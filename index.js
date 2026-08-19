@@ -48,6 +48,7 @@ async function startWhatsApp() {
       if (message.key.fromMe) continue;
 
       const jid = message.key.remoteJid;
+      if (!jid) continue;
 
       const text =
         message.message?.conversation ||
@@ -57,6 +58,18 @@ async function startWhatsApp() {
       console.log("NEUE WHATSAPP-NACHRICHT");
       console.log("Von:", jid);
       console.log("Text:", text || "[keine reine Textnachricht]");
+
+      if (text) {
+        try {
+          await sock.sendMessage(jid, {
+            text: "Test erfolgreich ✅ Der Marcel WhatsApp Bot kann automatisch antworten."
+          });
+
+          console.log("TESTANTWORT GESENDET");
+        } catch (error) {
+          console.error("Fehler beim Senden:", error);
+        }
+      }
     }
   });
 

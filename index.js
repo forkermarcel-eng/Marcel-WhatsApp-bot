@@ -29,7 +29,7 @@ app.get("/pairing-code", (req, res) => {
 
 async function startWhatsApp() {
   const { state, saveCreds } =
-    await useMultiFileAuthState("baileys_auth_info");
+    await useMultiFileAuthState("/app/auth_info");
 
   const { version } = await fetchLatestBaileysVersion();
 

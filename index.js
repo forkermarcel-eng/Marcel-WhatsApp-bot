@@ -27,6 +27,86 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL
 });
 
+const MARCEL_PROFILE = `
+VERLÄSSLICHE FAKTEN ÜBER MARCEL:
+
+- Marcel ist 41 Jahre alt.
+- Er ist Deutscher.
+- Er lebt aktuell in München, Deutschland.
+- Er plant, nach Medellín in Kolumbien zu ziehen.
+- Er spricht Deutsch und Englisch.
+- Er spricht noch kein Spanisch und benutzt für spanische Chats Übersetzungshilfe.
+- Er möchte Spanisch lernen.
+- Er ist selbstständig und arbeitet an verschiedenen Projekten.
+- Seine Arbeit ist örtlich relativ flexibel.
+- Er trinkt keinen Alkohol.
+- Er kann nicht tanzen.
+- Er hat zwei Kinder.
+- Er sucht grundsätzlich eine echte, längerfristige und exklusive Beziehung.
+- Er möchte nicht einer von mehreren Männern sein.
+- Körperliche Nähe ist ihm wichtig, aber nicht losgelöst von einer echten Verbindung.
+
+Diese Fakten dürfen benutzt werden, wenn sie natürlich zum Gespräch passen.
+Nicht ungefragt alle Fakten aufzählen.
+`;
+
+const WRITING_STYLE = `
+SCHREIBSTIL:
+
+- Schreibe wie eine echte kurze WhatsApp-Nachricht.
+- Natürlich, locker, warm und selbstbewusst.
+- Nicht überpoliert und nicht wie ein Assistent.
+- Lieber kurz als unnötig lang.
+- Stelle nicht in jeder Nachricht zwanghaft eine Frage.
+- Vermeide Wiederholungen aus dem bisherigen Gespräch.
+- Ein wenig Flirt, Charme und spielerische Wärme sind erlaubt, wenn der Kontext passt.
+- Keine übertriebenen Liebeserklärungen zu früh.
+- Komplimente sollen konkret und natürlich sein.
+- Emojis sparsam und passend einsetzen.
+`;
+
+const TRUTH_RULES = `
+SEHR WICHTIGE WAHRHEITSREGELN:
+
+- Erfinde NIEMALS persönliche Fakten über Marcel.
+- Erfinde NIEMALS, was Marcel gerade macht.
+- Erfinde NIEMALS, wo Marcel gerade ist, außer es steht ausdrücklich in den bekannten Fakten oder im Gespräch.
+- Erfinde NIEMALS, was er gerade isst, trinkt, hört, trägt, kauft oder plant.
+- Erfinde keine Reisen, Termine, Treffen, Berufe, Familieninformationen oder Erfahrungen.
+- Erfinde keine Gefühle oder Versprechen, die aus dem Gespräch nicht hervorgehen.
+
+Beispiel:
+Wenn jemand fragt "Und dir?" oder "Was machst du?", aber keine aktuelle Information über Marcel vorhanden ist, antworte neutral und ehrlich.
+
+Erlaubt:
+"Mir geht's auch gut 😊"
+"Alles gut bei mir."
+"Gerade ganz entspannt."
+
+Nicht erlaubt:
+"Ich sitze gerade zu Hause und höre Musik."
+"Ich trinke gerade einen Kaffee."
+"Ich bin gerade im Büro."
+Solche konkreten Details dürfen nur genannt werden, wenn sie tatsächlich bekannt sind.
+
+Wenn dir für eine konkrete Antwort eine Information fehlt, formuliere elegant und allgemein, statt etwas zu erfinden.
+`;
+
+const LANGUAGE_RULES = `
+SPRACHREGELN:
+
+- Antworte normalerweise in der Sprache der letzten eingehenden Nachricht.
+- Deutsch -> Deutsch.
+- Englisch -> Englisch.
+- Spanisch -> Spanisch.
+
+Bei Spanisch:
+- Marcel selbst spricht noch kein Spanisch.
+- Die Nachricht darf trotzdem natürlich auf Spanisch formuliert werden, weil Übersetzungshilfe benutzt wird.
+- Wenn das Thema Sprache oder ein persönliches Treffen aufkommt, darf niemals der falsche Eindruck entstehen, Marcel könne fließend Spanisch sprechen.
+- Falls passend, kann natürlich erwähnt werden, dass er Übersetzungshilfe benutzt und Spanisch lernen möchte.
+`;
+
 async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS contacts (
@@ -51,10 +131,18 @@ async function initDatabase() {
   console.log("PostgreSQL bereit.");
 }
 
-async function saveMessage(jid, direction, text, whatsappMessageId = null) {
+async function saveMessage(
+  jid,
+  direction,
+  text,
+  whatsappMessageId = null
+) {
   await pool.query(
     `
-      INSERT INTO contacts (whatsapp_jid, updated_at)
+      INSERT INTO contacts (
+        whatsapp_jid,
+        updated_at
+      )
       VALUES ($1, NOW())
       ON CONFLICT (whatsapp_jid)
       DO UPDATE SET updated_at = NOW()
@@ -62,7 +150,7 @@ async function saveMessage(jid, direction, text, whatsappMessageId = null) {
     [jid]
   );
 
-  await pool.query(
+  const result = await pool.query(
     `
       INSERT INTO messages (
         whatsapp_jid,
@@ -71,6 +159,7 @@ async function saveMessage(jid, direction, text, whatsappMessageId = null) {
         whatsapp_message_id
       )
       VALUES ($1, $2, $3, $4)
+      RETURNING id
     `,
     [
       jid,
@@ -79,26 +168,60 @@ async function saveMessage(jid, direction, text, whatsappMessageId = null) {
       whatsappMessageId
     ]
   );
+
+  return result.rows[0].id;
 }
 
-async function getConversationHistory(jid) {
-  const result = await pool.query(
-    `
-      SELECT direction, message_text
-      FROM messages
-      WHERE whatsapp_jid = $1
-      AND message_text IS NOT NULL
-      ORDER BY created_at DESC
-      LIMIT 20
-    `,
-    [jid]
-  );
+async function getConversationHistory(
+  jid,
+  beforeMessageId = null
+) {
+  let result;
+
+  if (beforeMessageId) {
+    result = await pool.query(
+      `
+        SELECT
+          direction,
+          message_text
+        FROM messages
+        WHERE whatsapp_jid = $1
+          AND message_text IS NOT NULL
+          AND id < $2
+        ORDER BY id DESC
+        LIMIT 20
+      `,
+      [jid, beforeMessageId]
+    );
+  } else {
+    result = await pool.query(
+      `
+        SELECT
+          direction,
+          message_text
+        FROM messages
+        WHERE whatsapp_jid = $1
+          AND message_text IS NOT NULL
+        ORDER BY id DESC
+        LIMIT 20
+      `,
+      [jid]
+    );
+  }
 
   return result.rows.reverse();
 }
 
-async function generateAIReply(jid, incomingText) {
-  const history = await getConversationHistory(jid);
+async function generateAIReply(
+  jid,
+  incomingText,
+  incomingMessageDbId
+) {
+  const history =
+    await getConversationHistory(
+      jid,
+      incomingMessageDbId
+    );
 
   const conversation = history
     .map((item) => {
@@ -111,33 +234,42 @@ async function generateAIReply(jid, incomingText) {
     })
     .join("\n");
 
-  const response = await openai.responses.create({
-    model: "gpt-5-mini",
-    instructions: `
-Du schreibst WhatsApp-Antworten im Namen von Marcel.
+  const response =
+    await openai.responses.create({
+      model: "gpt-5-mini",
 
-Wichtige Regeln:
-- Antworte natürlich, kurz und menschlich.
-- Keine langen Erklärungen.
-- Keine Erwähnung, dass du eine KI oder ein Bot bist.
-- Antworte grundsätzlich in der Sprache der letzten eingehenden Nachricht.
-- Wenn die Nachricht Spanisch ist, antworte auf Spanisch.
-- Wenn die Nachricht Deutsch ist, antworte auf Deutsch.
-- Wenn die Nachricht Englisch ist, antworte auf Englisch.
-- Erfinde keine persönlichen Fakten über Marcel.
-- Nutze den bisherigen Gesprächsverlauf, um Wiederholungen zu vermeiden.
-- Die Antwort soll wie eine normale WhatsApp-Nachricht wirken.
+      instructions: `
+Du schreibst private WhatsApp-Nachrichten im Namen von Marcel.
+
+${MARCEL_PROFILE}
+
+${WRITING_STYLE}
+
+${TRUTH_RULES}
+
+${LANGUAGE_RULES}
+
+Nutze den bisherigen Gesprächsverlauf als Gedächtnis.
+Widersprich früheren Aussagen nicht.
+Frage nichts erneut, was bereits beantwortet wurde.
+Gib ausschließlich die Nachricht aus, die Marcel senden soll.
+Keine Analyse.
+Keine Erklärung.
+Keine Anführungszeichen um die Antwort.
 `,
-    input: `
-Bisheriger Gesprächsverlauf:
-${conversation}
 
-Neue Nachricht:
+      input: `
+BISHERIGER GESPRÄCHSVERLAUF:
+
+${conversation || "[Noch kein früherer Verlauf gespeichert]"}
+
+NEUE EINGEHENDE NACHRICHT:
+
 ${incomingText}
 
-Schreibe jetzt nur die passende WhatsApp-Antwort.
+Formuliere jetzt Marcels passende WhatsApp-Antwort.
 `
-  });
+    });
 
   return response.output_text?.trim() || "";
 }
@@ -150,35 +282,47 @@ app.get("/", (req, res) => {
 
 app.get("/pairing-code", (req, res) => {
   if (pairingCode) {
-    res.send(`Pairing Code: ${pairingCode}`);
+    res.send(
+      `Pairing Code: ${pairingCode}`
+    );
   } else {
-    res.send("Noch kein Pairing-Code verfügbar.");
+    res.send(
+      "Noch kein Pairing-Code verfügbar."
+    );
   }
 });
 
 app.get("/db-test", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT NOW() AS server_time"
-    );
+    const result =
+      await pool.query(
+        "SELECT NOW() AS server_time"
+      );
 
     res.json({
       ok: true,
-      serverTime: result.rows[0].server_time
+      serverTime:
+        result.rows[0].server_time
     });
   } catch (error) {
-    console.error("DB-Test fehlgeschlagen:", error);
+    console.error(
+      "DB-Test fehlgeschlagen:",
+      error
+    );
 
     res.status(500).json({
       ok: false,
-      error: "Datenbankverbindung fehlgeschlagen"
+      error:
+        "Datenbankverbindung fehlgeschlagen"
     });
   }
 });
 
 async function startWhatsApp() {
   const { state, saveCreds } =
-    await useMultiFileAuthState("/app/auth_info");
+    await useMultiFileAuthState(
+      "/app/auth_info"
+    );
 
   const { version } =
     await fetchLatestBaileysVersion();
@@ -189,72 +333,108 @@ async function startWhatsApp() {
     logger
   });
 
-  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on(
+    "creds.update",
+    saveCreds
+  );
 
-  sock.ev.on("messages.upsert", async (event) => {
-    if (event.type !== "notify") return;
+  sock.ev.on(
+    "messages.upsert",
+    async (event) => {
+      if (event.type !== "notify") {
+        return;
+      }
 
-    for (const message of event.messages) {
-      if (message.key.fromMe) continue;
-
-      const jid = message.key.remoteJid;
-      if (!jid) continue;
-
-      const text =
-        message.message?.conversation ||
-        message.message?.extendedTextMessage?.text ||
-        "";
-
-      if (!text) continue;
-
-      console.log("NEUE WHATSAPP-NACHRICHT");
-      console.log("Von:", jid);
-      console.log("Text:", text);
-
-      try {
-        await saveMessage(
-          jid,
-          "incoming",
-          text,
-          message.key.id || null
-        );
-
-        console.log(
-          "Eingehende Nachricht in PostgreSQL gespeichert."
-        );
-
-        const aiReply =
-          await generateAIReply(jid, text);
-
-        if (!aiReply) {
-          console.log(
-            "OpenAI hat keine Antwort erzeugt."
-          );
+      for (const message of event.messages) {
+        if (message.key.fromMe) {
           continue;
         }
 
-        await sock.sendMessage(jid, {
-          text: aiReply
-        });
+        const jid =
+          message.key.remoteJid;
 
-        await saveMessage(
-          jid,
-          "outgoing",
-          aiReply
+        if (!jid) {
+          continue;
+        }
+
+        const text =
+          message.message?.conversation ||
+          message.message
+            ?.extendedTextMessage?.text ||
+          "";
+
+        if (!text) {
+          continue;
+        }
+
+        console.log(
+          "NEUE WHATSAPP-NACHRICHT"
         );
 
         console.log(
-          "KI-ANTWORT GESENDET:",
-          aiReply
+          "Von:",
+          jid
         );
-      } catch (error) {
-        console.error(
-          "Fehler bei KI-Antwort:",
-          error
+
+        console.log(
+          "Text:",
+          text
         );
+
+        try {
+          const incomingMessageDbId =
+            await saveMessage(
+              jid,
+              "incoming",
+              text,
+              message.key.id || null
+            );
+
+          console.log(
+            "Eingehende Nachricht in PostgreSQL gespeichert."
+          );
+
+          const aiReply =
+            await generateAIReply(
+              jid,
+              text,
+              incomingMessageDbId
+            );
+
+          if (!aiReply) {
+            console.log(
+              "OpenAI hat keine Antwort erzeugt."
+            );
+
+            continue;
+          }
+
+          await sock.sendMessage(
+            jid,
+            {
+              text: aiReply
+            }
+          );
+
+          await saveMessage(
+            jid,
+            "outgoing",
+            aiReply
+          );
+
+          console.log(
+            "KI-ANTWORT GESENDET:",
+            aiReply
+          );
+        } catch (error) {
+          console.error(
+            "Fehler bei KI-Antwort:",
+            error
+          );
+        }
       }
     }
-  });
+  );
 
   sock.ev.on(
     "connection.update",
@@ -265,15 +445,24 @@ async function startWhatsApp() {
         qr
       } = update;
 
-      if (connection === "open") {
-        whatsappStatus = "connected";
+      if (
+        connection === "open"
+      ) {
+        whatsappStatus =
+          "connected";
+
         pairingCode = null;
 
-        console.log("WhatsApp verbunden.");
+        console.log(
+          "WhatsApp verbunden."
+        );
       }
 
-      if (connection === "connecting") {
-        whatsappStatus = "connecting";
+      if (
+        connection === "connecting"
+      ) {
+        whatsappStatus =
+          "connecting";
       }
 
       if (
@@ -282,13 +471,17 @@ async function startWhatsApp() {
         !pairingCode
       ) {
         const phoneNumber =
-          process.env.WHATSAPP_PHONE_NUMBER;
+          process.env
+            .WHATSAPP_PHONE_NUMBER;
 
         if (phoneNumber) {
           try {
             pairingCode =
               await sock.requestPairingCode(
-                phoneNumber.replace(/\D/g, "")
+                phoneNumber.replace(
+                  /\D/g,
+                  ""
+                )
               );
 
             console.log(
@@ -308,11 +501,16 @@ async function startWhatsApp() {
         }
       }
 
-      if (connection === "close") {
-        whatsappStatus = "disconnected";
+      if (
+        connection === "close"
+      ) {
+        whatsappStatus =
+          "disconnected";
 
         const statusCode =
-          lastDisconnect?.error?.output
+          lastDisconnect
+            ?.error
+            ?.output
             ?.statusCode;
 
         if (
@@ -337,19 +535,24 @@ async function startWhatsApp() {
   );
 }
 
-app.listen(port, async () => {
-  console.log(
-    `Server läuft auf Port ${port}`
-  );
+app.listen(
+  port,
+  async () => {
+    console.log(
+      `Server läuft auf Port ${port}`
+    );
 
-  try {
-    await initDatabase();
-  } catch (error) {
-    console.error(
-      "PostgreSQL Initialisierung fehlgeschlagen:",
-      error
+    try {
+      await initDatabase();
+    } catch (error) {
+      console.error(
+        "PostgreSQL Initialisierung fehlgeschlagen:",
+        error
+      );
+    }
+
+    startWhatsApp().catch(
+      console.error
     );
   }
-
-  startWhatsApp().catch(console.error);
-});
+);

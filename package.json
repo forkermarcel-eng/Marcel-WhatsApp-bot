@@ -2,11 +2,14 @@
   "name": "marcel-whatsapp-bot",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "@whiskeysockets/baileys": "^7.0.0-rc.14",
+    "express": "^5.1.0",
+    "pino": "^9.9.0"
   }
 }

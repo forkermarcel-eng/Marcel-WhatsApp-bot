@@ -1,4 +1,5 @@
 import express from "express";
+import OpenAI from "openai";
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
@@ -17,6 +18,10 @@ let whatsappStatus = "starting";
 let pairingCode = null;
 
 const logger = P({ level: "silent" });
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL
@@ -46,10 +51,7 @@ async function initDatabase() {
   console.log("PostgreSQL bereit.");
 }
 
-async function saveIncomingMessage(message, text) {
-  const jid = message.key.remoteJid;
-  if (!jid) return;
-
+async function saveMessage(jid, direction, text, whatsappMessageId = null) {
   await pool.query(
     `
       INSERT INTO contacts (whatsapp_jid, updated_at)
@@ -72,13 +74,72 @@ async function saveIncomingMessage(message, text) {
     `,
     [
       jid,
-      "incoming",
+      direction,
       text || null,
-      message.key.id || null
+      whatsappMessageId
     ]
   );
+}
 
-  console.log("Nachricht in PostgreSQL gespeichert.");
+async function getConversationHistory(jid) {
+  const result = await pool.query(
+    `
+      SELECT direction, message_text
+      FROM messages
+      WHERE whatsapp_jid = $1
+      AND message_text IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 20
+    `,
+    [jid]
+  );
+
+  return result.rows.reverse();
+}
+
+async function generateAIReply(jid, incomingText) {
+  const history = await getConversationHistory(jid);
+
+  const conversation = history
+    .map((item) => {
+      const speaker =
+        item.direction === "incoming"
+          ? "Andere Person"
+          : "Marcel";
+
+      return `${speaker}: ${item.message_text}`;
+    })
+    .join("\n");
+
+  const response = await openai.responses.create({
+    model: "gpt-5-mini",
+    instructions: `
+Du schreibst WhatsApp-Antworten im Namen von Marcel.
+
+Wichtige Regeln:
+- Antworte natürlich, kurz und menschlich.
+- Keine langen Erklärungen.
+- Keine Erwähnung, dass du eine KI oder ein Bot bist.
+- Antworte grundsätzlich in der Sprache der letzten eingehenden Nachricht.
+- Wenn die Nachricht Spanisch ist, antworte auf Spanisch.
+- Wenn die Nachricht Deutsch ist, antworte auf Deutsch.
+- Wenn die Nachricht Englisch ist, antworte auf Englisch.
+- Erfinde keine persönlichen Fakten über Marcel.
+- Nutze den bisherigen Gesprächsverlauf, um Wiederholungen zu vermeiden.
+- Die Antwort soll wie eine normale WhatsApp-Nachricht wirken.
+`,
+    input: `
+Bisheriger Gesprächsverlauf:
+${conversation}
+
+Neue Nachricht:
+${incomingText}
+
+Schreibe jetzt nur die passende WhatsApp-Antwort.
+`
+  });
+
+  return response.output_text?.trim() || "";
 }
 
 app.get("/", (req, res) => {
@@ -144,36 +205,53 @@ async function startWhatsApp() {
         message.message?.extendedTextMessage?.text ||
         "";
 
+      if (!text) continue;
+
       console.log("NEUE WHATSAPP-NACHRICHT");
       console.log("Von:", jid);
-      console.log(
-        "Text:",
-        text || "[keine reine Textnachricht]"
-      );
+      console.log("Text:", text);
 
       try {
-        await saveIncomingMessage(message, text);
+        await saveMessage(
+          jid,
+          "incoming",
+          text,
+          message.key.id || null
+        );
+
+        console.log(
+          "Eingehende Nachricht in PostgreSQL gespeichert."
+        );
+
+        const aiReply =
+          await generateAIReply(jid, text);
+
+        if (!aiReply) {
+          console.log(
+            "OpenAI hat keine Antwort erzeugt."
+          );
+          continue;
+        }
+
+        await sock.sendMessage(jid, {
+          text: aiReply
+        });
+
+        await saveMessage(
+          jid,
+          "outgoing",
+          aiReply
+        );
+
+        console.log(
+          "KI-ANTWORT GESENDET:",
+          aiReply
+        );
       } catch (error) {
         console.error(
-          "Fehler beim Speichern der Nachricht:",
+          "Fehler bei KI-Antwort:",
           error
         );
-      }
-
-      if (text) {
-        try {
-          await sock.sendMessage(jid, {
-            text:
-              "Test erfolgreich ✅ Der Marcel WhatsApp Bot kann automatisch antworten."
-          });
-
-          console.log("TESTANTWORT GESENDET");
-        } catch (error) {
-          console.error(
-            "Fehler beim Senden:",
-            error
-          );
-        }
       }
     }
   });

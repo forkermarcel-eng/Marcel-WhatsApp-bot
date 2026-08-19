@@ -13,6 +13,9 @@ const { Pool } = pg;
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 let sock = null;
 let whatsappStatus = "starting";
 let pairingCode = null;
@@ -864,23 +867,27 @@ async function getConversationHistory(
 async function generateAIReply(
   jid,
   incomingText,
-  incomingMessageDbId
+  incomingMessageDbId = null
 ) {
-  const history = await getConversationHistory(
-    jid,
-    incomingMessageDbId
-  );
+  let conversation = "";
 
-  const conversation = history
-    .map((item) => {
-      const speaker =
-        item.direction === "incoming"
-          ? "Andere Person"
-          : "Marcel";
+  if (jid) {
+    const history = await getConversationHistory(
+      jid,
+      incomingMessageDbId
+    );
 
-      return `${speaker}: ${item.message_text}`;
-    })
-    .join("\n");
+    conversation = history
+      .map((item) => {
+        const speaker =
+          item.direction === "incoming"
+            ? "Andere Person"
+            : "Marcel";
+
+        return `${speaker}: ${item.message_text}`;
+      })
+      .join("\n");
+  }
 
   const response = await openai.responses.create({
     model: "gpt-5-mini",
@@ -888,17 +895,16 @@ async function generateAIReply(
     instructions: `
 ${MARCEL_PERSONA_V1}
 
-Nutze den bisherigen Gesprächsverlauf als Gedächtnis.
+Nutze vorhandenen Gesprächsverlauf als Gedächtnis.
 
 Widersprich früheren Aussagen nicht.
 
-Frage nichts erneut, was im gespeicherten Verlauf bereits
-beantwortet wurde.
+Frage nichts erneut, was bereits beantwortet wurde.
 
-Beurteile die aktuelle Nachricht immer im Kontext des bisherigen
-Gesprächs.
+Beurteile die aktuelle Nachricht immer im Kontext.
 
-Gib ausschließlich die Nachricht aus, die Marcel senden soll.
+Gib ausschließlich die Nachricht aus,
+die Marcel senden soll.
 
 Keine Analyse.
 Keine Erklärung.
@@ -908,13 +914,13 @@ Keine Anführungszeichen um die Antwort.
     input: `
 BISHERIGER GESPRÄCHSVERLAUF:
 
-${conversation || "[Noch kein früherer Verlauf gespeichert]"}
+${conversation || "[Kein vorheriger Gesprächsverlauf]"}
 
 NEUE EINGEHENDE NACHRICHT:
 
 ${incomingText}
 
-Formuliere jetzt Marcels passende WhatsApp-Antwort.
+Formuliere jetzt Marcels passende Antwort.
 `
   });
 
@@ -958,9 +964,228 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
+function personaPasswordCorrect(password) {
+  const expected =
+    process.env.PERSONA_TEST_PASSWORD;
+
+  if (!expected) {
+    return false;
+  }
+
+  return password === expected;
+}
+
+app.get("/persona-test", (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+  <title>Marcel Persona V1 Test</title>
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+      background: #111;
+      color: #fff;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .box {
+      max-width: 700px;
+      margin: 0 auto;
+      background: #1d1d1d;
+      padding: 20px;
+      border-radius: 18px;
+    }
+
+    h1 {
+      font-size: 24px;
+    }
+
+    input,
+    textarea,
+    button {
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 16px;
+      border-radius: 12px;
+      border: 0;
+      padding: 14px;
+      margin-top: 10px;
+    }
+
+    textarea {
+      min-height: 140px;
+      resize: vertical;
+    }
+
+    button {
+      background: #fff;
+      color: #111;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #answer {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 12px;
+      background: #2a2a2a;
+      min-height: 50px;
+      white-space: pre-wrap;
+    }
+
+    .small {
+      color: #aaa;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="box">
+    <h1>Marcel Persona V1</h1>
+
+    <p class="small">
+      Dieser Test sendet nichts an WhatsApp.
+    </p>
+
+    <input
+      id="password"
+      type="password"
+      placeholder="Test-Passwort"
+    >
+
+    <textarea
+      id="message"
+      placeholder="Was schreibt die Frau?"
+    ></textarea>
+
+    <button onclick="testPersona()">
+      Antwort testen
+    </button>
+
+    <div id="answer">
+      Hier erscheint Marcels Antwort.
+    </div>
+  </div>
+
+  <script>
+    async function testPersona() {
+      const password =
+        document.getElementById("password").value;
+
+      const message =
+        document.getElementById("message").value;
+
+      const answer =
+        document.getElementById("answer");
+
+      if (!message.trim()) {
+        answer.textContent =
+          "Bitte zuerst eine Nachricht eingeben.";
+        return;
+      }
+
+      answer.textContent =
+        "KI denkt ...";
+
+      try {
+        const response = await fetch(
+          "/persona-test",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              password,
+              message
+            })
+          }
+        );
+
+        const data =
+          await response.json();
+
+        if (!response.ok) {
+          answer.textContent =
+            data.error || "Fehler";
+          return;
+        }
+
+        answer.textContent =
+          data.reply;
+      } catch (error) {
+        answer.textContent =
+          "Verbindungsfehler";
+      }
+    }
+  </script>
+</body>
+</html>
+  `);
+});
+
+app.post("/persona-test", async (req, res) => {
+  try {
+    const {
+      password,
+      message
+    } = req.body;
+
+    if (
+      !personaPasswordCorrect(password)
+    ) {
+      return res.status(401).json({
+        error: "Falsches Passwort."
+      });
+    }
+
+    if (
+      !message ||
+      !message.trim()
+    ) {
+      return res.status(400).json({
+        error: "Keine Nachricht eingegeben."
+      });
+    }
+
+    const reply =
+      await generateAIReply(
+        null,
+        message.trim(),
+        null
+      );
+
+    res.json({
+      ok: true,
+      reply
+    });
+  } catch (error) {
+    console.error(
+      "Persona-Test Fehler:",
+      error
+    );
+
+    res.status(500).json({
+      error:
+        "KI-Test fehlgeschlagen."
+    });
+  }
+});
+
 async function startWhatsApp() {
   const { state, saveCreds } =
-    await useMultiFileAuthState("/app/auth_info");
+    await useMultiFileAuthState(
+      "/app/auth_info"
+    );
 
   const { version } =
     await fetchLatestBaileysVersion();

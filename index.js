@@ -41,6 +41,25 @@ async function startWhatsApp() {
 
   sock.ev.on("creds.update", saveCreds);
 
+  sock.ev.on("messages.upsert", async (event) => {
+    if (event.type !== "notify") return;
+
+    for (const message of event.messages) {
+      if (message.key.fromMe) continue;
+
+      const jid = message.key.remoteJid;
+
+      const text =
+        message.message?.conversation ||
+        message.message?.extendedTextMessage?.text ||
+        "";
+
+      console.log("NEUE WHATSAPP-NACHRICHT");
+      console.log("Von:", jid);
+      console.log("Text:", text || "[keine reine Textnachricht]");
+    }
+  });
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 

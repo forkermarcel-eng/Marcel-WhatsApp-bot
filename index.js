@@ -1908,14 +1908,16 @@ Keine Anführungszeichen.
 
 
 /* ==================================================
-   MEMORY-HILFSFUNKTIONEN
+   MEMORY HILFSFUNKTIONEN
 ================================================== */
 
 function normalizeText(value) {
   return String(value || "").trim();
 }
 
+
 function safeJsonParse(text, fallback = null) {
+
   if (!text) {
     return fallback;
   }
@@ -1934,39 +1936,54 @@ function safeJsonParse(text, fallback = null) {
     return JSON.parse(cleaned);
   } catch {}
 
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
+  const firstBrace =
+    cleaned.indexOf("{");
+
+  const lastBrace =
+    cleaned.lastIndexOf("}");
 
   if (
     firstBrace !== -1 &&
     lastBrace !== -1 &&
     lastBrace > firstBrace
   ) {
+
     try {
+
       return JSON.parse(
         cleaned.slice(
           firstBrace,
           lastBrace + 1
         )
       );
+
     } catch {}
+
   }
 
   return fallback;
 }
 
+
 function renderJson(value) {
+
   try {
     return JSON.stringify(value);
   } catch {
     return String(value ?? "");
   }
+
 }
 
-function clampConfidence(value) {
-  const number = Number(value);
 
-  if (Number.isNaN(number)) {
+function clampConfidence(value) {
+
+  const number =
+    Number(value);
+
+  if (
+    Number.isNaN(number)
+  ) {
     return 0.5;
   }
 
@@ -1977,12 +1994,18 @@ function clampConfidence(value) {
       number
     )
   );
+
 }
 
-function clampImportance(value) {
-  const number = Number(value);
 
-  if (Number.isNaN(number)) {
+function clampImportance(value) {
+
+  const number =
+    Number(value);
+
+  if (
+    Number.isNaN(number)
+  ) {
     return 2;
   }
 
@@ -1993,9 +2016,15 @@ function clampImportance(value) {
       Math.round(number)
     )
   );
+
 }
 
-function deepMerge(target, source) {
+
+function deepMerge(
+  target,
+  source
+) {
+
   if (
     typeof target !== "object" ||
     target === null ||
@@ -2020,21 +2049,87 @@ function deepMerge(target, source) {
     const [key, value]
     of Object.entries(source)
   ) {
+
     if (
       value &&
       typeof value === "object" &&
       !Array.isArray(value)
     ) {
-      result[key] = deepMerge(
-        result[key],
-        value
-      );
+
+      result[key] =
+        deepMerge(
+          result[key],
+          value
+        );
+
     } else {
-      result[key] = value;
+
+      result[key] =
+        value;
+
     }
+
   }
 
   return result;
+}
+
+
+function escapeHtml(value) {
+
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+}
+
+
+function createTestSlug(name) {
+
+  const base =
+    normalizeText(name)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(
+        /[\u0300-\u036f]/g,
+        ""
+      )
+      .replace(
+        /[^a-z0-9]+/g,
+        "-"
+      )
+      .replace(
+        /^-+|-+$/g,
+        ""
+      )
+      .slice(
+        0,
+        40
+      );
+
+  const random =
+    Math.random()
+      .toString(36)
+      .slice(2, 8);
+
+  return (
+    base || "testfrau"
+  ) + "-" + random;
+}
+
+
+function isTestJid(jid) {
+
+  return (
+    typeof jid === "string" &&
+    jid.endsWith(
+      "@persona.test"
+    )
+  );
+
 }
 
 
@@ -2082,8 +2177,6 @@ const PROFILE_COLUMNS = [
 
 async function initDatabase() {
 
-  /* ---------- BESTEHENDE CONTACTS ---------- */
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS contacts (
       id SERIAL PRIMARY KEY,
@@ -2093,8 +2186,6 @@ async function initDatabase() {
     )
   `);
 
-
-  /* ---------- CONTACTS ERWEITERN ---------- */
 
   await pool.query(`
     ALTER TABLE contacts
@@ -2119,8 +2210,6 @@ async function initDatabase() {
   `);
 
 
-  /* ---------- BESTEHENDE MESSAGES ---------- */
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id BIGSERIAL PRIMARY KEY,
@@ -2132,6 +2221,7 @@ async function initDatabase() {
     )
   `);
 
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_messages_jid_id
     ON messages (
@@ -2140,10 +2230,6 @@ async function initDatabase() {
     )
   `);
 
-
-  /* ==================================================
-     FRAUEN-PROFIL
-  ================================================== */
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS contact_memory_profiles (
@@ -2156,49 +2242,65 @@ async function initDatabase() {
       profile_summary JSONB DEFAULT '{}'::jsonb,
 
       personality JSONB DEFAULT '{}'::jsonb,
+
       humor_profile JSONB DEFAULT '{}'::jsonb,
 
       relationship JSONB DEFAULT '{}'::jsonb,
 
       family JSONB DEFAULT '{}'::jsonb,
+
       children JSONB DEFAULT '{}'::jsonb,
+
       social_circle JSONB DEFAULT '{}'::jsonb,
 
       work_education JSONB DEFAULT '{}'::jsonb,
+
       financial_context JSONB DEFAULT '{}'::jsonb,
 
       health JSONB DEFAULT '{}'::jsonb,
+
       religion_values JSONB DEFAULT '{}'::jsonb,
 
       sexuality_intimacy JSONB DEFAULT '{}'::jsonb,
 
       communication JSONB DEFAULT '{}'::jsonb,
+
       lifestyle_routines JSONB DEFAULT '{}'::jsonb,
 
       preferences JSONB DEFAULT '{}'::jsonb,
+
       dislikes JSONB DEFAULT '{}'::jsonb,
 
       goals_dreams JSONB DEFAULT '{}'::jsonb,
+
       travel_future_location JSONB DEFAULT '{}'::jsonb,
+
       living_situation JSONB DEFAULT '{}'::jsonb,
 
       personal_boundaries JSONB DEFAULT '{}'::jsonb,
+
       stress_support_style JSONB DEFAULT '{}'::jsonb,
+
       decision_style JSONB DEFAULT '{}'::jsonb,
 
       social_media JSONB DEFAULT '{}'::jsonb,
+
       cultural_interest JSONB DEFAULT '{}'::jsonb,
 
       investment JSONB DEFAULT '{}'::jsonb,
+
       interaction_patterns JSONB DEFAULT '{}'::jsonb,
 
       meaningful_details JSONB DEFAULT '{}'::jsonb,
 
       shared_history JSONB DEFAULT '{}'::jsonb,
+
       running_gags JSONB DEFAULT '{}'::jsonb,
+
       open_threads JSONB DEFAULT '{}'::jsonb,
 
       plans JSONB DEFAULT '{}'::jsonb,
+
       promises JSONB DEFAULT '{}'::jsonb,
 
       marcel_knowledge_map JSONB DEFAULT '{}'::jsonb,
@@ -2210,14 +2312,11 @@ async function initDatabase() {
       last_memory_update_at TIMESTAMPTZ,
 
       created_at TIMESTAMPTZ DEFAULT NOW(),
+
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
-
-  /* ==================================================
-     EINZELNE MEMORY-FAKTEN
-  ================================================== */
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS memory_items (
@@ -2284,6 +2383,7 @@ async function initDatabase() {
     )
   `);
 
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_memory_items_contact_active
     ON memory_items (
@@ -2294,10 +2394,6 @@ async function initDatabase() {
     )
   `);
 
-
-  /* ==================================================
-     MEMORY EVENTS
-  ================================================== */
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS memory_events (
@@ -2363,6 +2459,7 @@ async function initDatabase() {
     )
   `);
 
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_memory_events_contact_active
     ON memory_events (
@@ -2373,10 +2470,6 @@ async function initDatabase() {
     )
   `);
 
-
-  /* ==================================================
-     MEDIEN / GALERIE - STRUKTUR VORBEREITET
-  ================================================== */
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS media (
@@ -2440,10 +2533,6 @@ async function initDatabase() {
   `);
 
 
-  /* ==================================================
-     MARCEL MEMORY
-  ================================================== */
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS marcel_memory (
       id BIGSERIAL PRIMARY KEY,
@@ -2488,10 +2577,6 @@ async function initDatabase() {
     )
   `);
 
-
-  /* ==================================================
-     MARCEL LIVE STATE
-  ================================================== */
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS marcel_live_state (
@@ -2539,10 +2624,6 @@ async function initDatabase() {
   `);
 
 
-  /* ==================================================
-     LIVE STATE STARTWERT
-  ================================================== */
-
   await pool.query(`
     INSERT INTO marcel_live_state (
       id,
@@ -2577,14 +2658,11 @@ async function initDatabase() {
   `);
 
 
-  /* ==================================================
-     MARCEL MEMORY BEFÜLLEN
-  ================================================== */
-
   await seedMarcelMemory();
 
+
   console.log(
-    "PostgreSQL + Langzeit-Memory V1.4 bereit."
+    "PostgreSQL + Langzeit-Memory V1.4 + Testkontakt-System bereit."
   );
 }
 
@@ -2944,7 +3022,11 @@ async function seedMarcelMemory() {
 
   ];
 
-  for (const memory of memories) {
+
+  for (
+    const memory
+    of memories
+  ) {
 
     await pool.query(
       `
@@ -2991,6 +3073,7 @@ async function seedMarcelMemory() {
     );
 
   }
+
 }
 
 
@@ -3001,13 +3084,17 @@ async function seedMarcelMemory() {
 async function ensureContact(jid) {
 
   const phoneNumber =
-    jid
-      ?.split("@")
-      ?.[0]
-      ?.replace(
-        /\D/g,
-        ""
-      ) || null;
+    isTestJid(jid)
+      ? null
+      : jid
+          ?.split("@")
+          ?.[0]
+          ?.replace(
+            /\D/g,
+            ""
+          )
+          || null;
+
 
   const result =
     await pool.query(
@@ -3047,8 +3134,10 @@ async function ensureContact(jid) {
       ]
     );
 
+
   const contact =
     result.rows[0];
+
 
   await pool.query(
     `
@@ -3066,7 +3155,146 @@ async function ensureContact(jid) {
     ]
   );
 
+
   return contact;
+}
+
+
+/* ==================================================
+   TESTKONTAKT ERSTELLEN
+================================================== */
+
+async function createTestContact({
+  name,
+  country = null,
+  city = null,
+  language = null
+}) {
+
+  const cleanName =
+    normalizeText(name);
+
+  if (!cleanName) {
+    throw new Error(
+      "Testkontakt braucht einen Namen."
+    );
+  }
+
+
+  const slug =
+    createTestSlug(
+      cleanName
+    );
+
+
+  const jid =
+    `test-${slug}@persona.test`;
+
+
+  const result =
+    await pool.query(
+      `
+        INSERT INTO contacts (
+          whatsapp_jid,
+          display_name,
+          country,
+          city,
+          primary_language,
+          source_platform,
+          source_profile_name,
+          contact_status,
+          relationship_stage,
+          auto_reply_enabled,
+          date_lock_enabled,
+          first_contact_at,
+          last_message_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          'persona_test',
+          $2,
+          'active',
+          'new',
+          TRUE,
+          FALSE,
+          NOW(),
+          NOW(),
+          NOW()
+        )
+        RETURNING *
+      `,
+      [
+        jid,
+        cleanName,
+        normalizeText(country) || null,
+        normalizeText(city) || null,
+        normalizeText(language) || null
+      ]
+    );
+
+
+  const contact =
+    result.rows[0];
+
+
+  await pool.query(
+    `
+      INSERT INTO contact_memory_profiles (
+        contact_id
+      )
+      VALUES ($1)
+      ON CONFLICT (
+        contact_id
+      )
+      DO NOTHING
+    `,
+    [
+      contact.id
+    ]
+  );
+
+
+  return contact;
+}
+
+
+/* ==================================================
+   TESTKONTAKTE LADEN
+================================================== */
+
+async function getTestContacts() {
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+          id,
+          whatsapp_jid,
+          display_name,
+          country,
+          city,
+          primary_language,
+          relationship_stage,
+          created_at,
+          updated_at
+        FROM contacts
+
+        WHERE whatsapp_jid
+          LIKE '%@persona.test'
+
+        ORDER BY
+          updated_at DESC,
+          display_name ASC
+      `
+    );
+
+
+  return result.rows;
 }
 
 
@@ -3085,6 +3313,7 @@ async function saveMessage(
     await ensureContact(
       jid
     );
+
 
   const result =
     await pool.query(
@@ -3111,20 +3340,25 @@ async function saveMessage(
       ]
     );
 
+
   await pool.query(
     `
       UPDATE contacts
+
       SET
         last_message_at =
           NOW(),
+
         updated_at =
           NOW()
+
       WHERE id = $1
     `,
     [
       contact.id
     ]
   );
+
 
   return result.rows[0].id;
 }
@@ -3141,6 +3375,7 @@ async function getConversationHistory(
 
   let result;
 
+
   if (beforeMessageId) {
 
     result =
@@ -3151,12 +3386,19 @@ async function getConversationHistory(
             direction,
             message_text,
             created_at
+
           FROM messages
+
           WHERE whatsapp_jid = $1
+
             AND message_text
               IS NOT NULL
+
             AND id < $2
-          ORDER BY id DESC
+
+          ORDER BY
+            id DESC
+
           LIMIT 30
         `,
         [
@@ -3175,11 +3417,17 @@ async function getConversationHistory(
             direction,
             message_text,
             created_at
+
           FROM messages
+
           WHERE whatsapp_jid = $1
+
             AND message_text
               IS NOT NULL
-          ORDER BY id DESC
+
+          ORDER BY
+            id DESC
+
           LIMIT 30
         `,
         [
@@ -3189,6 +3437,7 @@ async function getConversationHistory(
 
   }
 
+
   return result.rows.reverse();
 }
 
@@ -3197,22 +3446,23 @@ async function getConversationHistory(
    MEMORY LADEN
 ================================================== */
 
-async function getContactByJid(
-  jid
-) {
+async function getContactByJid(jid) {
 
   const result =
     await pool.query(
       `
         SELECT *
         FROM contacts
+
         WHERE whatsapp_jid = $1
+
         LIMIT 1
       `,
       [
         jid
       ]
     );
+
 
   return result.rows[0] || null;
 }
@@ -3227,13 +3477,16 @@ async function getContactMemoryProfile(
       `
         SELECT *
         FROM contact_memory_profiles
+
         WHERE contact_id = $1
+
         LIMIT 1
       `,
       [
         contactId
       ]
     );
+
 
   return result.rows[0] || null;
 }
@@ -3249,6 +3502,7 @@ async function getRelevantMemoryItems(
       `
         SELECT *
         FROM memory_items
+
         WHERE contact_id = $1
 
           AND status =
@@ -3268,13 +3522,17 @@ async function getRelevantMemoryItems(
         ORDER BY
 
           CASE
+
             WHEN human_review_status
               IN (
                 'confirmed',
                 'corrected'
               )
+
             THEN 0
+
             ELSE 1
+
           END,
 
           importance DESC,
@@ -3288,6 +3546,36 @@ async function getRelevantMemoryItems(
         limit
       ]
     );
+
+
+  return result.rows;
+}
+
+
+async function getAllMemoryItems(
+  contactId,
+  limit = 200
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+        FROM memory_items
+
+        WHERE contact_id = $1
+
+        ORDER BY
+          created_at DESC
+
+        LIMIT $2
+      `,
+      [
+        contactId,
+        limit
+      ]
+    );
+
 
   return result.rows;
 }
@@ -3303,6 +3591,7 @@ async function getRelevantMemoryEvents(
       `
         SELECT *
         FROM memory_events
+
         WHERE contact_id = $1
 
           AND (
@@ -3340,6 +3629,36 @@ async function getRelevantMemoryEvents(
       ]
     );
 
+
+  return result.rows;
+}
+
+
+async function getAllMemoryEvents(
+  contactId,
+  limit = 200
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+        FROM memory_events
+
+        WHERE contact_id = $1
+
+        ORDER BY
+          created_at DESC
+
+        LIMIT $2
+      `,
+      [
+        contactId,
+        limit
+      ]
+    );
+
+
   return result.rows;
 }
 
@@ -3357,6 +3676,7 @@ async function getMarcelMemory(
           memory_value,
           importance,
           usage_notes
+
         FROM marcel_memory
 
         WHERE status =
@@ -3381,6 +3701,7 @@ async function getMarcelMemory(
       ]
     );
 
+
   return result.rows;
 }
 
@@ -3392,17 +3713,78 @@ async function getMarcelLiveState() {
       `
         SELECT *
         FROM marcel_live_state
+
         WHERE id = 1
+
         LIMIT 1
       `
     );
+
 
   return result.rows[0] || {};
 }
 
 
 /* ==================================================
-   MEMORY-KONTEXT FÜR ANTWORT
+   TEST SNAPSHOT
+================================================== */
+
+async function getTestContactSnapshot(jid) {
+
+  const contact =
+    await getContactByJid(
+      jid
+    );
+
+
+  if (!contact) {
+    return null;
+  }
+
+
+  const [
+    history,
+    profile,
+    items,
+    events,
+    liveState
+  ] =
+    await Promise.all([
+
+      getConversationHistory(
+        jid
+      ),
+
+      getContactMemoryProfile(
+        contact.id
+      ),
+
+      getAllMemoryItems(
+        contact.id
+      ),
+
+      getAllMemoryEvents(
+        contact.id
+      ),
+
+      getMarcelLiveState()
+
+    ]);
+
+
+  return {
+    contact,
+    history,
+    profile,
+    items,
+    events,
+    liveState
+  };
+}
+
+
+/* ==================================================
+   MEMORY KONTEXT FÜR ANTWORT
 ================================================== */
 
 function buildMemoryContext({
@@ -3449,6 +3831,7 @@ function buildMemoryContext({
                   : item
                       .memory_value;
 
+
               return [
                 `#${item.id}`,
                 `category=${item.category}`,
@@ -3487,8 +3870,9 @@ function buildMemoryContext({
     memoryEvents.length
       ? memoryEvents
           .map(
-            (event) =>
-              [
+            (event) => {
+
+              return [
                 `#${event.id}`,
                 `type=${event.event_type}`,
 
@@ -3516,7 +3900,9 @@ function buildMemoryContext({
 
               ]
                 .filter(Boolean)
-                .join(" | ")
+                .join(" | ");
+
+            }
           )
           .join("\n")
 
@@ -3527,8 +3913,9 @@ function buildMemoryContext({
     marcelMemory.length
       ? marcelMemory
           .map(
-            (memory) =>
-              [
+            (memory) => {
+
+              return [
                 `${memory.category}.${memory.memory_key}`,
 
                 renderJson(
@@ -3540,9 +3927,12 @@ function buildMemoryContext({
                       memory.usage_notes
                     )}`
                   : null
+
               ]
                 .filter(Boolean)
-                .join(" | ")
+                .join(" | ");
+
+            }
           )
           .join("\n")
 
@@ -3896,6 +4286,7 @@ async function findSimilarActiveMemory(
       ]
     );
 
+
   return result.rows[0] || null;
 }
 
@@ -3931,6 +4322,7 @@ async function applyMemoryItems(
       normalizeText(
         rawItem?.category
       );
+
 
     const memoryKey =
       normalizeText(
@@ -4004,24 +4396,19 @@ async function applyMemoryItems(
       null;
 
 
-    const requestedSourceId =
-      Number(
-        rawItem
-          ?.source_message_id
-      );
+    /*
+      WICHTIG:
+      Die KI darf keine fremden / erfundenen DB-IDs setzen.
 
+      Frauen-Memory aus dieser Runde
+      bekommt als Beleg grundsätzlich
+      die aktuelle eingehende Nachricht.
+    */
 
     const sourceMessageId =
-
-      Number.isFinite(
-        requestedSourceId
-      )
-      &&
-      requestedSourceId > 0
-
-        ? requestedSourceId
-
-        : defaultSourceMessageId;
+      defaultSourceMessageId
+      ||
+      null;
 
 
     const existing =
@@ -4031,10 +4418,6 @@ async function applyMemoryItems(
         memoryKey
       );
 
-
-    /* --------------------------------
-       MENSCHLICHE KORREKTUR SCHÜTZEN
-    -------------------------------- */
 
     if (
       existing
@@ -4125,13 +4508,10 @@ async function applyMemoryItems(
           ]
         );
 
+
         continue;
       }
 
-
-      /* --------------------------------
-         ALTER FAKT BLEIBT HISTORISCH
-      -------------------------------- */
 
       await pool.query(
         `
@@ -4237,14 +4617,21 @@ async function applyMemoryItems(
       `,
       [
         contactId,
+
         category,
+
         memoryKey,
+
         JSON.stringify(
           memoryValue
         ),
+
         memoryType,
+
         confidence,
+
         sourceMessageId,
+
         sourceQuote,
 
         Number.isFinite(
@@ -4265,6 +4652,67 @@ async function applyMemoryItems(
     );
 
   }
+}
+
+
+/* ==================================================
+   EVENT DOPPELT PRÜFEN
+================================================== */
+
+async function memoryEventAlreadyExists({
+  contactId,
+  eventType,
+  eventSubtype,
+  sourceMessageId
+}) {
+
+  if (!sourceMessageId) {
+    return false;
+  }
+
+
+  const result =
+    await pool.query(
+      `
+        SELECT id
+
+        FROM memory_events
+
+        WHERE contact_id = $1
+
+          AND event_type = $2
+
+          AND COALESCE(
+            event_subtype,
+            ''
+          )
+          =
+          COALESCE(
+            $3,
+            ''
+          )
+
+          AND source_message_ids
+            @> $4::jsonb
+
+        LIMIT 1
+      `,
+      [
+        contactId,
+        eventType,
+        eventSubtype || null,
+        JSON.stringify([
+          sourceMessageId
+        ])
+      ]
+    );
+
+
+  return (
+    result.rowCount
+    >
+    0
+  );
 }
 
 
@@ -4307,38 +4755,43 @@ async function applyMemoryEvents(
     }
 
 
-    const sourceIds =
-
-      Array.isArray(
+    const eventSubtype =
+      normalizeText(
         rawEvent
-          ?.source_message_ids
+          ?.event_subtype
       )
+      ||
+      null;
 
-        ? rawEvent
-            .source_message_ids
-            .map(Number)
-            .filter(
-              (value) =>
-                Number.isFinite(
-                  value
-                )
-                &&
-                value > 0
-            )
 
+    /*
+      Auch hier:
+      keine halluzinierten IDs der KI.
+
+      Beleg dieser Runde
+      ist die aktuelle eingehende Nachricht.
+    */
+
+    const sourceIds =
+      defaultSourceMessageId
+        ? [
+            defaultSourceMessageId
+          ]
         : [];
 
 
-    if (
-      sourceIds.length
-        === 0
-      &&
-      defaultSourceMessageId
-    ) {
+    const duplicate =
+      await memoryEventAlreadyExists({
+        contactId,
+        eventType,
+        eventSubtype,
+        sourceMessageId:
+          defaultSourceMessageId
+      });
 
-      sourceIds.push(
-        defaultSourceMessageId
-      );
+
+    if (duplicate) {
+      continue;
     }
 
 
@@ -4459,12 +4912,7 @@ async function applyMemoryEvents(
 
         eventType,
 
-        normalizeText(
-          rawEvent
-            ?.event_subtype
-        )
-        ||
-        null,
+        eventSubtype,
 
         normalizeText(
           rawEvent
@@ -4539,6 +4987,7 @@ async function applyMemoryEvents(
     );
 
   }
+
 }
 
 
@@ -4579,7 +5028,8 @@ async function applyProfilePatch(
 
   const values = [];
 
-  let parameterIndex = 1;
+  let parameterIndex =
+    1;
 
 
   for (
@@ -4631,13 +5081,15 @@ async function applyProfilePatch(
     );
 
 
-    parameterIndex += 1;
+    parameterIndex +=
+      1;
+
   }
 
 
   if (
-    updates.length
-    === 0
+    updates.length ===
+    0
   ) {
     return;
   }
@@ -4646,6 +5098,7 @@ async function applyProfilePatch(
   updates.push(
     "last_memory_update_at = NOW()"
   );
+
 
   updates.push(
     "updated_at = NOW()"
@@ -4669,6 +5122,7 @@ async function applyProfilePatch(
     `,
     values
   );
+
 }
 
 
@@ -4818,7 +5272,7 @@ für Marcels privaten WhatsApp-Bot.
 Du antwortest NICHT der Frau.
 
 Du analysierst nur,
-ob aus dem Gespräch
+ob aus der AKTUELLEN neuen Nachricht
 langfristig nützliche Informationen
 entstanden sind.
 
@@ -4839,6 +5293,24 @@ Der Chat ist kein Fragebogen.
 Speichere nur Dinge,
 die aus dem normalen Gespräch
 wirklich entstanden sind.
+
+
+==================================================
+EXTREM WICHTIG: NICHT ALTEN KONTEXT NEU SPEICHERN
+==================================================
+
+Der vorherige Gesprächskontext
+ist nur dazu da,
+die aktuelle Nachricht richtig zu verstehen.
+
+Extrahiere NICHT bei jeder Runde
+erneut dieselben alten Fakten oder Events.
+
+Neue Items oder Events
+sollen sich hauptsächlich
+auf die AKTUELLE eingehende Nachricht
+oder eine echte Änderung
+gegenüber bisherigen Informationen beziehen.
 
 
 ==================================================
@@ -4946,9 +5418,6 @@ possible_contradiction
 
 erstellt werden.
 
-Beide Aussagen
-und Belege möglichst erhalten.
-
 Nicht automatisch
 in Marcels Antwort ansprechen.
 
@@ -5003,8 +5472,7 @@ gespeichert werden.
 
 Ein klares Nein
 oder eine ausdrückliche Grenze
-ist wichtig
-und darf gespeichert werden.
+ist wichtig.
 
 
 ==================================================
@@ -5050,8 +5518,6 @@ Investment kann z.B. sein:
 - beschäftigt sich mit Dingen,
   die Marcel betreffen
 - investiert reale Zeit oder Mühe
-
-Aber:
 
 Keine einzelne Kleinigkeit
 automatisch überbewerten.
@@ -5107,6 +5573,13 @@ als die zugrunde liegenden Memories.
 Unsichere Interpretationen
 nicht als sichere Fakten
 in das Profil schreiben.
+
+profile_patch darf nur
+die tatsächlich betroffenen Bereiche
+enthalten.
+
+Nicht alle Bereiche
+mit leeren Objekten ausgeben.
 
 
 ==================================================
@@ -5200,7 +5673,6 @@ Schema:
       "memory_type": "self_reported|explicit_fact|observed_pattern|interpretation|temporary_state",
       "confidence": 0.0,
       "source_quote": "kurzer Originalbeleg",
-      "source_message_id": 0,
       "importance": 1,
       "use_in_reply": true,
       "valid_until_hours": null
@@ -5215,7 +5687,6 @@ Schema:
       "event_data": {},
       "importance": 1,
       "sensitivity": "normal|personal|intimate",
-      "source_message_ids": [0],
       "evidence_summary": "string",
       "requires_follow_up": false,
       "follow_up_after_hours": null,
@@ -5275,13 +5746,14 @@ ${existingEventText || "[keine]"}
 
 ==================================================
 LETZTER GESPRÄCHSKONTEXT
+NUR ZUM VERSTEHEN
 ==================================================
 
 ${recentConversation || "[keiner]"}
 
 
 ==================================================
-NEUE NACHRICHT DER FRAU
+AKTUELLE NEUE NACHRICHT DER FRAU
 ==================================================
 
 DB MESSAGE ID:
@@ -5309,8 +5781,10 @@ AUFGABE
 ==================================================
 
 Extrahiere nur wirklich
+neue,
 langfristig nützliche
-oder aktuell relevante Informationen.
+oder aktuell relevante Informationen
+aus dieser neuen Runde.
 
 Nicht zwanghaft Memory erzeugen.
 `
@@ -5334,7 +5808,6 @@ Nicht zwanghaft Memory erzeugen.
     typeof parsed
       !== "object"
   ) {
-
     return;
   }
 
@@ -5366,7 +5839,7 @@ Nicht zwanghaft Memory erzeugen.
 
 
 /* ==================================================
-   MEMORY UPDATE ASYNCHRON STARTEN
+   LIVE MEMORY UPDATE ASYNCHRON
 ================================================== */
 
 function scheduleMemoryUpdate(
@@ -5393,6 +5866,7 @@ function scheduleMemoryUpdate(
     },
     250
   );
+
 }
 
 
@@ -5453,13 +5927,14 @@ app.get(
           "SELECT NOW() AS server_time"
         );
 
+
       res.json({
         ok: true,
-
         serverTime:
           result.rows[0]
             .server_time
       });
+
 
     } catch (error) {
 
@@ -5467,6 +5942,7 @@ app.get(
         "DB-Test fehlgeschlagen:",
         error
       );
+
 
       res
         .status(500)
@@ -5531,7 +6007,15 @@ app.get(
                 SELECT COUNT(*)
                 FROM marcel_memory
               )
-              AS marcel_memory
+              AS marcel_memory,
+
+              (
+                SELECT COUNT(*)
+                FROM contacts
+                WHERE whatsapp_jid
+                  LIKE '%@persona.test'
+              )
+              AS test_contacts
           `
         );
 
@@ -5541,12 +6025,14 @@ app.get(
         ...result.rows[0]
       });
 
+
     } catch (error) {
 
       console.error(
         "Memory-Status Fehler:",
         error
       );
+
 
       res
         .status(500)
@@ -5637,12 +6123,12 @@ app.get(
             contact.id
           ),
 
-          getRelevantMemoryItems(
+          getAllMemoryItems(
             contact.id,
             100
           ),
 
-          getRelevantMemoryEvents(
+          getAllMemoryEvents(
             contact.id,
             100
           ),
@@ -5653,17 +6139,11 @@ app.get(
 
 
       res.json({
-
         contact,
-
         profile,
-
         items,
-
         events,
-
         liveState
-
       });
 
 
@@ -5673,6 +6153,7 @@ app.get(
         "Memory-Debug Fehler:",
         error
       );
+
 
       res
         .status(500)
@@ -5688,7 +6169,7 @@ app.get(
 
 
 /* ==================================================
-   PERSONA TEST
+   PERSONA TEST PASSWORT
 ================================================== */
 
 function personaPasswordCorrect(
@@ -5712,12 +6193,17 @@ function personaPasswordCorrect(
 }
 
 
+/* ==================================================
+   PERSONA TEST UI
+================================================== */
+
 app.get(
   "/persona-test",
   (req, res) => {
 
     res.send(`
 <!DOCTYPE html>
+
 <html lang="de">
 
 <head>
@@ -5730,10 +6216,14 @@ app.get(
   >
 
   <title>
-    Marcel Persona V1.4 Memory Test
+    Marcel Memory Test
   </title>
 
   <style>
+
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       font-family:
@@ -5743,7 +6233,7 @@ app.get(
         sans-serif;
 
       background:
-        #111;
+        #0f0f0f;
 
       color:
         #fff;
@@ -5752,63 +6242,110 @@ app.get(
         0;
 
       padding:
-        20px;
-    }
-
-    .box {
-      max-width:
-        700px;
-
-      margin:
-        0 auto;
-
-      background:
-        #1d1d1d;
-
-      padding:
-        20px;
-
-      border-radius:
         18px;
     }
 
-    input,
-    textarea,
-    button {
+    .app {
+      max-width:
+        900px;
 
-      width:
-        100%;
+      margin:
+        0 auto;
+    }
 
-      box-sizing:
-        border-box;
-
-      font-size:
-        16px;
+    .card {
+      background:
+        #1c1c1e;
 
       border-radius:
-        12px;
+        18px;
+
+      padding:
+        18px;
+
+      margin-bottom:
+        16px;
+    }
+
+    h1 {
+      font-size:
+        25px;
+
+      margin:
+        0 0 6px 0;
+    }
+
+    h2 {
+      font-size:
+        18px;
+
+      margin-top:
+        0;
+    }
+
+    .muted {
+      color:
+        #9a9a9f;
+
+      font-size:
+        13px;
+
+      line-height:
+        1.4;
+    }
+
+    .success {
+      color:
+        #7fe08a;
+    }
+
+    .danger {
+      color:
+        #ff7777;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      width:
+        100%;
 
       border:
         0;
 
+      border-radius:
+        12px;
+
       padding:
-        14px;
+        13px;
 
       margin-top:
-        10px;
+        9px;
+
+      font-size:
+        16px;
+    }
+
+    input,
+    select,
+    textarea {
+      background:
+        #2c2c2e;
+
+      color:
+        #fff;
     }
 
     textarea {
-
       min-height:
-        140px;
+        110px;
 
       resize:
         vertical;
     }
 
     button {
-
       background:
         #fff;
 
@@ -5816,59 +6353,225 @@ app.get(
         #111;
 
       font-weight:
-        bold;
+        700;
 
       cursor:
         pointer;
     }
 
-    #answer {
+    button.secondary {
+      background:
+        #333336;
 
-      margin-top:
-        20px;
+      color:
+        #fff;
+    }
 
-      padding:
-        16px;
+    button.danger {
+      background:
+        #4a2020;
+
+      color:
+        #fff;
+    }
+
+    .row {
+      display:
+        grid;
+
+      grid-template-columns:
+        1fr 1fr;
+
+      gap:
+        10px;
+    }
+
+    @media (
+      max-width: 650px
+    ) {
+
+      .row {
+        grid-template-columns:
+          1fr;
+      }
+
+    }
+
+    #chat {
+      background:
+        #111;
 
       border-radius:
+        14px;
+
+      padding:
         12px;
 
-      background:
-        #2a2a2a;
-
       min-height:
-        50px;
+        100px;
+
+      max-height:
+        430px;
+
+      overflow-y:
+        auto;
+    }
+
+    .msg {
+      padding:
+        10px 12px;
+
+      border-radius:
+        13px;
+
+      margin:
+        7px 0;
+
+      line-height:
+        1.35;
 
       white-space:
         pre-wrap;
     }
 
-    .small {
+    .her {
+      background:
+        #303033;
 
-      color:
-        #aaa;
+      margin-right:
+        15%;
+    }
+
+    .me {
+      background:
+        #173b26;
+
+      margin-left:
+        15%;
+    }
+
+    .speaker {
+      font-size:
+        11px;
+
+      opacity:
+        0.7;
+
+      margin-bottom:
+        4px;
+    }
+
+    .memoryItem {
+      border-bottom:
+        1px solid #333;
+
+      padding:
+        10px 0;
+    }
+
+    .memoryItem:last-child {
+      border-bottom:
+        0;
+    }
+
+    .tag {
+      display:
+        inline-block;
+
+      border-radius:
+        999px;
+
+      background:
+        #333;
+
+      padding:
+        4px 8px;
+
+      margin-right:
+        5px;
+
+      margin-bottom:
+        4px;
 
       font-size:
-        13px;
+        11px;
+    }
+
+    pre {
+      background:
+        #111;
+
+      padding:
+        12px;
+
+      border-radius:
+        12px;
+
+      white-space:
+        pre-wrap;
+
+      word-break:
+        break-word;
+
+      font-size:
+        12px;
+    }
+
+    .tabs {
+      display:
+        grid;
+
+      grid-template-columns:
+        repeat(3, 1fr);
+
+      gap:
+        7px;
+
+      margin-bottom:
+        12px;
+    }
+
+    .tabs button {
+      margin:
+        0;
+
+      padding:
+        10px;
+
+      background:
+        #333336;
+
+      color:
+        #fff;
+    }
+
+    .hidden {
+      display:
+        none;
     }
 
   </style>
 
 </head>
 
+
 <body>
 
-  <div class="box">
+<div class="app">
+
+
+  <div class="card">
 
     <h1>
-      Marcel Persona V1.4 Memory
+      Marcel Memory Test V1.4
     </h1>
 
-    <p class="small">
-      Dieser Test sendet nichts an WhatsApp.
-      Ohne echte Kontakt-JID nutzt er weiterhin
-      kein Frauen-Langzeitmemory.
-    </p>
+    <div class="muted">
+      Echter Mehr-Runden-Test mit eigener Testfrau,
+      30er-Verlauf und Langzeit-Memory.
+      Es wird NICHTS an WhatsApp gesendet.
+    </div>
+
 
     <input
       id="password"
@@ -5876,119 +6579,1139 @@ app.get(
       placeholder="Test-Passwort"
     >
 
-    <textarea
-      id="message"
-      placeholder="Was schreibt die Frau?"
-    ></textarea>
 
     <button
-      onclick="testPersona()"
+      class="secondary"
+      onclick="loadContacts()"
     >
-      Antwort testen
+      Testkontakte laden
     </button>
 
-    <div id="answer">
-      Hier erscheint Marcels Antwort.
+  </div>
+
+
+  <div class="card">
+
+    <h2>
+      Testfrau
+    </h2>
+
+
+    <select
+      id="contactSelect"
+      onchange="contactChanged()"
+    >
+
+      <option value="">
+        -- Testkontakt auswählen --
+      </option>
+
+    </select>
+
+
+    <div class="row">
+
+      <input
+        id="newName"
+        placeholder="Neue Testfrau: Name"
+      >
+
+      <input
+        id="newCountry"
+        placeholder="Land, z.B. Colombia"
+      >
+
+    </div>
+
+
+    <div class="row">
+
+      <input
+        id="newCity"
+        placeholder="Stadt, z.B. Medellín"
+      >
+
+      <input
+        id="newLanguage"
+        placeholder="Sprache, z.B. Spanish"
+      >
+
+    </div>
+
+
+    <button
+      onclick="createContact()"
+    >
+      Neue Testfrau anlegen
+    </button>
+
+
+    <div
+      id="contactInfo"
+      class="muted"
+      style="margin-top:10px"
+    >
+      Noch kein Kontakt ausgewählt.
     </div>
 
   </div>
 
 
-  <script>
+  <div class="card">
 
-    async function testPersona() {
+    <h2>
+      Test-Chat
+    </h2>
 
-      const password =
+
+    <div id="chat">
+      Noch kein Testverlauf.
+    </div>
+
+
+    <textarea
+      id="message"
+      placeholder="Was schreibt die Frau?"
+    ></textarea>
+
+
+    <button
+      onclick="sendTestMessage()"
+    >
+      Nachricht testen
+    </button>
+
+
+    <div
+      id="status"
+      class="muted"
+      style="margin-top:10px"
+    ></div>
+
+  </div>
+
+
+  <div class="card">
+
+    <div class="tabs">
+
+      <button
+        onclick="showTab('items')"
+      >
+        Fakten
+      </button>
+
+      <button
+        onclick="showTab('events')"
+      >
+        Events
+      </button>
+
+      <button
+        onclick="showTab('profile')"
+      >
+        Profil
+      </button>
+
+    </div>
+
+
+    <div id="tab-items">
+
+      <h2>
+        Memory Items
+      </h2>
+
+      <div id="memoryItems">
+        Noch keine Daten.
+      </div>
+
+    </div>
+
+
+    <div
+      id="tab-events"
+      class="hidden"
+    >
+
+      <h2>
+        Memory Events
+      </h2>
+
+      <div id="memoryEvents">
+        Noch keine Daten.
+      </div>
+
+    </div>
+
+
+    <div
+      id="tab-profile"
+      class="hidden"
+    >
+
+      <h2>
+        Frauenprofil
+      </h2>
+
+      <pre id="profile">
+Noch keine Daten.
+      </pre>
+
+    </div>
+
+  </div>
+
+
+  <div class="card">
+
+    <h2>
+      Testkontakt zurücksetzen
+    </h2>
+
+    <div class="muted">
+      Löscht nur Chat und Frauen-Memory
+      des ausgewählten TESTKONTAKTS.
+      Keine echten WhatsApp-Kontakte.
+    </div>
+
+
+    <button
+      class="danger"
+      onclick="resetContact()"
+    >
+      Testkontakt-Memory zurücksetzen
+    </button>
+
+  </div>
+
+
+</div>
+
+
+<script>
+
+let currentJid =
+  "";
+
+
+function password() {
+
+  return document
+    .getElementById(
+      "password"
+    )
+    .value;
+
+}
+
+
+function selectedJid() {
+
+  return document
+    .getElementById(
+      "contactSelect"
+    )
+    .value;
+
+}
+
+
+function showTab(name) {
+
+  [
+    "items",
+    "events",
+    "profile"
+  ]
+    .forEach(
+      (tab) => {
+
         document
           .getElementById(
-            "password"
+            "tab-" + tab
           )
-          .value;
-
-
-      const message =
-        document
-          .getElementById(
-            "message"
-          )
-          .value;
-
-
-      const answer =
-        document
-          .getElementById(
-            "answer"
+          .classList
+          .toggle(
+            "hidden",
+            tab !== name
           );
 
-
-      if (
-        !message.trim()
-      ) {
-
-        answer.textContent =
-          "Bitte zuerst eine Nachricht eingeben.";
-
-        return;
       }
+    );
+
+}
 
 
-      answer.textContent =
-        "KI denkt ...";
+function esc(value) {
+
+  return String(
+    value ?? ""
+  )
+    .replaceAll(
+      "&",
+      "&amp;"
+    )
+    .replaceAll(
+      "<",
+      "&lt;"
+    )
+    .replaceAll(
+      ">",
+      "&gt;"
+    )
+    .replaceAll(
+      '"',
+      "&quot;"
+    )
+    .replaceAll(
+      "'",
+      "&#039;"
+    );
+
+}
 
 
-      try {
+async function api(
+  url,
+  options = {}
+) {
 
-        const response =
-          await fetch(
-            "/persona-test",
-            {
-
-              method:
-                "POST",
-
-              headers: {
-                "Content-Type":
-                  "application/json"
-              },
-
-              body:
-                JSON.stringify({
-                  password,
-                  message
-                })
-            }
-          );
+  const response =
+    await fetch(
+      url,
+      options
+    );
 
 
-        const data =
-          await response.json();
+  const data =
+    await response.json();
 
 
-        if (!response.ok) {
+  if (!response.ok) {
 
-          answer.textContent =
-            data.error
-            ||
-            "Fehler";
+    throw new Error(
+      data.error
+      ||
+      "Unbekannter Fehler"
+    );
 
-          return;
+  }
+
+
+  return data;
+}
+
+
+async function loadContacts(
+  keepJid = null
+) {
+
+  try {
+
+    const data =
+      await api(
+        "/persona-test/contacts",
+        {
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              password:
+                password()
+            })
         }
+      );
 
 
-        answer.textContent =
-          data.reply;
+    const select =
+      document
+        .getElementById(
+          "contactSelect"
+        );
 
 
-      } catch (error) {
+    select.innerHTML =
+      '<option value="">-- Testkontakt auswählen --</option>';
 
-        answer.textContent =
-          "Verbindungsfehler";
 
-      }
+    data.contacts
+      .forEach(
+        (contact) => {
+
+          const option =
+            document.createElement(
+              "option"
+            );
+
+
+          option.value =
+            contact.whatsapp_jid;
+
+
+          let text =
+            contact.display_name
+            ||
+            contact.whatsapp_jid;
+
+
+          if (
+            contact.city
+            ||
+            contact.country
+          ) {
+
+            text +=
+              " · "
+              +
+              [
+                contact.city,
+                contact.country
+              ]
+                .filter(Boolean)
+                .join(", ");
+
+          }
+
+
+          option.textContent =
+            text;
+
+
+          select.appendChild(
+            option
+          );
+
+        }
+      );
+
+
+    if (
+      keepJid
+      &&
+      data.contacts.some(
+        (contact) =>
+          contact.whatsapp_jid
+          === keepJid
+      )
+    ) {
+
+      select.value =
+        keepJid;
+
+      currentJid =
+        keepJid;
+
+      await loadSnapshot();
 
     }
 
-  </script>
+
+  } catch (error) {
+
+    alert(
+      error.message
+    );
+
+  }
+
+}
+
+
+async function createContact() {
+
+  try {
+
+    const name =
+      document
+        .getElementById(
+          "newName"
+        )
+        .value
+        .trim();
+
+
+    if (!name) {
+
+      alert(
+        "Bitte einen Namen eingeben."
+      );
+
+      return;
+    }
+
+
+    const data =
+      await api(
+        "/persona-test/create-contact",
+        {
+
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+
+              password:
+                password(),
+
+              name,
+
+              country:
+                document
+                  .getElementById(
+                    "newCountry"
+                  )
+                  .value,
+
+              city:
+                document
+                  .getElementById(
+                    "newCity"
+                  )
+                  .value,
+
+              language:
+                document
+                  .getElementById(
+                    "newLanguage"
+                  )
+                  .value
+
+            })
+
+        }
+      );
+
+
+    document
+      .getElementById(
+        "newName"
+      )
+      .value =
+      "";
+
+
+    currentJid =
+      data.contact
+        .whatsapp_jid;
+
+
+    await loadContacts(
+      currentJid
+    );
+
+
+  } catch (error) {
+
+    alert(
+      error.message
+    );
+
+  }
+
+}
+
+
+async function contactChanged() {
+
+  currentJid =
+    selectedJid();
+
+
+  if (!currentJid) {
+
+    document
+      .getElementById(
+        "chat"
+      )
+      .innerHTML =
+      "Noch kein Testverlauf.";
+
+
+    document
+      .getElementById(
+        "contactInfo"
+      )
+      .textContent =
+      "Noch kein Kontakt ausgewählt.";
+
+
+    return;
+  }
+
+
+  await loadSnapshot();
+
+}
+
+
+async function loadSnapshot() {
+
+  if (!currentJid) {
+    return;
+  }
+
+
+  try {
+
+    const data =
+      await api(
+        "/persona-test/snapshot",
+        {
+
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              password:
+                password(),
+
+              jid:
+                currentJid
+            })
+
+        }
+      );
+
+
+    renderSnapshot(
+      data
+    );
+
+
+  } catch (error) {
+
+    alert(
+      error.message
+    );
+
+  }
+
+}
+
+
+function renderSnapshot(data) {
+
+  const contact =
+    data.contact
+    ||
+    {};
+
+
+  document
+    .getElementById(
+      "contactInfo"
+    )
+    .textContent =
+    [
+      contact.display_name,
+      contact.city,
+      contact.country,
+      contact.primary_language
+    ]
+      .filter(Boolean)
+      .join(" · ")
+    ||
+    contact.whatsapp_jid
+    ||
+    "";
+
+
+  const chat =
+    document
+      .getElementById(
+        "chat"
+      );
+
+
+  if (
+    !data.history
+    ||
+    data.history.length === 0
+  ) {
+
+    chat.innerHTML =
+      '<div class="muted">Noch kein Testverlauf.</div>';
+
+  } else {
+
+    chat.innerHTML =
+      data.history
+        .map(
+          (item) => {
+
+            const incoming =
+              item.direction
+              === "incoming";
+
+
+            return (
+              '<div class="msg '
+              +
+              (
+                incoming
+                  ? "her"
+                  : "me"
+              )
+              +
+              '">'
+              +
+              '<div class="speaker">'
+              +
+              (
+                incoming
+                  ? "Sie"
+                  : "Marcel"
+              )
+              +
+              "</div>"
+              +
+              esc(
+                item.message_text
+              )
+              +
+              "</div>"
+            );
+
+          }
+        )
+        .join("");
+
+  }
+
+
+  chat.scrollTop =
+    chat.scrollHeight;
+
+
+  const memoryItems =
+    document
+      .getElementById(
+        "memoryItems"
+      );
+
+
+  if (
+    !data.items
+    ||
+    data.items.length === 0
+  ) {
+
+    memoryItems.innerHTML =
+      '<div class="muted">Noch keine Memory Items.</div>';
+
+  } else {
+
+    memoryItems.innerHTML =
+      data.items
+        .map(
+          (item) => {
+
+            const value =
+              item.human_review_status
+              === "corrected"
+              &&
+              item.human_corrected_value
+
+                ? item
+                    .human_corrected_value
+
+                : item
+                    .memory_value;
+
+
+            return (
+              '<div class="memoryItem">'
+              +
+              '<span class="tag">'
+              +
+              esc(
+                item.memory_type
+              )
+              +
+              "</span>"
+              +
+              '<span class="tag">Confidence '
+              +
+              esc(
+                item.confidence
+              )
+              +
+              "</span>"
+              +
+              '<span class="tag">Wichtigkeit '
+              +
+              esc(
+                item.importance
+              )
+              +
+              "</span>"
+              +
+              "<br>"
+              +
+              "<strong>"
+              +
+              esc(
+                item.category
+              )
+              +
+              "."
+              +
+              esc(
+                item.memory_key
+              )
+              +
+              "</strong>"
+              +
+              "<br>"
+              +
+              esc(
+                JSON.stringify(
+                  value
+                )
+              )
+              +
+              (
+                item.source_quote
+                  ? (
+                      '<div class="muted" style="margin-top:6px">Beleg: '
+                      +
+                      esc(
+                        item.source_quote
+                      )
+                      +
+                      "</div>"
+                    )
+                  : ""
+              )
+              +
+              (
+                item.human_review_status
+                !== "unreviewed"
+                  ? (
+                      '<div class="muted">Review: '
+                      +
+                      esc(
+                        item.human_review_status
+                      )
+                      +
+                      "</div>"
+                    )
+                  : ""
+              )
+              +
+              "</div>"
+            );
+
+          }
+        )
+        .join("");
+
+  }
+
+
+  const events =
+    document
+      .getElementById(
+        "memoryEvents"
+      );
+
+
+  if (
+    !data.events
+    ||
+    data.events.length === 0
+  ) {
+
+    events.innerHTML =
+      '<div class="muted">Noch keine Events.</div>';
+
+  } else {
+
+    events.innerHTML =
+      data.events
+        .map(
+          (event) => {
+
+            return (
+              '<div class="memoryItem">'
+              +
+              '<span class="tag">'
+              +
+              esc(
+                event.event_status
+              )
+              +
+              "</span>"
+              +
+              '<span class="tag">Wichtigkeit '
+              +
+              esc(
+                event.importance
+              )
+              +
+              "</span>"
+              +
+              "<br>"
+              +
+              "<strong>"
+              +
+              esc(
+                event.event_type
+              )
+              +
+              (
+                event.event_subtype
+                  ? (
+                      " / "
+                      +
+                      esc(
+                        event.event_subtype
+                      )
+                    )
+                  : ""
+              )
+              +
+              "</strong>"
+              +
+              "<br>"
+              +
+              esc(
+                JSON.stringify(
+                  event.event_data
+                )
+              )
+              +
+              (
+                event.evidence_summary
+                  ? (
+                      '<div class="muted" style="margin-top:6px">Beleg: '
+                      +
+                      esc(
+                        event.evidence_summary
+                      )
+                      +
+                      "</div>"
+                    )
+                  : ""
+              )
+              +
+              "</div>"
+            );
+
+          }
+        )
+        .join("");
+
+  }
+
+
+  document
+    .getElementById(
+      "profile"
+    )
+    .textContent =
+    JSON.stringify(
+      data.profile
+      ||
+      {},
+      null,
+      2
+    );
+
+}
+
+
+async function sendTestMessage() {
+
+  const message =
+    document
+      .getElementById(
+        "message"
+      )
+      .value
+      .trim();
+
+
+  if (!currentJid) {
+
+    alert(
+      "Bitte zuerst eine Testfrau auswählen."
+    );
+
+    return;
+  }
+
+
+  if (!message) {
+
+    alert(
+      "Bitte eine Nachricht eingeben."
+    );
+
+    return;
+  }
+
+
+  const status =
+    document
+      .getElementById(
+        "status"
+      );
+
+
+  status.textContent =
+    "Antwort + Memory werden verarbeitet ...";
+
+
+  try {
+
+    const data =
+      await api(
+        "/persona-test/message",
+        {
+
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              password:
+                password(),
+
+              jid:
+                currentJid,
+
+              message
+            })
+
+        }
+      );
+
+
+    document
+      .getElementById(
+        "message"
+      )
+      .value =
+      "";
+
+
+    renderSnapshot(
+      data.snapshot
+    );
+
+
+    status.innerHTML =
+      '<span class="success">Fertig. Antwort und Memory gespeichert.</span>';
+
+
+  } catch (error) {
+
+    status.innerHTML =
+      '<span class="danger">'
+      +
+      esc(
+        error.message
+      )
+      +
+      "</span>";
+
+  }
+
+}
+
+
+async function resetContact() {
+
+  if (!currentJid) {
+
+    alert(
+      "Bitte zuerst einen Testkontakt auswählen."
+    );
+
+    return;
+  }
+
+
+  const okay =
+    confirm(
+      "Nur diesen Testkontakt zurücksetzen? Chat, Memory Items, Events und Frauenprofil werden gelöscht."
+    );
+
+
+  if (!okay) {
+    return;
+  }
+
+
+  try {
+
+    const data =
+      await api(
+        "/persona-test/reset",
+        {
+
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+              password:
+                password(),
+
+              jid:
+                currentJid
+            })
+
+        }
+      );
+
+
+    renderSnapshot(
+      data.snapshot
+    );
+
+
+  } catch (error) {
+
+    alert(
+      error.message
+    );
+
+  }
+
+}
+
+</script>
 
 </body>
 
@@ -5999,8 +7722,762 @@ app.get(
 );
 
 
+/* ==================================================
+   TESTKONTAKTE ABRUFEN
+================================================== */
+
 app.post(
-  "/persona-test",
+  "/persona-test/contacts",
+  async (req, res) => {
+
+    try {
+
+      const {
+        password
+      } =
+        req.body;
+
+
+      if (
+        !personaPasswordCorrect(
+          password
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+            error:
+              "Falsches Passwort."
+          });
+
+      }
+
+
+      const contacts =
+        await getTestContacts();
+
+
+      res.json({
+        ok: true,
+        contacts
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Testkontakte Fehler:",
+        error
+      );
+
+
+      res
+        .status(500)
+        .json({
+          error:
+            "Testkontakte konnten nicht geladen werden."
+        });
+
+    }
+
+  }
+);
+
+
+/* ==================================================
+   TESTKONTAKT ANLEGEN
+================================================== */
+
+app.post(
+  "/persona-test/create-contact",
+  async (req, res) => {
+
+    try {
+
+      const {
+        password,
+        name,
+        country,
+        city,
+        language
+      } =
+        req.body;
+
+
+      if (
+        !personaPasswordCorrect(
+          password
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+            error:
+              "Falsches Passwort."
+          });
+
+      }
+
+
+      if (
+        !normalizeText(
+          name
+        )
+      ) {
+
+        return res
+          .status(400)
+          .json({
+            error:
+              "Bitte einen Namen eingeben."
+          });
+
+      }
+
+
+      const contact =
+        await createTestContact({
+          name,
+          country,
+          city,
+          language
+        });
+
+
+      res.json({
+        ok: true,
+        contact
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Testkontakt erstellen Fehler:",
+        error
+      );
+
+
+      res
+        .status(500)
+        .json({
+          error:
+            "Testkontakt konnte nicht erstellt werden."
+        });
+
+    }
+
+  }
+);
+
+
+/* ==================================================
+   TEST SNAPSHOT
+================================================== */
+
+app.post(
+  "/persona-test/snapshot",
+  async (req, res) => {
+
+    try {
+
+      const {
+        password,
+        jid
+      } =
+        req.body;
+
+
+      if (
+        !personaPasswordCorrect(
+          password
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+            error:
+              "Falsches Passwort."
+          });
+
+      }
+
+
+      if (
+        !isTestJid(
+          jid
+        )
+      ) {
+
+        return res
+          .status(400)
+          .json({
+            error:
+              "Ungültiger Testkontakt."
+          });
+
+      }
+
+
+      const snapshot =
+        await getTestContactSnapshot(
+          jid
+        );
+
+
+      if (!snapshot) {
+
+        return res
+          .status(404)
+          .json({
+            error:
+              "Testkontakt nicht gefunden."
+          });
+
+      }
+
+
+      res.json(
+        snapshot
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "Snapshot Fehler:",
+        error
+      );
+
+
+      res
+        .status(500)
+        .json({
+          error:
+            "Snapshot konnte nicht geladen werden."
+        });
+
+    }
+
+  }
+);
+
+
+/* ==================================================
+   ECHTER MEHR-RUNDEN TEST
+================================================== */
+
+app.post(
+  "/persona-test/message",
+  async (req, res) => {
+
+    try {
+
+      const {
+        password,
+        jid,
+        message
+      } =
+        req.body;
+
+
+      if (
+        !personaPasswordCorrect(
+          password
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+            error:
+              "Falsches Passwort."
+          });
+
+      }
+
+
+      if (
+        !isTestJid(
+          jid
+        )
+      ) {
+
+        return res
+          .status(400)
+          .json({
+            error:
+              "Ungültiger Testkontakt."
+          });
+
+      }
+
+
+      const incomingText =
+        normalizeText(
+          message
+        );
+
+
+      if (!incomingText) {
+
+        return res
+          .status(400)
+          .json({
+            error:
+              "Keine Nachricht eingegeben."
+          });
+
+      }
+
+
+      const contact =
+        await getContactByJid(
+          jid
+        );
+
+
+      if (!contact) {
+
+        return res
+          .status(404)
+          .json({
+            error:
+              "Testkontakt nicht gefunden."
+          });
+
+      }
+
+
+      /*
+        1. Testnachricht der Frau speichern
+      */
+
+      const incomingMessageDbId =
+        await saveMessage(
+          jid,
+          "incoming",
+          incomingText,
+          `test-in-${Date.now()}`
+        );
+
+
+      /*
+        2. Antwort mit echter Test-JID generieren
+
+        Dadurch bekommt generateAIReply:
+        - genau diesen Kontakt
+        - dessen 30er Verlauf
+        - dessen Langzeitmemory
+        - dessen Events
+        - Marcel Memory
+        - Live State
+      */
+
+      const reply =
+        await generateAIReply(
+          jid,
+          incomingText,
+          incomingMessageDbId
+        );
+
+
+      if (!reply) {
+
+        return res
+          .status(500)
+          .json({
+            error:
+              "OpenAI hat keine Antwort erzeugt."
+          });
+
+      }
+
+
+      /*
+        3. Marcels simulierte Antwort speichern
+
+        KEIN WhatsApp sendMessage.
+      */
+
+      const outgoingMessageDbId =
+        await saveMessage(
+          jid,
+          "outgoing",
+          reply,
+          `test-out-${Date.now()}`
+        );
+
+
+      /*
+        4. Im Test NICHT asynchron.
+
+        Wir warten absichtlich auf
+        Memory-Extraktion,
+        damit du sofort danach sehen kannst,
+        was gespeichert wurde.
+      */
+
+      await extractMemoryUpdates({
+
+        jid,
+
+        contactId:
+          contact.id,
+
+        incomingText,
+
+        incomingMessageDbId,
+
+        outgoingText:
+          reply,
+
+        outgoingMessageDbId
+
+      });
+
+
+      /*
+        5. Kompletten aktuellen Teststand
+        an die Oberfläche zurückgeben.
+      */
+
+      const snapshot =
+        await getTestContactSnapshot(
+          jid
+        );
+
+
+      res.json({
+        ok: true,
+        reply,
+        snapshot
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Mehr-Runden Test Fehler:",
+        error
+      );
+
+
+      res
+        .status(500)
+        .json({
+          error:
+            "Testnachricht konnte nicht verarbeitet werden."
+        });
+
+    }
+
+  }
+);
+
+
+/* ==================================================
+   TESTKONTAKT ZURÜCKSETZEN
+================================================== */
+
+app.post(
+  "/persona-test/reset",
+  async (req, res) => {
+
+    const client =
+      await pool.connect();
+
+
+    try {
+
+      const {
+        password,
+        jid
+      } =
+        req.body;
+
+
+      if (
+        !personaPasswordCorrect(
+          password
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+            error:
+              "Falsches Passwort."
+          });
+
+      }
+
+
+      if (
+        !isTestJid(
+          jid
+        )
+      ) {
+
+        return res
+          .status(400)
+          .json({
+            error:
+              "Aus Sicherheitsgründen dürfen hier nur Testkontakte zurückgesetzt werden."
+          });
+
+      }
+
+
+      const contact =
+        await getContactByJid(
+          jid
+        );
+
+
+      if (!contact) {
+
+        return res
+          .status(404)
+          .json({
+            error:
+              "Testkontakt nicht gefunden."
+          });
+
+      }
+
+
+      await client.query(
+        "BEGIN"
+      );
+
+
+      await client.query(
+        `
+          DELETE FROM memory_events
+          WHERE contact_id = $1
+        `,
+        [
+          contact.id
+        ]
+      );
+
+
+      await client.query(
+        `
+          DELETE FROM memory_items
+          WHERE contact_id = $1
+        `,
+        [
+          contact.id
+        ]
+      );
+
+
+      await client.query(
+        `
+          DELETE FROM media
+          WHERE contact_id = $1
+        `,
+        [
+          contact.id
+        ]
+      );
+
+
+      await client.query(
+        `
+          DELETE FROM messages
+          WHERE whatsapp_jid = $1
+        `,
+        [
+          jid
+        ]
+      );
+
+
+      await client.query(
+        `
+          UPDATE contact_memory_profiles
+
+          SET
+            profile_summary =
+              '{}'::jsonb,
+
+            personality =
+              '{}'::jsonb,
+
+            humor_profile =
+              '{}'::jsonb,
+
+            relationship =
+              '{}'::jsonb,
+
+            family =
+              '{}'::jsonb,
+
+            children =
+              '{}'::jsonb,
+
+            social_circle =
+              '{}'::jsonb,
+
+            work_education =
+              '{}'::jsonb,
+
+            financial_context =
+              '{}'::jsonb,
+
+            health =
+              '{}'::jsonb,
+
+            religion_values =
+              '{}'::jsonb,
+
+            sexuality_intimacy =
+              '{}'::jsonb,
+
+            communication =
+              '{}'::jsonb,
+
+            lifestyle_routines =
+              '{}'::jsonb,
+
+            preferences =
+              '{}'::jsonb,
+
+            dislikes =
+              '{}'::jsonb,
+
+            goals_dreams =
+              '{}'::jsonb,
+
+            travel_future_location =
+              '{}'::jsonb,
+
+            living_situation =
+              '{}'::jsonb,
+
+            personal_boundaries =
+              '{}'::jsonb,
+
+            stress_support_style =
+              '{}'::jsonb,
+
+            decision_style =
+              '{}'::jsonb,
+
+            social_media =
+              '{}'::jsonb,
+
+            cultural_interest =
+              '{}'::jsonb,
+
+            investment =
+              '{}'::jsonb,
+
+            interaction_patterns =
+              '{}'::jsonb,
+
+            meaningful_details =
+              '{}'::jsonb,
+
+            shared_history =
+              '{}'::jsonb,
+
+            running_gags =
+              '{}'::jsonb,
+
+            open_threads =
+              '{}'::jsonb,
+
+            plans =
+              '{}'::jsonb,
+
+            promises =
+              '{}'::jsonb,
+
+            marcel_knowledge_map =
+              '{}'::jsonb,
+
+            current_context =
+              '{}'::jsonb,
+
+            profile_version =
+              profile_version + 1,
+
+            last_memory_update_at =
+              NULL,
+
+            updated_at =
+              NOW()
+
+          WHERE contact_id = $1
+        `,
+        [
+          contact.id
+        ]
+      );
+
+
+      await client.query(
+        "COMMIT"
+      );
+
+
+      const snapshot =
+        await getTestContactSnapshot(
+          jid
+        );
+
+
+      res.json({
+        ok: true,
+        snapshot
+      });
+
+
+    } catch (error) {
+
+      await client.query(
+        "ROLLBACK"
+      );
+
+
+      console.error(
+        "Test Reset Fehler:",
+        error
+      );
+
+
+      res
+        .status(500)
+        .json({
+          error:
+            "Testkontakt konnte nicht zurückgesetzt werden."
+        });
+
+
+    } finally {
+
+      client.release();
+
+    }
+
+  }
+);
+
+
+/* ==================================================
+   ALTER EINZEL-PERSONA TEST
+   BLEIBT OPTIONAL KOMPATIBEL
+================================================== */
+
+app.post(
+  "/persona-test-single",
   async (req, res) => {
 
     try {
@@ -6024,6 +8501,7 @@ app.post(
             error:
               "Falsches Passwort."
           });
+
       }
 
 
@@ -6039,6 +8517,7 @@ app.post(
             error:
               "Keine Nachricht eingegeben."
           });
+
       }
 
 
@@ -6059,7 +8538,7 @@ app.post(
     } catch (error) {
 
       console.error(
-        "Persona-Test Fehler:",
+        "Single Persona Test Fehler:",
         error
       );
 
@@ -6118,7 +8597,7 @@ async function startWhatsApp() {
 
 
   /* ==================================================
-     NEUE WHATSAPP-NACHRICHT
+     NEUE WHATSAPP NACHRICHT
   ================================================== */
 
   sock.ev.on(
@@ -6156,8 +8635,6 @@ async function startWhatsApp() {
         }
 
 
-        /* Gruppen vorerst ignorieren */
-
         if (
           jid.endsWith(
             "@g.us"
@@ -6185,8 +8662,6 @@ async function startWhatsApp() {
           "";
 
 
-        /* Bilder / Videos kommen später separat */
-
         if (!text) {
 
           console.log(
@@ -6201,10 +8676,12 @@ async function startWhatsApp() {
           "NEUE WHATSAPP-NACHRICHT"
         );
 
+
         console.log(
           "Von:",
           jid
         );
+
 
         console.log(
           "Text:",
@@ -6214,20 +8691,11 @@ async function startWhatsApp() {
 
         try {
 
-          /* --------------------------------
-             KONTAKT LADEN
-          -------------------------------- */
-
           let contact =
             await ensureContact(
               jid
             );
 
-
-          /* --------------------------------
-             EINGEHENDE NACHRICHT
-             IMMER SPEICHERN
-          -------------------------------- */
 
           const incomingMessageDbId =
             await saveMessage(
@@ -6245,20 +8713,11 @@ async function startWhatsApp() {
           );
 
 
-          /* --------------------------------
-             KONTAKT NEU LADEN,
-             DAMIT FLAGS AKTUELL SIND
-          -------------------------------- */
-
           contact =
             await getContactByJid(
               jid
             );
 
-
-          /* --------------------------------
-             AUTO REPLY AUS
-          -------------------------------- */
 
           if (
             contact
@@ -6274,10 +8733,6 @@ async function startWhatsApp() {
           }
 
 
-          /* --------------------------------
-             DATE LOCK
-          -------------------------------- */
-
           if (
             contact
               ?.date_lock_enabled
@@ -6291,10 +8746,6 @@ async function startWhatsApp() {
             continue;
           }
 
-
-          /* --------------------------------
-             KI ANTWORT
-          -------------------------------- */
 
           const aiReply =
             await generateAIReply(
@@ -6314,10 +8765,6 @@ async function startWhatsApp() {
           }
 
 
-          /* --------------------------------
-             SENDEN
-          -------------------------------- */
-
           await sock.sendMessage(
             jid,
             {
@@ -6326,11 +8773,6 @@ async function startWhatsApp() {
             }
           );
 
-
-          /* --------------------------------
-             AUSGEHENDE NACHRICHT
-             SPEICHERN
-          -------------------------------- */
 
           const outgoingMessageDbId =
             await saveMessage(
@@ -6345,11 +8787,6 @@ async function startWhatsApp() {
             aiReply
           );
 
-
-          /* --------------------------------
-             MEMORY ERST DANACH
-             ASYNCHRON ANALYSIEREN
-          -------------------------------- */
 
           scheduleMemoryUpdate({
 
@@ -6538,6 +8975,7 @@ async function startWhatsApp() {
 
     }
   );
+
 }
 
 

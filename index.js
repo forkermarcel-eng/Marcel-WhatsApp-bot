@@ -6164,7 +6164,7 @@ async function addContactIdentifier({
     ) {
 
       throw new Error(
-        \`Identity-Konflikt: \${type} \${clean} gehört bereits Kontakt \${existingStrong.rows[0].contact_id}\`
+        `Identity-Konflikt: ${type} ${clean} gehört bereits Kontakt ${existingStrong.rows[0].contact_id}`
       );
 
     }
@@ -7053,7 +7053,7 @@ async function applyProfileSnapshot(
   const assignments =
     PROFILE_COLUMNS.map(
       (column, index) =>
-        \`\${column} = $\${index + 1}::jsonb\`
+        `${column} = $${index + 1}::jsonb`
     );
 
 
@@ -7157,7 +7157,7 @@ async function seedWomenMemory() {
             key,
 
           memoryKey:
-            \`seed_\${key}\`,
+            `seed_${key}`,
 
           memoryValue:
             value,
@@ -7185,7 +7185,7 @@ async function seedWomenMemory() {
 
 
   console.log(
-    \`Frauen-Memory geladen: \${WOMEN_SEED.length} getrennte Profile.\`
+    `Frauen-Memory geladen: ${WOMEN_SEED.length} getrennte Profile.`
   );
 
 }
@@ -7313,7 +7313,7 @@ async function ensureContact(
       ) {
 
         throw new Error(
-          \`WhatsApp-JID \${jid} ist bereits einem anderen Kontakt zugeordnet.\`
+          `WhatsApp-JID ${jid} ist bereits einem anderen Kontakt zugeordnet.`
         );
 
       }
@@ -7703,7 +7703,7 @@ async function createTestContact({
 
 
   const jid =
-    \`test-\${createTestSlug(cleanName)}@persona.test\`;
+    `test-${createTestSlug(cleanName)}@persona.test`;
 
 
   const result =
@@ -8624,17 +8624,17 @@ function buildMemoryContext({
 
 
               return (
-                \`#\${item.id}\`
+                `#${item.id}`
                 +
-                \`|\${item.category}.\${item.memory_key}\`
+                `|${item.category}.${item.memory_key}`
                 +
-                \`|\${item.memory_type}\`
+                `|${item.memory_type}`
                 +
-                \`|review=\${item.human_review_status}\`
+                `|review=${item.human_review_status}`
                 +
-                \`|importance=\${item.importance}\`
+                `|importance=${item.importance}`
                 +
-                \`|\${renderJson(value)}\`
+                `|${renderJson(value)}`
               );
 
             }
@@ -8652,11 +8652,11 @@ function buildMemoryContext({
       ? memoryEvents
           .map(
             event =>
-              \`#\${event.id}\`
+              `#${event.id}`
               +
-              \`|\${event.event_type}/\${event.event_subtype || "-"}\`
+              `|${event.event_type}/${event.event_subtype || "-"}`
               +
-              \`|\${renderJson(event.event_data)}\`
+              `|${renderJson(event.event_data)}`
           )
           .join(
             "\n"
@@ -8671,11 +8671,11 @@ function buildMemoryContext({
       ? marcelMemory
           .map(
             memory =>
-              \`\${memory.category}.\${memory.memory_key}\`
+              `${memory.category}.${memory.memory_key}`
               +
-              \`|\${renderJson(memory.memory_value)}\`
+              `|${renderJson(memory.memory_value)}`
               +
-              \`|\${memory.usage_notes || ""}\`
+              `|${memory.usage_notes || ""}`
           )
           .join(
             "\n"
@@ -8918,7 +8918,7 @@ async function generateAIReply(
       history
         .map(
           item =>
-            \`\${item.direction === "incoming" ? "Andere Person" : "Marcel"}: \${item.message_text}\`
+            `${item.direction === "incoming" ? "Andere Person" : "Marcel"}: ${item.message_text}`
         )
         .join(
           "\n"
@@ -10187,13 +10187,13 @@ async function extractMemoryUpdates({
     items
       .map(
         item =>
-          \`ID=\${item.id}\`
+          `ID=${item.id}`
           +
-          \`|\${item.category}.\${item.memory_key}\`
+          `|${item.category}.${item.memory_key}`
           +
-          \`|review=\${item.human_review_status}\`
+          `|review=${item.human_review_status}`
           +
-          \`|\${renderJson(
+          `|${renderJson(
             item.human_review_status
             ===
             "corrected"
@@ -10203,7 +10203,7 @@ async function extractMemoryUpdates({
               ? item.human_corrected_value
 
               : item.memory_value
-          )}\`
+          )}`
       )
       .join(
         "\n"
@@ -10285,7 +10285,7 @@ Gib ausschließlich JSON:
     ${PROFILE_COLUMNS
       .map(
         column =>
-          \`"\${column}": {}\`
+          `"${column}": {}`
       )
       .join(",")}
   }
@@ -10329,7 +10329,7 @@ ${history
   )
   .map(
     item =>
-      \`\${item.direction === "incoming" ? "Sie" : "Marcel"}: \${item.message_text}\`
+      `${item.direction === "incoming" ? "Sie" : "Marcel"}: ${item.message_text}`
   )
   .join(
     "\n"
@@ -10572,7 +10572,7 @@ app.get(
   (req, res) => {
 
     res.send(
-      \`Marcel WhatsApp Bot V1.7.2 läuft. WhatsApp-Status: \${whatsappStatus}\`
+      `Marcel WhatsApp Bot V1.7.2 läuft. WhatsApp-Status: ${whatsappStatus}`
     );
 
   }
@@ -10750,7 +10750,7 @@ app.get(
     ) {
 
       return res.send(
-        \`Pairing Code: \${pairingCode}\`
+        `Pairing Code: ${pairingCode}`
       );
 
     }
@@ -10773,7 +10773,7 @@ app.get(
   (req, res) => {
 
     res.send(
-\`<!doctype html>
+`<!doctype html>
 
 <html lang="de">
 
@@ -12015,7 +12015,7 @@ Memory / Profil
 
 </body>
 
-</html>\`
+</html>`
     );
 
   }
@@ -12413,7 +12413,7 @@ app.post(
           jid,
           "incoming",
           text,
-          \`test-in-\${Date.now()}\`,
+          `test-in-${Date.now()}`,
           {
 
             processingStatus:
@@ -12446,7 +12446,7 @@ app.post(
           jid,
           "outgoing",
           reply,
-          \`test-out-\${Date.now()}\`,
+          `test-out-${Date.now()}`,
           {
 
             processingStatus:
@@ -12483,7 +12483,7 @@ app.post(
           jid,
           "incoming",
           text,
-          \`test-in-\${Date.now()}\`
+          `test-in-${Date.now()}`
         );
 
 
@@ -12524,7 +12524,7 @@ app.post(
           jid,
           "outgoing",
           reply,
-          \`test-out-\${Date.now()}\`
+          `test-out-${Date.now()}`
         );
 
 
@@ -13160,7 +13160,7 @@ app.listen(
   async () => {
 
     console.log(
-      \`Server läuft auf Port \${port}\`
+      `Server läuft auf Port ${port}`
     );
 
 

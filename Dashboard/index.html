@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Marcel AI Dashboard</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #090d11;
+      color: #f5f5f5;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 190px 280px 1fr 300px;
+      height: 100vh;
+      background: #0b1015;
+    }
+
+    /* SIDEBAR */
+
+    .sidebar {
+      background: #0d1217;
+      border-right: 1px solid #252c33;
+      padding: 22px 14px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 25px;
+    }
+
+    .logo span {
+      color: #39b65a;
+    }
+
+    .new-message {
+      background: #2ca84f;
+      color: white;
+      border: none;
+      border-radius: 9px;
+      padding: 12px;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+
+    .nav-item {
+      padding: 12px;
+      margin: 3px 0;
+      border-radius: 8px;
+      color: #c7cdd3;
+      font-size: 14px;
+    }
+
+    .nav-item.active {
+      background: #20272e;
+      color: white;
+    }
+
+    .auto-box {
+      margin-top: auto;
+      border: 1px solid #293139;
+      border-radius: 10px;
+      padding: 13px;
+      font-size: 12px;
+      color: #c8cdd2;
+    }
+
+    .auto-title {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .green {
+      color: #42c763;
+    }
+
+    .pause {
+      margin-top: 14px;
+      width: 100%;
+      border: 1px solid #8a3535;
+      color: #ff8181;
+      background: #28191b;
+      padding: 8px;
+      border-radius: 7px;
+    }
+
+    /* CHAT LIST */
+
+    .chat-list {
+      border-right: 1px solid #252c33;
+      background: #10161c;
+      overflow-y: auto;
+    }
+
+    .chat-header {
+      padding: 18px;
+      border-bottom: 1px solid #252c33;
+    }
+
+    .chat-header h2 {
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+
+    .search {
+      background: #20272e;
+      padding: 10px;
+      border-radius: 8px;
+      color: #89929b;
+      font-size: 13px;
+    }
+
+    .contact {
+      padding: 14px 16px;
+      border-bottom: 1px solid #20272e;
+      cursor: pointer;
+    }
+
+    .contact.active {
+      background: #252d34;
+    }
+
+    .contact-top {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 5px;
+    }
+
+    .contact-name {
+      font-weight: 700;
+    }
+
+    .time {
+      font-size: 11px;
+      color: #8e979f;
+    }
+
+    .preview {
+      color: #9ba3aa;
+      font-size: 12px;
+    }
+
+    /* MAIN CHAT */
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      background: #e9e3da;
+      color: #202020;
+    }
+
+    .topbar {
+      height: 70px;
+      background: #10161c;
+      color: white;
+      padding: 15px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .online {
+      color: #49cf6c;
+      font-size: 12px;
+    }
+
+    .actions button {
+      background: #252d34;
+      border: none;
+      color: white;
+      padding: 9px 14px;
+      border-radius: 7px;
+      margin-left: 5px;
+    }
+
+    .actions .auto {
+      background: #299b49;
+    }
+
+    .messages {
+      flex: 1;
+      padding: 28px;
+      overflow-y: auto;
+    }
+
+    .bubble {
+      max-width: 68%;
+      padding: 13px 16px;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      line-height: 1.4;
+      box-shadow: 0 1px 2px rgba(0,0,0,.15);
+    }
+
+    .incoming {
+      background: white;
+    }
+
+    .translation {
+      background: #fff2d5;
+      font-size: 13px;
+    }
+
+    .suggestion {
+      margin-left: auto;
+      background: #d7f5d5;
+    }
+
+    .ai-card {
+      background: white;
+      width: 72%;
+      margin: 25px auto;
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.15);
+    }
+
+    .ai-card h4 {
+      margin-bottom: 12px;
+    }
+
+    .ai-answer {
+      background: #d7f5d5;
+      padding: 14px;
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+
+    .ai-translation {
+      background: #fff1d1;
+      padding: 14px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    .ai-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .ai-buttons button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 7px;
+      font-weight: 600;
+    }
+
+    .send {
+      background: #2ca84f;
+      color: white;
+    }
+
+    .edit {
+      background: #e6e6e6;
+    }
+
+    .reject {
+      background: #ffdede;
+      color: #9d3030;
+    }
+
+    .composer {
+      padding: 15px;
+      background: #e9e3da;
+      display: flex;
+      gap: 10px;
+    }
+
+    .composer input {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    .composer button {
+      width: 48px;
+      border: none;
+      border-radius: 50%;
+      background: #2ca84f;
+      color: white;
+      font-size: 20px;
+    }
+
+    /* PROFILE */
+
+    .profile {
+      background: #10161c;
+      border-left: 1px solid #252c33;
+      overflow-y: auto;
+    }
+
+    .profile-section {
+      padding: 20px;
+      border-bottom: 1px solid #293139;
+    }
+
+    .profile h2 {
+      margin-bottom: 15px;
+    }
+
+    .avatar {
+      width: 82px;
+      height: 82px;
+      border-radius: 50%;
+      background: linear-gradient(135deg,#6d747b,#252a30);
+      margin: 5px auto 15px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 30px;
+    }
+
+    .profile-data {
+      font-size: 13px;
+      line-height: 1.8;
+      color: #c9cfd4;
+    }
+
+    .profile-section h3 {
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+
+    .profile-section p,
+    .profile-section li {
+      font-size: 13px;
+      color: #c1c8ce;
+      line-height: 1.6;
+    }
+
+    ul {
+      list-style: none;
+    }
+
+    .status-dot {
+      color: #43cc67;
+    }
+
+    @media (max-width: 1000px) {
+      .app {
+        grid-template-columns: 160px 240px 1fr;
+      }
+
+      .profile {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="logo">👑 Marcel <span>AI</span></div>
+
+    <button class="new-message">＋ Neue Nachricht</button>
+
+    <div class="nav-item active">⌂ Übersicht</div>
+    <div class="nav-item">💬 Chats</div>
+    <div class="nav-item">📅 Dates</div>
+    <div class="nav-item">👤 Kontakte</div>
+    <div class="nav-item">🖼 Medien</div>
+    <div class="nav-item">📊 Analyse</div>
+    <div class="nav-item">⚙ Einstellungen</div>
+
+    <div class="auto-box">
+      <div class="auto-title">
+        <b>Auto-Modus</b>
+        <span class="green">Aktiv</span>
+      </div>
+
+      Antwortverzögerung<br>
+      <b>2–20 Min</b>
+
+      <br><br>
+
+      Ruhezeiten<br>
+      <b>23:00–08:00</b>
+
+      <button class="pause">Pause für alle</button>
+    </div>
+  </aside>
+
+
+  <section class="chat-list">
+
+    <div class="chat-header">
+      <h2>Alle Chats <span class="green">12 ungelesen</span></h2>
+      <div class="search">🔍 Suchen</div>
+    </div>
+
+    <div class="contact active">
+      <div class="contact-top">
+        <span class="contact-name">Daniela</span>
+        <span class="time">14:28</span>
+      </div>
+      <div class="preview">¿Qué haces esta noche? 😉</div>
+    </div>
+
+    <div class="contact">
+      <div class="contact-top">
+        <span class="contact-name">Karla</span>
+        <span class="time">14:15</span>
+      </div>
+      <div class="preview">Jajaja me encantó lo que dijiste 😂</div>
+    </div>
+
+    <div class="contact">
+      <div class="contact-top">
+        <span class="contact-name">Valentina</span>
+        <span class="time">13:42</span>
+      </div>
+      <div class="preview">Te extraño...</div>
+    </div>
+
+    <div class="contact">
+      <div class="contact-top">
+        <span class="contact-name">Camila</span>
+        <span class="time">12:55</span>
+      </div>
+      <div class="preview">¿Vamos a la playa este finde?</div>
+    </div>
+
+    <div class="contact">
+      <div class="contact-top">
+        <span class="contact-name">Sofía</span>
+        <span class="time">10:45</span>
+      </div>
+      <div class="preview">Buenos días ☀️</div>
+    </div>
+
+  </section>
+
+
+  <main class="main">
+
+    <div class="topbar">
+
+      <div>
+        <strong>Daniela</strong><br>
+        <span class="online">● Online</span>
+      </div>
+
+      <div class="actions">
+        <button>Profil</button>
+        <button>Notizen</button>
+        <button class="auto">Auto ✓</button>
+      </div>
+
+    </div>
+
+
+    <div class="messages">
+
+      <div class="bubble incoming">
+        ¿Qué haces esta noche? 😉
+      </div>
+
+      <div class="bubble translation">
+        <b>Übersetzung für dich:</b><br>
+        Was machst du heute Abend? 😉
+      </div>
+
+
+      <div class="ai-card">
+
+        <h4>Vorgeschlagene Antwort von Marcel AI</h4>
+
+        <div class="ai-answer">
+          Todavía no tengo nada planeado...
+          aunque eso podría cambiar 😉
+        </div>
+
+        <div class="ai-translation">
+          <b>Übersetzung für dich:</b><br>
+          Ich habe noch nichts geplant...
+          obwohl sich das ändern könnte 😉
+        </div>
+
+        <div class="ai-buttons">
+          <button class="send">Senden</button>
+          <button class="edit">Ändern</button>
+          <button class="reject">Nicht senden</button>
+        </div>
+
+      </div>
+
+    </div>
+
+
+    <div class="composer">
+      <input placeholder="Nachricht schreiben...">
+      <button>➤</button>
+    </div>
+
+  </main>
+
+
+  <aside class="profile">
+
+    <div class="profile-section">
+
+      <h2>Daniela</h2>
+
+      <div class="avatar">D</div>
+
+      <div style="text-align:center;margin-bottom:15px">
+        <span class="status-dot">●</span> Online
+      </div>
+
+      <div class="profile-data">
+        Alter: 27<br>
+        Stadt: Medellín<br>
+        Beruf: Architektin<br>
+        Sprache: 🇨🇴 Spanisch
+      </div>
+
+    </div>
+
+
+    <div class="profile-section">
+
+      <h3>Über sie</h3>
+
+      <p>
+        Familienorientiert, humorvoll und offen.
+        Mag Reisen, Strand und gute Restaurants.
+      </p>
+
+    </div>
+
+
+    <div class="profile-section">
+
+      <h3>Interessen</h3>
+
+      <ul>
+        <li>✈ Reisen</li>
+        <li>🏖 Strand</li>
+        <li>🍣 Restaurants</li>
+        <li>💬 Gute Gespräche</li>
+        <li>🏋 Fitness</li>
+      </ul>
+
+    </div>
+
+
+    <div class="profile-section">
+
+      <h3>Nächstes Date</h3>
+
+      <p>
+        📅 Freitag – 19:00<br>
+        📍 Medellín
+      </p>
+
+    </div>
+
+
+    <div class="profile-section">
+
+      <h3>Notizen</h3>
+
+      <p>
+        Reagiert gut auf Humor und kleine Neckereien.
+        Wichtige Informationen werden später automatisch
+        aus dem Kontakt-Memory geladen.
+      </p>
+
+    </div>
+
+  </aside>
+
+</div>
+
+</body>
+</html>

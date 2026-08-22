@@ -1,1429 +1,7428 @@
 import express from "express";
 import OpenAI from "openai";
-import makeWASocket,{DisconnectReason,fetchLatestBaileysVersion,useMultiFileAuthState} from "@whiskeysockets/baileys";
+import makeWASocket, {
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  useMultiFileAuthState
+} from "@whiskeysockets/baileys";
 import P from "pino";
 import pg from "pg";
 
-const {Pool}=pg;
-const app=express();
-const port=process.env.PORT||3000;
-app.use(express.json({limit:"2mb"}));
-app.use(express.urlencoded({extended:true}));
+const { Pool } = pg;
 
-let sock=null;
-let whatsappStatus="disabled";
-let pairingCode=null;
+const app = express();
+const port = process.env.PORT || 3000;
 
-const logger=P({level:"silent"});
-const openai=new OpenAI({apiKey:process.env.OPENAI_API_KEY});
-const pool=new Pool({connectionString:process.env.DATABASE_URL});
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-const WHATSAPP_ENABLED=String(process.env.WHATSAPP_ENABLED||"false").toLowerCase()==="true";
-const DUPLICATE_WINDOW_MINUTES=Math.max(1,Number(process.env.DUPLICATE_WINDOW_MINUTES||15));
-const MODEL=process.env.OPENAI_MODEL||"gpt-5.6-sol";
+let sock = null;
+let whatsappStatus = "disabled";
+let pairingCode = null;
 
-const MARCEL_PERSONA_V1_7=`
+const logger = P({
+  level: "silent"
+});
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+const WHATSAPP_ENABLED =
+  String(
+    process.env.WHATSAPP_ENABLED || "false"
+  ).toLowerCase() === "true";
+
+const DUPLICATE_WINDOW_MINUTES =
+  Math.max(
+    1,
+    Number(
+      process.env.DUPLICATE_WINDOW_MINUTES || 15
+    )
+  );
+
+const MODEL =
+  process.env.OPENAI_MODEL || "gpt-5.6-sol";
+
+
+/* ==================================================
+   MARCEL PERSONA V1.7
+================================================== */
+
+const MARCEL_PERSONA_V1_7 = `
 MARCEL PERSONA V1.7
 
 Du schreibst private Dating-/WhatsApp-Nachrichten im Namen von Marcel.
+
 Conversation first, Memory second.
-Die Frau darf niemals merken, dass Regeln oder ein Memory-System dahinterstehen.
 
-MARCEL:
-selbstbewusst, entspannt, humorvoll, charmant, direkt, romantisch, verspielt,
-sexuell offen, emotional offen, loyal, familienorientiert, in echter Beziehung großzügig,
-nicht kontrollierend, ruhig bei Konflikten.
+Die Frau darf niemals merken,
+dass Regeln oder ein Memory-System dahinterstehen.
 
-SCHREIBSTIL:
+
+==================================================
+MARCEL
+==================================================
+
+Marcel ist:
+
+- selbstbewusst
+- entspannt
+- humorvoll
+- charmant
+- direkt
+- romantisch
+- verspielt
+- sexuell offen
+- emotional offen
+- loyal
+- familienorientiert
+- in echter Beziehung großzügig
+- nicht kontrollierend
+- ruhig bei Konflikten
+
+
+==================================================
+SCHREIBSTIL
+==================================================
+
 - kurz, natürlich, menschlich
-- nicht wie KI, Assistent, Coach, Therapeut oder Kundendienst
-- nicht jede Nachricht braucht Frage, Konter, Pointe oder sexuellen Unterton
-- Reagieren statt ihre Aussage künstlich zu paraphrasieren
-- keine Eigenschaftslisten aus ihrer Nachricht zurückspiegeln
-- keine KI-Sätze wie "Jetzt verstehe ich", "Das macht Sinn", "Das muss ich wissen",
-  "I have to ask", "Now I need to know", wenn ein Mensch es so nicht schreiben würde
+
+- nicht wie KI,
+  Assistent,
+  Coach,
+  Therapeut
+  oder Kundendienst
+
+- nicht jede Nachricht braucht
+  Frage,
+  Konter,
+  Pointe
+  oder sexuellen Unterton
+
+- Reagieren statt ihre Aussage
+  künstlich zu paraphrasieren
+
+- keine Eigenschaftslisten
+  aus ihrer Nachricht zurückspiegeln
+
+- keine KI-Sätze wie:
+  "Jetzt verstehe ich"
+  "Das macht Sinn"
+  "Das muss ich wissen"
+  "I have to ask"
+  "Now I need to know"
+
+  wenn ein Mensch es so
+  nicht schreiben würde
+
 - Fragen dürfen direkt kommen
+
 - grob ihr Investment spiegeln
-- bei persönlicher/verletzlicher Nachricht zuerst Wärme
-- keine künstlichen abwertenden Kosenamen wie "Fräulein schlechte Laune"
-- natürliche Anreden wie amor, mi hermosa, preciosa, princesa, meine Schöne, beautiful sind okay
-- Herzen nicht automatisch ans Ende frecher/neckischer Nachrichten hängen
+
+- bei persönlicher oder verletzlicher
+  Nachricht zuerst Wärme
+
+- keine künstlichen abwertenden
+  Kosenamen wie:
+  "Fräulein schlechte Laune"
+
+- natürliche Anreden wie:
+  amor
+  mi hermosa
+  preciosa
+  princesa
+  meine Schöne
+  beautiful
+  sind okay
+
+- Herzen nicht automatisch
+  ans Ende frecher oder neckischer
+  Nachrichten hängen
+
 - Emojis sparsam und natürlich
 
-FLIRT:
-führend, frech, spielerisch, warm.
-Bei Gegenseitigkeit steigern; bei Ausweichen reduzieren; bei Block akzeptieren.
+
+==================================================
+FLIRT
+==================================================
+
+Marcel flirtet:
+
+- führend
+- frech
+- spielerisch
+- warm
+
+Bei Gegenseitigkeit steigern.
+
+Bei Ausweichen reduzieren.
+
+Bei Block akzeptieren.
+
 Keine Zustimmung erfinden.
 
-GELD:
-Finanzproblem ist nicht automatisch Geldbitte.
+
+==================================================
+GELD
+==================================================
+
+Finanzproblem ist nicht automatisch
+eine Geldbitte.
+
 Nur bei echter Bitte Grenze setzen.
-Vor persönlichem Treffen grundsätzlich kein Geld überweisen.
 
-MARCEL:
-41, Geburtstag 7. August, Löwe.
-Kinder: Finn 16, Charlotte 14.
-Aktuell München/Deutschland.
-Definitiver Umzug in ca. 6-8 Wochen nach Medellín.
-Deutsch + Englisch, kein Spanisch.
-Keine aktuellen Aktivitäten, Reisen, Essen, Musik oder Aufenthalte erfinden.
-Solange in Deutschland keine konkreten Kolumbien-Date-Termine festlegen.
+Vor persönlichem Treffen
+grundsätzlich kein Geld überweisen.
 
-TINDER/WHATSAPP:
-Tinder nicht reflexartig zu WhatsApp verlagern.
+
+==================================================
+MARCEL FAKTEN
+==================================================
+
+Marcel ist 41.
+
+Geburtstag:
+7. August.
+
+Sternzeichen:
+Löwe.
+
+Kinder:
+Finn, 16.
+Charlotte, 14.
+
+Aktuell:
+München,
+Deutschland.
+
+Definitiver Umzug:
+in ca. 6-8 Wochen
+nach Medellín.
+
+Sprachen:
+Deutsch
+Englisch
+
+Kein Spanisch.
+
+Keine aktuellen Aktivitäten,
+Reisen,
+Essen,
+Musik
+oder Aufenthalte erfinden.
+
+Solange Marcel in Deutschland ist,
+keine konkreten Kolumbien-Date-Termine
+festlegen.
+
+
+==================================================
+TINDER / WHATSAPP
+==================================================
+
+Tinder nicht reflexartig
+zu WhatsApp verlagern.
+
 Erst wenn Kommunikation läuft.
-Nach 4-5 Tagen eigener Tinder-Funkstille kurz entschuldigen und Busy-/Projektkontext erwähnen.
-Wenn WhatsApp angeboten wird, darf der praktische Übersetzungsgrund genannt werden.
-Nach Wechsel Verlauf nahtlos fortführen, nicht bei null anfangen.
 
-IDENTITÄTSREGEL:
+Nach 4-5 Tagen eigener
+Tinder-Funkstille:
+
+kurz entschuldigen
+und Busy-/Projektkontext erwähnen.
+
+Wenn WhatsApp angeboten wird,
+darf der praktische Übersetzungsgrund
+genannt werden.
+
+Nach Wechsel:
+
+Verlauf nahtlos fortführen.
+
+Nicht bei null anfangen.
+
+
+==================================================
+IDENTITÄTSREGEL
+==================================================
+
 Gleichnamige Frauen niemals vermischen.
-Besonders:
-Dani != Daniela (Messe) != Dángela
-Kate Castillo != alte Kathe
-Paola Maza != ältere Paola
-Karla Tinder != Karla Instagram
 
-OUTPUT:
-Gib ausschließlich Marcels Nachricht aus.
-Keine Analyse, Erklärung, Übersetzung oder Anführungszeichen.
+Besonders:
+
+Dani
+!=
+Daniela Messe
+!=
+Dángela
+
+Kate Castillo
+!=
+alte Kathe
+
+Paola Maza
+!=
+ältere Paola
+
+Karla Tinder
+!=
+Karla Instagram
+
+
+==================================================
+OUTPUT
+==================================================
+
+Gib ausschließlich
+Marcels Nachricht aus.
+
+Keine Analyse.
+
+Keine Erklärung.
+
+Keine Übersetzung.
+
+Keine Anführungszeichen.
 `;
 
-function normalizeText(v){return String(v||"").trim();}
-function normalizeForDuplicate(v){return normalizeText(v).toLowerCase().replace(/\s+/g," ").replace(/[“”„"]/g,'"').replace(/[’‘]/g,"'");}
-function normalizeIdentityValue(v){return normalizeText(v).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();}
-function renderJson(v){try{return JSON.stringify(v);}catch{return String(v??"");}}
-function safeJsonParse(t,f=null){
-  if(!t)return f;
-  try{return JSON.parse(t);}catch{}
-  const c=String(t).replace(/^```json/i,"").replace(/^```/i,"").replace(/```$/i,"").trim();
-  try{return JSON.parse(c);}catch{}
-  const a=c.indexOf("{"),b=c.lastIndexOf("}");
-  if(a!==-1&&b>a){try{return JSON.parse(c.slice(a,b+1));}catch{}}
-  return f;
+
+/* ==================================================
+   HILFSFUNKTIONEN
+================================================== */
+
+function normalizeText(value) {
+
+  return String(
+    value || ""
+  ).trim();
+
 }
-function clampConfidence(v){const n=Number(v);return Number.isNaN(n)?0.5:Math.max(0,Math.min(1,n));}
-function clampImportance(v){const n=Number(v);return Number.isNaN(n)?2:Math.max(1,Math.min(5,Math.round(n)));}
-function isTestJid(j){return typeof j==="string"&&j.endsWith("@persona.test");}
-function isProfileJid(j){return typeof j==="string"&&j.endsWith("@memory.local");}
-function createProfileJid(k){return "profile-"+normalizeIdentityValue(k).replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80)+"@memory.local";}
-function createTestSlug(n){return normalizeIdentityValue(n).replace(/[^a-z0-9]+/g,"-").slice(0,40)+"-"+Math.random().toString(36).slice(2,8);}
-function cleanIntegerArray(v,m=100){return Array.isArray(v)?[...new Set(v.map(Number).filter(x=>Number.isInteger(x)&&x>0))].slice(0,m):[];}
-function extractTextFromMessageContent(c){return c?.conversation||c?.extendedTextMessage?.text||c?.imageMessage?.caption||c?.videoMessage?.caption||"";}
-function extractEditedText(u){return extractTextFromMessageContent(u?.message?.editedMessage?.message);}
 
-const PROFILE_COLUMNS=[
-"profile_summary","personality","humor_profile","relationship","family","children","social_circle",
-"work_education","financial_context","health","religion_values","sexuality_intimacy","communication",
-"lifestyle_routines","preferences","dislikes","goals_dreams","travel_future_location","living_situation",
-"personal_boundaries","stress_support_style","decision_style","social_media","cultural_interest","investment",
-"interaction_patterns","meaningful_details","shared_history","running_gags","open_threads","plans","promises",
-"marcel_knowledge_map","current_context"
+
+function normalizeForDuplicate(value) {
+
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[“”„"]/g, '"')
+    .replace(/[’‘]/g, "'");
+
+}
+
+
+function normalizeIdentityValue(value) {
+
+  return normalizeText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .trim();
+
+}
+
+
+function renderJson(value) {
+
+  try {
+
+    return JSON.stringify(
+      value
+    );
+
+  } catch {
+
+    return String(
+      value ?? ""
+    );
+
+  }
+
+}
+
+
+function safeJsonParse(
+  text,
+  fallback = null
+) {
+
+  if (!text) {
+
+    return fallback;
+
+  }
+
+
+  try {
+
+    return JSON.parse(
+      text
+    );
+
+  } catch {}
+
+
+  const cleaned =
+    String(text)
+      .replace(
+        /^```json/i,
+        ""
+      )
+      .replace(
+        /^```/i,
+        ""
+      )
+      .replace(
+        /```$/i,
+        ""
+      )
+      .trim();
+
+
+  try {
+
+    return JSON.parse(
+      cleaned
+    );
+
+  } catch {}
+
+
+  const firstBrace =
+    cleaned.indexOf(
+      "{"
+    );
+
+
+  const lastBrace =
+    cleaned.lastIndexOf(
+      "}"
+    );
+
+
+  if (
+    firstBrace !== -1
+    &&
+    lastBrace > firstBrace
+  ) {
+
+    try {
+
+      return JSON.parse(
+        cleaned.slice(
+          firstBrace,
+          lastBrace + 1
+        )
+      );
+
+    } catch {}
+
+  }
+
+
+  return fallback;
+
+}
+
+
+function clampConfidence(value) {
+
+  const number =
+    Number(
+      value
+    );
+
+
+  return Number.isNaN(
+    number
+  )
+
+    ? 0.5
+
+    : Math.max(
+        0,
+        Math.min(
+          1,
+          number
+        )
+      );
+
+}
+
+
+function clampImportance(value) {
+
+  const number =
+    Number(
+      value
+    );
+
+
+  return Number.isNaN(
+    number
+  )
+
+    ? 2
+
+    : Math.max(
+        1,
+        Math.min(
+          5,
+          Math.round(
+            number
+          )
+        )
+      );
+
+}
+
+
+function isTestJid(jid) {
+
+  return (
+    typeof jid === "string"
+    &&
+    jid.endsWith(
+      "@persona.test"
+    )
+  );
+
+}
+
+
+function isProfileJid(jid) {
+
+  return (
+    typeof jid === "string"
+    &&
+    jid.endsWith(
+      "@memory.local"
+    )
+  );
+
+}
+
+
+function createProfileJid(identityKey) {
+
+  return (
+    "profile-"
+    +
+    normalizeIdentityValue(
+      identityKey
+    )
+      .replace(
+        /[^a-z0-9]+/g,
+        "-"
+      )
+      .replace(
+        /^-+|-+$/g,
+        ""
+      )
+      .slice(
+        0,
+        80
+      )
+    +
+    "@memory.local"
+  );
+
+}
+
+
+function createTestSlug(name) {
+
+  return (
+    normalizeIdentityValue(
+      name
+    )
+      .replace(
+        /[^a-z0-9]+/g,
+        "-"
+      )
+      .slice(
+        0,
+        40
+      )
+    +
+    "-"
+    +
+    Math.random()
+      .toString(36)
+      .slice(
+        2,
+        8
+      )
+  );
+
+}
+
+
+function cleanIntegerArray(
+  values,
+  maxLength = 100
+) {
+
+  if (
+    !Array.isArray(
+      values
+    )
+  ) {
+
+    return [];
+
+  }
+
+
+  return [
+    ...new Set(
+      values
+        .map(
+          Number
+        )
+        .filter(
+          value =>
+            Number.isInteger(
+              value
+            )
+            &&
+            value > 0
+        )
+    )
+  ].slice(
+    0,
+    maxLength
+  );
+
+}
+
+
+function extractTextFromMessageContent(
+  content
+) {
+
+  return (
+    content?.conversation
+    ||
+    content?.extendedTextMessage?.text
+    ||
+    content?.imageMessage?.caption
+    ||
+    content?.videoMessage?.caption
+    ||
+    ""
+  );
+
+}
+
+
+function extractEditedText(update) {
+
+  return extractTextFromMessageContent(
+    update
+      ?.message
+      ?.editedMessage
+      ?.message
+  );
+
+}
+
+
+/* ==================================================
+   PROFILE COLUMNS
+================================================== */
+
+const PROFILE_COLUMNS = [
+
+  "profile_summary",
+
+  "personality",
+
+  "humor_profile",
+
+  "relationship",
+
+  "family",
+
+  "children",
+
+  "social_circle",
+
+  "work_education",
+
+  "financial_context",
+
+  "health",
+
+  "religion_values",
+
+  "sexuality_intimacy",
+
+  "communication",
+
+  "lifestyle_routines",
+
+  "preferences",
+
+  "dislikes",
+
+  "goals_dreams",
+
+  "travel_future_location",
+
+  "living_situation",
+
+  "personal_boundaries",
+
+  "stress_support_style",
+
+  "decision_style",
+
+  "social_media",
+
+  "cultural_interest",
+
+  "investment",
+
+  "interaction_patterns",
+
+  "meaningful_details",
+
+  "shared_history",
+
+  "running_gags",
+
+  "open_threads",
+
+  "plans",
+
+  "promises",
+
+  "marcel_knowledge_map",
+
+  "current_context"
+
 ];
 
-const WOMEN_SEED=[
-{identityKey:"zay_20_medellin",canonicalName:"Zay",country:"Colombia",city:"Medellín",language:"Spanish/Some English",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:20,notes:["Seit ihrem 16. Lebensjahr unabhängig, also ungefähr vier Jahre.","Ursprünglich aus kleiner Stadt; lebte selbstständig in Cartagena; jetzt Medellín.","Jüngstes Kind; Daddy's Girl und stolz auf Selbstständigkeit."]},
-family:{lives_with_brother_in_medellin:true,mother_is_reassured:true},
-work_education:{education_completed:true,several_certificates:true,wants_university_again:true,planned_study:"Mikrobiologie und Bioanalyse",english_lessons_paused:true,wants_to_improve_english:true},
-preferences:{music:["Vallenato","Silvestre","Poncho"],interests:["Fotografie","Instagram","Kochen","Foodie","Selbstliebe","Lesen","Volleyball","Sprachaustausch","Natur","Fitness"]},
-personality:{independent:true,clear_goals:true},
-investment:{reinitiated_after_silence:true,examples:["Good morning","good night","He","Hello"]},
-running_gags:{independent_woman_and_daddys_girl:true,english_for_spanish_exchange:true},
-open_threads:{do_not_ask_again:["Warum seit 16 unabhängig","familienverbunden","warum Bruder","Studium","Englisch"]}}},
-{identityKey:"natalia_24_san_cristobal",canonicalName:"Natalia",city:"San Cristóbal",language:"Spanish",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:24,height_cm:177},personality:{relaxed:true,calm:true,friendly:true},
-relationship:{wants_connection:true,wants_affection:true,wants_open_feelings:true,wants_honest_loving_man:true},
-preferences:{likes:["Kino","gutes Essen","gute Gespräche","Filme","Serien","Bücher","Manga","Spaziergänge","Süßigkeiten","True Crime","Plot-Twist-Filme"]},
-open_threads:{no_immediate_whatsapp:true}}},
-{identityKey:"lu_travel_home_english",canonicalName:"Lu",language:"English/Spanish",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-preferences:{likes_home_time_alone:true,travels_a_lot:true},communication:{english_fairly_good:true,says_not_perfect:true},
-investment:{liked_marcels_photo:true,said_unusual_message_made_difference:true},open_threads:{do_not_repeat_her_statements:true,no_immediate_whatsapp:true}}},
-{identityKey:"lorena_tinder",canonicalName:"Lorena",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-investment:{liked_marcels_name:true,liked_non_generic_opener:true},open_threads:{unknown_passion:"Sie sagte, Fotos zeigen ihre Leidenschaft nicht; konkrete Leidenschaft noch unbekannt."}}},
-{identityKey:"luu_18",canonicalName:"Luu",language:"Spanish",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:18,height_cm:171,adult:true},relationship:{wants_contacts_or_friends:true,open_to_casual_sex:true},
-preferences:{likes_motorcycles:true,loves_animals:true,interests:["Shopping","Street Food","TikTok"]},personal_boundaries:{note:"Nicht als reine Beziehungssuche speichern."}}},
-{identityKey:"dani_existing_daniela_27_medellin",canonicalName:"Daniela",aliases:["Dani"],country:"Colombia",city:"Medellín",language:"Spanish",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",whatsappDisplayName:"Dani",profile:{
-profile_summary:{age:27,city:"Medellín"},living_situation:{lives_with_mother_and_siblings:true,context:"Jobverlust; seit ca. 1,5 Monaten dort."},
-personality:{extroverted:true,serious_side:true,sin_prisa:true},relationship:{seeks_humble_calm_man:true},
-preferences:{love_language:"Geschenke",zodiac:"Taurus"},marcel_knowledge_map:{asked_future_neighborhood:true,knows_move_to_medellin:true},
-meaningful_details:{warned_marcel_about_medellin:true},current_context:{whatsapp_name:"Dani",do_not_merge_with_daniela_mass:true}}},
-{identityKey:"daniela_mass_separate",canonicalName:"Daniela",aliases:["Daniela Messe"],country:"Colombia",language:"Spanish",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{
-religion_values:{self_reported:"Ich gehe jeden Tag zur Messe.",interpretation:"Glaube/Religion scheint wichtig; nicht mehr annehmen als belegt."},
-current_context:{separate_person_from_dani:true,whatsapp_active_confirmed:true},open_threads:{early_getting_to_know:true,do_not_invent_religious_assumptions:true}}},
-{identityKey:"sandy_san_32",canonicalName:"Sandy",aliases:["San"],language:"Spanish",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{
-profile_summary:{age:32},shared_history:{strong_flirt:true,themes:["Dusche","Morgenküsse","acostumbrarnos juntos"],sent_kiss_photo:true,whatsapp_for_photos:true},
-communication:{responds_well_to_warmth_and_heart_emojis:true}}},
-{identityKey:"karla_tinder_older_men",canonicalName:"Karla",aliases:["Karla Tinder"],sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-relationship:{attracted_to_older_mature_men:true},open_threads:{age_topic_already_discussed:true,do_not_merge_with_karla_instagram:true}}},
-{identityKey:"karla_instagram_bed",canonicalName:"Karla",aliases:["Karla Instagram"],sourcePlatform:"instagram",platformStatus:"CONTACT_KNOWN",profile:{
-living_situation:{bed_broken:true,compared_repair_prices_with_mother:true},personality:{affectionate:true,real:true,sensitive:true,loyal:true,independent:true},
-religion_values:{catholic_family_background:true},children:{has_children:false},financial_context:{gifts_money_strong_theme:true,asked_early_for_support:true},
-personal_boundaries:{marcel_money_boundary_relevant:true},current_context:{do_not_merge_with_karla_tinder:true}}},
-{identityKey:"elena_whatsapp",canonicalName:"Elena",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{
-relationship:{natural_connection:true,let_it_flow:true,patient:true,no_forcing:true},social_media:{whatsapp:true,instagram:true},
-shared_history:{heart_sent:true,nervous_sweet_smile_flirt:true,affectionate_hug_flirt:true}}},
-{identityKey:"marcela_medellin_guide",canonicalName:"Marcela",country:"Colombia",city:"Medellín",language:"Spanish",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{
-work_education:{tourist_guide:true,spanish_teacher:true,cosmetologist:true},shared_history:{mirador_plan:true,offered_show_medellin:true,offered_massage:true,photo_sent:true},
-social_media:{whatsapp_discussed:true,instagram_discussed:true}}},
-{identityKey:"michell_home",canonicalName:"Michell",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{preferences:{prefers_home:true,likes_calm_plans:true,likes_cinema:true,likes_food:true}}},
-{identityKey:"valeria_adventurous_romantic",canonicalName:"Valeria",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{personality:{sensible:true,adventurous:true,romantic:true}}},
-{identityKey:"paola_old_existing",canonicalName:"Paola",aliases:["Paola alt"],sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{relationship:{sin_prisa:true,open_to_getting_to_know:true},current_context:{do_not_merge_with_paola_maza:true}}},
-{identityKey:"traccy_cosmetology",canonicalName:"Traccy",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{work_education:{cosmetology_student:true,classes_most_of_day:true},running_gags:{lado_travieso:true}}},
-{identityKey:"tiana_whatsapp",canonicalName:"Tiana",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{lifestyle_routines:{gym:true,disciplined:true},running_gags:{juice_jugo:true}}},
-{identityKey:"evelyn_whatsapp",canonicalName:"Evelyn",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{work_education:{works_in_store:true},shared_history:{noodles_topic:true,working_hours_topic:true}}},
-{identityKey:"mafe_whatsapp",canonicalName:"Mafe",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{communication:{attempted_video_call:true},shared_history:{last_known_text:"Que hace"},open_threads:{check_history_before_reply:true}}},
-{identityKey:"vanessa_content_money",canonicalName:"Vanessa",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{financial_context:{erotic_content_money_negotiation:true},personal_boundaries:{marcel_rejected_paid_content:true,serious_relationship_emphasized:true}}},
-{identityKey:"isabela_university_food",canonicalName:"Isabela",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{financial_context:{asked_for_food_and_university_items:true}}},
-{identityKey:"chantall_late_sleep",canonicalName:"Chantall",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{communication:{gave_number:true,late_sleep_4am_topic:true,said_she_thought_marcel_would_write:true}}},
-{identityKey:"kira_tinder",canonicalName:"Kira",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{social_media:{says_no_instagram:true},shared_history:{later_message:"Bien amor"}}},
-{identityKey:"milena_work_question",canonicalName:"Milena",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{marcel_knowledge_map:{asked_what_marcel_does_for_work:true}}},
-{identityKey:"dayana_vargas",canonicalName:"Dayana Vargas",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{shared_history:{topics:["palabras","no soy así"],photo_with_smile:true,asked:"¿por qué problema?"}}},
-{identityKey:"lizeth_32",canonicalName:"Lizeth",sourcePlatform:"tinder",platformStatus:"WHATSAPP_INVITED",profile:{
-profile_summary:{age:32},relationship:{does_not_want_casual:true},preferences:{little_party:true,prefers_calm_plans:true,likes_food_and_conversation:true},
-shared_history:{important_quote:"me quedaría contigo",meaning:"Ich würde bei dir bleiben.",date_closeness_flirt:true},
-open_threads:{do_not_ask_party_vs_calm_again:true,do_not_overinterpret_quote:true}}},
-{identityKey:"stephanie_peace",canonicalName:"Stephanie",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{preferences:{prefers_peace_calm:true}}},
-{identityKey:"kathe_old_unclear",canonicalName:"Kathe",aliases:["Kathe alt"],sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{personality:{strong_temper:true},current_context:{do_not_merge_with_kate_castillo:true}}},
-{identityKey:"dulce_working",canonicalName:"Dulce",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{current_context:{last_known:"working"}}},
-{identityKey:"miri_busy",canonicalName:"Miri",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{current_context:{busy_day:true,wanted_to_rest:true}}},
-{identityKey:"anggie_23",canonicalName:"Anggie",sourcePlatform:"tinder",platformStatus:"WHATSAPP_INVITED",profile:{
-profile_summary:{age:23},marcel_knowledge_map:{knows_move_to_medellin:true,knows_self_employed_projects:true},
-relationship:{wants_to_feel_again:true,misses_affection:true,wants_someone_by_side:true},running_gags:{profesora_language_translator:true},
-shared_history:{tinder_silence_explained_by_projects:true,whatsapp_offered_for_translation:true},
-open_threads:{do_not_treat_profesora_as_new:true,do_not_repeat_emotional_openness:true}}},
-{identityKey:"maye_existing",canonicalName:"Maye",country:"Colombia",language:"Spanish",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{
-personality:{romantic:true,temperamental:true,self_description_context:["mala clase","mal genio"]},
-stress_support_style:{needs_distance_when_really_serious:true},personal_boundaries:{values_respectful_treatment:true,says_she_would_not_treat_badly:true},
-running_gags:{temper_vs_romantic_side:true},shared_history:{whatsapp_reason:"Tinder-Inaktivität + Übersetzung"},
-open_threads:{no_abusive_nickname_from_traits:true,natural_warm_addresses_ok:true,do_not_repeat_conflict_questions:true},current_context:{whatsapp_active_confirmed:true}}},
-{identityKey:"and_different_writing",canonicalName:"And",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{meaningful_details:{quote_meaning:"Sie akzeptierte Marcel, weil er anders geschrieben hat."}}},
-{identityKey:"neicy_soy_lo_que_ves",canonicalName:"Neicy",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{meaningful_details:{quote:"soy lo que ves",meaning:"Ich bin, was du siehst."}}},
-{identityKey:"eri_buenos_dias",canonicalName:"Eri",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{current_context:{last_known:"Buenos días 💋"}}},
-{identityKey:"alejandra_bien_y_tu",canonicalName:"Alejandra",sourcePlatform:"contact",platformStatus:"CONTACT_KNOWN",profile:{current_context:{last_known:"Bien y tú"}}},
-{identityKey:"yudi_existing",canonicalName:"Yudi",country:"Colombia",language:"Spanish",sourcePlatform:"tinder",platformStatus:"WHATSAPP_INVITED",profile:{
-relationship:{seeks_serious_relationship:true},preferences:{likes_travel:true,fitness:true,likes_new_things:true},
-running_gags:{spanish_teacher:true,marcel_teaches_german:true},shared_history:{she_offered_teach_spanish:true,whatsapp_offered_number_sent:true},
-open_threads:{do_not_ask_again_about_teaching_spanish:true}}},
-{identityKey:"niuber_save_pool",canonicalName:"Niuber",sourcePlatform:"tinder",platformStatus:"SAVE_POOL",profile:{current_context:{insufficient_detail_profile:true}}},
-{identityKey:"nicol_save_pool",canonicalName:"Nicol",sourcePlatform:"tinder",platformStatus:"SAVE_POOL",profile:{current_context:{insufficient_detail_profile:true}}},
-{identityKey:"jesila_save_pool",canonicalName:"Jesila",sourcePlatform:"tinder",platformStatus:"SAVE_POOL",profile:{current_context:{insufficient_detail_profile:true}}},
-{identityKey:"karol_save_pool",canonicalName:"Karol",sourcePlatform:"tinder",platformStatus:"SAVE_POOL",profile:{current_context:{insufficient_detail_profile:true}}},
-{identityKey:"geral_27_colombia",canonicalName:"Geral",country:"Colombia",language:"Spanish",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{
-profile_summary:{age:27},relationship:{not_forcing_serious:true,open_to_serious_if_develops:true},personality:{warm_playful:true},
-investment:{reinitiated_after_pause:true,used_carino:true,asked_how_marcel_is:true},running_gags:{local_guide_medellin_flirt:true},
-shared_history:{whatsapp_reason:"wenig Tinder + Übersetzung"},open_threads:{do_not_reexplain_tinder_inactivity:true},
-current_context:{whatsapp_active_confirmed:true,correct_spelling:"Geral",not_gerald:true}}},
-{identityKey:"nia_30",canonicalName:"Nia",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:30},personality:{initially_shy:true,very_funny_with_trust:true},
-preferences:{likes:["Kulturen/Menschen","Tanzen","Kochen","Sport","Filme","Unternehmungen"]},
-investment:{complimented_marcel:"estás muy guapo"},shared_history:{said_marcel_must_find_out_if_she_is_interesting:true},
-open_threads:{no_whatsapp_push_yet:true,shy_funny_side_playful_not_interview:true}}},
-{identityKey:"sarah_26_teacher",canonicalName:"Sarah",country:"Colombia",language:"English",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:26,nationality:"Colombian",profession:"Teacher"},relationship:{serious_or_see_what_develops:true},
-preferences:{likes:["Reisen","Natur","Picknick","Camping","gutes Essen","Strandbars","Cocktails","Pole-Dancing"]},
-investment:{liked_marcels_photo:true},communication:{speaks_english:true},shared_history:{noted_marcel_did_not_know_english:true},
-open_threads:{use_english_directly:true,no_whatsapp_push_early:true}}},
-{identityKey:"kate_castillo_31_medellin",canonicalName:"Kate Castillo",aliases:["Kathe Castillo"],country:"Colombia",city:"Medellín",language:"Spanish",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",phoneNumber:"573242540896",whatsappDisplayName:"Kate Castillo",profile:{
-profile_summary:{age:31,city:"Medellín"},personality:{extroverted:true,friendly:true,strong_temper:true,affectionate:true,not_overly_clingy:true},
-relationship:{wants_real_honest_man:true,wants_man_who_knows_what_he_wants:true,no_forcing:true,time_and_interest_show_direction:true},
-stress_support_style:{values_communication_trust_security:true,can_get_angry_then_wants_affection:true},
-sexuality_intimacy:{hugs_kisses_closeness_flirt:true},running_gags:{hugs_looks_kisses_common_language:true},
-shared_history:{would_take_closeness_risk:true,does_not_need_anger_for_affection:true},
-open_threads:{do_not_ask_again_hugs_kisses:true,do_not_assume_clinginess:true},
-current_context:{whatsapp_active_confirmed:true,correct_name:"Kate Castillo",old_spelling:"Kathe Castillo",do_not_merge_old_kathe:true}}},
-{identityKey:"laura_26_medellin",canonicalName:"Laura",country:"Colombia",city:"Medellín",language:"Spanish",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:26,city:"Medellín"},personality:{independent:true},relationship:{wants_positive_contribution:true,wants_care_and_pampering:true},
-preferences:{likes_attention:true,likes_flowers_without_occasion:true},open_threads:{do_not_assume_money_orientation:true}}},
-{identityKey:"dangela_26_venezuela_medellin",canonicalName:"Dángela",aliases:["Dangela"],country:"Colombia",city:"Medellín",language:"Spanish",sourcePlatform:"whatsapp",platformStatus:"WHATSAPP_ACTIVE",profile:{
-profile_summary:{age:26,nationality:"Venezuelan",medellin_about_years:8},family:{mother_from_colombia:true,much_family_in_colombia:true},
-relationship:{seeks_serious_relationship:true},preferences:{loves_dancing:true,likes_romeo_santos:true,goes_out_with_friends:true},
-shared_history:{offered_food:true,offered_show_medellin:true,nervous_flirt:"eso depende",marcel_must_find_out_in_person:true,translator_then_without_words:true,she_confirmed_plan:"Perfecto / Un buen plan"},
-running_gags:{dancing_food_medellin_looks_language:true},marcel_knowledge_map:{knows_marcel_no_spanish:true},
-open_threads:{do_not_reexplain_no_spanish:true,continue_tinder_history_on_whatsapp:true},current_context:{whatsapp_active_confirmed:true}}},
-{identityKey:"veronica_29_medellin",canonicalName:"Veronica",country:"Colombia",city:"Medellín",language:"Spanish/English",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:29,city:"Medellín",speaks_spanish:true,speaks_english:true},relationship:{no_casual_sex:true,no_mutual_benefits:true,wants_people_friends_language_exchange:true},
-travel_future_location:{new_in_medellin:true},preferences:{likes:["Süßes","Street Food","Outdoor","Tanzen"]},meaningful_details:{birthday_day_of_first_chat:true},
-open_threads:{english_can_be_used:true,do_not_ignore_no_casual_boundary:true}}},
-{identityKey:"luisa_23_medellin",canonicalName:"Luisa",country:"Colombia",city:"Medellín",language:"Spanish",sourcePlatform:"tinder",platformStatus:"TINDER_ACTIVE",profile:{
-profile_summary:{age:23,city:"Medellín",height_cm:155,university_profile:"Universidad Alfonso Reyes, S.C.",double_date_friend:"Manu"},
-personality:{original:["chévere","respetuosa","parchada"],relaxed:true,respectful:true,adventurous:true},
-relationship:{dating_intent_original:"Conocer y disfrutar por el momento",meaning:"Im Moment kennenlernen und genießen.",not_confirmed_casual_only:true},
-sexuality_intimacy:{light_double_meaning_not_rejected:true},
-open_threads:{do_not_list_back_traits:true,treat_dating_intent_as_current_changeable:true}}},
-{identityKey:"salome_26_cali",canonicalName:"Salome",country:"Colombia",city:"Cali",language:"Spanish",sourcePlatform:"tinder",platformStatus:"WHATSAPP_INVITED",phoneNumber:"573005092127",profile:{
-profile_summary:{age:26,city:"Cali"},relationship:{not_serious_required_but_open_to_serious:true},
-preferences:{likes:["Selbstliebe","Street Food","Kochen","Musik","Unternehmertum","Walking"]},
-shared_history:{gave_whatsapp_number:true,number:"+57 300 509 2127",said_write_me_if_you_want:true},
-open_threads:{she_initiated_move:true,first_whatsapp_short:true,active_only_after_actual_message:true}}},
-{identityKey:"paola_maza_20",canonicalName:"Paola Maza",country:"Colombia",language:"Spanish/Some English",sourcePlatform:"tinder",platformStatus:"WHATSAPP_INVITED",profile:{
-profile_summary:{age:20},personality:{respectful:true,says_good_heart:true},lifestyle_routines:{gym_important:true,disciplined:true},
-preferences:{likes:["gutes Essen","Reisen","Filme","Spaziergänge"]},relationship:{tinder_goal:"Feste Beziehung, mal sehen"},
-communication:{some_english:true},shared_history:{sent_wave_first:true,accepted_whatsapp:true,quote:"You WhatsApp it is",marcel_number_sent:true},
-current_context:{do_not_merge_other_paola:true,waiting_for_whatsapp_message:true}}}
+
+/* ==================================================
+   FRAUEN MEMORY SEED
+================================================== */
+
+const WOMEN_SEED = [
+
+  {
+    identityKey:
+      "zay_20_medellin",
+
+    canonicalName:
+      "Zay",
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish/Some English",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          20,
+
+        notes: [
+
+          "Seit ihrem 16. Lebensjahr unabhängig, also ungefähr vier Jahre.",
+
+          "Ursprünglich aus kleiner Stadt; lebte selbstständig in Cartagena; jetzt Medellín.",
+
+          "Jüngstes Kind; Daddy's Girl und stolz auf Selbstständigkeit."
+
+        ]
+
+      },
+
+      family: {
+
+        lives_with_brother_in_medellin:
+          true,
+
+        mother_is_reassured:
+          true
+
+      },
+
+      work_education: {
+
+        education_completed:
+          true,
+
+        several_certificates:
+          true,
+
+        wants_university_again:
+          true,
+
+        planned_study:
+          "Mikrobiologie und Bioanalyse",
+
+        english_lessons_paused:
+          true,
+
+        wants_to_improve_english:
+          true
+
+      },
+
+      preferences: {
+
+        music: [
+          "Vallenato",
+          "Silvestre",
+          "Poncho"
+        ],
+
+        interests: [
+          "Fotografie",
+          "Instagram",
+          "Kochen",
+          "Foodie",
+          "Selbstliebe",
+          "Lesen",
+          "Volleyball",
+          "Sprachaustausch",
+          "Natur",
+          "Fitness"
+        ]
+
+      },
+
+      personality: {
+
+        independent:
+          true,
+
+        clear_goals:
+          true
+
+      },
+
+      investment: {
+
+        reinitiated_after_silence:
+          true,
+
+        examples: [
+          "Good morning",
+          "good night",
+          "He",
+          "Hello"
+        ]
+
+      },
+
+      running_gags: {
+
+        independent_woman_and_daddys_girl:
+          true,
+
+        english_for_spanish_exchange:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_ask_again: [
+
+          "Warum seit 16 unabhängig",
+
+          "familienverbunden",
+
+          "warum Bruder",
+
+          "Studium",
+
+          "Englisch"
+
+        ]
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "natalia_24_san_cristobal",
+
+    canonicalName:
+      "Natalia",
+
+    city:
+      "San Cristóbal",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          24,
+
+        height_cm:
+          177
+
+      },
+
+      personality: {
+
+        relaxed:
+          true,
+
+        calm:
+          true,
+
+        friendly:
+          true
+
+      },
+
+      relationship: {
+
+        wants_connection:
+          true,
+
+        wants_affection:
+          true,
+
+        wants_open_feelings:
+          true,
+
+        wants_honest_loving_man:
+          true
+
+      },
+
+      preferences: {
+
+        likes: [
+
+          "Kino",
+
+          "gutes Essen",
+
+          "gute Gespräche",
+
+          "Filme",
+
+          "Serien",
+
+          "Bücher",
+
+          "Manga",
+
+          "Spaziergänge",
+
+          "Süßigkeiten",
+
+          "True Crime",
+
+          "Plot-Twist-Filme"
+
+        ]
+
+      },
+
+      open_threads: {
+
+        no_immediate_whatsapp:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "lu_travel_home_english",
+
+    canonicalName:
+      "Lu",
+
+    language:
+      "English/Spanish",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      preferences: {
+
+        likes_home_time_alone:
+          true,
+
+        travels_a_lot:
+          true
+
+      },
+
+      communication: {
+
+        english_fairly_good:
+          true,
+
+        says_not_perfect:
+          true
+
+      },
+
+      investment: {
+
+        liked_marcels_photo:
+          true,
+
+        said_unusual_message_made_difference:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_repeat_her_statements:
+          true,
+
+        no_immediate_whatsapp:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "lorena_tinder",
+
+    canonicalName:
+      "Lorena",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      investment: {
+
+        liked_marcels_name:
+          true,
+
+        liked_non_generic_opener:
+          true
+
+      },
+
+      open_threads: {
+
+        unknown_passion:
+          "Sie sagte, Fotos zeigen ihre Leidenschaft nicht; konkrete Leidenschaft noch unbekannt."
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "luu_18",
+
+    canonicalName:
+      "Luu",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          18,
+
+        height_cm:
+          171,
+
+        adult:
+          true
+
+      },
+
+      relationship: {
+
+        wants_contacts_or_friends:
+          true,
+
+        open_to_casual_sex:
+          true
+
+      },
+
+      preferences: {
+
+        likes_motorcycles:
+          true,
+
+        loves_animals:
+          true,
+
+        interests: [
+          "Shopping",
+          "Street Food",
+          "TikTok"
+        ]
+
+      },
+
+      personal_boundaries: {
+
+        note:
+          "Nicht als reine Beziehungssuche speichern."
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "dani_existing_daniela_27_medellin",
+
+    canonicalName:
+      "Daniela",
+
+    aliases: [
+      "Dani"
+    ],
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    whatsappDisplayName:
+      "Dani",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          27,
+
+        city:
+          "Medellín"
+
+      },
+
+      living_situation: {
+
+        lives_with_mother_and_siblings:
+          true,
+
+        context:
+          "Jobverlust; seit ca. 1,5 Monaten dort."
+
+      },
+
+      personality: {
+
+        extroverted:
+          true,
+
+        serious_side:
+          true,
+
+        sin_prisa:
+          true
+
+      },
+
+      relationship: {
+
+        seeks_humble_calm_man:
+          true
+
+      },
+
+      preferences: {
+
+        love_language:
+          "Geschenke",
+
+        zodiac:
+          "Taurus"
+
+      },
+
+      marcel_knowledge_map: {
+
+        asked_future_neighborhood:
+          true,
+
+        knows_move_to_medellin:
+          true
+
+      },
+
+      meaningful_details: {
+
+        warned_marcel_about_medellin:
+          true
+
+      },
+
+      current_context: {
+
+        whatsapp_name:
+          "Dani",
+
+        do_not_merge_with_daniela_mass:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "daniela_mass_separate",
+
+    canonicalName:
+      "Daniela",
+
+    aliases: [
+      "Daniela Messe"
+    ],
+
+    country:
+      "Colombia",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      religion_values: {
+
+        self_reported:
+          "Ich gehe jeden Tag zur Messe.",
+
+        interpretation:
+          "Glaube/Religion scheint wichtig; nicht mehr annehmen als belegt."
+
+      },
+
+      current_context: {
+
+        separate_person_from_dani:
+          true,
+
+        whatsapp_active_confirmed:
+          true
+
+      },
+
+      open_threads: {
+
+        early_getting_to_know:
+          true,
+
+        do_not_invent_religious_assumptions:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "sandy_san_32",
+
+    canonicalName:
+      "Sandy",
+
+    aliases: [
+      "San"
+    ],
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          32
+
+      },
+
+      shared_history: {
+
+        strong_flirt:
+          true,
+
+        themes: [
+          "Dusche",
+          "Morgenküsse",
+          "acostumbrarnos juntos"
+        ],
+
+        sent_kiss_photo:
+          true,
+
+        whatsapp_for_photos:
+          true
+
+      },
+
+      communication: {
+
+        responds_well_to_warmth_and_heart_emojis:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "karla_tinder_older_men",
+
+    canonicalName:
+      "Karla",
+
+    aliases: [
+      "Karla Tinder"
+    ],
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      relationship: {
+
+        attracted_to_older_mature_men:
+          true
+
+      },
+
+      open_threads: {
+
+        age_topic_already_discussed:
+          true,
+
+        do_not_merge_with_karla_instagram:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "karla_instagram_bed",
+
+    canonicalName:
+      "Karla",
+
+    aliases: [
+      "Karla Instagram"
+    ],
+
+    sourcePlatform:
+      "instagram",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      living_situation: {
+
+        bed_broken:
+          true,
+
+        compared_repair_prices_with_mother:
+          true
+
+      },
+
+      personality: {
+
+        affectionate:
+          true,
+
+        real:
+          true,
+
+        sensitive:
+          true,
+
+        loyal:
+          true,
+
+        independent:
+          true
+
+      },
+
+      religion_values: {
+
+        catholic_family_background:
+          true
+
+      },
+
+      children: {
+
+        has_children:
+          false
+
+      },
+
+      financial_context: {
+
+        gifts_money_strong_theme:
+          true,
+
+        asked_early_for_support:
+          true
+
+      },
+
+      personal_boundaries: {
+
+        marcel_money_boundary_relevant:
+          true
+
+      },
+
+      current_context: {
+
+        do_not_merge_with_karla_tinder:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "elena_whatsapp",
+
+    canonicalName:
+      "Elena",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      relationship: {
+
+        natural_connection:
+          true,
+
+        let_it_flow:
+          true,
+
+        patient:
+          true,
+
+        no_forcing:
+          true
+
+      },
+
+      social_media: {
+
+        whatsapp:
+          true,
+
+        instagram:
+          true
+
+      },
+
+      shared_history: {
+
+        heart_sent:
+          true,
+
+        nervous_sweet_smile_flirt:
+          true,
+
+        affectionate_hug_flirt:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "marcela_medellin_guide",
+
+    canonicalName:
+      "Marcela",
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      work_education: {
+
+        tourist_guide:
+          true,
+
+        spanish_teacher:
+          true,
+
+        cosmetologist:
+          true
+
+      },
+
+      shared_history: {
+
+        mirador_plan:
+          true,
+
+        offered_show_medellin:
+          true,
+
+        offered_massage:
+          true,
+
+        photo_sent:
+          true
+
+      },
+
+      social_media: {
+
+        whatsapp_discussed:
+          true,
+
+        instagram_discussed:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "michell_home",
+
+    canonicalName:
+      "Michell",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      preferences: {
+
+        prefers_home:
+          true,
+
+        likes_calm_plans:
+          true,
+
+        likes_cinema:
+          true,
+
+        likes_food:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "valeria_adventurous_romantic",
+
+    canonicalName:
+      "Valeria",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      personality: {
+
+        sensible:
+          true,
+
+        adventurous:
+          true,
+
+        romantic:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "paola_old_existing",
+
+    canonicalName:
+      "Paola",
+
+    aliases: [
+      "Paola alt"
+    ],
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      relationship: {
+
+        sin_prisa:
+          true,
+
+        open_to_getting_to_know:
+          true
+
+      },
+
+      current_context: {
+
+        do_not_merge_with_paola_maza:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "traccy_cosmetology",
+
+    canonicalName:
+      "Traccy",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      work_education: {
+
+        cosmetology_student:
+          true,
+
+        classes_most_of_day:
+          true
+
+      },
+
+      running_gags: {
+
+        lado_travieso:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "tiana_whatsapp",
+
+    canonicalName:
+      "Tiana",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      lifestyle_routines: {
+
+        gym:
+          true,
+
+        disciplined:
+          true
+
+      },
+
+      running_gags: {
+
+        juice_jugo:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "evelyn_whatsapp",
+
+    canonicalName:
+      "Evelyn",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      work_education: {
+
+        works_in_store:
+          true
+
+      },
+
+      shared_history: {
+
+        noodles_topic:
+          true,
+
+        working_hours_topic:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "mafe_whatsapp",
+
+    canonicalName:
+      "Mafe",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      communication: {
+
+        attempted_video_call:
+          true
+
+      },
+
+      shared_history: {
+
+        last_known_text:
+          "Que hace"
+
+      },
+
+      open_threads: {
+
+        check_history_before_reply:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "vanessa_content_money",
+
+    canonicalName:
+      "Vanessa",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      financial_context: {
+
+        erotic_content_money_negotiation:
+          true
+
+      },
+
+      personal_boundaries: {
+
+        marcel_rejected_paid_content:
+          true,
+
+        serious_relationship_emphasized:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "isabela_university_food",
+
+    canonicalName:
+      "Isabela",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      financial_context: {
+
+        asked_for_food_and_university_items:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "chantall_late_sleep",
+
+    canonicalName:
+      "Chantall",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      communication: {
+
+        gave_number:
+          true,
+
+        late_sleep_4am_topic:
+          true,
+
+        said_she_thought_marcel_would_write:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "kira_tinder",
+
+    canonicalName:
+      "Kira",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      social_media: {
+
+        says_no_instagram:
+          true
+
+      },
+
+      shared_history: {
+
+        later_message:
+          "Bien amor"
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "milena_work_question",
+
+    canonicalName:
+      "Milena",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      marcel_knowledge_map: {
+
+        asked_what_marcel_does_for_work:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "dayana_vargas",
+
+    canonicalName:
+      "Dayana Vargas",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      shared_history: {
+
+        topics: [
+          "palabras",
+          "no soy así"
+        ],
+
+        photo_with_smile:
+          true,
+
+        asked:
+          "¿por qué problema?"
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "lizeth_32",
+
+    canonicalName:
+      "Lizeth",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "WHATSAPP_INVITED",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          32
+
+      },
+
+      relationship: {
+
+        does_not_want_casual:
+          true
+
+      },
+
+      preferences: {
+
+        little_party:
+          true,
+
+        prefers_calm_plans:
+          true,
+
+        likes_food_and_conversation:
+          true
+
+      },
+
+      shared_history: {
+
+        important_quote:
+          "me quedaría contigo",
+
+        meaning:
+          "Ich würde bei dir bleiben.",
+
+        date_closeness_flirt:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_ask_party_vs_calm_again:
+          true,
+
+        do_not_overinterpret_quote:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "stephanie_peace",
+
+    canonicalName:
+      "Stephanie",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      preferences: {
+
+        prefers_peace_calm:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "kathe_old_unclear",
+
+    canonicalName:
+      "Kathe",
+
+    aliases: [
+      "Kathe alt"
+    ],
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      personality: {
+
+        strong_temper:
+          true
+
+      },
+
+      current_context: {
+
+        do_not_merge_with_kate_castillo:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "dulce_working",
+
+    canonicalName:
+      "Dulce",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      current_context: {
+
+        last_known:
+          "working"
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "miri_busy",
+
+    canonicalName:
+      "Miri",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      current_context: {
+
+        busy_day:
+          true,
+
+        wanted_to_rest:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "anggie_23",
+
+    canonicalName:
+      "Anggie",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "WHATSAPP_INVITED",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          23
+
+      },
+
+      marcel_knowledge_map: {
+
+        knows_move_to_medellin:
+          true,
+
+        knows_self_employed_projects:
+          true
+
+      },
+
+      relationship: {
+
+        wants_to_feel_again:
+          true,
+
+        misses_affection:
+          true,
+
+        wants_someone_by_side:
+          true
+
+      },
+
+      running_gags: {
+
+        profesora_language_translator:
+          true
+
+      },
+
+      shared_history: {
+
+        tinder_silence_explained_by_projects:
+          true,
+
+        whatsapp_offered_for_translation:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_treat_profesora_as_new:
+          true,
+
+        do_not_repeat_emotional_openness:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "maye_existing",
+
+    canonicalName:
+      "Maye",
+
+    country:
+      "Colombia",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      personality: {
+
+        romantic:
+          true,
+
+        temperamental:
+          true,
+
+        self_description_context: [
+          "mala clase",
+          "mal genio"
+        ]
+
+      },
+
+      stress_support_style: {
+
+        needs_distance_when_really_serious:
+          true
+
+      },
+
+      personal_boundaries: {
+
+        values_respectful_treatment:
+          true,
+
+        says_she_would_not_treat_badly:
+          true
+
+      },
+
+      running_gags: {
+
+        temper_vs_romantic_side:
+          true
+
+      },
+
+      shared_history: {
+
+        whatsapp_reason:
+          "Tinder-Inaktivität + Übersetzung"
+
+      },
+
+      open_threads: {
+
+        no_abusive_nickname_from_traits:
+          true,
+
+        natural_warm_addresses_ok:
+          true,
+
+        do_not_repeat_conflict_questions:
+          true
+
+      },
+
+      current_context: {
+
+        whatsapp_active_confirmed:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "and_different_writing",
+
+    canonicalName:
+      "And",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      meaningful_details: {
+
+        quote_meaning:
+          "Sie akzeptierte Marcel, weil er anders geschrieben hat."
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "neicy_soy_lo_que_ves",
+
+    canonicalName:
+      "Neicy",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      meaningful_details: {
+
+        quote:
+          "soy lo que ves",
+
+        meaning:
+          "Ich bin, was du siehst."
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "eri_buenos_dias",
+
+    canonicalName:
+      "Eri",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      current_context: {
+
+        last_known:
+          "Buenos días 💋"
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "alejandra_bien_y_tu",
+
+    canonicalName:
+      "Alejandra",
+
+    sourcePlatform:
+      "contact",
+
+    platformStatus:
+      "CONTACT_KNOWN",
+
+    profile: {
+
+      current_context: {
+
+        last_known:
+          "Bien y tú"
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "yudi_existing",
+
+    canonicalName:
+      "Yudi",
+
+    country:
+      "Colombia",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "WHATSAPP_INVITED",
+
+    profile: {
+
+      relationship: {
+
+        seeks_serious_relationship:
+          true
+
+      },
+
+      preferences: {
+
+        likes_travel:
+          true,
+
+        fitness:
+          true,
+
+        likes_new_things:
+          true
+
+      },
+
+      running_gags: {
+
+        spanish_teacher:
+          true,
+
+        marcel_teaches_german:
+          true
+
+      },
+
+      shared_history: {
+
+        she_offered_teach_spanish:
+          true,
+
+        whatsapp_offered_number_sent:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_ask_again_about_teaching_spanish:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "niuber_save_pool",
+
+    canonicalName:
+      "Niuber",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "SAVE_POOL",
+
+    profile: {
+
+      current_context: {
+
+        insufficient_detail_profile:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "nicol_save_pool",
+
+    canonicalName:
+      "Nicol",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "SAVE_POOL",
+
+    profile: {
+
+      current_context: {
+
+        insufficient_detail_profile:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "jesila_save_pool",
+
+    canonicalName:
+      "Jesila",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "SAVE_POOL",
+
+    profile: {
+
+      current_context: {
+
+        insufficient_detail_profile:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "karol_save_pool",
+
+    canonicalName:
+      "Karol",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "SAVE_POOL",
+
+    profile: {
+
+      current_context: {
+
+        insufficient_detail_profile:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "geral_27_colombia",
+
+    canonicalName:
+      "Geral",
+
+    country:
+      "Colombia",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          27
+
+      },
+
+      relationship: {
+
+        not_forcing_serious:
+          true,
+
+        open_to_serious_if_develops:
+          true
+
+      },
+
+      personality: {
+
+        warm_playful:
+          true
+
+      },
+
+      investment: {
+
+        reinitiated_after_pause:
+          true,
+
+        used_carino:
+          true,
+
+        asked_how_marcel_is:
+          true
+
+      },
+
+      running_gags: {
+
+        local_guide_medellin_flirt:
+          true
+
+      },
+
+      shared_history: {
+
+        whatsapp_reason:
+          "wenig Tinder + Übersetzung"
+
+      },
+
+      open_threads: {
+
+        do_not_reexplain_tinder_inactivity:
+          true
+
+      },
+
+      current_context: {
+
+        whatsapp_active_confirmed:
+          true,
+
+        correct_spelling:
+          "Geral",
+
+        not_gerald:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "nia_30",
+
+    canonicalName:
+      "Nia",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          30
+
+      },
+
+      personality: {
+
+        initially_shy:
+          true,
+
+        very_funny_with_trust:
+          true
+
+      },
+
+      preferences: {
+
+        likes: [
+
+          "Kulturen/Menschen",
+
+          "Tanzen",
+
+          "Kochen",
+
+          "Sport",
+
+          "Filme",
+
+          "Unternehmungen"
+
+        ]
+
+      },
+
+      investment: {
+
+        complimented_marcel:
+          "estás muy guapo"
+
+      },
+
+      shared_history: {
+
+        said_marcel_must_find_out_if_she_is_interesting:
+          true
+
+      },
+
+      open_threads: {
+
+        no_whatsapp_push_yet:
+          true,
+
+        shy_funny_side_playful_not_interview:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "sarah_26_teacher",
+
+    canonicalName:
+      "Sarah",
+
+    country:
+      "Colombia",
+
+    language:
+      "English",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          26,
+
+        nationality:
+          "Colombian",
+
+        profession:
+          "Teacher"
+
+      },
+
+      relationship: {
+
+        serious_or_see_what_develops:
+          true
+
+      },
+
+      preferences: {
+
+        likes: [
+
+          "Reisen",
+
+          "Natur",
+
+          "Picknick",
+
+          "Camping",
+
+          "gutes Essen",
+
+          "Strandbars",
+
+          "Cocktails",
+
+          "Pole-Dancing"
+
+        ]
+
+      },
+
+      investment: {
+
+        liked_marcels_photo:
+          true
+
+      },
+
+      communication: {
+
+        speaks_english:
+          true
+
+      },
+
+      shared_history: {
+
+        noted_marcel_did_not_know_english:
+          true
+
+      },
+
+      open_threads: {
+
+        use_english_directly:
+          true,
+
+        no_whatsapp_push_early:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "kate_castillo_31_medellin",
+
+    canonicalName:
+      "Kate Castillo",
+
+    aliases: [
+      "Kathe Castillo"
+    ],
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    phoneNumber:
+      "573242540896",
+
+    whatsappDisplayName:
+      "Kate Castillo",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          31,
+
+        city:
+          "Medellín"
+
+      },
+
+      personality: {
+
+        extroverted:
+          true,
+
+        friendly:
+          true,
+
+        strong_temper:
+          true,
+
+        affectionate:
+          true,
+
+        not_overly_clingy:
+          true
+
+      },
+
+      relationship: {
+
+        wants_real_honest_man:
+          true,
+
+        wants_man_who_knows_what_he_wants:
+          true,
+
+        no_forcing:
+          true,
+
+        time_and_interest_show_direction:
+          true
+
+      },
+
+      stress_support_style: {
+
+        values_communication_trust_security:
+          true,
+
+        can_get_angry_then_wants_affection:
+          true
+
+      },
+
+      sexuality_intimacy: {
+
+        hugs_kisses_closeness_flirt:
+          true
+
+      },
+
+      running_gags: {
+
+        hugs_looks_kisses_common_language:
+          true
+
+      },
+
+      shared_history: {
+
+        would_take_closeness_risk:
+          true,
+
+        does_not_need_anger_for_affection:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_ask_again_hugs_kisses:
+          true,
+
+        do_not_assume_clinginess:
+          true
+
+      },
+
+      current_context: {
+
+        whatsapp_active_confirmed:
+          true,
+
+        correct_name:
+          "Kate Castillo",
+
+        old_spelling:
+          "Kathe Castillo",
+
+        do_not_merge_old_kathe:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "laura_26_medellin",
+
+    canonicalName:
+      "Laura",
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          26,
+
+        city:
+          "Medellín"
+
+      },
+
+      personality: {
+
+        independent:
+          true
+
+      },
+
+      relationship: {
+
+        wants_positive_contribution:
+          true,
+
+        wants_care_and_pampering:
+          true
+
+      },
+
+      preferences: {
+
+        likes_attention:
+          true,
+
+        likes_flowers_without_occasion:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_assume_money_orientation:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "dangela_26_venezuela_medellin",
+
+    canonicalName:
+      "Dángela",
+
+    aliases: [
+      "Dangela"
+    ],
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "whatsapp",
+
+    platformStatus:
+      "WHATSAPP_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          26,
+
+        nationality:
+          "Venezuelan",
+
+        medellin_about_years:
+          8
+
+      },
+
+      family: {
+
+        mother_from_colombia:
+          true,
+
+        much_family_in_colombia:
+          true
+
+      },
+
+      relationship: {
+
+        seeks_serious_relationship:
+          true
+
+      },
+
+      preferences: {
+
+        loves_dancing:
+          true,
+
+        likes_romeo_santos:
+          true,
+
+        goes_out_with_friends:
+          true
+
+      },
+
+      shared_history: {
+
+        offered_food:
+          true,
+
+        offered_show_medellin:
+          true,
+
+        nervous_flirt:
+          "eso depende",
+
+        marcel_must_find_out_in_person:
+          true,
+
+        translator_then_without_words:
+          true,
+
+        she_confirmed_plan:
+          "Perfecto / Un buen plan"
+
+      },
+
+      running_gags: {
+
+        dancing_food_medellin_looks_language:
+          true
+
+      },
+
+      marcel_knowledge_map: {
+
+        knows_marcel_no_spanish:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_reexplain_no_spanish:
+          true,
+
+        continue_tinder_history_on_whatsapp:
+          true
+
+      },
+
+      current_context: {
+
+        whatsapp_active_confirmed:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "veronica_29_medellin",
+
+    canonicalName:
+      "Veronica",
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish/English",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          29,
+
+        city:
+          "Medellín",
+
+        speaks_spanish:
+          true,
+
+        speaks_english:
+          true
+
+      },
+
+      relationship: {
+
+        no_casual_sex:
+          true,
+
+        no_mutual_benefits:
+          true,
+
+        wants_people_friends_language_exchange:
+          true
+
+      },
+
+      travel_future_location: {
+
+        new_in_medellin:
+          true
+
+      },
+
+      preferences: {
+
+        likes: [
+          "Süßes",
+          "Street Food",
+          "Outdoor",
+          "Tanzen"
+        ]
+
+      },
+
+      meaningful_details: {
+
+        birthday_day_of_first_chat:
+          true
+
+      },
+
+      open_threads: {
+
+        english_can_be_used:
+          true,
+
+        do_not_ignore_no_casual_boundary:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "luisa_23_medellin",
+
+    canonicalName:
+      "Luisa",
+
+    country:
+      "Colombia",
+
+    city:
+      "Medellín",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "TINDER_ACTIVE",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          23,
+
+        city:
+          "Medellín",
+
+        height_cm:
+          155,
+
+        university_profile:
+          "Universidad Alfonso Reyes, S.C.",
+
+        double_date_friend:
+          "Manu"
+
+      },
+
+      personality: {
+
+        original: [
+          "chévere",
+          "respetuosa",
+          "parchada"
+        ],
+
+        relaxed:
+          true,
+
+        respectful:
+          true,
+
+        adventurous:
+          true
+
+      },
+
+      relationship: {
+
+        dating_intent_original:
+          "Conocer y disfrutar por el momento",
+
+        meaning:
+          "Im Moment kennenlernen und genießen.",
+
+        not_confirmed_casual_only:
+          true
+
+      },
+
+      sexuality_intimacy: {
+
+        light_double_meaning_not_rejected:
+          true
+
+      },
+
+      open_threads: {
+
+        do_not_list_back_traits:
+          true,
+
+        treat_dating_intent_as_current_changeable:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "salome_26_cali",
+
+    canonicalName:
+      "Salome",
+
+    country:
+      "Colombia",
+
+    city:
+      "Cali",
+
+    language:
+      "Spanish",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "WHATSAPP_INVITED",
+
+    phoneNumber:
+      "573005092127",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          26,
+
+        city:
+          "Cali"
+
+      },
+
+      relationship: {
+
+        not_serious_required_but_open_to_serious:
+          true
+
+      },
+
+      preferences: {
+
+        likes: [
+          "Selbstliebe",
+          "Street Food",
+          "Kochen",
+          "Musik",
+          "Unternehmertum",
+          "Walking"
+        ]
+
+      },
+
+      shared_history: {
+
+        gave_whatsapp_number:
+          true,
+
+        number:
+          "+57 300 509 2127",
+
+        said_write_me_if_you_want:
+          true
+
+      },
+
+      open_threads: {
+
+        she_initiated_move:
+          true,
+
+        first_whatsapp_short:
+          true,
+
+        active_only_after_actual_message:
+          true
+
+      }
+
+    }
+
+  },
+
+
+  {
+    identityKey:
+      "paola_maza_20",
+
+    canonicalName:
+      "Paola Maza",
+
+    country:
+      "Colombia",
+
+    language:
+      "Spanish/Some English",
+
+    sourcePlatform:
+      "tinder",
+
+    platformStatus:
+      "WHATSAPP_INVITED",
+
+    profile: {
+
+      profile_summary: {
+
+        age:
+          20
+
+      },
+
+      personality: {
+
+        respectful:
+          true,
+
+        says_good_heart:
+          true
+
+      },
+
+      lifestyle_routines: {
+
+        gym_important:
+          true,
+
+        disciplined:
+          true
+
+      },
+
+      preferences: {
+
+        likes: [
+          "gutes Essen",
+          "Reisen",
+          "Filme",
+          "Spaziergänge"
+        ]
+
+      },
+
+      relationship: {
+
+        tinder_goal:
+          "Feste Beziehung, mal sehen"
+
+      },
+
+      communication: {
+
+        some_english:
+          true
+
+      },
+
+      shared_history: {
+
+        sent_wave_first:
+          true,
+
+        accepted_whatsapp:
+          true,
+
+        quote:
+          "You WhatsApp it is",
+
+        marcel_number_sent:
+          true
+
+      },
+
+      current_context: {
+
+        do_not_merge_other_paola:
+          true,
+
+        waiting_for_whatsapp_message:
+          true
+
+      }
+
+    }
+
+  }
+
 ];
 
-async function initDatabase(){
-  await pool.query(`CREATE TABLE IF NOT EXISTS contacts(id SERIAL PRIMARY KEY,whatsapp_jid TEXT UNIQUE NOT NULL,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
-  await pool.query(`ALTER TABLE contacts
-    ADD COLUMN IF NOT EXISTS phone_number TEXT,
-    ADD COLUMN IF NOT EXISTS display_name TEXT,
-    ADD COLUMN IF NOT EXISTS nickname TEXT,
-    ADD COLUMN IF NOT EXISTS country TEXT,
-    ADD COLUMN IF NOT EXISTS city TEXT,
-    ADD COLUMN IF NOT EXISTS timezone TEXT,
-    ADD COLUMN IF NOT EXISTS primary_language TEXT,
-    ADD COLUMN IF NOT EXISTS source_platform TEXT,
-    ADD COLUMN IF NOT EXISTS source_profile_name TEXT,
-    ADD COLUMN IF NOT EXISTS contact_status TEXT DEFAULT 'active',
-    ADD COLUMN IF NOT EXISTS relationship_stage TEXT DEFAULT 'new',
-    ADD COLUMN IF NOT EXISTS auto_reply_enabled BOOLEAN DEFAULT TRUE,
-    ADD COLUMN IF NOT EXISTS date_lock_enabled BOOLEAN DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS manual_review_required BOOLEAN DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS location_context JSONB DEFAULT '{}'::jsonb,
-    ADD COLUMN IF NOT EXISTS relocation_context JSONB DEFAULT '{}'::jsonb,
-    ADD COLUMN IF NOT EXISTS first_contact_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS memory_identity_key TEXT,
-    ADD COLUMN IF NOT EXISTS canonical_name TEXT,
-    ADD COLUMN IF NOT EXISTS whatsapp_display_name TEXT,
-    ADD COLUMN IF NOT EXISTS current_platform TEXT,
-    ADD COLUMN IF NOT EXISTS platform_status TEXT,
-    ADD COLUMN IF NOT EXISTS identity_locked BOOLEAN DEFAULT FALSE`);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_memory_identity_key ON contacts(memory_identity_key) WHERE memory_identity_key IS NOT NULL`);
-  await pool.query(`CREATE TABLE IF NOT EXISTS contact_identifiers(
-    id BIGSERIAL PRIMARY KEY,contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-    identifier_type TEXT NOT NULL,identifier_value TEXT NOT NULL,normalized_value TEXT NOT NULL,
-    source_platform TEXT,is_primary BOOLEAN DEFAULT FALSE,human_verified BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_contact_identifiers_contact ON contact_identifiers(contact_id)`);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_identifiers_strong_unique
-    ON contact_identifiers(identifier_type,normalized_value)
-    WHERE identifier_type IN ('identity_key','phone','whatsapp_jid')`);
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS messages(
-    id BIGSERIAL PRIMARY KEY,whatsapp_jid TEXT NOT NULL,direction TEXT NOT NULL,message_text TEXT,
-    whatsapp_message_id TEXT,created_at TIMESTAMPTZ DEFAULT NOW())`);
-  await pool.query(`ALTER TABLE messages
-    ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS original_message_text TEXT,
-    ADD COLUMN IF NOT EXISTS processing_status TEXT DEFAULT 'processed',
-    ADD COLUMN IF NOT EXISTS duplicate_of_message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_messages_jid_id ON messages(whatsapp_jid,id DESC)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_messages_whatsapp_id ON messages(whatsapp_jid,whatsapp_message_id)`);
+/* ==================================================
+   DATENBANK INITIALISIEREN
+================================================== */
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS contact_memory_profiles(
-    id BIGSERIAL PRIMARY KEY,contact_id INTEGER UNIQUE NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-    ${PROFILE_COLUMNS.map(c=>`${c} JSONB DEFAULT '{}'::jsonb`).join(",")},
-    profile_version INTEGER DEFAULT 1,last_memory_update_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
+async function initDatabase() {
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS memory_items(
-    id BIGSERIAL PRIMARY KEY,contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-    category TEXT NOT NULL,memory_key TEXT NOT NULL,memory_value JSONB NOT NULL DEFAULT '{}'::jsonb,
-    memory_type TEXT NOT NULL DEFAULT 'interpretation',confidence NUMERIC(4,3) DEFAULT 0.5,
-    source_message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL,source_quote TEXT,
-    source_context JSONB DEFAULT '{}'::jsonb,valid_from TIMESTAMPTZ DEFAULT NOW(),valid_until TIMESTAMPTZ,
-    status TEXT DEFAULT 'active',supersedes_memory_id BIGINT REFERENCES memory_items(id) ON DELETE SET NULL,
-    human_review_status TEXT DEFAULT 'unreviewed',human_corrected_value JSONB,human_note TEXT,human_reviewed_at TIMESTAMPTZ,
-    importance INTEGER DEFAULT 2,use_in_reply BOOLEAN DEFAULT TRUE,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_memory_items_contact_active ON memory_items(contact_id,status,importance DESC,updated_at DESC)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS contacts (
+      id SERIAL PRIMARY KEY,
+      whatsapp_jid TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS memory_events(
-    id BIGSERIAL PRIMARY KEY,contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-    event_type TEXT NOT NULL,event_subtype TEXT,title TEXT,event_data JSONB DEFAULT '{}'::jsonb,
-    started_at TIMESTAMPTZ DEFAULT NOW(),ended_at TIMESTAMPTZ,event_status TEXT DEFAULT 'active',
-    importance INTEGER DEFAULT 2,sensitivity TEXT DEFAULT 'normal',source_message_ids JSONB DEFAULT '[]'::jsonb,
-    evidence_summary TEXT,related_memory_item_ids JSONB DEFAULT '[]'::jsonb,
-    related_event_id BIGINT REFERENCES memory_events(id) ON DELETE SET NULL,requires_follow_up BOOLEAN DEFAULT FALSE,
-    follow_up_after TIMESTAMPTZ,follow_up_status TEXT DEFAULT 'none',bot_action TEXT,
-    marcel_review_required BOOLEAN DEFAULT FALSE,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_memory_events_contact_active ON memory_events(contact_id,event_status,importance DESC,started_at DESC)`);
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS media(
-    id BIGSERIAL PRIMARY KEY,contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-    message_id BIGINT REFERENCES messages(id) ON DELETE SET NULL,whatsapp_message_id TEXT,media_type TEXT,mime_type TEXT,
-    storage_path TEXT,thumbnail_path TEXT,is_view_once BOOLEAN DEFAULT FALSE,view_once_status TEXT DEFAULT 'unknown',
-    caption TEXT,ai_description TEXT,ai_tags JSONB DEFAULT '[]'::jsonb,sensitivity TEXT DEFAULT 'normal',
-    sexual_media_context JSONB DEFAULT '{}'::jsonb,memory_relevance INTEGER DEFAULT 1,
-    related_memory_item_ids JSONB DEFAULT '[]'::jsonb,related_event_ids JSONB DEFAULT '[]'::jsonb,
-    received_at TIMESTAMPTZ DEFAULT NOW(),created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`
+    ALTER TABLE contacts
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS marcel_memory(
-    id BIGSERIAL PRIMARY KEY,category TEXT NOT NULL,memory_key TEXT NOT NULL UNIQUE,
-    memory_value JSONB NOT NULL DEFAULT '{}'::jsonb,status TEXT DEFAULT 'active',importance INTEGER DEFAULT 3,
-    sensitivity TEXT DEFAULT 'normal',source_type TEXT DEFAULT 'marcel',human_verified BOOLEAN DEFAULT TRUE,
-    valid_from TIMESTAMPTZ DEFAULT NOW(),valid_until TIMESTAMPTZ,allowed_for_bot BOOLEAN DEFAULT TRUE,
-    usage_notes TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
+      ADD COLUMN IF NOT EXISTS phone_number TEXT,
 
-  await pool.query(`CREATE TABLE IF NOT EXISTS marcel_live_state(
-    id INTEGER PRIMARY KEY DEFAULT 1 CHECK(id=1),current_country TEXT,current_city TEXT,current_timezone TEXT,
-    location_status TEXT DEFAULT 'living',location_verified_at TIMESTAMPTZ DEFAULT NOW(),
-    relocation_target_country TEXT,relocation_target_city TEXT,relocation_stage TEXT,relocation_eta TEXT,
-    temporary_travel_country TEXT,temporary_travel_city TEXT,temporary_travel_until TIMESTAMPTZ,
-    housing_stage TEXT,manual_location_lock BOOLEAN DEFAULT TRUE,updated_by TEXT DEFAULT 'marcel',
-    updated_at TIMESTAMPTZ DEFAULT NOW())`);
-  await pool.query(`INSERT INTO marcel_live_state(id,current_country,current_city,current_timezone,location_status,
-    relocation_target_country,relocation_target_city,relocation_stage,relocation_eta,housing_stage,manual_location_lock,updated_by)
-    VALUES(1,'Germany','Munich','Europe/Berlin','living','Colombia','Medellín','planned','approximately 6 to 8 weeks','not_arrived',TRUE,'marcel')
-    ON CONFLICT(id) DO NOTHING`);
+      ADD COLUMN IF NOT EXISTS display_name TEXT,
+
+      ADD COLUMN IF NOT EXISTS nickname TEXT,
+
+      ADD COLUMN IF NOT EXISTS country TEXT,
+
+      ADD COLUMN IF NOT EXISTS city TEXT,
+
+      ADD COLUMN IF NOT EXISTS timezone TEXT,
+
+      ADD COLUMN IF NOT EXISTS primary_language TEXT,
+
+      ADD COLUMN IF NOT EXISTS source_platform TEXT,
+
+      ADD COLUMN IF NOT EXISTS source_profile_name TEXT,
+
+      ADD COLUMN IF NOT EXISTS contact_status TEXT
+        DEFAULT 'active',
+
+      ADD COLUMN IF NOT EXISTS relationship_stage TEXT
+        DEFAULT 'new',
+
+      ADD COLUMN IF NOT EXISTS auto_reply_enabled BOOLEAN
+        DEFAULT TRUE,
+
+      ADD COLUMN IF NOT EXISTS date_lock_enabled BOOLEAN
+        DEFAULT FALSE,
+
+      ADD COLUMN IF NOT EXISTS manual_review_required BOOLEAN
+        DEFAULT FALSE,
+
+      ADD COLUMN IF NOT EXISTS location_context JSONB
+        DEFAULT '{}'::jsonb,
+
+      ADD COLUMN IF NOT EXISTS relocation_context JSONB
+        DEFAULT '{}'::jsonb,
+
+      ADD COLUMN IF NOT EXISTS first_contact_at TIMESTAMPTZ,
+
+      ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ,
+
+      ADD COLUMN IF NOT EXISTS memory_identity_key TEXT,
+
+      ADD COLUMN IF NOT EXISTS canonical_name TEXT,
+
+      ADD COLUMN IF NOT EXISTS whatsapp_display_name TEXT,
+
+      ADD COLUMN IF NOT EXISTS current_platform TEXT,
+
+      ADD COLUMN IF NOT EXISTS platform_status TEXT,
+
+      ADD COLUMN IF NOT EXISTS identity_locked BOOLEAN
+        DEFAULT FALSE
+  `);
+
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS
+    idx_contacts_memory_identity_key
+
+    ON contacts (
+      memory_identity_key
+    )
+
+    WHERE memory_identity_key IS NOT NULL
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS contact_identifiers (
+
+      id BIGSERIAL PRIMARY KEY,
+
+      contact_id INTEGER NOT NULL
+        REFERENCES contacts(id)
+        ON DELETE CASCADE,
+
+      identifier_type TEXT NOT NULL,
+
+      identifier_value TEXT NOT NULL,
+
+      normalized_value TEXT NOT NULL,
+
+      source_platform TEXT,
+
+      is_primary BOOLEAN
+        DEFAULT FALSE,
+
+      human_verified BOOLEAN
+        DEFAULT TRUE,
+
+      created_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      updated_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    idx_contact_identifiers_contact
+
+    ON contact_identifiers (
+      contact_id
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS
+    idx_contact_identifiers_strong_unique
+
+    ON contact_identifiers (
+      identifier_type,
+      normalized_value
+    )
+
+    WHERE identifier_type IN (
+      'identity_key',
+      'phone',
+      'whatsapp_jid'
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+
+      id BIGSERIAL PRIMARY KEY,
+
+      whatsapp_jid TEXT NOT NULL,
+
+      direction TEXT NOT NULL,
+
+      message_text TEXT,
+
+      whatsapp_message_id TEXT,
+
+      created_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    ALTER TABLE messages
+
+      ADD COLUMN IF NOT EXISTS is_edited BOOLEAN
+        DEFAULT FALSE,
+
+      ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ,
+
+      ADD COLUMN IF NOT EXISTS original_message_text TEXT,
+
+      ADD COLUMN IF NOT EXISTS processing_status TEXT
+        DEFAULT 'processed',
+
+      ADD COLUMN IF NOT EXISTS duplicate_of_message_id BIGINT
+        REFERENCES messages(id)
+        ON DELETE SET NULL
+  `);
+
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    idx_messages_jid_id
+
+    ON messages (
+      whatsapp_jid,
+      id DESC
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    idx_messages_whatsapp_id
+
+    ON messages (
+      whatsapp_jid,
+      whatsapp_message_id
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS contact_memory_profiles (
+
+      id BIGSERIAL PRIMARY KEY,
+
+      contact_id INTEGER UNIQUE NOT NULL
+        REFERENCES contacts(id)
+        ON DELETE CASCADE,
+
+      ${PROFILE_COLUMNS
+        .map(
+          column =>
+            `${column} JSONB DEFAULT '{}'::jsonb`
+        )
+        .join(",")},
+
+      profile_version INTEGER
+        DEFAULT 1,
+
+      last_memory_update_at TIMESTAMPTZ,
+
+      created_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      updated_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS memory_items (
+
+      id BIGSERIAL PRIMARY KEY,
+
+      contact_id INTEGER NOT NULL
+        REFERENCES contacts(id)
+        ON DELETE CASCADE,
+
+      category TEXT NOT NULL,
+
+      memory_key TEXT NOT NULL,
+
+      memory_value JSONB NOT NULL
+        DEFAULT '{}'::jsonb,
+
+      memory_type TEXT NOT NULL
+        DEFAULT 'interpretation',
+
+      confidence NUMERIC(4,3)
+        DEFAULT 0.5,
+
+      source_message_id BIGINT
+        REFERENCES messages(id)
+        ON DELETE SET NULL,
+
+      source_quote TEXT,
+
+      source_context JSONB
+        DEFAULT '{}'::jsonb,
+
+      valid_from TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      valid_until TIMESTAMPTZ,
+
+      status TEXT
+        DEFAULT 'active',
+
+      supersedes_memory_id BIGINT
+        REFERENCES memory_items(id)
+        ON DELETE SET NULL,
+
+      human_review_status TEXT
+        DEFAULT 'unreviewed',
+
+      human_corrected_value JSONB,
+
+      human_note TEXT,
+
+      human_reviewed_at TIMESTAMPTZ,
+
+      importance INTEGER
+        DEFAULT 2,
+
+      use_in_reply BOOLEAN
+        DEFAULT TRUE,
+
+      created_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      updated_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    idx_memory_items_contact_active
+
+    ON memory_items (
+      contact_id,
+      status,
+      importance DESC,
+      updated_at DESC
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS memory_events (
+
+      id BIGSERIAL PRIMARY KEY,
+
+      contact_id INTEGER NOT NULL
+        REFERENCES contacts(id)
+        ON DELETE CASCADE,
+
+      event_type TEXT NOT NULL,
+
+      event_subtype TEXT,
+
+      title TEXT,
+
+      event_data JSONB
+        DEFAULT '{}'::jsonb,
+
+      started_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      ended_at TIMESTAMPTZ,
+
+      event_status TEXT
+        DEFAULT 'active',
+
+      importance INTEGER
+        DEFAULT 2,
+
+      sensitivity TEXT
+        DEFAULT 'normal',
+
+      source_message_ids JSONB
+        DEFAULT '[]'::jsonb,
+
+      evidence_summary TEXT,
+
+      related_memory_item_ids JSONB
+        DEFAULT '[]'::jsonb,
+
+      related_event_id BIGINT
+        REFERENCES memory_events(id)
+        ON DELETE SET NULL,
+
+      requires_follow_up BOOLEAN
+        DEFAULT FALSE,
+
+      follow_up_after TIMESTAMPTZ,
+
+      follow_up_status TEXT
+        DEFAULT 'none',
+
+      bot_action TEXT,
+
+      marcel_review_required BOOLEAN
+        DEFAULT FALSE,
+
+      created_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      updated_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    idx_memory_events_contact_active
+
+    ON memory_events (
+      contact_id,
+      event_status,
+      importance DESC,
+      started_at DESC
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS media (
+
+      id BIGSERIAL PRIMARY KEY,
+
+      contact_id INTEGER NOT NULL
+        REFERENCES contacts(id)
+        ON DELETE CASCADE,
+
+      message_id BIGINT
+        REFERENCES messages(id)
+        ON DELETE SET NULL,
+
+      whatsapp_message_id TEXT,
+
+      media_type TEXT,
+
+      mime_type TEXT,
+
+      storage_path TEXT,
+
+      thumbnail_path TEXT,
+
+      is_view_once BOOLEAN
+        DEFAULT FALSE,
+
+      view_once_status TEXT
+        DEFAULT 'unknown',
+
+      caption TEXT,
+
+      ai_description TEXT,
+
+      ai_tags JSONB
+        DEFAULT '[]'::jsonb,
+
+      sensitivity TEXT
+        DEFAULT 'normal',
+
+      sexual_media_context JSONB
+        DEFAULT '{}'::jsonb,
+
+      memory_relevance INTEGER
+        DEFAULT 1,
+
+      related_memory_item_ids JSONB
+        DEFAULT '[]'::jsonb,
+
+      related_event_ids JSONB
+        DEFAULT '[]'::jsonb,
+
+      received_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      created_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      updated_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marcel_memory (
+
+      id BIGSERIAL PRIMARY KEY,
+
+      category TEXT NOT NULL,
+
+      memory_key TEXT NOT NULL UNIQUE,
+
+      memory_value JSONB NOT NULL
+        DEFAULT '{}'::jsonb,
+
+      status TEXT
+        DEFAULT 'active',
+
+      importance INTEGER
+        DEFAULT 3,
+
+      sensitivity TEXT
+        DEFAULT 'normal',
+
+      source_type TEXT
+        DEFAULT 'marcel',
+
+      human_verified BOOLEAN
+        DEFAULT TRUE,
+
+      valid_from TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      valid_until TIMESTAMPTZ,
+
+      allowed_for_bot BOOLEAN
+        DEFAULT TRUE,
+
+      usage_notes TEXT,
+
+      created_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      updated_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marcel_live_state (
+
+      id INTEGER PRIMARY KEY
+        DEFAULT 1
+        CHECK (
+          id = 1
+        ),
+
+      current_country TEXT,
+
+      current_city TEXT,
+
+      current_timezone TEXT,
+
+      location_status TEXT
+        DEFAULT 'living',
+
+      location_verified_at TIMESTAMPTZ
+        DEFAULT NOW(),
+
+      relocation_target_country TEXT,
+
+      relocation_target_city TEXT,
+
+      relocation_stage TEXT,
+
+      relocation_eta TEXT,
+
+      temporary_travel_country TEXT,
+
+      temporary_travel_city TEXT,
+
+      temporary_travel_until TIMESTAMPTZ,
+
+      housing_stage TEXT,
+
+      manual_location_lock BOOLEAN
+        DEFAULT TRUE,
+
+      updated_by TEXT
+        DEFAULT 'marcel',
+
+      updated_at TIMESTAMPTZ
+        DEFAULT NOW()
+
+    )
+  `);
+
+
+  await pool.query(`
+    INSERT INTO marcel_live_state (
+
+      id,
+
+      current_country,
+
+      current_city,
+
+      current_timezone,
+
+      location_status,
+
+      relocation_target_country,
+
+      relocation_target_city,
+
+      relocation_stage,
+
+      relocation_eta,
+
+      housing_stage,
+
+      manual_location_lock,
+
+      updated_by
+
+    )
+
+    VALUES (
+
+      1,
+
+      'Germany',
+
+      'Munich',
+
+      'Europe/Berlin',
+
+      'living',
+
+      'Colombia',
+
+      'Medellín',
+
+      'planned',
+
+      'approximately 6 to 8 weeks',
+
+      'not_arrived',
+
+      TRUE,
+
+      'marcel'
+
+    )
+
+    ON CONFLICT (
+      id
+    )
+
+    DO NOTHING
+  `);
+
 
   await seedMarcelMemory();
+
+
   await seedWomenMemory();
-  console.log("PostgreSQL + Langzeit-Memory V1.7 + Frauen-Memory + Identity Registry bereit.");
+
+
+  console.log(
+    "PostgreSQL + Langzeit-Memory V1.7 + Frauen-Memory + Identity Registry bereit."
+  );
+
 }
 
-async function seedMarcelMemory(){
-  const memories=[
-    ["identity","age",{years:41},4,"Nicht ungefragt mit Alter anfangen."],
-    ["identity","birthday",{day:7,month:"August",zodiac:"Leo"},2,"Nur natürlich verwenden."],
-    ["languages","spoken_languages",{german:true,english:true,spanish:false},5,"Spanisch ist praktische Einschränkung."],
-    ["work","self_employed",{self_employed:true,various_projects:true,location_flexible:true},3,"Aktuelle konkrete Tätigkeit niemals erfinden."],
-    ["family","children",{count:2,son:{name:"Finn",age:16},daughter:{name:"Charlotte",age:14}},5,"Know a lot, reveal naturally."],
-    ["communication","warmth_balance",{loving:true,cheeky:true,avoid_emoji_overload:true,avoid_ai_phrases:true,do_not_paraphrase:true,no_mechanical_question:true,avoid_trait_catalogues:true},5,"Menschlich schreiben."],
-    ["communication","tinder_whatsapp_transition",{do_not_move_immediately:true,after_4_5_days_silence_short_busy_apology:true,translation_reason_valid:true,continue_history:true},5,"WhatsApp erst wenn Kommunikation läuft."],
-    ["nicknames","romantic_address_style",{preferred:["meine Schöne","meine Hübsche","mi hermosa","preciosa","amor","princesa","beautiful"],avoid_artificial:true},5,"Keine künstlichen Spitznamen."],
-    ["communication","emoji_style",{hearts_not_automatic:true,hearts_only_if_warmth_fits:true},4,"Freche Nachricht braucht kein Herz."],
-    ["lifestyle","alcohol_and_smoking",{marcel_drinks_alcohol:false,partner_drinking_is_ok:true,partner_smoking_is_ok:true},4,"Nie behaupten Marcel trinkt."],
-    ["food_drinks","favorite_food",{name:"German beef roulades"},2,"Natürlich verwenden."],
-    ["food_drinks","favorite_drink",{name:"Spezi",explanation:"Cola-Orangen-Limonaden-Mix"},2,"Falls unbekannt kurz erklären."],
-    ["skills","cooking",{likes_cooking:true,cooks_well:true},2,"Natürlich verwenden."],
-    ["personal_stories","sister_burned_water",{sister_older_by_years:1.5,story:"Schwester hat einmal Wasser im Topf anbrennen lassen."},1,"Nur passend."],
-    ["personal_stories","fathers_car_at_14",{story:"Mit 14 Auto des Vaters genommen und von Polizei erwischt."},1,"Nur passend."],
-    ["family","parents_long_marriage",{parents_still_married:true,years_over:44},2,"Nur wenn relevant."],
-    ["relationship_history","longest_relationship",{years:14,partner:"mother_of_children"},3,"Nicht ungefragt."],
-    ["relationship_values","partner_freedom",{partner_can_go_out_without_marcel:true,male_best_friend_ok:true,ex_contact_can_be_ok:true,marcel_values_own_time:true},3,"Kontextabhängig."],
-    ["marriage_religion","marriage_and_religion",{never_married:true,open_to_marriage:true,marriage_required:false,religion:"atheist"},3,"Nur wenn relevant."],
-    ["sexuality","orientation_and_ffm",{orientation:"heterosexual",open_to_ffm:true,interested_in_male_third_party:false},5,"Nur bei offenem Sexualgespräch."],
-    ["communication","contact_style",{likes_frequent_contact:true,likes_writing_a_lot:true,prolonged_silence_matters:true},4,"Viel Kontakt, nicht hinterherlaufen."],
-    ["housing","arrival_housing_plan",{temporary_months:"1-2",temporary_options:["hotel","vacation_apartment"],permanent_plan:"Vor Ort feste Unterkunft in sicherer Gegend suchen."},4,"Keine konkrete Gegend erfinden."]
+
+/* ==================================================
+   MARCEL MEMORY
+================================================== */
+
+async function seedMarcelMemory() {
+
+  const memories = [
+
+    [
+      "identity",
+
+      "age",
+
+      {
+        years: 41
+      },
+
+      4,
+
+      "Nicht ungefragt mit Alter anfangen."
+    ],
+
+
+    [
+      "identity",
+
+      "birthday",
+
+      {
+        day: 7,
+        month: "August",
+        zodiac: "Leo"
+      },
+
+      2,
+
+      "Nur natürlich verwenden."
+    ],
+
+
+    [
+      "languages",
+
+      "spoken_languages",
+
+      {
+        german: true,
+        english: true,
+        spanish: false
+      },
+
+      5,
+
+      "Spanisch ist praktische Einschränkung."
+    ],
+
+
+    [
+      "work",
+
+      "self_employed",
+
+      {
+        self_employed: true,
+        various_projects: true,
+        location_flexible: true
+      },
+
+      3,
+
+      "Aktuelle konkrete Tätigkeit niemals erfinden."
+    ],
+
+
+    [
+      "family",
+
+      "children",
+
+      {
+        count: 2,
+
+        son: {
+          name: "Finn",
+          age: 16
+        },
+
+        daughter: {
+          name: "Charlotte",
+          age: 14
+        }
+
+      },
+
+      5,
+
+      "Know a lot, reveal naturally."
+    ],
+
+
+    [
+      "communication",
+
+      "warmth_balance",
+
+      {
+        loving: true,
+        cheeky: true,
+        avoid_emoji_overload: true,
+        avoid_ai_phrases: true,
+        do_not_paraphrase: true,
+        no_mechanical_question: true,
+        avoid_trait_catalogues: true
+      },
+
+      5,
+
+      "Menschlich schreiben."
+    ],
+
+
+    [
+      "communication",
+
+      "tinder_whatsapp_transition",
+
+      {
+        do_not_move_immediately: true,
+        after_4_5_days_silence_short_busy_apology: true,
+        translation_reason_valid: true,
+        continue_history: true
+      },
+
+      5,
+
+      "WhatsApp erst wenn Kommunikation läuft."
+    ],
+
+
+    [
+      "nicknames",
+
+      "romantic_address_style",
+
+      {
+        preferred: [
+          "meine Schöne",
+          "meine Hübsche",
+          "mi hermosa",
+          "preciosa",
+          "amor",
+          "princesa",
+          "beautiful"
+        ],
+
+        avoid_artificial:
+          true
+
+      },
+
+      5,
+
+      "Keine künstlichen Spitznamen."
+    ],
+
+
+    [
+      "communication",
+
+      "emoji_style",
+
+      {
+        hearts_not_automatic:
+          true,
+
+        hearts_only_if_warmth_fits:
+          true
+
+      },
+
+      4,
+
+      "Freche Nachricht braucht kein Herz."
+    ],
+
+
+    [
+      "lifestyle",
+
+      "alcohol_and_smoking",
+
+      {
+        marcel_drinks_alcohol:
+          false,
+
+        partner_drinking_is_ok:
+          true,
+
+        partner_smoking_is_ok:
+          true
+
+      },
+
+      4,
+
+      "Nie behaupten Marcel trinkt."
+    ],
+
+
+    [
+      "food_drinks",
+
+      "favorite_food",
+
+      {
+        name:
+          "German beef roulades"
+      },
+
+      2,
+
+      "Natürlich verwenden."
+    ],
+
+
+    [
+      "food_drinks",
+
+      "favorite_drink",
+
+      {
+        name:
+          "Spezi",
+
+        explanation:
+          "Cola-Orangen-Limonaden-Mix"
+      },
+
+      2,
+
+      "Falls unbekannt kurz erklären."
+    ],
+
+
+    [
+      "skills",
+
+      "cooking",
+
+      {
+        likes_cooking:
+          true,
+
+        cooks_well:
+          true
+      },
+
+      2,
+
+      "Natürlich verwenden."
+    ],
+
+
+    [
+      "personal_stories",
+
+      "sister_burned_water",
+
+      {
+        sister_older_by_years:
+          1.5,
+
+        story:
+          "Schwester hat einmal Wasser im Topf anbrennen lassen."
+      },
+
+      1,
+
+      "Nur passend."
+    ],
+
+
+    [
+      "personal_stories",
+
+      "fathers_car_at_14",
+
+      {
+        story:
+          "Mit 14 Auto des Vaters genommen und von Polizei erwischt."
+      },
+
+      1,
+
+      "Nur passend."
+    ],
+
+
+    [
+      "family",
+
+      "parents_long_marriage",
+
+      {
+        parents_still_married:
+          true,
+
+        years_over:
+          44
+      },
+
+      2,
+
+      "Nur wenn relevant."
+    ],
+
+
+    [
+      "relationship_history",
+
+      "longest_relationship",
+
+      {
+        years:
+          14,
+
+        partner:
+          "mother_of_children"
+      },
+
+      3,
+
+      "Nicht ungefragt."
+    ],
+
+
+    [
+      "relationship_values",
+
+      "partner_freedom",
+
+      {
+        partner_can_go_out_without_marcel:
+          true,
+
+        male_best_friend_ok:
+          true,
+
+        ex_contact_can_be_ok:
+          true,
+
+        marcel_values_own_time:
+          true
+      },
+
+      3,
+
+      "Kontextabhängig."
+    ],
+
+
+    [
+      "marriage_religion",
+
+      "marriage_and_religion",
+
+      {
+        never_married:
+          true,
+
+        open_to_marriage:
+          true,
+
+        marriage_required:
+          false,
+
+        religion:
+          "atheist"
+      },
+
+      3,
+
+      "Nur wenn relevant."
+    ],
+
+
+    [
+      "sexuality",
+
+      "orientation_and_ffm",
+
+      {
+        orientation:
+          "heterosexual",
+
+        open_to_ffm:
+          true,
+
+        interested_in_male_third_party:
+          false
+      },
+
+      5,
+
+      "Nur bei offenem Sexualgespräch."
+    ],
+
+
+    [
+      "communication",
+
+      "contact_style",
+
+      {
+        likes_frequent_contact:
+          true,
+
+        likes_writing_a_lot:
+          true,
+
+        prolonged_silence_matters:
+          true
+      },
+
+      4,
+
+      "Viel Kontakt, nicht hinterherlaufen."
+    ],
+
+
+    [
+      "housing",
+
+      "arrival_housing_plan",
+
+      {
+        temporary_months:
+          "1-2",
+
+        temporary_options: [
+          "hotel",
+          "vacation_apartment"
+        ],
+
+        permanent_plan:
+          "Vor Ort feste Unterkunft in sicherer Gegend suchen."
+      },
+
+      4,
+
+      "Keine konkrete Gegend erfinden."
+    ]
+
   ];
 
-  for(const [category,key,value,importance,usage] of memories){
-    await pool.query(`INSERT INTO marcel_memory(category,memory_key,memory_value,importance,usage_notes,human_verified,allowed_for_bot)
-      VALUES($1,$2,$3::jsonb,$4,$5,TRUE,TRUE)
-      ON CONFLICT(memory_key) DO UPDATE SET category=EXCLUDED.category,memory_value=EXCLUDED.memory_value,
-      importance=EXCLUDED.importance,usage_notes=EXCLUDED.usage_notes,updated_at=NOW()`,
-      [category,key,JSON.stringify(value),importance,usage]);
-  }
-}
 
-async function addContactIdentifier({contactId,type,value,sourcePlatform=null,isPrimary=false}){
-  const clean=normalizeText(value);
-  if(!contactId||!clean)return;
+  for (
+    const [
+      category,
+      key,
+      value,
+      importance,
+      usage
+    ]
+    of memories
+  ) {
 
-  const norm=normalizeIdentityValue(clean);
+    await pool.query(
+      `
+        INSERT INTO marcel_memory (
 
-  if(["identity_key","phone","whatsapp_jid"].includes(type)){
-    const x=await pool.query(
-      `SELECT contact_id FROM contact_identifiers
-       WHERE identifier_type=$1 AND normalized_value=$2
-       LIMIT 1`,
-      [type,norm]
+          category,
+
+          memory_key,
+
+          memory_value,
+
+          importance,
+
+          usage_notes,
+
+          human_verified,
+
+          allowed_for_bot
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          $3::jsonb,
+
+          $4,
+
+          $5,
+
+          TRUE,
+
+          TRUE
+
+        )
+
+        ON CONFLICT (
+          memory_key
+        )
+
+        DO UPDATE SET
+
+          category =
+            EXCLUDED.category,
+
+          memory_value =
+            EXCLUDED.memory_value,
+
+          importance =
+            EXCLUDED.importance,
+
+          usage_notes =
+            EXCLUDED.usage_notes,
+
+          updated_at =
+            NOW()
+      `,
+      [
+        category,
+        key,
+        JSON.stringify(
+          value
+        ),
+        importance,
+        usage
+      ]
     );
 
-    if(x.rows[0]&&x.rows[0].contact_id!==contactId){
-      throw new Error(`Identity-Konflikt: ${type} ${clean} gehört bereits Kontakt ${x.rows[0].contact_id}`);
+  }
+
+}
+
+
+/* ==================================================
+   CONTACT IDENTIFIER
+================================================== */
+
+async function addContactIdentifier({
+  contactId,
+  type,
+  value,
+  sourcePlatform = null,
+  isPrimary = false
+}) {
+
+  const clean =
+    normalizeText(
+      value
+    );
+
+
+  if (
+    !contactId
+    ||
+    !clean
+  ) {
+
+    return;
+
+  }
+
+
+  const normalized =
+    normalizeIdentityValue(
+      clean
+    );
+
+
+  if (
+    [
+      "identity_key",
+      "phone",
+      "whatsapp_jid"
+    ].includes(
+      type
+    )
+  ) {
+
+    const existingStrong =
+      await pool.query(
+        `
+          SELECT
+            contact_id
+
+          FROM contact_identifiers
+
+          WHERE identifier_type =
+            $1
+
+            AND normalized_value =
+            $2
+
+          LIMIT 1
+        `,
+        [
+          type,
+          normalized
+        ]
+      );
+
+
+    if (
+      existingStrong.rows[0]
+      &&
+      existingStrong.rows[0].contact_id
+      !==
+      contactId
+    ) {
+
+      throw new Error(
+        `Identity-Konflikt: ${type} ${clean} gehört bereits Kontakt ${existingStrong.rows[0].contact_id}`
+      );
+
     }
+
   }
 
-  const same=await pool.query(
-    `SELECT id FROM contact_identifiers
-     WHERE contact_id=$1 AND identifier_type=$2 AND normalized_value=$3
-     LIMIT 1`,
-    [contactId,type,norm]
-  );
 
-  if(same.rows[0]){
+  const same =
     await pool.query(
-      `UPDATE contact_identifiers
-       SET identifier_value=$2,
-           source_platform=COALESCE($3,source_platform),
-           is_primary=is_primary OR $4,
-           updated_at=NOW()
-       WHERE id=$1`,
-      [same.rows[0].id,clean,sourcePlatform,isPrimary]
-    );
-  }else{
-    await pool.query(
-      `INSERT INTO contact_identifiers(
-         contact_id,
-         identifier_type,
-         identifier_value,
-         normalized_value,
-         source_platform,
-         is_primary,
-         human_verified
-       )
-       VALUES($1,$2,$3,$4,$5,$6,TRUE)`,
-      [contactId,type,clean,norm,sourcePlatform,isPrimary]
-    );
-  }
-}
+      `
+        SELECT
+          id
 
-async function findContactByIdentifier(type,value){
-  const norm=normalizeIdentityValue(value);
-  if(!norm)return null;
+        FROM contact_identifiers
 
-  const r=await pool.query(
-    `SELECT c.*
-     FROM contact_identifiers i
-     JOIN contacts c ON c.id=i.contact_id
-     WHERE i.identifier_type=$1
-       AND i.normalized_value=$2
-     ORDER BY i.is_primary DESC,i.id ASC
-     LIMIT 1`,
-    [type,norm]
-  );
+        WHERE contact_id =
+          $1
 
-  return r.rows[0]||null;
-}
+          AND identifier_type =
+            $2
 
-async function getContactByIdentityKey(key){
-  const r=await pool.query(
-    `SELECT *
-     FROM contacts
-     WHERE memory_identity_key=$1
-     LIMIT 1`,
-    [key]
-  );
+          AND normalized_value =
+            $3
 
-  return r.rows[0]||null;
-}
-
-async function ensureWomanProfile(w){
-  let c=await getContactByIdentityKey(w.identityKey);
-  const phone=w.phoneNumber?String(w.phoneNumber).replace(/\D/g,""):null;
-
-  if(!c&&phone){
-    c=await findContactByIdentifier("phone",phone);
-  }
-
-  if(!c){
-    const r=await pool.query(
-      `INSERT INTO contacts(
-        whatsapp_jid,
-        display_name,
-        canonical_name,
-        memory_identity_key,
-        identity_locked,
-        phone_number,
-        country,
-        city,
-        primary_language,
-        source_platform,
-        current_platform,
-        platform_status,
-        whatsapp_display_name,
-        contact_status,
-        relationship_stage,
-        auto_reply_enabled,
-        date_lock_enabled,
-        first_contact_at,
-        updated_at
-      )
-      VALUES(
-        $1,$2,$2,$3,TRUE,$4,$5,$6,$7,$8,$8,$9,$10,
-        'active','new',TRUE,FALSE,NOW(),NOW()
-      )
-      RETURNING *`,
+        LIMIT 1
+      `,
       [
-        createProfileJid(w.identityKey),
-        w.canonicalName,
-        w.identityKey,
-        phone,
-        w.country||null,
-        w.city||null,
-        w.language||null,
-        w.sourcePlatform||null,
-        w.platformStatus||null,
-        w.whatsappDisplayName||null
+        contactId,
+        type,
+        normalized
       ]
     );
 
-    c=r.rows[0];
-  }else{
-    const r=await pool.query(
-      `UPDATE contacts
-       SET canonical_name=COALESCE($2,canonical_name),
-           display_name=COALESCE(display_name,$2),
-           phone_number=COALESCE($3,phone_number),
-           country=COALESCE($4,country),
-           city=COALESCE($5,city),
-           primary_language=COALESCE($6,primary_language),
-           source_platform=COALESCE(source_platform,$7),
-           current_platform=COALESCE($7,current_platform),
-           platform_status=COALESCE($8,platform_status),
-           whatsapp_display_name=COALESCE($9,whatsapp_display_name),
-           memory_identity_key=COALESCE(memory_identity_key,$10),
-           identity_locked=TRUE,
-           updated_at=NOW()
-       WHERE id=$1
-       RETURNING *`,
+
+  if (
+    same.rows[0]
+  ) {
+
+    await pool.query(
+      `
+        UPDATE contact_identifiers
+
+        SET
+          identifier_value =
+            $2,
+
+          source_platform =
+            COALESCE(
+              $3,
+              source_platform
+            ),
+
+          is_primary =
+            is_primary
+            OR
+            $4,
+
+          updated_at =
+            NOW()
+
+        WHERE id =
+          $1
+      `,
       [
-        c.id,
-        w.canonicalName,
-        phone,
-        w.country||null,
-        w.city||null,
-        w.language||null,
-        w.sourcePlatform||null,
-        w.platformStatus||null,
-        w.whatsappDisplayName||null,
-        w.identityKey
+        same.rows[0].id,
+        clean,
+        sourcePlatform,
+        isPrimary
       ]
     );
 
-    c=r.rows[0];
+  } else {
+
+    await pool.query(
+      `
+        INSERT INTO contact_identifiers (
+
+          contact_id,
+
+          identifier_type,
+
+          identifier_value,
+
+          normalized_value,
+
+          source_platform,
+
+          is_primary,
+
+          human_verified
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          $3,
+
+          $4,
+
+          $5,
+
+          $6,
+
+          TRUE
+
+        )
+      `,
+      [
+        contactId,
+        type,
+        clean,
+        normalized,
+        sourcePlatform,
+        isPrimary
+      ]
+    );
+
   }
+
+}
+
+
+async function findContactByIdentifier(
+  type,
+  value
+) {
+
+  const normalized =
+    normalizeIdentityValue(
+      value
+    );
+
+
+  if (
+    !normalized
+  ) {
+
+    return null;
+
+  }
+
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+          c.*
+
+        FROM contact_identifiers i
+
+        JOIN contacts c
+          ON c.id =
+             i.contact_id
+
+        WHERE i.identifier_type =
+          $1
+
+          AND i.normalized_value =
+          $2
+
+        ORDER BY
+          i.is_primary DESC,
+          i.id ASC
+
+        LIMIT 1
+      `,
+      [
+        type,
+        normalized
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
+  );
+
+}
+
+
+async function getContactByIdentityKey(
+  key
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+        FROM contacts
+
+        WHERE memory_identity_key =
+          $1
+
+        LIMIT 1
+      `,
+      [
+        key
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
+  );
+
+}
+
+
+/* ==================================================
+   FRAUEN PROFILE
+================================================== */
+
+async function ensureWomanProfile(
+  woman
+) {
+
+  let contact =
+    await getContactByIdentityKey(
+      woman.identityKey
+    );
+
+
+  const phone =
+    woman.phoneNumber
+      ? String(
+          woman.phoneNumber
+        )
+          .replace(
+            /\D/g,
+            ""
+          )
+      : null;
+
+
+  if (
+    !contact
+    &&
+    phone
+  ) {
+
+    contact =
+      await findContactByIdentifier(
+        "phone",
+        phone
+      );
+
+  }
+
+
+  if (
+    !contact
+  ) {
+
+    const result =
+      await pool.query(
+        `
+          INSERT INTO contacts (
+
+            whatsapp_jid,
+
+            display_name,
+
+            canonical_name,
+
+            memory_identity_key,
+
+            identity_locked,
+
+            phone_number,
+
+            country,
+
+            city,
+
+            primary_language,
+
+            source_platform,
+
+            current_platform,
+
+            platform_status,
+
+            whatsapp_display_name,
+
+            contact_status,
+
+            relationship_stage,
+
+            auto_reply_enabled,
+
+            date_lock_enabled,
+
+            first_contact_at,
+
+            updated_at
+
+          )
+
+          VALUES (
+
+            $1,
+
+            $2,
+
+            $2,
+
+            $3,
+
+            TRUE,
+
+            $4,
+
+            $5,
+
+            $6,
+
+            $7,
+
+            $8,
+
+            $8,
+
+            $9,
+
+            $10,
+
+            'active',
+
+            'new',
+
+            TRUE,
+
+            FALSE,
+
+            NOW(),
+
+            NOW()
+
+          )
+
+          RETURNING *
+        `,
+        [
+          createProfileJid(
+            woman.identityKey
+          ),
+          woman.canonicalName,
+          woman.identityKey,
+          phone,
+          woman.country || null,
+          woman.city || null,
+          woman.language || null,
+          woman.sourcePlatform || null,
+          woman.platformStatus || null,
+          woman.whatsappDisplayName || null
+        ]
+      );
+
+
+    contact =
+      result.rows[0];
+
+  } else {
+
+    const result =
+      await pool.query(
+        `
+          UPDATE contacts
+
+          SET
+            canonical_name =
+              COALESCE(
+                $2,
+                canonical_name
+              ),
+
+            display_name =
+              COALESCE(
+                display_name,
+                $2
+              ),
+
+            phone_number =
+              COALESCE(
+                $3,
+                phone_number
+              ),
+
+            country =
+              COALESCE(
+                $4,
+                country
+              ),
+
+            city =
+              COALESCE(
+                $5,
+                city
+              ),
+
+            primary_language =
+              COALESCE(
+                $6,
+                primary_language
+              ),
+
+            source_platform =
+              COALESCE(
+                source_platform,
+                $7
+              ),
+
+            current_platform =
+              COALESCE(
+                $7,
+                current_platform
+              ),
+
+            platform_status =
+              COALESCE(
+                $8,
+                platform_status
+              ),
+
+            whatsapp_display_name =
+              COALESCE(
+                $9,
+                whatsapp_display_name
+              ),
+
+            memory_identity_key =
+              COALESCE(
+                memory_identity_key,
+                $10
+              ),
+
+            identity_locked =
+              TRUE,
+
+            updated_at =
+              NOW()
+
+          WHERE id =
+            $1
+
+          RETURNING *
+        `,
+        [
+          contact.id,
+          woman.canonicalName,
+          phone,
+          woman.country || null,
+          woman.city || null,
+          woman.language || null,
+          woman.sourcePlatform || null,
+          woman.platformStatus || null,
+          woman.whatsappDisplayName || null,
+          woman.identityKey
+        ]
+      );
+
+
+    contact =
+      result.rows[0];
+
+  }
+
 
   await pool.query(
-    `INSERT INTO contact_memory_profiles(contact_id)
-     VALUES($1)
-     ON CONFLICT(contact_id) DO NOTHING`,
-    [c.id]
+    `
+      INSERT INTO contact_memory_profiles (
+        contact_id
+      )
+
+      VALUES (
+        $1
+      )
+
+      ON CONFLICT (
+        contact_id
+      )
+
+      DO NOTHING
+    `,
+    [
+      contact.id
+    ]
   );
 
-  await addContactIdentifier({
-    contactId:c.id,
-    type:"identity_key",
-    value:w.identityKey,
-    isPrimary:true
-  });
 
   await addContactIdentifier({
-    contactId:c.id,
-    type:"canonical_name",
-    value:w.canonicalName,
-    isPrimary:true
+
+    contactId:
+      contact.id,
+
+    type:
+      "identity_key",
+
+    value:
+      woman.identityKey,
+
+    isPrimary:
+      true
+
   });
 
-  for(const a of w.aliases||[]){
+
+  await addContactIdentifier({
+
+    contactId:
+      contact.id,
+
+    type:
+      "canonical_name",
+
+    value:
+      woman.canonicalName,
+
+    isPrimary:
+      true
+
+  });
+
+
+  for (
+    const alias
+    of woman.aliases || []
+  ) {
+
     await addContactIdentifier({
-      contactId:c.id,
-      type:"alias",
-      value:a
+
+      contactId:
+        contact.id,
+
+      type:
+        "alias",
+
+      value:
+        alias
+
     });
+
   }
 
-  if(phone){
+
+  if (
+    phone
+  ) {
+
     await addContactIdentifier({
-      contactId:c.id,
-      type:"phone",
-      value:phone,
-      sourcePlatform:"whatsapp",
-      isPrimary:true
+
+      contactId:
+        contact.id,
+
+      type:
+        "phone",
+
+      value:
+        phone,
+
+      sourcePlatform:
+        "whatsapp",
+
+      isPrimary:
+        true
+
     });
+
   }
 
-  if(w.whatsappDisplayName){
+
+  if (
+    woman.whatsappDisplayName
+  ) {
+
     await addContactIdentifier({
-      contactId:c.id,
-      type:"whatsapp_display_name",
-      value:w.whatsappDisplayName,
-      sourcePlatform:"whatsapp"
+
+      contactId:
+        contact.id,
+
+      type:
+        "whatsapp_display_name",
+
+      value:
+        woman.whatsappDisplayName,
+
+      sourcePlatform:
+        "whatsapp"
+
     });
+
   }
 
-  return c;
+
+  return contact;
+
 }
+
+
+/* ==================================================
+   VERIFIED SEED MEMORY
+================================================== */
 
 async function upsertVerifiedSeedMemory({
   contactId,
   category,
   memoryKey,
   memoryValue,
-  importance=3
-}){
-  const r=await pool.query(
-    `SELECT *
-     FROM memory_items
-     WHERE contact_id=$1
-       AND category=$2
-       AND memory_key=$3
-       AND status='active'
-     ORDER BY id DESC
-     LIMIT 1`,
-    [contactId,category,memoryKey]
-  );
+  importance = 3
+}) {
 
-  if(r.rows[0]){
+  const existing =
     await pool.query(
-      `UPDATE memory_items
-       SET memory_value=$2::jsonb,
-           memory_type='explicit_fact',
-           confidence=1.0,
-           human_review_status='confirmed',
-           human_note='Manuell gepflegtes Frauen-Memory UPDATE3.',
-           human_reviewed_at=NOW(),
-           importance=$3,
-           use_in_reply=TRUE,
-           updated_at=NOW()
-       WHERE id=$1`,
+      `
+        SELECT *
+
+        FROM memory_items
+
+        WHERE contact_id =
+          $1
+
+          AND category =
+            $2
+
+          AND memory_key =
+            $3
+
+          AND status =
+            'active'
+
+        ORDER BY
+          id DESC
+
+        LIMIT 1
+      `,
       [
-        r.rows[0].id,
-        JSON.stringify(memoryValue),
-        clampImportance(importance)
+        contactId,
+        category,
+        memoryKey
       ]
     );
-  }else{
+
+
+  if (
+    existing.rows[0]
+  ) {
+
     await pool.query(
-      `INSERT INTO memory_items(
-         contact_id,
-         category,
-         memory_key,
-         memory_value,
-         memory_type,
-         confidence,
-         status,
-         human_review_status,
-         human_note,
-         human_reviewed_at,
-         importance,
-         use_in_reply
-       )
-       VALUES(
-         $1,$2,$3,$4::jsonb,
-         'explicit_fact',
-         1.0,
-         'active',
-         'confirmed',
-         'Manuell gepflegtes Frauen-Memory UPDATE3.',
-         NOW(),
-         $5,
-         TRUE
-       )`,
+      `
+        UPDATE memory_items
+
+        SET
+          memory_value =
+            $2::jsonb,
+
+          memory_type =
+            'explicit_fact',
+
+          confidence =
+            1.0,
+
+          human_review_status =
+            'confirmed',
+
+          human_note =
+            'Manuell gepflegtes Frauen-Memory UPDATE3.',
+
+          human_reviewed_at =
+            NOW(),
+
+          importance =
+            $3,
+
+          use_in_reply =
+            TRUE,
+
+          updated_at =
+            NOW()
+
+        WHERE id =
+          $1
+      `,
+      [
+        existing.rows[0].id,
+        JSON.stringify(
+          memoryValue
+        ),
+        clampImportance(
+          importance
+        )
+      ]
+    );
+
+  } else {
+
+    await pool.query(
+      `
+        INSERT INTO memory_items (
+
+          contact_id,
+
+          category,
+
+          memory_key,
+
+          memory_value,
+
+          memory_type,
+
+          confidence,
+
+          status,
+
+          human_review_status,
+
+          human_note,
+
+          human_reviewed_at,
+
+          importance,
+
+          use_in_reply
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          $3,
+
+          $4::jsonb,
+
+          'explicit_fact',
+
+          1.0,
+
+          'active',
+
+          'confirmed',
+
+          'Manuell gepflegtes Frauen-Memory UPDATE3.',
+
+          NOW(),
+
+          $5,
+
+          TRUE
+
+        )
+      `,
       [
         contactId,
         category,
         memoryKey,
-        JSON.stringify(memoryValue),
-        clampImportance(importance)
+        JSON.stringify(
+          memoryValue
+        ),
+        clampImportance(
+          importance
+        )
       ]
     );
+
   }
+
 }
+
+
+/* ==================================================
+   KONTAKT MEMORY PROFIL
+================================================== */
+
+async function getContactMemoryProfile(
+  contactId
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM contact_memory_profiles
+
+        WHERE contact_id =
+          $1
+
+        LIMIT 1
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
+  );
+
+}
+
+
+/* ==================================================
+   PROFILE SNAPSHOT
+================================================== */
 
 async function applyProfileSnapshot(
   contactId,
   snapshot,
-  {humanSeed=false}={}
-){
-  const current=await getContactMemoryProfile(contactId);
+  {
+    humanSeed = false
+  } = {}
+) {
 
-  const vals=PROFILE_COLUMNS.map(c=>{
-    const incoming=
-      snapshot?.[c]
-      &&
-      typeof snapshot[c]==="object"
-      &&
-      !Array.isArray(snapshot[c])
-        ? snapshot[c]
-        : {};
+  const current =
+    await getContactMemoryProfile(
+      contactId
+    );
 
-    if(
-      !humanSeed
-      &&
-      current?.[c]
-      &&
-      typeof current[c]==="object"
-      &&
-      Object.keys(current[c]).length>0
-      &&
-      Object.keys(incoming).length===0
-    ){
-      return JSON.stringify(current[c]);
-    }
 
-    return JSON.stringify(incoming);
-  });
+  const values =
+    PROFILE_COLUMNS.map(
+      column => {
 
-  const sets=PROFILE_COLUMNS.map(
-    (c,i)=>`${c}=$${i+1}::jsonb`
+        const incoming =
+          snapshot?.[column]
+          &&
+          typeof snapshot[column]
+          ===
+          "object"
+          &&
+          !Array.isArray(
+            snapshot[column]
+          )
+
+            ? snapshot[column]
+
+            : {};
+
+
+        if (
+          !humanSeed
+          &&
+          current?.[column]
+          &&
+          typeof current[column]
+          ===
+          "object"
+          &&
+          Object.keys(
+            current[column]
+          ).length > 0
+          &&
+          Object.keys(
+            incoming
+          ).length === 0
+        ) {
+
+          return JSON.stringify(
+            current[column]
+          );
+
+        }
+
+
+        return JSON.stringify(
+          incoming
+        );
+
+      }
+    );
+
+
+  const assignments =
+    PROFILE_COLUMNS.map(
+      (column, index) =>
+        `${column} = $${index + 1}::jsonb`
+    );
+
+
+  values.push(
+    contactId
   );
 
-  vals.push(contactId);
 
   await pool.query(
-    `UPDATE contact_memory_profiles
-     SET ${sets.join(",")},
-         profile_version=profile_version+1,
-         last_memory_update_at=NOW(),
-         updated_at=NOW()
-     WHERE contact_id=$${PROFILE_COLUMNS.length+1}`,
-    vals
+    `
+      UPDATE contact_memory_profiles
+
+      SET
+        ${assignments.join(",")},
+
+        profile_version =
+          profile_version + 1,
+
+        last_memory_update_at =
+          NOW(),
+
+        updated_at =
+          NOW()
+
+      WHERE contact_id =
+        $${PROFILE_COLUMNS.length + 1}
+    `,
+    values
   );
+
 }
 
-async function seedWomenMemory(){
-  for(const w of WOMEN_SEED){
-    const c=await ensureWomanProfile(w);
 
-    const snapshot=Object.fromEntries(
-      PROFILE_COLUMNS.map(
-        k=>[k,w.profile?.[k]||{}]
-      )
-    );
+/* ==================================================
+   FRAUEN MEMORY LADEN
+================================================== */
 
-    await applyProfileSnapshot(
-      c.id,
-      snapshot,
-      {humanSeed:true}
-    );
+async function seedWomenMemory() {
 
-    for(const k of PROFILE_COLUMNS){
-      const v=snapshot[k];
+  for (
+    const woman
+    of WOMEN_SEED
+  ) {
 
-      if(
-        v
-        &&
-        typeof v==="object"
-        &&
-        !Array.isArray(v)
-        &&
-        Object.keys(v).length
-      ){
-        await upsertVerifiedSeedMemory({
-          contactId:c.id,
-          category:k,
-          memoryKey:`seed_${k}`,
-          memoryValue:v,
-          importance:[
-            "current_context",
-            "open_threads",
-            "relationship",
-            "children",
-            "marcel_knowledge_map"
-          ].includes(k)
-            ?5
-            :3
-        });
-      }
-    }
-  }
-
-  console.log(`Frauen-Memory geladen: ${WOMEN_SEED.length} getrennte Profile.`);
-}
-
-async function ensureContact(jid){
-  const phone=
-    isTestJid(jid)||isProfileJid(jid)
-      ?null
-      :jid?.split("@")?.[0]?.replace(/\D/g,"")||null;
-
-  let c=phone
-    ?await findContactByIdentifier("phone",phone)
-    :null;
-
-  if(!c){
-    c=await findContactByIdentifier(
-      "whatsapp_jid",
-      jid
-    );
-  }
-
-  if(!c){
-    const r=await pool.query(
-      `SELECT *
-       FROM contacts
-       WHERE whatsapp_jid=$1
-       LIMIT 1`,
-      [jid]
-    );
-
-    c=r.rows[0]||null;
-  }
-
-  if(c){
-    if(phone&&c.whatsapp_jid!==jid){
-      const conflict=await pool.query(
-        `SELECT id
-         FROM contacts
-         WHERE whatsapp_jid=$1
-           AND id<>$2
-         LIMIT 1`,
-        [jid,c.id]
+    const contact =
+      await ensureWomanProfile(
+        woman
       );
 
-      if(conflict.rows[0]){
+
+    const snapshot =
+      Object.fromEntries(
+        PROFILE_COLUMNS.map(
+          key => [
+            key,
+            woman.profile?.[key] || {}
+          ]
+        )
+      );
+
+
+    await applyProfileSnapshot(
+      contact.id,
+      snapshot,
+      {
+        humanSeed:
+          true
+      }
+    );
+
+
+    for (
+      const key
+      of PROFILE_COLUMNS
+    ) {
+
+      const value =
+        snapshot[key];
+
+
+      if (
+        value
+        &&
+        typeof value === "object"
+        &&
+        !Array.isArray(
+          value
+        )
+        &&
+        Object.keys(
+          value
+        ).length
+      ) {
+
+        await upsertVerifiedSeedMemory({
+
+          contactId:
+            contact.id,
+
+          category:
+            key,
+
+          memoryKey:
+            `seed_${key}`,
+
+          memoryValue:
+            value,
+
+          importance:
+            [
+              "current_context",
+              "open_threads",
+              "relationship",
+              "children",
+              "marcel_knowledge_map"
+            ].includes(
+              key
+            )
+              ? 5
+              : 3
+
+        });
+
+      }
+
+    }
+
+  }
+
+
+  console.log(
+    `Frauen-Memory geladen: ${WOMEN_SEED.length} getrennte Profile.`
+  );
+
+}
+
+
+/* ==================================================
+   KONTAKT AUFLÖSUNG
+================================================== */
+
+async function ensureContact(
+  jid
+) {
+
+  const phone =
+    (
+      isTestJid(
+        jid
+      )
+      ||
+      isProfileJid(
+        jid
+      )
+    )
+
+      ? null
+
+      : jid
+          ?.split("@")
+          ?.[0]
+          ?.replace(
+            /\D/g,
+            ""
+          )
+          ||
+          null;
+
+
+  let contact =
+    phone
+      ? await findContactByIdentifier(
+          "phone",
+          phone
+        )
+      : null;
+
+
+  if (
+    !contact
+  ) {
+
+    contact =
+      await findContactByIdentifier(
+        "whatsapp_jid",
+        jid
+      );
+
+  }
+
+
+  if (
+    !contact
+  ) {
+
+    const direct =
+      await pool.query(
+        `
+          SELECT *
+
+          FROM contacts
+
+          WHERE whatsapp_jid =
+            $1
+
+          LIMIT 1
+        `,
+        [
+          jid
+        ]
+      );
+
+
+    contact =
+      direct.rows[0]
+      ||
+      null;
+
+  }
+
+
+  if (
+    contact
+  ) {
+
+    if (
+      phone
+      &&
+      contact.whatsapp_jid !== jid
+    ) {
+
+      const conflict =
+        await pool.query(
+          `
+            SELECT
+              id
+
+            FROM contacts
+
+            WHERE whatsapp_jid =
+              $1
+
+              AND id <>
+                $2
+
+            LIMIT 1
+          `,
+          [
+            jid,
+            contact.id
+          ]
+        );
+
+
+      if (
+        conflict.rows[0]
+      ) {
+
         throw new Error(
           `WhatsApp-JID ${jid} ist bereits einem anderen Kontakt zugeordnet.`
         );
+
       }
 
+
       await pool.query(
-        `UPDATE messages
-         SET whatsapp_jid=$2
-         WHERE whatsapp_jid=$1`,
-        [c.whatsapp_jid,jid]
+        `
+          UPDATE messages
+
+          SET whatsapp_jid =
+            $2
+
+          WHERE whatsapp_jid =
+            $1
+        `,
+        [
+          contact.whatsapp_jid,
+          jid
+        ]
       );
 
-      const r=await pool.query(
-        `UPDATE contacts
-         SET whatsapp_jid=$2,
-             phone_number=COALESCE($3,phone_number),
-             current_platform='whatsapp',
-             platform_status='WHATSAPP_ACTIVE',
-             last_message_at=NOW(),
-             updated_at=NOW()
-         WHERE id=$1
-         RETURNING *`,
-        [c.id,jid,phone]
-      );
 
-      c=r.rows[0];
-    }else{
-      const r=await pool.query(
-        `UPDATE contacts
-         SET phone_number=COALESCE(phone_number,$2),
-             last_message_at=NOW(),
-             updated_at=NOW()
-         WHERE id=$1
-         RETURNING *`,
-        [c.id,phone]
-      );
+      const updated =
+        await pool.query(
+          `
+            UPDATE contacts
 
-      c=r.rows[0];
+            SET
+              whatsapp_jid =
+                $2,
+
+              phone_number =
+                COALESCE(
+                  $3,
+                  phone_number
+                ),
+
+              current_platform =
+                'whatsapp',
+
+              platform_status =
+                'WHATSAPP_ACTIVE',
+
+              last_message_at =
+                NOW(),
+
+              updated_at =
+                NOW()
+
+            WHERE id =
+              $1
+
+            RETURNING *
+          `,
+          [
+            contact.id,
+            jid,
+            phone
+          ]
+        );
+
+
+      contact =
+        updated.rows[0];
+
+    } else {
+
+      const updated =
+        await pool.query(
+          `
+            UPDATE contacts
+
+            SET
+              phone_number =
+                COALESCE(
+                  phone_number,
+                  $2
+                ),
+
+              last_message_at =
+                NOW(),
+
+              updated_at =
+                NOW()
+
+            WHERE id =
+              $1
+
+            RETURNING *
+          `,
+          [
+            contact.id,
+            phone
+          ]
+        );
+
+
+      contact =
+        updated.rows[0];
+
     }
+
 
     await addContactIdentifier({
-      contactId:c.id,
-      type:"whatsapp_jid",
-      value:jid,
-      sourcePlatform:"whatsapp",
-      isPrimary:true
+
+      contactId:
+        contact.id,
+
+      type:
+        "whatsapp_jid",
+
+      value:
+        jid,
+
+      sourcePlatform:
+        "whatsapp",
+
+      isPrimary:
+        true
+
     });
 
-    if(phone){
+
+    if (
+      phone
+    ) {
+
       await addContactIdentifier({
-        contactId:c.id,
-        type:"phone",
-        value:phone,
-        sourcePlatform:"whatsapp",
-        isPrimary:true
+
+        contactId:
+          contact.id,
+
+        type:
+          "phone",
+
+        value:
+          phone,
+
+        sourcePlatform:
+          "whatsapp",
+
+        isPrimary:
+          true
+
       });
+
     }
+
 
     await pool.query(
-      `INSERT INTO contact_memory_profiles(contact_id)
-       VALUES($1)
-       ON CONFLICT(contact_id) DO NOTHING`,
-      [c.id]
+      `
+        INSERT INTO contact_memory_profiles (
+          contact_id
+        )
+
+        VALUES (
+          $1
+        )
+
+        ON CONFLICT (
+          contact_id
+        )
+
+        DO NOTHING
+      `,
+      [
+        contact.id
+      ]
     );
 
-    return c;
+
+    return contact;
+
   }
 
-  const r=await pool.query(
-    `INSERT INTO contacts(
-      whatsapp_jid,
-      phone_number,
-      current_platform,
-      platform_status,
-      first_contact_at,
-      last_message_at,
-      updated_at
-    )
-    VALUES(
-      $1,
-      $2,
-      CASE
-        WHEN $2 IS NULL THEN NULL
-        ELSE 'whatsapp'
-      END,
-      CASE
-        WHEN $2 IS NULL THEN NULL
-        ELSE 'WHATSAPP_ACTIVE'
-      END,
-      NOW(),
-      NOW(),
-      NOW()
-    )
-    ON CONFLICT(whatsapp_jid)
-    DO UPDATE SET
-      phone_number=COALESCE(
-        contacts.phone_number,
-        EXCLUDED.phone_number
-      ),
-      last_message_at=NOW(),
-      updated_at=NOW()
-    RETURNING *`,
-    [jid,phone]
-  );
 
-  c=r.rows[0];
+  const result =
+    await pool.query(
+      `
+        INSERT INTO contacts (
+
+          whatsapp_jid,
+
+          phone_number,
+
+          current_platform,
+
+          platform_status,
+
+          first_contact_at,
+
+          last_message_at,
+
+          updated_at
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          CASE
+            WHEN $2 IS NULL
+              THEN NULL
+            ELSE
+              'whatsapp'
+          END,
+
+          CASE
+            WHEN $2 IS NULL
+              THEN NULL
+            ELSE
+              'WHATSAPP_ACTIVE'
+          END,
+
+          NOW(),
+
+          NOW(),
+
+          NOW()
+
+        )
+
+        ON CONFLICT (
+          whatsapp_jid
+        )
+
+        DO UPDATE SET
+
+          phone_number =
+            COALESCE(
+              contacts.phone_number,
+              EXCLUDED.phone_number
+            ),
+
+          last_message_at =
+            NOW(),
+
+          updated_at =
+            NOW()
+
+        RETURNING *
+      `,
+      [
+        jid,
+        phone
+      ]
+    );
+
+
+  contact =
+    result.rows[0];
+
 
   await pool.query(
-    `INSERT INTO contact_memory_profiles(contact_id)
-     VALUES($1)
-     ON CONFLICT(contact_id) DO NOTHING`,
-    [c.id]
-  );
+    `
+      INSERT INTO contact_memory_profiles (
+        contact_id
+      )
 
-  await addContactIdentifier({
-    contactId:c.id,
-    type:"whatsapp_jid",
-    value:jid,
-    sourcePlatform:"whatsapp",
-    isPrimary:true
-  });
+      VALUES (
+        $1
+      )
 
-  if(phone){
-    await addContactIdentifier({
-      contactId:c.id,
-      type:"phone",
-      value:phone,
-      sourcePlatform:"whatsapp",
-      isPrimary:true
-    });
-  }
+      ON CONFLICT (
+        contact_id
+      )
 
-  return c;
-}
-
-async function getContactByJid(jid){
-  const r=await pool.query(
-    `SELECT *
-     FROM contacts
-     WHERE whatsapp_jid=$1
-     LIMIT 1`,
-    [jid]
-  );
-
-  return r.rows[0]||null;
-}
-
-async function createTestContact({
-  name,
-  country=null,
-  city=null,
-  language=null
-}){
-  const n=normalizeText(name);
-
-  if(!n){
-    throw new Error(
-      "Testkontakt braucht einen Namen."
-    );
-  }
-
-  const jid=
-    `test-${createTestSlug(n)}@persona.test`;
-
-  const r=await pool.query(
-    `INSERT INTO contacts(
-      whatsapp_jid,
-      display_name,
-      country,
-      city,
-      primary_language,
-      source_platform,
-      current_platform,
-      source_profile_name,
-      contact_status,
-      relationship_stage,
-      auto_reply_enabled,
-      date_lock_enabled,
-      first_contact_at,
-      last_message_at,
-      updated_at
-    )
-    VALUES(
-      $1,$2,$3,$4,$5,
-      'persona_test',
-      'persona_test',
-      $2,
-      'active',
-      'new',
-      TRUE,
-      FALSE,
-      NOW(),
-      NOW(),
-      NOW()
-    )
-    RETURNING *`,
+      DO NOTHING
+    `,
     [
-      jid,
-      n,
-      normalizeText(country)||null,
-      normalizeText(city)||null,
-      normalizeText(language)||null
+      contact.id
     ]
   );
 
+
+  await addContactIdentifier({
+
+    contactId:
+      contact.id,
+
+    type:
+      "whatsapp_jid",
+
+    value:
+      jid,
+
+    sourcePlatform:
+      "whatsapp",
+
+    isPrimary:
+      true
+
+  });
+
+
+  if (
+    phone
+  ) {
+
+    await addContactIdentifier({
+
+      contactId:
+        contact.id,
+
+      type:
+        "phone",
+
+      value:
+        phone,
+
+      sourcePlatform:
+        "whatsapp",
+
+      isPrimary:
+        true
+
+    });
+
+  }
+
+
+  return contact;
+
+}
+
+
+async function getContactByJid(
+  jid
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM contacts
+
+        WHERE whatsapp_jid =
+          $1
+
+        LIMIT 1
+      `,
+      [
+        jid
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
+  );
+
+}
+
+
+/* ==================================================
+   TESTKONTAKT
+================================================== */
+
+async function createTestContact({
+  name,
+  country = null,
+  city = null,
+  language = null
+}) {
+
+  const cleanName =
+    normalizeText(
+      name
+    );
+
+
+  if (
+    !cleanName
+  ) {
+
+    throw new Error(
+      "Testkontakt braucht einen Namen."
+    );
+
+  }
+
+
+  const jid =
+    `test-${createTestSlug(cleanName)}@persona.test`;
+
+
+  const result =
+    await pool.query(
+      `
+        INSERT INTO contacts (
+
+          whatsapp_jid,
+
+          display_name,
+
+          country,
+
+          city,
+
+          primary_language,
+
+          source_platform,
+
+          current_platform,
+
+          source_profile_name,
+
+          contact_status,
+
+          relationship_stage,
+
+          auto_reply_enabled,
+
+          date_lock_enabled,
+
+          first_contact_at,
+
+          last_message_at,
+
+          updated_at
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          $3,
+
+          $4,
+
+          $5,
+
+          'persona_test',
+
+          'persona_test',
+
+          $2,
+
+          'active',
+
+          'new',
+
+          TRUE,
+
+          FALSE,
+
+          NOW(),
+
+          NOW(),
+
+          NOW()
+
+        )
+
+        RETURNING *
+      `,
+      [
+        jid,
+        cleanName,
+        normalizeText(
+          country
+        )
+        ||
+        null,
+        normalizeText(
+          city
+        )
+        ||
+        null,
+        normalizeText(
+          language
+        )
+        ||
+        null
+      ]
+    );
+
+
   await pool.query(
-    `INSERT INTO contact_memory_profiles(contact_id)
-     VALUES($1)
-     ON CONFLICT(contact_id) DO NOTHING`,
-    [r.rows[0].id]
+    `
+      INSERT INTO contact_memory_profiles (
+        contact_id
+      )
+
+      VALUES (
+        $1
+      )
+
+      ON CONFLICT (
+        contact_id
+      )
+
+      DO NOTHING
+    `,
+    [
+      result.rows[0].id
+    ]
   );
 
-  return r.rows[0];
+
+  return result.rows[0];
+
 }
 
-async function getTestContacts(){
-  const r=await pool.query(
-    `SELECT
-       id,
-       whatsapp_jid,
-       display_name,
-       country,
-       city,
-       primary_language,
-       relationship_stage,
-       created_at,
-       updated_at
-     FROM contacts
-     WHERE whatsapp_jid LIKE '%@persona.test'
-     ORDER BY updated_at DESC,display_name ASC`
-  );
 
-  return r.rows;
+async function getTestContacts() {
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+
+          id,
+
+          whatsapp_jid,
+
+          display_name,
+
+          country,
+
+          city,
+
+          primary_language,
+
+          relationship_stage,
+
+          created_at,
+
+          updated_at
+
+        FROM contacts
+
+        WHERE whatsapp_jid
+          LIKE '%@persona.test'
+
+        ORDER BY
+          updated_at DESC,
+          display_name ASC
+      `
+    );
+
+
+  return result.rows;
+
 }
+
+
+/* ==================================================
+   NACHRICHTEN
+================================================== */
 
 async function saveMessage(
   jid,
   direction,
   text,
-  whatsappMessageId=null,
-  options={}
-){
-  const c=await ensureContact(jid);
+  whatsappMessageId = null,
+  options = {}
+) {
 
-  const r=await pool.query(
-    `INSERT INTO messages(
-      whatsapp_jid,
-      direction,
-      message_text,
-      whatsapp_message_id,
-      processing_status,
-      duplicate_of_message_id
-    )
-    VALUES($1,$2,$3,$4,$5,$6)
-    RETURNING *`,
+  const contact =
+    await ensureContact(
+      jid
+    );
+
+
+  const result =
+    await pool.query(
+      `
+        INSERT INTO messages (
+
+          whatsapp_jid,
+
+          direction,
+
+          message_text,
+
+          whatsapp_message_id,
+
+          processing_status,
+
+          duplicate_of_message_id
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          $3,
+
+          $4,
+
+          $5,
+
+          $6
+
+        )
+
+        RETURNING *
+      `,
+      [
+        jid,
+        direction,
+        text || null,
+        whatsappMessageId,
+        options.processingStatus || "processed",
+        options.duplicateOfMessageId || null
+      ]
+    );
+
+
+  await pool.query(
+    `
+      UPDATE contacts
+
+      SET
+        last_message_at =
+          NOW(),
+
+        updated_at =
+          NOW()
+
+      WHERE id =
+        $1
+    `,
     [
-      jid,
-      direction,
-      text||null,
-      whatsappMessageId,
-      options.processingStatus||"processed",
-      options.duplicateOfMessageId||null
+      contact.id
     ]
   );
 
-  await pool.query(
-    `UPDATE contacts
-     SET last_message_at=NOW(),
-         updated_at=NOW()
-     WHERE id=$1`,
-    [c.id]
-  );
 
-  return r.rows[0];
+  return result.rows[0];
+
 }
 
-async function getLastIncomingMessage(jid){
-  const r=await pool.query(
-    `SELECT *
-     FROM messages
-     WHERE whatsapp_jid=$1
-       AND direction='incoming'
-       AND message_text IS NOT NULL
-     ORDER BY id DESC
-     LIMIT 1`,
-    [jid]
+
+/* ==================================================
+   DUPLIKAT
+================================================== */
+
+async function getLastIncomingMessage(
+  jid
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM messages
+
+        WHERE whatsapp_jid =
+          $1
+
+          AND direction =
+            'incoming'
+
+          AND message_text
+            IS NOT NULL
+
+        ORDER BY
+          id DESC
+
+        LIMIT 1
+      `,
+      [
+        jid
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
   );
 
-  return r.rows[0]||null;
 }
+
 
 async function detectImmediateDuplicate(
   jid,
   text
-){
-  const l=await getLastIncomingMessage(jid);
+) {
 
-  if(!l){
+  const last =
+    await getLastIncomingMessage(
+      jid
+    );
+
+
+  if (
+    !last
+  ) {
+
     return null;
+
   }
 
-  if(
-    normalizeForDuplicate(l.message_text)
+
+  if (
+    normalizeForDuplicate(
+      last.message_text
+    )
     !==
-    normalizeForDuplicate(text)
-  ){
+    normalizeForDuplicate(
+      text
+    )
+  ) {
+
     return null;
+
   }
 
-  const age=
+
+  const ageMinutes =
     (
       Date.now()
       -
-      new Date(l.created_at).getTime()
+      new Date(
+        last.created_at
+      ).getTime()
     )
     /
     60000;
 
-  return Number.isFinite(age)
+
+  return (
+    Number.isFinite(
+      ageMinutes
+    )
     &&
-    age<=DUPLICATE_WINDOW_MINUTES
-      ?l
-      :null;
+    ageMinutes
+    <=
+    DUPLICATE_WINDOW_MINUTES
+  )
+
+    ? last
+
+    : null;
+
 }
 
-function duplicateReplyForContact(c){
-  const l=
-    normalizeText(c?.primary_language)
+
+function duplicateReplyForContact(
+  contact
+) {
+
+  const language =
+    normalizeText(
+      contact?.primary_language
+    )
       .toLowerCase();
 
-  if(
-    l.includes("span")
+
+  if (
+    language.includes(
+      "span"
+    )
     ||
-    l==="es"
-  ){
-    return "Esa me llegó dos veces 😄 ¿Fue sin querer o querías asegurarte de que la viera?";
+    language === "es"
+  ) {
+
+    return (
+      "Esa me llegó dos veces 😄 "
+      +
+      "¿Fue sin querer o querías asegurarte de que la viera?"
+    );
+
   }
 
-  if(
-    l.includes("german")
+
+  if (
+    language.includes(
+      "german"
+    )
     ||
-    l.includes("deutsch")
+    language.includes(
+      "deutsch"
+    )
     ||
-    l==="de"
-  ){
-    return "Die kam gerade zweimal 😄 War das aus Versehen oder wolltest du sichergehen, dass ich sie sehe?";
+    language === "de"
+  ) {
+
+    return (
+      "Die kam gerade zweimal 😄 "
+      +
+      "War das aus Versehen oder wolltest du sichergehen, dass ich sie sehe?"
+    );
+
   }
 
-  return "That one just came through twice 😄 Accident, or were you making sure I saw it?";
+
+  return (
+    "That one just came through twice 😄 "
+    +
+    "Accident, or were you making sure I saw it?"
+  );
+
 }
+
+
+/* ==================================================
+   EDITED MESSAGE
+================================================== */
 
 async function updateEditedIncomingMessage({
   jid,
   whatsappMessageId,
   newText
-}){
-  if(
+}) {
+
+  if (
     !jid
     ||
     !whatsappMessageId
     ||
-    !normalizeText(newText)
-  ){
+    !normalizeText(
+      newText
+    )
+  ) {
+
     return null;
+
   }
 
-  const r=await pool.query(
-    `UPDATE messages
-     SET original_message_text=COALESCE(
-           original_message_text,
-           message_text
-         ),
-         message_text=$3,
-         is_edited=TRUE,
-         edited_at=NOW()
-     WHERE whatsapp_jid=$1
-       AND whatsapp_message_id=$2
-       AND direction='incoming'
-     RETURNING *`,
-    [
-      jid,
-      whatsappMessageId,
-      normalizeText(newText)
-    ]
+
+  const result =
+    await pool.query(
+      `
+        UPDATE messages
+
+        SET
+          original_message_text =
+            COALESCE(
+              original_message_text,
+              message_text
+            ),
+
+          message_text =
+            $3,
+
+          is_edited =
+            TRUE,
+
+          edited_at =
+            NOW()
+
+        WHERE whatsapp_jid =
+          $1
+
+          AND whatsapp_message_id =
+            $2
+
+          AND direction =
+            'incoming'
+
+        RETURNING *
+      `,
+      [
+        jid,
+        whatsappMessageId,
+        normalizeText(
+          newText
+        )
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
   );
 
-  return r.rows[0]||null;
 }
+
+
+/* ==================================================
+   VERLAUF
+================================================== */
 
 async function getConversationHistory(
   jid,
-  beforeMessageId=null
-){
-  const q=beforeMessageId
-    ?[
-        `SELECT
-           id,
-           direction,
-           message_text,
-           is_edited,
-           created_at
-         FROM messages
-         WHERE whatsapp_jid=$1
-           AND message_text IS NOT NULL
-           AND id<$2
-         ORDER BY id DESC
-         LIMIT 30`,
-        [jid,beforeMessageId]
-      ]
-    :[
-        `SELECT
-           id,
-           direction,
-           message_text,
-           is_edited,
-           created_at
-         FROM messages
-         WHERE whatsapp_jid=$1
-           AND message_text IS NOT NULL
-         ORDER BY id DESC
-         LIMIT 30`,
-        [jid]
-      ];
+  beforeMessageId = null
+) {
 
-  const r=await pool.query(
-    q[0],
-    q[1]
-  );
+  let result;
 
-  return r.rows.reverse();
+
+  if (
+    beforeMessageId
+  ) {
+
+    result =
+      await pool.query(
+        `
+          SELECT
+
+            id,
+
+            direction,
+
+            message_text,
+
+            is_edited,
+
+            created_at
+
+          FROM messages
+
+          WHERE whatsapp_jid =
+            $1
+
+            AND message_text
+              IS NOT NULL
+
+            AND id <
+              $2
+
+          ORDER BY
+            id DESC
+
+          LIMIT 30
+        `,
+        [
+          jid,
+          beforeMessageId
+        ]
+      );
+
+  } else {
+
+    result =
+      await pool.query(
+        `
+          SELECT
+
+            id,
+
+            direction,
+
+            message_text,
+
+            is_edited,
+
+            created_at
+
+          FROM messages
+
+          WHERE whatsapp_jid =
+            $1
+
+            AND message_text
+              IS NOT NULL
+
+          ORDER BY
+            id DESC
+
+          LIMIT 30
+        `,
+        [
+          jid
+        ]
+      );
+
+  }
+
+
+  return result.rows.reverse();
+
 }
 
-async function getContactMemoryProfile(id){
-  const r=await pool.query(
-    `SELECT *
-     FROM contact_memory_profiles
-     WHERE contact_id=$1
-     LIMIT 1`,
-    [id]
-  );
 
-  return r.rows[0]||null;
-}
+/* ==================================================
+   MEMORY ITEMS
+================================================== */
 
 async function getRelevantMemoryItems(
-  id,
-  limit=60
-){
-  const r=await pool.query(
-    `SELECT *
-     FROM memory_items
-     WHERE contact_id=$1
-       AND status='active'
-       AND use_in_reply=TRUE
-       AND(
-         valid_until IS NULL
-         OR valid_until>NOW()
-       )
-       AND human_review_status<>'rejected'
-     ORDER BY
-       CASE
-         WHEN human_review_status IN(
-           'confirmed',
-           'corrected'
-         )
-         THEN 0
-         ELSE 1
-       END,
-       importance DESC,
-       updated_at DESC
-     LIMIT $2`,
-    [id,limit]
-  );
+  contactId,
+  limit = 60
+) {
 
-  return r.rows;
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM memory_items
+
+        WHERE contact_id =
+          $1
+
+          AND status =
+            'active'
+
+          AND use_in_reply =
+            TRUE
+
+          AND (
+            valid_until IS NULL
+            OR valid_until > NOW()
+          )
+
+          AND human_review_status
+            <> 'rejected'
+
+        ORDER BY
+
+          CASE
+
+            WHEN human_review_status IN (
+              'confirmed',
+              'corrected'
+            )
+
+            THEN 0
+
+            ELSE 1
+
+          END,
+
+          importance DESC,
+
+          updated_at DESC
+
+        LIMIT $2
+      `,
+      [
+        contactId,
+        limit
+      ]
+    );
+
+
+  return result.rows;
+
 }
+
 
 async function getHistoricalMemoryItems(
-  id,
-  limit=200
-){
-  const r=await pool.query(
-    `SELECT *
-     FROM memory_items
-     WHERE contact_id=$1
-       AND status<>'active'
-     ORDER BY created_at DESC
-     LIMIT $2`,
-    [id,limit]
-  );
+  contactId,
+  limit = 200
+) {
 
-  return r.rows;
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM memory_items
+
+        WHERE contact_id =
+          $1
+
+          AND status
+            <> 'active'
+
+        ORDER BY
+          created_at DESC
+
+        LIMIT $2
+      `,
+      [
+        contactId,
+        limit
+      ]
+    );
+
+
+  return result.rows;
+
 }
+
+
+/* ==================================================
+   MEMORY EVENTS
+================================================== */
 
 async function getRelevantMemoryEvents(
-  id,
-  limit=30
-){
-  const r=await pool.query(
-    `SELECT *
-     FROM memory_events
-     WHERE contact_id=$1
-       AND(
-         event_status IN(
-           'active',
-           'open'
-         )
-         OR(
-           requires_follow_up=TRUE
-           AND follow_up_status NOT IN(
-             'completed',
-             'cancelled'
-           )
-         )
-       )
-     ORDER BY
-       importance DESC,
-       started_at DESC
-     LIMIT $2`,
-    [id,limit]
-  );
+  contactId,
+  limit = 30
+) {
 
-  return r.rows;
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM memory_events
+
+        WHERE contact_id =
+          $1
+
+          AND (
+
+            event_status IN (
+              'active',
+              'open'
+            )
+
+            OR (
+
+              requires_follow_up =
+                TRUE
+
+              AND follow_up_status NOT IN (
+                'completed',
+                'cancelled'
+              )
+
+            )
+
+          )
+
+        ORDER BY
+          importance DESC,
+          started_at DESC
+
+        LIMIT $2
+      `,
+      [
+        contactId,
+        limit
+      ]
+    );
+
+
+  return result.rows;
+
 }
+
 
 async function getAllMemoryEvents(
-  id,
-  limit=200
-){
-  const r=await pool.query(
-    `SELECT *
-     FROM memory_events
-     WHERE contact_id=$1
-     ORDER BY created_at DESC
-     LIMIT $2`,
-    [id,limit]
-  );
+  contactId,
+  limit = 200
+) {
 
-  return r.rows;
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM memory_events
+
+        WHERE contact_id =
+          $1
+
+        ORDER BY
+          created_at DESC
+
+        LIMIT $2
+      `,
+      [
+        contactId,
+        limit
+      ]
+    );
+
+
+  return result.rows;
+
 }
 
-async function getMarcelMemory(limit=60){
-  const r=await pool.query(
-    `SELECT
-       category,
-       memory_key,
-       memory_value,
-       importance,
-       usage_notes
-     FROM marcel_memory
-     WHERE status='active'
-       AND allowed_for_bot=TRUE
-       AND(
-         valid_until IS NULL
-         OR valid_until>NOW()
-       )
-     ORDER BY
-       importance DESC,
-       updated_at DESC
-     LIMIT $1`,
-    [limit]
-  );
 
-  return r.rows;
+/* ==================================================
+   MARCEL MEMORY LADEN
+================================================== */
+
+async function getMarcelMemory(
+  limit = 60
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+
+          category,
+
+          memory_key,
+
+          memory_value,
+
+          importance,
+
+          usage_notes
+
+        FROM marcel_memory
+
+        WHERE status =
+          'active'
+
+          AND allowed_for_bot =
+            TRUE
+
+          AND (
+            valid_until IS NULL
+            OR valid_until > NOW()
+          )
+
+        ORDER BY
+          importance DESC,
+          updated_at DESC
+
+        LIMIT $1
+      `,
+      [
+        limit
+      ]
+    );
+
+
+  return result.rows;
+
 }
 
-async function getMarcelLiveState(){
-  const r=await pool.query(
-    `SELECT *
-     FROM marcel_live_state
-     WHERE id=1
-     LIMIT 1`
+
+async function getMarcelLiveState() {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM marcel_live_state
+
+        WHERE id =
+          1
+
+        LIMIT 1
+      `
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    {}
   );
 
-  return r.rows[0]||{};
 }
+
+
+/* ==================================================
+   MEMORY CONTEXT
+================================================== */
 
 function buildMemoryContext({
   contact,
@@ -1432,383 +7431,757 @@ function buildMemoryContext({
   memoryEvents,
   marcelMemory,
   liveState
-}){
-  const pd=profile
-    ?Object.fromEntries(
-        PROFILE_COLUMNS.map(
-          c=>[c,profile[c]||{}]
+}) {
+
+  const profileData =
+    profile
+
+      ? Object.fromEntries(
+          PROFILE_COLUMNS.map(
+            column => [
+              column,
+              profile[column] || {}
+            ]
+          )
         )
-      )
-    :{};
 
-  const items=memoryItems.length
-    ?memoryItems.map(i=>{
-        const v=
-          i.human_review_status==="corrected"
-          &&
-          i.human_corrected_value
-            ?i.human_corrected_value
-            :i.memory_value;
+      : {};
 
-        return `#${i.id}|${i.category}.${i.memory_key}|${i.memory_type}|review=${i.human_review_status}|importance=${i.importance}|${renderJson(v)}`;
-      }).join("\n")
-    :"[keine]";
 
-  const events=memoryEvents.length
-    ?memoryEvents.map(
-        e=>
-          `#${e.id}|${e.event_type}/${e.event_subtype||"-"}|${renderJson(e.event_data)}`
-      ).join("\n")
-    :"[keine]";
+  const renderedItems =
+    memoryItems.length
 
-  const mm=marcelMemory.length
-    ?marcelMemory.map(
-        m=>
-          `${m.category}.${m.memory_key}|${renderJson(m.memory_value)}|${m.usage_notes||""}`
-      ).join("\n")
-    :"[keine]";
+      ? memoryItems
+          .map(
+            item => {
+
+              const value =
+                item.human_review_status
+                ===
+                "corrected"
+                &&
+                item.human_corrected_value
+
+                  ? item.human_corrected_value
+
+                  : item.memory_value;
+
+
+              return (
+                `#${item.id}`
+                +
+                `|${item.category}.${item.memory_key}`
+                +
+                `|${item.memory_type}`
+                +
+                `|review=${item.human_review_status}`
+                +
+                `|importance=${item.importance}`
+                +
+                `|${renderJson(value)}`
+              );
+
+            }
+          )
+          .join(
+            "\n"
+          )
+
+      : "[keine]";
+
+
+  const renderedEvents =
+    memoryEvents.length
+
+      ? memoryEvents
+          .map(
+            event =>
+              `#${event.id}`
+              +
+              `|${event.event_type}/${event.event_subtype || "-"}`
+              +
+              `|${renderJson(event.event_data)}`
+          )
+          .join(
+            "\n"
+          )
+
+      : "[keine]";
+
+
+  const renderedMarcelMemory =
+    marcelMemory.length
+
+      ? marcelMemory
+          .map(
+            memory =>
+              `${memory.category}.${memory.memory_key}`
+              +
+              `|${renderJson(memory.memory_value)}`
+              +
+              `|${memory.usage_notes || ""}`
+          )
+          .join(
+            "\n"
+          )
+
+      : "[keine]";
+
 
   return `
+==================================================
 LANGZEIT-GEDÄCHTNIS V1.7
+==================================================
 
 KONTAKT:
+
 ${renderJson({
-  id:contact?.id,
-  memory_identity_key:contact?.memory_identity_key,
-  canonical_name:contact?.canonical_name,
-  display_name:contact?.display_name,
-  whatsapp_display_name:contact?.whatsapp_display_name,
-  country:contact?.country,
-  city:contact?.city,
-  primary_language:contact?.primary_language,
-  source_platform:contact?.source_platform,
-  current_platform:contact?.current_platform,
-  platform_status:contact?.platform_status,
-  relationship_stage:contact?.relationship_stage
+
+  id:
+    contact?.id,
+
+  memory_identity_key:
+    contact?.memory_identity_key,
+
+  canonical_name:
+    contact?.canonical_name,
+
+  display_name:
+    contact?.display_name,
+
+  whatsapp_display_name:
+    contact?.whatsapp_display_name,
+
+  country:
+    contact?.country,
+
+  city:
+    contact?.city,
+
+  primary_language:
+    contact?.primary_language,
+
+  source_platform:
+    contact?.source_platform,
+
+  current_platform:
+    contact?.current_platform,
+
+  platform_status:
+    contact?.platform_status,
+
+  relationship_stage:
+    contact?.relationship_stage
+
 })}
 
-MARCEL LIVE STATE:
-${renderJson(liveState)}
 
-AKTUELLES FRAUENPROFIL:
-${renderJson(pd)}
+==================================================
+MARCEL LIVE STATE
+==================================================
 
-AKTIVE MEMORIES:
-${items}
+${renderJson(
+  liveState
+)}
 
-EVENTS:
-${events}
 
-MARCEL MEMORY:
-${mm}
+==================================================
+AKTUELLES FRAUENPROFIL
+==================================================
 
-REGELN:
+${renderJson(
+  profileData
+)}
+
+
+==================================================
+AKTIVE MEMORIES
+==================================================
+
+${renderedItems}
+
+
+==================================================
+EVENTS
+==================================================
+
+${renderedEvents}
+
+
+==================================================
+MARCEL MEMORY
+==================================================
+
+${renderedMarcelMemory}
+
+
+==================================================
+REGELN
+==================================================
+
 - Nur ACTIVE gilt aktuell.
-- Human confirmed/corrected hat Vorrang.
+
+- Human confirmed/corrected
+  hat Vorrang.
+
 - Frau und Marcel nie vermischen.
-- Gleichnamige Frauen nie nur anhand Namen zusammenführen.
+
+- Gleichnamige Frauen nie
+  nur anhand Namen zusammenführen.
+
 - Dani != Daniela Messe != Dángela.
+
 - Kate Castillo != alte Kathe.
+
 - Paola Maza != ältere Paola.
+
 - Karla Tinder != Karla Instagram.
-- marcel_knowledge_map = nur was diese Frau über Marcel weiß.
-- Bestehende Fragen nicht erneut stellen.
-- Nach Plattformwechsel Verlauf fortsetzen.
+
+- marcel_knowledge_map =
+  nur was diese Frau über Marcel weiß.
+
+- Bestehende Fragen
+  nicht erneut stellen.
+
+- Nach Plattformwechsel
+  Verlauf fortsetzen.
 `;
+
 }
+
+
+/* ==================================================
+   KI ANTWORT
+================================================== */
 
 async function generateAIReply(
   jid,
   incomingText,
-  incomingMessageDbId=null,
-  extraInstructions=""
-){
-  let conversation="";
-  let memoryContext="";
+  incomingMessageDbId = null,
+  extraInstructions = ""
+) {
 
-  if(jid){
-    const c=
+  let conversation =
+    "";
+
+  let memoryContext =
+    "";
+
+
+  if (
+    jid
+  ) {
+
+    const contact =
       (
-        await getContactByJid(jid)
+        await getContactByJid(
+          jid
+        )
       )
       ||
       (
-        await ensureContact(jid)
+        await ensureContact(
+          jid
+        )
       );
 
+
     const [
-      h,
-      p,
-      mi,
-      me,
-      mm,
-      ls
-    ]=await Promise.all([
-      getConversationHistory(
-        jid,
-        incomingMessageDbId
-      ),
-      getContactMemoryProfile(c.id),
-      getRelevantMemoryItems(c.id),
-      getRelevantMemoryEvents(c.id),
-      getMarcelMemory(),
-      getMarcelLiveState()
-    ]);
+      history,
+      profile,
+      memoryItems,
+      memoryEvents,
+      marcelMemory,
+      liveState
+    ] =
+      await Promise.all([
 
-    conversation=h.map(
-      x=>
-        `${x.direction==="incoming"?"Andere Person":"Marcel"}: ${x.message_text}`
-    ).join("\n");
+        getConversationHistory(
+          jid,
+          incomingMessageDbId
+        ),
 
-    memoryContext=buildMemoryContext({
-      contact:c,
-      profile:p,
-      memoryItems:mi,
-      memoryEvents:me,
-      marcelMemory:mm,
-      liveState:ls
-    });
+        getContactMemoryProfile(
+          contact.id
+        ),
+
+        getRelevantMemoryItems(
+          contact.id
+        ),
+
+        getRelevantMemoryEvents(
+          contact.id
+        ),
+
+        getMarcelMemory(),
+
+        getMarcelLiveState()
+
+      ]);
+
+
+    conversation =
+      history
+        .map(
+          item =>
+            `${item.direction === "incoming" ? "Andere Person" : "Marcel"}: ${item.message_text}`
+        )
+        .join(
+          "\n"
+        );
+
+
+    memoryContext =
+      buildMemoryContext({
+
+        contact,
+
+        profile,
+
+        memoryItems,
+
+        memoryEvents,
+
+        marcelMemory,
+
+        liveState
+
+      });
+
   }
 
-  const r=await openai.responses.create({
-    model:MODEL,
 
-    instructions:`
+  const response =
+    await openai.responses.create({
+
+      model:
+        MODEL,
+
+
+      instructions: `
 ${MARCEL_PERSONA_V1_7}
 
 ${memoryContext}
 
-Nutze Verlauf als Kurzzeitgedächtnis und aktive Memories als Langzeitwissen.
+Nutze Verlauf
+als Kurzzeitgedächtnis
+und aktive Memories
+als Langzeitwissen.
 
 Widersprich bekannten Fakten nicht.
+
 Frage nichts erneut.
 
-Keine KI-Füllsätze,
-keine Eigenschaftslisten,
-keine künstlichen Kosenamen.
+Keine KI-Füllsätze.
 
-${extraInstructions}
+Keine Eigenschaftslisten.
 
-Gib ausschließlich Marcels Nachricht aus.
+Keine künstlichen Kosenamen.
+
+${extraInstructions || ""}
+
+Gib ausschließlich
+Marcels Nachricht aus.
 `,
 
-    input:`
-BISHERIGER VERLAUF:
 
-${conversation||"[keiner]"}
+      input: `
+==================================================
+BISHERIGER VERLAUF
+==================================================
 
-NEUE NACHRICHT:
+${conversation || "[keiner]"}
+
+
+==================================================
+NEUE NACHRICHT
+==================================================
 
 ${incomingText}
 
+
+==================================================
+AUFGABE
+==================================================
+
 Schreibe Marcels Antwort.
 `
-  });
+    });
 
-  return r.output_text?.trim()||"";
+
+  return (
+    response.output_text
+      ?.trim()
+    ||
+    ""
+  );
+
 }
+
+
+/* ==================================================
+   MEMORY SUCHEN
+================================================== */
 
 async function findSimilarActiveMemory(
-  id,
-  cat,
+  contactId,
+  category,
   key
-){
-  const r=await pool.query(
-    `SELECT *
-     FROM memory_items
-     WHERE contact_id=$1
-       AND category=$2
-       AND memory_key=$3
-       AND status='active'
-     ORDER BY updated_at DESC
-     LIMIT 1`,
-    [id,cat,key]
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM memory_items
+
+        WHERE contact_id =
+          $1
+
+          AND category =
+            $2
+
+          AND memory_key =
+            $3
+
+          AND status =
+            'active'
+
+        ORDER BY
+          updated_at DESC
+
+        LIMIT 1
+      `,
+      [
+        contactId,
+        category,
+        key
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
   );
 
-  return r.rows[0]||null;
 }
+
+
+/* ==================================================
+   MEMORY RETIRE
+================================================== */
 
 async function retireMemoryItems(
-  id,
+  contactId,
   ids
-){
-  const s=cleanIntegerArray(ids);
+) {
 
-  if(!s.length){
+  const safeIds =
+    cleanIntegerArray(
+      ids
+    );
+
+
+  if (
+    !safeIds.length
+  ) {
+
     return;
+
   }
 
+
   await pool.query(
-    `UPDATE memory_items
-     SET status='superseded',
-         valid_until=COALESCE(
-           valid_until,
-           NOW()
-         ),
-         updated_at=NOW()
-     WHERE contact_id=$1
-       AND id=ANY($2::bigint[])
-       AND status='active'
-       AND human_review_status NOT IN(
-         'confirmed',
-         'corrected'
-       )`,
-    [id,s]
+    `
+      UPDATE memory_items
+
+      SET
+        status =
+          'superseded',
+
+        valid_until =
+          COALESCE(
+            valid_until,
+            NOW()
+          ),
+
+        updated_at =
+          NOW()
+
+      WHERE contact_id =
+        $1
+
+        AND id =
+          ANY(
+            $2::bigint[]
+          )
+
+        AND status =
+          'active'
+
+        AND human_review_status NOT IN (
+          'confirmed',
+          'corrected'
+        )
+    `,
+    [
+      contactId,
+      safeIds
+    ]
   );
+
 }
 
+
+/* ==================================================
+   KINDER LOGIK
+================================================== */
+
 function childSignalFromMemory(
-  cat,
+  category,
   key,
-  val
-){
-  if(
-    normalizeText(cat)
+  value
+) {
+
+  if (
+    normalizeText(
+      category
+    )
       .toLowerCase()
     !==
     "children"
-  ){
+  ) {
+
     return null;
+
   }
 
-  const k=
-    normalizeText(key)
+
+  const memoryKey =
+    normalizeText(
+      key
+    )
       .toLowerCase();
 
-  const v=
-    val
-    &&
-    typeof val==="object"
-      ?val
-      :{};
 
-  if(
-    k.includes("has_no_children")
+  const memoryValue =
+    value
+    &&
+    typeof value === "object"
+
+      ? value
+
+      : {};
+
+
+  if (
+    memoryKey.includes(
+      "has_no_children"
+    )
     ||
     (
-      k.includes("has_children")
+      memoryKey.includes(
+        "has_children"
+      )
       &&
       (
-        v.has_children===false
+        memoryValue.has_children === false
         ||
-        v.value===false
+        memoryValue.value === false
       )
     )
     ||
-    v.child_count===0
+    memoryValue.child_count === 0
     ||
-    v.count===0
-  ){
+    memoryValue.count === 0
+  ) {
+
     return "none";
+
   }
 
-  if(
-    k.includes("has_son")
+
+  if (
+    memoryKey.includes(
+      "has_son"
+    )
     ||
-    v.has_son===true
+    memoryValue.has_son === true
     ||
-    v.son===true
-  ){
+    memoryValue.son === true
+  ) {
+
     return "son";
+
   }
 
-  if(
-    k.includes("has_daughter")
+
+  if (
+    memoryKey.includes(
+      "has_daughter"
+    )
     ||
-    v.has_daughter===true
+    memoryValue.has_daughter === true
     ||
-    v.daughter===true
-  ){
+    memoryValue.daughter === true
+  ) {
+
     return "daughter";
+
   }
 
-  if(
-    k.includes("has_children")
+
+  if (
+    memoryKey.includes(
+      "has_children"
+    )
     ||
-    v.has_children===true
+    memoryValue.has_children === true
     ||
-    Number(v.child_count)>0
+    Number(
+      memoryValue.child_count
+    ) > 0
     ||
-    Number(v.count)>0
-  ){
+    Number(
+      memoryValue.count
+    ) > 0
+  ) {
+
     return "children";
+
   }
+
 
   return null;
+
 }
 
+
+/* ==================================================
+   DETERMINISTISCHER WIDERSPRUCH
+================================================== */
+
 async function detectDeterministicContradiction(
-  id,
+  contactId,
   item
-){
-  const ns=
+) {
+
+  const newSignal =
     childSignalFromMemory(
+
       item?.category,
+
       item?.memory_key,
+
       item?.memory_value
+
     );
 
-  if(!ns){
+
+  if (
+    !newSignal
+  ) {
+
     return null;
+
   }
 
-  const a=
+
+  const active =
     (
       await getRelevantMemoryItems(
-        id,
+        contactId,
         200
       )
     )
-    .filter(
-      x=>
-        normalizeText(x.category)
-          .toLowerCase()
-        ===
-        "children"
-    );
-
-  for(const e of a){
-    const v=
-      e.human_review_status==="corrected"
-      &&
-      e.human_corrected_value
-        ?e.human_corrected_value
-        :e.memory_value;
-
-    const os=
-      childSignalFromMemory(
-        e.category,
-        e.memory_key,
-        v
+      .filter(
+        memory =>
+          normalizeText(
+            memory.category
+          )
+            .toLowerCase()
+          ===
+          "children"
       );
 
-    if(
+
+  for (
+    const existing
+    of active
+  ) {
+
+    const value =
+      existing.human_review_status
+      ===
+      "corrected"
+      &&
+      existing.human_corrected_value
+
+        ? existing.human_corrected_value
+
+        : existing.memory_value;
+
+
+    const oldSignal =
+      childSignalFromMemory(
+
+        existing.category,
+
+        existing.memory_key,
+
+        value
+
+      );
+
+
+    const conflict =
       (
-        ns==="none"
+        newSignal === "none"
         &&
         [
           "son",
           "daughter",
           "children"
-        ].includes(os)
+        ].includes(
+          oldSignal
+        )
       )
       ||
       (
-        os==="none"
+        oldSignal === "none"
         &&
         [
           "son",
           "daughter",
           "children"
-        ].includes(ns)
-      )
-    ){
-      return e;
+        ].includes(
+          newSignal
+        )
+      );
+
+
+    if (
+      conflict
+    ) {
+
+      return existing;
+
     }
+
   }
 
+
   return null;
+
 }
+
+
+/* ==================================================
+   CONTRADICTION EVENT
+================================================== */
 
 async function createContradictionEvent({
   contactId,
@@ -1816,42 +8189,72 @@ async function createContradictionEvent({
   proposedItem,
   incomingMessageDbId,
   incomingText
-}){
+}) {
+
   await pool.query(
-    `INSERT INTO memory_events(
-      contact_id,
-      event_type,
-      event_subtype,
-      title,
-      event_data,
-      event_status,
-      importance,
-      sensitivity,
-      source_message_ids,
-      evidence_summary,
-      marcel_review_required
-    )
-    VALUES(
-      $1,
-      'possible_contradiction',
-      'deterministic_fact_conflict',
-      'Möglicher Widerspruch',
-      $2::jsonb,
-      'active',
-      4,
-      'personal',
-      $3::jsonb,
-      $4,
-      TRUE
-    )`,
+    `
+      INSERT INTO memory_events (
+
+        contact_id,
+
+        event_type,
+
+        event_subtype,
+
+        title,
+
+        event_data,
+
+        event_status,
+
+        importance,
+
+        sensitivity,
+
+        source_message_ids,
+
+        evidence_summary,
+
+        marcel_review_required
+
+      )
+
+      VALUES (
+
+        $1,
+
+        'possible_contradiction',
+
+        'deterministic_fact_conflict',
+
+        'Möglicher Widerspruch',
+
+        $2::jsonb,
+
+        'active',
+
+        4,
+
+        'personal',
+
+        $3::jsonb,
+
+        $4,
+
+        TRUE
+
+      )
+    `,
     [
       contactId,
 
       JSON.stringify({
+
         existing_memory_id:
           existingItem.id,
 
-        existing_fact:{
+        existing_fact: {
+
           category:
             existingItem.category,
 
@@ -1860,9 +8263,11 @@ async function createContradictionEvent({
 
           memory_value:
             existingItem.memory_value
+
         },
 
-        proposed_fact:{
+        proposed_fact: {
+
           category:
             proposedItem.category,
 
@@ -1871,78 +8276,126 @@ async function createContradictionEvent({
 
           memory_value:
             proposedItem.memory_value
+
         }
+
       }),
 
       JSON.stringify(
         incomingMessageDbId
-          ?[incomingMessageDbId]
-          :[]
+          ? [
+              incomingMessageDbId
+            ]
+          : []
       ),
 
-      normalizeText(incomingText)
+      normalizeText(
+        incomingText
+      )
       ||
       "Neue Aussage kollidiert mit bestehendem Fakt."
     ]
   );
+
 }
 
+
+/* ==================================================
+   MEMORY ITEMS ANWENDEN
+================================================== */
+
 async function applyMemoryItems(
-  id,
+  contactId,
   items,
   sourceId,
-  incomingText=""
-){
-  if(!Array.isArray(items)){
+  incomingText = ""
+) {
+
+  if (
+    !Array.isArray(
+      items
+    )
+  ) {
+
     return;
+
   }
 
-  for(const x of items.slice(0,25)){
-    const cat=
+
+  for (
+    const item
+    of items.slice(
+      0,
+      25
+    )
+  ) {
+
+    const category =
       normalizeText(
-        x?.category
+        item?.category
       );
 
-    const key=
+
+    const key =
       normalizeText(
-        x?.memory_key
+        item?.memory_key
       );
 
-    if(
-      !cat
+
+    if (
+      !category
       ||
       !key
-    ){
+    ) {
+
       continue;
+
     }
 
-    const con=
+
+    const contradiction =
       await detectDeterministicContradiction(
-        id,
-        x
+        contactId,
+        item
       );
 
-    if(con){
+
+    if (
+      contradiction
+    ) {
+
       await createContradictionEvent({
-        contactId:id,
-        existingItem:con,
-        proposedItem:x,
+
+        contactId,
+
+        existingItem:
+          contradiction,
+
+        proposedItem:
+          item,
+
         incomingMessageDbId:
           sourceId,
+
         incomingText
+
       });
 
+
       continue;
+
     }
 
-    const existing=
+
+    const existing =
       await findSimilarActiveMemory(
-        id,
-        cat,
+        contactId,
+        category,
         key
       );
 
-    if(
+
+    if (
       existing
       &&
       [
@@ -1951,11 +8404,14 @@ async function applyMemoryItems(
       ].includes(
         existing.human_review_status
       )
-    ){
+    ) {
+
       continue;
+
     }
 
-    const type=
+
+    const memoryType =
       [
         "self_reported",
         "explicit_fact",
@@ -1963,272 +8419,452 @@ async function applyMemoryItems(
         "interpretation",
         "temporary_state"
       ].includes(
-        x?.memory_type
+        item?.memory_type
       )
-        ?x.memory_type
-        :"interpretation";
 
-    const val=
-      x?.memory_value
+        ? item.memory_type
+
+        : "interpretation";
+
+
+    const value =
+      item?.memory_value
       &&
-      typeof x.memory_value==="object"
+      typeof item.memory_value
+      ===
+      "object"
       &&
       !Array.isArray(
-        x.memory_value
+        item.memory_value
       )
-        ?x.memory_value
-        :{
+
+        ? item.memory_value
+
+        : {
             value:
-              x?.memory_value
+              item?.memory_value
               ??
               null
           };
 
-    const conf=
+
+    const confidence =
       clampConfidence(
-        x?.confidence
+        item?.confidence
       );
 
-    const imp=
+
+    const importance =
       clampImportance(
-        x?.importance
+        item?.importance
       );
 
-    const quote=
+
+    const quote =
       normalizeText(
-        x?.source_quote
+        item?.source_quote
       )
       ||
       null;
 
-    if(existing){
-      if(
+
+    if (
+      existing
+    ) {
+
+      if (
         renderJson(
           existing.memory_value
         )
         ===
-        renderJson(val)
-      ){
+        renderJson(
+          value
+        )
+      ) {
+
         await pool.query(
-          `UPDATE memory_items
-           SET confidence=GREATEST(
-                 confidence,
-                 $2
-               ),
-               source_quote=COALESCE(
-                 $3,
-                 source_quote
-               ),
-               source_message_id=COALESCE(
-                 $4,
-                 source_message_id
-               ),
-               importance=GREATEST(
-                 importance,
-                 $5
-               ),
-               updated_at=NOW()
-           WHERE id=$1`,
+          `
+            UPDATE memory_items
+
+            SET
+              confidence =
+                GREATEST(
+                  confidence,
+                  $2
+                ),
+
+              source_quote =
+                COALESCE(
+                  $3,
+                  source_quote
+                ),
+
+              source_message_id =
+                COALESCE(
+                  $4,
+                  source_message_id
+                ),
+
+              importance =
+                GREATEST(
+                  importance,
+                  $5
+                ),
+
+              updated_at =
+                NOW()
+
+            WHERE id =
+              $1
+          `,
           [
             existing.id,
-            conf,
+            confidence,
             quote,
-            sourceId||null,
-            imp
+            sourceId || null,
+            importance
           ]
         );
 
+
         continue;
+
       }
 
+
       await pool.query(
-        `UPDATE memory_items
-         SET status='superseded',
-             valid_until=NOW(),
-             updated_at=NOW()
-         WHERE id=$1`,
-        [existing.id]
+        `
+          UPDATE memory_items
+
+          SET
+            status =
+              'superseded',
+
+            valid_until =
+              NOW(),
+
+            updated_at =
+              NOW()
+
+          WHERE id =
+            $1
+        `,
+        [
+          existing.id
+        ]
       );
+
     }
 
-    const hrs=
-      x?.valid_until_hours==null
-        ?null
-        :Number(
-            x.valid_until_hours
+
+    const validUntilHours =
+      item?.valid_until_hours
+      == null
+
+        ? null
+
+        : Number(
+            item.valid_until_hours
           );
 
+
     await pool.query(
-      `INSERT INTO memory_items(
-        contact_id,
-        category,
-        memory_key,
-        memory_value,
-        memory_type,
-        confidence,
-        source_message_id,
-        source_quote,
-        valid_from,
-        valid_until,
-        supersedes_memory_id,
-        importance,
-        use_in_reply
-      )
-      VALUES(
-        $1,
-        $2,
-        $3,
-        $4::jsonb,
-        $5,
-        $6,
-        $7,
-        $8,
-        NOW(),
-        CASE
-          WHEN $9::double precision IS NULL
-          THEN NULL
-          ELSE
-            NOW()
-            +
-            (
-              $9::text
-              ||
-              ' hours'
-            )::interval
-        END,
-        $10,
-        $11,
-        $12
-      )`,
+      `
+        INSERT INTO memory_items (
+
+          contact_id,
+
+          category,
+
+          memory_key,
+
+          memory_value,
+
+          memory_type,
+
+          confidence,
+
+          source_message_id,
+
+          source_quote,
+
+          valid_from,
+
+          valid_until,
+
+          supersedes_memory_id,
+
+          importance,
+
+          use_in_reply
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          $3,
+
+          $4::jsonb,
+
+          $5,
+
+          $6,
+
+          $7,
+
+          $8,
+
+          NOW(),
+
+          CASE
+
+            WHEN $9::double precision
+              IS NULL
+
+            THEN NULL
+
+            ELSE
+
+              NOW()
+
+              +
+
+              (
+                $9::text
+                ||
+                ' hours'
+              )::interval
+
+          END,
+
+          $10,
+
+          $11,
+
+          $12
+
+        )
+      `,
       [
-        id,
-        cat,
+        contactId,
+        category,
         key,
-        JSON.stringify(val),
-        type,
-        conf,
-        sourceId||null,
+        JSON.stringify(
+          value
+        ),
+        memoryType,
+        confidence,
+        sourceId || null,
         quote,
-        Number.isFinite(hrs)
-          ?hrs
-          :null,
-        existing?.id||null,
-        imp,
-        x?.use_in_reply!==false
+        Number.isFinite(
+          validUntilHours
+        )
+          ? validUntilHours
+          : null,
+        existing?.id || null,
+        importance,
+        item?.use_in_reply !== false
       ]
     );
+
   }
+
 }
 
+
+/* ==================================================
+   MEMORY EVENTS ANWENDEN
+================================================== */
+
 async function applyMemoryEvents(
-  id,
+  contactId,
   events,
   sourceId
-){
-  if(!Array.isArray(events)){
+) {
+
+  if (
+    !Array.isArray(
+      events
+    )
+  ) {
+
     return;
+
   }
 
-  for(const e of events.slice(0,20)){
-    const type=
+
+  for (
+    const event
+    of events.slice(
+      0,
+      20
+    )
+  ) {
+
+    const eventType =
       normalizeText(
-        e?.event_type
+        event?.event_type
       );
 
-    if(!type){
+
+    if (
+      !eventType
+    ) {
+
       continue;
+
     }
 
+
     await pool.query(
-      `INSERT INTO memory_events(
-        contact_id,
-        event_type,
-        event_subtype,
-        title,
-        event_data,
-        event_status,
-        importance,
-        sensitivity,
-        source_message_ids,
-        evidence_summary,
-        requires_follow_up,
-        follow_up_status,
-        bot_action,
-        marcel_review_required
-      )
-      VALUES(
-        $1,
-        $2,
-        $3,
-        $4,
-        $5::jsonb,
-        'active',
-        $6,
-        $7,
-        $8::jsonb,
-        $9,
-        $10,
-        CASE
-          WHEN $10=TRUE
-          THEN 'pending'
-          ELSE 'none'
-        END,
-        $11,
-        $12
-      )`,
+      `
+        INSERT INTO memory_events (
+
+          contact_id,
+
+          event_type,
+
+          event_subtype,
+
+          title,
+
+          event_data,
+
+          event_status,
+
+          importance,
+
+          sensitivity,
+
+          source_message_ids,
+
+          evidence_summary,
+
+          requires_follow_up,
+
+          follow_up_status,
+
+          bot_action,
+
+          marcel_review_required
+
+        )
+
+        VALUES (
+
+          $1,
+
+          $2,
+
+          $3,
+
+          $4,
+
+          $5::jsonb,
+
+          'active',
+
+          $6,
+
+          $7,
+
+          $8::jsonb,
+
+          $9,
+
+          $10,
+
+          CASE
+
+            WHEN $10 =
+              TRUE
+
+            THEN 'pending'
+
+            ELSE 'none'
+
+          END,
+
+          $11,
+
+          $12
+
+        )
+      `,
       [
-        id,
-        type,
+        contactId,
+        eventType,
         normalizeText(
-          e?.event_subtype
+          event?.event_subtype
         )
         ||
         null,
         normalizeText(
-          e?.title
+          event?.title
         )
         ||
         null,
         JSON.stringify(
-          e?.event_data
+          event?.event_data
           &&
-          typeof e.event_data==="object"
-            ?e.event_data
-            :{}
+          typeof event.event_data
+          ===
+          "object"
+
+            ? event.event_data
+
+            : {}
         ),
         clampImportance(
-          e?.importance
+          event?.importance
         ),
         [
           "normal",
           "personal",
           "intimate"
         ].includes(
-          e?.sensitivity
+          event?.sensitivity
         )
-          ?e.sensitivity
-          :"normal",
+          ? event.sensitivity
+          : "normal",
         JSON.stringify(
           sourceId
-            ?[sourceId]
-            :[]
+            ? [
+                sourceId
+              ]
+            : []
         ),
         normalizeText(
-          e?.evidence_summary
+          event?.evidence_summary
         )
         ||
         null,
-        e?.requires_follow_up===true,
+        event?.requires_follow_up
+        ===
+        true,
         normalizeText(
-          e?.bot_action
+          event?.bot_action
         )
         ||
         null,
-        e?.marcel_review_required===true
+        event?.marcel_review_required
+        ===
+        true
       ]
     );
+
   }
+
 }
+
+
+/* ==================================================
+   MEMORY EXTRACTOR
+================================================== */
 
 async function extractMemoryUpdates({
   jid,
@@ -2237,64 +8873,107 @@ async function extractMemoryUpdates({
   incomingMessageDbId,
   outgoingText,
   outgoingMessageDbId
-}){
+}) {
+
   const [
-    h,
-    p,
+    history,
+    profile,
     items,
     events,
-    ls
-  ]=await Promise.all([
-    getConversationHistory(jid),
-    getContactMemoryProfile(contactId),
-    getRelevantMemoryItems(
-      contactId,
-      100
-    ),
-    getRelevantMemoryEvents(
-      contactId,
-      50
-    ),
-    getMarcelLiveState()
-  ]);
+    liveState
+  ] =
+    await Promise.all([
 
-  const mem=
-    items.map(i=>
-      `ID=${i.id}|${i.category}.${i.memory_key}|review=${i.human_review_status}|${renderJson(
-        i.human_review_status==="corrected"
-        &&
-        i.human_corrected_value
-          ?i.human_corrected_value
-          :i.memory_value
-      )}`
-    ).join("\n");
+      getConversationHistory(
+        jid
+      ),
 
-  const response=
+      getContactMemoryProfile(
+        contactId
+      ),
+
+      getRelevantMemoryItems(
+        contactId,
+        100
+      ),
+
+      getRelevantMemoryEvents(
+        contactId,
+        50
+      ),
+
+      getMarcelLiveState()
+
+    ]);
+
+
+  const memoryText =
+    items
+      .map(
+        item =>
+          `ID=${item.id}`
+          +
+          `|${item.category}.${item.memory_key}`
+          +
+          `|review=${item.human_review_status}`
+          +
+          `|${renderJson(
+            item.human_review_status
+            ===
+            "corrected"
+            &&
+            item.human_corrected_value
+
+              ? item.human_corrected_value
+
+              : item.memory_value
+          )}`
+      )
+      .join(
+        "\n"
+      );
+
+
+  const response =
     await openai.responses.create({
-      model:MODEL,
 
-      instructions:`
+      model:
+        MODEL,
+
+
+      instructions: `
 Du bist Memory-Extractor.
 
 Antworte nicht der Frau.
 
-Neue Fakten erkennen,
-alte nicht neu speichern,
-temporäre Zustände sauber ersetzen,
+Neue Fakten erkennen.
+
+Alte Fakten nicht neu speichern.
+
+Temporäre Zustände sauber ersetzen.
+
 Widersprüche nicht blind überschreiben.
 
-Human confirmed/corrected Memory niemals überschreiben oder retiren.
+Human confirmed/corrected Memory
+niemals überschreiben oder retiren.
 
 Gleichnamige Frauen nie vermischen.
 
 Dani != Daniela Messe != Dángela.
+
 Kate Castillo != alte Kathe.
+
 Paola Maza != ältere Paola.
+
 Karla Tinder != Karla Instagram.
 
-Frau/Marcel/Dritte strikt trennen.
+Frau,
+Marcel
+und Dritte
+strikt trennen.
 
-marcel_knowledge_map nur für Wissen dieser Frau über Marcel.
+marcel_knowledge_map
+nur für Wissen dieser Frau über Marcel.
 
 Gib ausschließlich JSON:
 
@@ -2303,134 +8982,227 @@ Gib ausschließlich JSON:
   "items": [],
   "events": [],
   "profile_snapshot": {
-    ${PROFILE_COLUMNS.map(
-      c=>`"${c}": {}`
-    ).join(",")}
+    ${PROFILE_COLUMNS
+      .map(
+        column =>
+          `"${column}": {}`
+      )
+      .join(",")}
   }
 }
 `,
 
-      input:`
-LIVE STATE:
 
-${renderJson(ls)}
+      input: `
+==================================================
+LIVE STATE
+==================================================
 
-BISHERIGES PROFIL:
+${renderJson(
+  liveState
+)}
 
-${renderJson(p||{})}
 
-AKTIVE MEMORIES:
+==================================================
+BISHERIGES PROFIL
+==================================================
 
-${mem||"[keine]"}
+${renderJson(
+  profile || {}
+)}
 
-VERLAUF:
 
-${h.slice(-20).map(
-  x=>
-    `${x.direction==="incoming"?"Sie":"Marcel"}: ${x.message_text}`
-).join("\n")}
+==================================================
+AKTIVE MEMORIES
+==================================================
 
-NEU SIE:
+${memoryText || "[keine]"}
+
+
+==================================================
+VERLAUF
+==================================================
+
+${history
+  .slice(
+    -20
+  )
+  .map(
+    item =>
+      `${item.direction === "incoming" ? "Sie" : "Marcel"}: ${item.message_text}`
+  )
+  .join(
+    "\n"
+  )}
+
+
+==================================================
+NEU SIE
+==================================================
 
 ${incomingText}
 
-MARCEL ANTWORT:
+
+==================================================
+MARCEL ANTWORT
+==================================================
 
 ${outgoingText}
+
+
+==================================================
+AUFGABE
+==================================================
 
 Aktualisiere Memory.
 `
     });
 
-  const empty=
+
+  const emptySnapshot =
     Object.fromEntries(
       PROFILE_COLUMNS.map(
-        c=>[c,{}]
+        column => [
+          column,
+          {}
+        ]
       )
     );
 
-  const parsed=
+
+  const parsed =
     safeJsonParse(
       response.output_text,
       {
-        retire_item_ids:[],
-        items:[],
-        events:[],
-        profile_snapshot:empty
+        retire_item_ids: [],
+        items: [],
+        events: [],
+        profile_snapshot:
+          emptySnapshot
       }
     );
 
-  if(
+
+  if (
     !parsed
     ||
-    typeof parsed!=="object"
-  ){
+    typeof parsed !== "object"
+  ) {
+
     return;
+
   }
+
 
   await retireMemoryItems(
     contactId,
-    parsed.retire_item_ids||[]
+    parsed.retire_item_ids || []
   );
+
 
   await applyMemoryItems(
     contactId,
-    parsed.items||[],
+    parsed.items || [],
     incomingMessageDbId,
     incomingText
   );
 
+
   await applyMemoryEvents(
     contactId,
-    parsed.events||[],
+    parsed.events || [],
     incomingMessageDbId
   );
 
+
   await applyProfileSnapshot(
     contactId,
-    parsed.profile_snapshot||empty
+    parsed.profile_snapshot
+    ||
+    emptySnapshot
   );
+
 
   console.log(
     "Langzeit-Memory V1.7 aktualisiert."
   );
+
 }
 
-function scheduleMemoryUpdate(payload){
+
+/* ==================================================
+   MEMORY UPDATE ASYNCHRON
+================================================== */
+
+function scheduleMemoryUpdate(
+  payload
+) {
+
   setTimeout(
-    ()=>{
+    () => {
+
       extractMemoryUpdates(
         payload
       )
-      .catch(
-        e=>
-          console.error(
-            "Memory-Update fehlgeschlagen:",
-            e
-          )
-      );
+        .catch(
+          error =>
+            console.error(
+              "Memory-Update fehlgeschlagen:",
+              error
+            )
+        );
+
     },
     250
   );
+
 }
 
-function personaPasswordCorrect(password){
-  const e=
+
+/* ==================================================
+   TEST PASSWORT
+================================================== */
+
+function personaPasswordCorrect(
+  password
+) {
+
+  const expected =
     process.env
       .PERSONA_TEST_PASSWORD;
 
-  return !!e
+
+  return (
+    !!expected
     &&
-    password===e;
+    password === expected
+  );
+
 }
 
-async function getTestContactSnapshot(jid){
-  const c=
-    await getContactByJid(jid);
 
-  if(!c){
+/* ==================================================
+   TEST SNAPSHOT
+================================================== */
+
+async function getTestContactSnapshot(
+  jid
+) {
+
+  const contact =
+    await getContactByJid(
+      jid
+    );
+
+
+  if (
+    !contact
+  ) {
+
     return null;
+
   }
+
 
   const [
     history,
@@ -2439,159 +9211,270 @@ async function getTestContactSnapshot(jid){
     historicalItems,
     events,
     liveState
-  ]=await Promise.all([
-    getConversationHistory(jid),
-    getContactMemoryProfile(c.id),
-    getRelevantMemoryItems(
-      c.id,
-      250
-    ),
-    getHistoricalMemoryItems(
-      c.id,
-      250
-    ),
-    getAllMemoryEvents(
-      c.id,
-      200
-    ),
-    getMarcelLiveState()
-  ]);
+  ] =
+    await Promise.all([
+
+      getConversationHistory(
+        jid
+      ),
+
+      getContactMemoryProfile(
+        contact.id
+      ),
+
+      getRelevantMemoryItems(
+        contact.id,
+        250
+      ),
+
+      getHistoricalMemoryItems(
+        contact.id,
+        250
+      ),
+
+      getAllMemoryEvents(
+        contact.id,
+        200
+      ),
+
+      getMarcelLiveState()
+
+    ]);
+
 
   return {
-    contact:c,
+
+    contact,
+
     history,
+
     profile,
+
     activeItems,
+
     historicalItems,
+
     events,
+
     liveState
+
   };
+
 }
+
+
+/* ==================================================
+   STARTSEITE
+================================================== */
 
 app.get(
   "/",
-  (req,res)=>
+  (req, res) => {
+
     res.send(
       `Marcel WhatsApp Bot V1.7 läuft. WhatsApp-Status: ${whatsappStatus}`
-    )
+    );
+
+  }
 );
+
+
+/* ==================================================
+   DB TEST
+================================================== */
 
 app.get(
   "/db-test",
-  async(req,res)=>{
-    try{
-      const r=
+  async (req, res) => {
+
+    try {
+
+      const result =
         await pool.query(
           "SELECT NOW() AS server_time"
         );
 
+
       res.json({
-        ok:true,
+
+        ok:
+          true,
+
         serverTime:
-          r.rows[0]
+          result.rows[0]
             .server_time
+
       });
-    }catch(e){
+
+
+    } catch (error) {
+
+      console.error(
+        "DB-Test Fehler:",
+        error
+      );
+
+
       res
         .status(500)
         .json({
-          ok:false,
+
+          ok:
+            false,
+
           error:
             "Datenbankverbindung fehlgeschlagen"
+
         });
+
     }
+
   }
 );
+
+
+/* ==================================================
+   MEMORY STATUS
+================================================== */
 
 app.get(
   "/memory-status",
-  async(req,res)=>{
-    try{
-      const r=
+  async (req, res) => {
+
+    try {
+
+      const result =
         await pool.query(
-          `SELECT
+          `
+            SELECT
 
-            (
-              SELECT COUNT(*)
-              FROM contacts
-            )
-            contacts,
+              (
+                SELECT COUNT(*)
+                FROM contacts
+              )
+              AS contacts,
 
-            (
-              SELECT COUNT(*)
-              FROM messages
-            )
-            messages,
+              (
+                SELECT COUNT(*)
+                FROM messages
+              )
+              AS messages,
 
-            (
-              SELECT COUNT(*)
-              FROM memory_items
-            )
-            memory_items,
+              (
+                SELECT COUNT(*)
+                FROM memory_items
+              )
+              AS memory_items,
 
-            (
-              SELECT COUNT(*)
-              FROM memory_items
-              WHERE status='active'
-            )
-            active_memory_items,
+              (
+                SELECT COUNT(*)
+                FROM memory_items
+                WHERE status = 'active'
+              )
+              AS active_memory_items,
 
-            (
-              SELECT COUNT(*)
-              FROM memory_events
-            )
-            memory_events,
+              (
+                SELECT COUNT(*)
+                FROM memory_events
+              )
+              AS memory_events,
 
-            (
-              SELECT COUNT(*)
-              FROM contacts
-              WHERE memory_identity_key IS NOT NULL
-            )
-            women_registry_contacts`
+              (
+                SELECT COUNT(*)
+                FROM contacts
+                WHERE memory_identity_key
+                  IS NOT NULL
+              )
+              AS women_registry_contacts
+          `
         );
 
+
       res.json({
-        ok:true,
-        ...r.rows[0]
+
+        ok:
+          true,
+
+        ...result.rows[0]
+
       });
-    }catch(e){
+
+
+    } catch (error) {
+
+      console.error(
+        "Memory-Status Fehler:",
+        error
+      );
+
+
       res
         .status(500)
         .json({
-          ok:false,
+
+          ok:
+            false,
+
           error:
             "Memory-Status konnte nicht geladen werden."
+
         });
+
     }
+
   }
 );
 
+
+/* ==================================================
+   PAIRING CODE
+================================================== */
+
 app.get(
   "/pairing-code",
-  (req,res)=>{
-    if(!WHATSAPP_ENABLED){
+  (req, res) => {
+
+    if (
+      !WHATSAPP_ENABLED
+    ) {
+
       return res.send(
         "WhatsApp ist deaktiviert. Kein Pairing, kein Socket, kein Reconnect."
       );
+
     }
 
-    if(pairingCode){
+
+    if (
+      pairingCode
+    ) {
+
       return res.send(
         `Pairing Code: ${pairingCode}`
       );
+
     }
+
 
     res.send(
       "Noch kein Pairing-Code verfügbar."
     );
+
   }
 );
 
+
+/* ==================================================
+   PERSONA TEST UI
+================================================== */
+
 app.get(
   "/persona-test",
-  (req,res)=>
+  (req, res) => {
+
     res.send(
 `<!doctype html>
+
 <html lang="de">
 
 <head>
@@ -2600,22 +9483,44 @@ app.get(
 
 <meta
   name="viewport"
-  content="width=device-width,initial-scale=1"
+  content="width=device-width,initial-scale=1,viewport-fit=cover"
 >
 
 <title>
-Memory Test V1.7
+Marcel Memory Test V1.7
 </title>
 
 <style>
 
+*{
+  box-sizing:border-box;
+}
+
 body{
-  font-family:-apple-system,Arial;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
   background:#111;
   color:#fff;
+
   max-width:850px;
-  margin:auto;
-  padding:20px
+
+  margin:0 auto;
+  padding:20px;
+}
+
+h1{
+  font-size:34px;
+  line-height:1.1;
+  margin:20px 0 24px;
+}
+
+p{
+  line-height:1.45;
 }
 
 input,
@@ -2624,11 +9529,12 @@ select,
 textarea,
 pre{
   width:100%;
-  padding:12px;
-  margin:6px 0;
+  padding:14px;
+  margin:7px 0;
   border:0;
-  border-radius:10px;
-  box-sizing:border-box
+  border-radius:12px;
+  box-sizing:border-box;
+  font-size:16px;
 }
 
 input,
@@ -2636,474 +9542,1590 @@ select,
 textarea,
 pre{
   background:#222;
-  color:#fff
+  color:#fff;
+}
+
+textarea{
+  min-height:110px;
+  resize:vertical;
 }
 
 button{
-  font-weight:700
+  background:#f4f4f4;
+  color:#1677ff;
+  font-weight:700;
+  cursor:pointer;
+  -webkit-appearance:none;
+  appearance:none;
 }
 
-pre{
-  white-space:pre-wrap
+button:disabled{
+  opacity:.5;
+}
+
+#chat{
+  margin-top:12px;
 }
 
 .msg{
-  padding:10px;
-  margin:6px 0;
-  border-radius:10px
+  padding:11px 12px;
+  margin:7px 0;
+  border-radius:12px;
+  white-space:pre-wrap;
+  word-break:break-word;
 }
 
 .her{
-  background:#333
+  background:#333;
+  margin-right:12%;
 }
 
 .me{
-  background:#173b26
+  background:#173b26;
+  margin-left:12%;
+}
+
+.speaker{
+  font-size:11px;
+  opacity:.65;
+  margin-bottom:4px;
+}
+
+.status{
+  min-height:24px;
+  margin:8px 0 2px;
+  font-size:14px;
+  line-height:1.35;
+}
+
+.status.ok{
+  color:#7fe08a;
+}
+
+.status.error{
+  color:#ff7b7b;
+}
+
+.status.loading{
+  color:#9abfff;
+}
+
+pre{
+  white-space:pre-wrap;
+  word-break:break-word;
+  min-height:80px;
+}
+
+.section-title{
+  font-size:18px;
+  font-weight:700;
+  margin-top:22px;
+}
+
+.muted{
+  color:#aaa;
+  font-size:13px;
 }
 
 </style>
 
 </head>
 
+
 <body>
+
 
 <h1>
 Marcel Memory Test V1.7
 </h1>
 
+
 <p>
 WhatsApp bleibt bei WHATSAPP_ENABLED=false komplett aus.
 </p>
 
+
 <input
-  id="password"
+  id="passwordInput"
   type="password"
   placeholder="Passwort"
+  autocomplete="current-password"
 >
 
-<button onclick="load()">
+
+<button
+  id="loadContactsButton"
+  type="button"
+>
 Testkontakte laden
 </button>
 
-<select id="contacts"></select>
+
+<div
+  id="globalStatus"
+  class="status"
+></div>
+
+
+<select id="contactsSelect">
+
+  <option value="">
+    -- auswählen --
+  </option>
+
+</select>
+
 
 <input
-  id="name"
+  id="newContactNameInput"
+  type="text"
   placeholder="Neue Testfrau"
+  autocomplete="off"
 >
 
-<button onclick="create()">
+
+<button
+  id="createContactButton"
+  type="button"
+>
 Anlegen
 </button>
 
-<div id="chat"></div>
+
+<div
+  id="createStatus"
+  class="status"
+></div>
+
+
+<div
+  id="chat"
+></div>
+
 
 <textarea
-  id="msg"
+  id="messageInput"
   placeholder="Ihre Nachricht"
 ></textarea>
 
-<button onclick="send()">
+
+<button
+  id="sendMessageButton"
+  type="button"
+>
 Testen
 </button>
 
-<pre id="out"></pre>
+
+<div
+  id="sendStatus"
+  class="status"
+></div>
+
+
+<div class="section-title">
+Memory / Profil
+</div>
+
+
+<pre id="outputBox"></pre>
+
 
 <script>
 
-const p=
-  ()=>
-    document
-      .getElementById(
-        "password"
-      )
-      .value;
+(function(){
 
-const api=
-  async(u,o)=>{
-    const r=
-      await fetch(
-        u,
-        o
-      );
+  "use strict";
 
-    const d=
-      await r.json();
 
-    if(!r.ok){
-      throw Error(
-        d.error
-        ||
-        "Fehler"
-      );
-    }
-
-    return d;
-  };
-
-async function load(){
-  const d=
-    await api(
-      "/persona-test/contacts",
-      {
-        method:"POST",
-
-        headers:{
-          "Content-Type":
-            "application/json"
-        },
-
-        body:
-          JSON.stringify({
-            password:p()
-          })
-      }
+  const passwordInput =
+    document.getElementById(
+      "passwordInput"
     );
 
-  contacts.innerHTML=
-    '<option value="">-- auswählen --</option>'
-    +
-    d.contacts.map(
-      x=>
-        '<option value="'
-        +
-        x.whatsapp_jid
-        +
-        '">'
-        +
-        (
-          x.display_name
-          ||
-          x.whatsapp_jid
-        )
-        +
-        '</option>'
-    ).join("");
-}
 
-async function create(){
-  const d=
-    await api(
-      "/persona-test/create-contact",
-      {
-        method:"POST",
-
-        headers:{
-          "Content-Type":
-            "application/json"
-        },
-
-        body:
-          JSON.stringify({
-            password:p(),
-            name:name.value
-          })
-      }
+  const loadContactsButton =
+    document.getElementById(
+      "loadContactsButton"
     );
 
-  await load();
 
-  contacts.value=
-    d.contact
-      .whatsapp_jid;
+  const contactsSelect =
+    document.getElementById(
+      "contactsSelect"
+    );
 
-  await snap();
-}
 
-contacts.onchange=
-  snap;
+  const newContactNameInput =
+    document.getElementById(
+      "newContactNameInput"
+    );
 
-async function snap(){
-  if(!contacts.value){
-    return;
+
+  const createContactButton =
+    document.getElementById(
+      "createContactButton"
+    );
+
+
+  const chatElement =
+    document.getElementById(
+      "chat"
+    );
+
+
+  const messageInput =
+    document.getElementById(
+      "messageInput"
+    );
+
+
+  const sendMessageButton =
+    document.getElementById(
+      "sendMessageButton"
+    );
+
+
+  const outputBox =
+    document.getElementById(
+      "outputBox"
+    );
+
+
+  const globalStatus =
+    document.getElementById(
+      "globalStatus"
+    );
+
+
+  const createStatus =
+    document.getElementById(
+      "createStatus"
+    );
+
+
+  const sendStatus =
+    document.getElementById(
+      "sendStatus"
+    );
+
+
+  function getPassword(){
+
+    return String(
+      passwordInput.value || ""
+    );
+
   }
 
-  const d=
-    await api(
-      "/persona-test/snapshot",
-      {
-        method:"POST",
 
-        headers:{
-          "Content-Type":
-            "application/json"
-        },
+  function setStatus(
+    element,
+    text,
+    type = ""
+  ){
 
-        body:
-          JSON.stringify({
-            password:p(),
-            jid:contacts.value
-          })
-      }
-    );
+    element.textContent =
+      text || "";
 
-  chat.innerHTML=
-    d.history.map(
-      x=>
-        '<div class="msg '
+
+    element.className =
+      "status"
+      +
+      (
+        type
+          ? " " + type
+          : ""
+      );
+
+  }
+
+
+  function escapeHtml(value){
+
+    return String(
+      value ?? ""
+    )
+      .replaceAll(
+        "&",
+        "&amp;"
+      )
+      .replaceAll(
+        "<",
+        "&lt;"
+      )
+      .replaceAll(
+        ">",
+        "&gt;"
+      )
+      .replaceAll(
+        '"',
+        "&quot;"
+      )
+      .replaceAll(
+        "'",
+        "&#039;"
+      );
+
+  }
+
+
+  async function apiRequest(
+    url,
+    options = {}
+  ){
+
+    let response;
+
+
+    try{
+
+      response =
+        await fetch(
+          url,
+          options
+        );
+
+    }catch(error){
+
+      throw new Error(
+        "Server nicht erreichbar: "
         +
         (
-          x.direction==="incoming"
-            ?"her"
-            :"me"
+          error?.message
+          ||
+          "Netzwerkfehler"
+        )
+      );
+
+    }
+
+
+    const rawText =
+      await response.text();
+
+
+    let data;
+
+
+    try{
+
+      data =
+        rawText
+          ? JSON.parse(
+              rawText
+            )
+          : {};
+
+    }catch{
+
+      throw new Error(
+        rawText
+        ||
+        "Ungültige Serverantwort."
+      );
+
+    }
+
+
+    if(
+      !response.ok
+    ){
+
+      throw new Error(
+        data?.error
+        ||
+        "Serverfehler"
+      );
+
+    }
+
+
+    return data;
+
+  }
+
+
+  function renderChat(
+    history
+  ){
+
+    if(
+      !Array.isArray(
+        history
+      )
+      ||
+      history.length === 0
+    ){
+
+      chatElement.innerHTML =
+        '<div class="muted">Noch kein Testverlauf.</div>';
+
+
+      return;
+
+    }
+
+
+    chatElement.innerHTML =
+      history
+        .map(
+          item => {
+
+            const incoming =
+              item.direction
+              ===
+              "incoming";
+
+
+            return (
+              '<div class="msg '
+              +
+              (
+                incoming
+                  ? "her"
+                  : "me"
+              )
+              +
+              '">'
+              +
+              '<div class="speaker">'
+              +
+              (
+                incoming
+                  ? "Sie"
+                  : "Marcel"
+              )
+              +
+              (
+                item.is_edited
+                  ? " · bearbeitet"
+                  : ""
+              )
+              +
+              '</div>'
+              +
+              escapeHtml(
+                item.message_text
+              )
+              +
+              '</div>'
+            );
+
+          }
+        )
+        .join("");
+
+  }
+
+
+  function renderSnapshot(
+    data,
+    extra = {}
+  ){
+
+    renderChat(
+      data?.history || []
+    );
+
+
+    outputBox.textContent =
+      JSON.stringify(
+        {
+
+          ...extra,
+
+          contact:
+            data?.contact
+            ||
+            null,
+
+          profile:
+            data?.profile
+            ||
+            {},
+
+          active:
+            data?.activeItems
+            ||
+            [],
+
+          historical:
+            data?.historicalItems
+            ||
+            [],
+
+          events:
+            data?.events
+            ||
+            [],
+
+          liveState:
+            data?.liveState
+            ||
+            {}
+
+        },
+        null,
+        2
+      );
+
+  }
+
+
+  async function loadContacts(
+    keepJid = null
+  ){
+
+    if(
+      !getPassword()
+    ){
+
+      setStatus(
+        globalStatus,
+        "Bitte zuerst das Passwort eingeben.",
+        "error"
+      );
+
+
+      return;
+
+    }
+
+
+    setStatus(
+      globalStatus,
+      "Testkontakte werden geladen ...",
+      "loading"
+    );
+
+
+    loadContactsButton.disabled =
+      true;
+
+
+    try{
+
+      const data =
+        await apiRequest(
+          "/persona-test/contacts",
+          {
+
+            method:
+              "POST",
+
+            headers:{
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+                password:
+                  getPassword()
+              })
+
+          }
+        );
+
+
+      contactsSelect.innerHTML =
+        '<option value="">-- auswählen --</option>';
+
+
+      for(
+        const contact
+        of data.contacts || []
+      ){
+
+        const option =
+          document.createElement(
+            "option"
+          );
+
+
+        option.value =
+          contact.whatsapp_jid;
+
+
+        let label =
+          contact.display_name
+          ||
+          contact.whatsapp_jid;
+
+
+        if(
+          contact.city
+          ||
+          contact.country
+        ){
+
+          label +=
+            " · "
+            +
+            [
+              contact.city,
+              contact.country
+            ]
+              .filter(
+                Boolean
+              )
+              .join(
+                ", "
+              );
+
+        }
+
+
+        option.textContent =
+          label;
+
+
+        contactsSelect.appendChild(
+          option
+        );
+
+      }
+
+
+      if(
+        keepJid
+      ){
+
+        const exists =
+          Array.from(
+            contactsSelect.options
+          )
+          .some(
+            option =>
+              option.value
+              ===
+              keepJid
+          );
+
+
+        if(
+          exists
+        ){
+
+          contactsSelect.value =
+            keepJid;
+
+
+          await loadSnapshot();
+
+        }
+
+      }
+
+
+      setStatus(
+        globalStatus,
+        String(
+          data.contacts?.length || 0
         )
         +
-        '">'
-        +
-        x.message_text
-        +
-        '</div>'
-    ).join("");
+        " Testkontakt(e) geladen.",
+        "ok"
+      );
 
-  out.textContent=
-    JSON.stringify(
-      {
-        profile:d.profile,
-        active:d.activeItems,
-        events:d.events
-      },
-      null,
-      2
+
+    }catch(error){
+
+      console.error(
+        error
+      );
+
+
+      setStatus(
+        globalStatus,
+        error.message,
+        "error"
+      );
+
+
+    }finally{
+
+      loadContactsButton.disabled =
+        false;
+
+    }
+
+  }
+
+
+  async function createNewTestContact(){
+
+    const contactName =
+      String(
+        newContactNameInput.value
+        ||
+        ""
+      )
+        .trim();
+
+
+    if(
+      !getPassword()
+    ){
+
+      setStatus(
+        createStatus,
+        "Bitte zuerst das Passwort eingeben.",
+        "error"
+      );
+
+
+      return;
+
+    }
+
+
+    if(
+      !contactName
+    ){
+
+      setStatus(
+        createStatus,
+        "Bitte einen Namen eingeben.",
+        "error"
+      );
+
+
+      return;
+
+    }
+
+
+    createContactButton.disabled =
+      true;
+
+
+    setStatus(
+      createStatus,
+      "Testkontakt wird angelegt ...",
+      "loading"
     );
-}
 
-async function send(){
-  const d=
-    await api(
-      "/persona-test/message",
-      {
-        method:"POST",
 
-        headers:{
-          "Content-Type":
-            "application/json"
-        },
+    try{
 
-        body:
-          JSON.stringify({
-            password:p(),
-            jid:contacts.value,
-            message:msg.value
-          })
+      const data =
+        await apiRequest(
+          "/persona-test/create-contact",
+          {
+
+            method:
+              "POST",
+
+            headers:{
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+
+                password:
+                  getPassword(),
+
+                name:
+                  contactName
+
+              })
+
+          }
+        );
+
+
+      if(
+        !data?.contact?.whatsapp_jid
+      ){
+
+        throw new Error(
+          "Der Server hat keine Testkontakt-ID zurückgegeben."
+        );
+
+      }
+
+
+      const newJid =
+        data.contact.whatsapp_jid;
+
+
+      newContactNameInput.value =
+        "";
+
+
+      await loadContacts(
+        newJid
+      );
+
+
+      setStatus(
+        createStatus,
+        "Testkontakt "
+        +
+        (
+          data.contact.display_name
+          ||
+          contactName
+        )
+        +
+        " wurde angelegt.",
+        "ok"
+      );
+
+
+    }catch(error){
+
+      console.error(
+        error
+      );
+
+
+      setStatus(
+        createStatus,
+        error.message,
+        "error"
+      );
+
+
+    }finally{
+
+      createContactButton.disabled =
+        false;
+
+    }
+
+  }
+
+
+  async function loadSnapshot(){
+
+    const jid =
+      String(
+        contactsSelect.value
+        ||
+        ""
+      );
+
+
+    if(
+      !jid
+    ){
+
+      chatElement.innerHTML =
+        '<div class="muted">Bitte einen Testkontakt auswählen.</div>';
+
+
+      outputBox.textContent =
+        "";
+
+
+      return;
+
+    }
+
+
+    try{
+
+      const data =
+        await apiRequest(
+          "/persona-test/snapshot",
+          {
+
+            method:
+              "POST",
+
+            headers:{
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+
+                password:
+                  getPassword(),
+
+                jid
+
+              })
+
+          }
+        );
+
+
+      renderSnapshot(
+        data
+      );
+
+
+    }catch(error){
+
+      console.error(
+        error
+      );
+
+
+      outputBox.textContent =
+        "FEHLER:\\n"
+        +
+        error.message;
+
+    }
+
+  }
+
+
+  async function sendTestMessage(){
+
+    const jid =
+      String(
+        contactsSelect.value
+        ||
+        ""
+      );
+
+
+    const message =
+      String(
+        messageInput.value
+        ||
+        ""
+      )
+        .trim();
+
+
+    if(
+      !getPassword()
+    ){
+
+      setStatus(
+        sendStatus,
+        "Bitte zuerst das Passwort eingeben.",
+        "error"
+      );
+
+
+      return;
+
+    }
+
+
+    if(
+      !jid
+    ){
+
+      setStatus(
+        sendStatus,
+        "Bitte zuerst einen Testkontakt auswählen.",
+        "error"
+      );
+
+
+      return;
+
+    }
+
+
+    if(
+      !message
+    ){
+
+      setStatus(
+        sendStatus,
+        "Bitte eine Nachricht eingeben.",
+        "error"
+      );
+
+
+      return;
+
+    }
+
+
+    sendMessageButton.disabled =
+      true;
+
+
+    setStatus(
+      sendStatus,
+      "Antwort und Memory werden verarbeitet ...",
+      "loading"
+    );
+
+
+    try{
+
+      const data =
+        await apiRequest(
+          "/persona-test/message",
+          {
+
+            method:
+              "POST",
+
+            headers:{
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+
+                password:
+                  getPassword(),
+
+                jid,
+
+                message
+
+              })
+
+          }
+        );
+
+
+      messageInput.value =
+        "";
+
+
+      renderSnapshot(
+        data.snapshot,
+        {
+
+          reply:
+            data.reply,
+
+          duplicate:
+            data.duplicate
+
+        }
+      );
+
+
+      setStatus(
+        sendStatus,
+        data.duplicate
+          ? "Doppelte Nachricht erkannt. Kein zweites Memory erzeugt."
+          : "Antwort und Memory wurden gespeichert.",
+        "ok"
+      );
+
+
+    }catch(error){
+
+      console.error(
+        error
+      );
+
+
+      setStatus(
+        sendStatus,
+        error.message,
+        "error"
+      );
+
+
+    }finally{
+
+      sendMessageButton.disabled =
+        false;
+
+    }
+
+  }
+
+
+  loadContactsButton
+    .addEventListener(
+      "click",
+      () => {
+
+        loadContacts();
+
       }
     );
 
-  msg.value="";
 
-  await snap();
-}
+  createContactButton
+    .addEventListener(
+      "click",
+      () => {
+
+        createNewTestContact();
+
+      }
+    );
+
+
+  contactsSelect
+    .addEventListener(
+      "change",
+      () => {
+
+        loadSnapshot();
+
+      }
+    );
+
+
+  sendMessageButton
+    .addEventListener(
+      "click",
+      () => {
+
+        sendTestMessage();
+
+      }
+    );
+
+
+  newContactNameInput
+    .addEventListener(
+      "keydown",
+      event => {
+
+        if(
+          event.key === "Enter"
+        ){
+
+          event.preventDefault();
+
+
+          createNewTestContact();
+
+        }
+
+      }
+    );
+
+
+})();
 
 </script>
+
 
 </body>
 
 </html>`
-    )
+    );
+
+  }
 );
+
+
+/* ==================================================
+   TESTKONTAKTE LADEN
+================================================== */
 
 app.post(
   "/persona-test/contacts",
-  async(req,res)=>{
-    try{
-      if(
+  async (req, res) => {
+
+    try {
+
+      if (
         !personaPasswordCorrect(
           req.body.password
         )
-      ){
+      ) {
+
         return res
           .status(401)
           .json({
+
             error:
               "Falsches Passwort."
+
           });
+
       }
 
+
+      const contacts =
+        await getTestContacts();
+
+
       res.json({
-        ok:true,
-        contacts:
-          await getTestContacts()
+
+        ok:
+          true,
+
+        contacts
+
       });
-    }catch(e){
+
+
+    } catch (error) {
+
+      console.error(
+        "Testkontakte Fehler:",
+        error
+      );
+
+
       res
         .status(500)
         .json({
+
           error:
+            error?.message
+            ||
             "Testkontakte konnten nicht geladen werden."
+
         });
+
     }
+
   }
 );
+
+
+/* ==================================================
+   TESTKONTAKT ANLEGEN
+================================================== */
 
 app.post(
   "/persona-test/create-contact",
-  async(req,res)=>{
-    try{
-      if(
+  async (req, res) => {
+
+    try {
+
+      if (
         !personaPasswordCorrect(
           req.body.password
         )
-      ){
+      ) {
+
         return res
           .status(401)
           .json({
+
             error:
               "Falsches Passwort."
+
           });
+
       }
 
-      res.json({
-        ok:true,
-        contact:
-          await createTestContact(
-            req.body
-          )
-      });
-    }catch(e){
-      res
-        .status(500)
-        .json({
-          error:e.message
-        });
-    }
-  }
-);
 
-app.post(
-  "/persona-test/snapshot",
-  async(req,res)=>{
-    try{
-      if(
-        !personaPasswordCorrect(
-          req.body.password
-        )
-      ){
-        return res
-          .status(401)
-          .json({
-            error:
-              "Falsches Passwort."
-          });
-      }
+      const name =
+        normalizeText(
+          req.body.name
+        );
 
-      if(
-        !isTestJid(
-          req.body.jid
-        )
-      ){
+
+      if (
+        !name
+      ) {
+
         return res
           .status(400)
           .json({
+
             error:
-              "Ungültiger Testkontakt."
+              "Bitte einen Namen für den Testkontakt eingeben."
+
           });
+
       }
 
-      const s=
-        await getTestContactSnapshot(
-          req.body.jid
-        );
 
-      if(!s){
-        return res
-          .status(404)
-          .json({
-            error:
-              "Nicht gefunden."
-          });
-      }
+      const contact =
+        await createTestContact({
 
-      res.json(s);
-    }catch(e){
+          name,
+
+          country:
+            req.body.country || null,
+
+          city:
+            req.body.city || null,
+
+          language:
+            req.body.language || null
+
+        });
+
+
+      console.log(
+        "Neuer Testkontakt angelegt:",
+        contact.display_name,
+        contact.whatsapp_jid
+      );
+
+
+      res.json({
+
+        ok:
+          true,
+
+        contact
+
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Testkontakt anlegen Fehler:",
+        error
+      );
+
+
       res
         .status(500)
         .json({
+
           error:
-            "Snapshot konnte nicht geladen werden."
+            error?.message
+            ||
+            "Testkontakt konnte nicht angelegt werden."
+
         });
+
     }
+
   }
 );
 
+
+/* ==================================================
+   TEST SNAPSHOT
+================================================== */
+
 app.post(
-  "/persona-test/message",
-  async(req,res)=>{
-    try{
-      if(
+  "/persona-test/snapshot",
+  async (req, res) => {
+
+    try {
+
+      if (
         !personaPasswordCorrect(
           req.body.password
         )
-      ){
+      ) {
+
         return res
           .status(401)
           .json({
+
             error:
               "Falsches Passwort."
+
           });
+
       }
 
-      const jid=
-        req.body.jid;
 
-      const text=
+      const jid =
+        normalizeText(
+          req.body.jid
+        );
+
+
+      if (
+        !isTestJid(
+          jid
+        )
+      ) {
+
+        return res
+          .status(400)
+          .json({
+
+            error:
+              "Ungültiger Testkontakt."
+
+          });
+
+      }
+
+
+      const snapshot =
+        await getTestContactSnapshot(
+          jid
+        );
+
+
+      if (
+        !snapshot
+      ) {
+
+        return res
+          .status(404)
+          .json({
+
+            error:
+              "Testkontakt nicht gefunden."
+
+          });
+
+      }
+
+
+      res.json(
+        snapshot
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "Snapshot Fehler:",
+        error
+      );
+
+
+      res
+        .status(500)
+        .json({
+
+          error:
+            error?.message
+            ||
+            "Snapshot konnte nicht geladen werden."
+
+        });
+
+    }
+
+  }
+);
+
+
+/* ==================================================
+   TEST MESSAGE
+================================================== */
+
+app.post(
+  "/persona-test/message",
+  async (req, res) => {
+
+    try {
+
+      if (
+        !personaPasswordCorrect(
+          req.body.password
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+
+            error:
+              "Falsches Passwort."
+
+          });
+
+      }
+
+
+      const jid =
+        normalizeText(
+          req.body.jid
+        );
+
+
+      const text =
         normalizeText(
           req.body.message
         );
 
-      if(
-        !isTestJid(jid)
-      ){
+
+      if (
+        !isTestJid(
+          jid
+        )
+      ) {
+
         return res
           .status(400)
           .json({
+
             error:
               "Ungültiger Testkontakt."
+
           });
+
       }
 
-      if(!text){
+
+      if (
+        !text
+      ) {
+
         return res
           .status(400)
           .json({
+
             error:
               "Keine Nachricht eingegeben."
+
           });
+
       }
 
-      const c=
-        await getContactByJid(jid);
 
-      if(!c){
+      const contact =
+        await getContactByJid(
+          jid
+        );
+
+
+      if (
+        !contact
+      ) {
+
         return res
           .status(404)
           .json({
+
             error:
-              "Nicht gefunden."
+              "Testkontakt nicht gefunden."
+
           });
+
       }
 
-      const dup=
+
+      const duplicate =
         await detectImmediateDuplicate(
           jid,
           text
         );
 
-      if(dup){
+
+      if (
+        duplicate
+      ) {
+
         await saveMessage(
           jid,
           "incoming",
           text,
           `test-in-${Date.now()}`,
           {
+
             processingStatus:
               "duplicate",
 
             duplicateOfMessageId:
-              dup.id
+              duplicate.id
+
           }
         );
 
-        const reply=
-          duplicateReplyForContact(c);
+
+        const reply =
+          duplicateReplyForContact(
+            contact
+          );
+
 
         await saveMessage(
           jid,
@@ -3111,23 +11133,35 @@ app.post(
           reply,
           `test-out-${Date.now()}`,
           {
+
             processingStatus:
               "duplicate_reply"
+
           }
         );
 
+
         return res.json({
-          ok:true,
-          duplicate:true,
+
+          ok:
+            true,
+
+          duplicate:
+            true,
+
           reply,
+
           snapshot:
             await getTestContactSnapshot(
               jid
             )
+
         });
+
       }
 
-      const incoming=
+
+      const incoming =
         await saveMessage(
           jid,
           "incoming",
@@ -3135,23 +11169,32 @@ app.post(
           `test-in-${Date.now()}`
         );
 
-      const reply=
+
+      const reply =
         await generateAIReply(
           jid,
           text,
           incoming.id
         );
 
-      if(!reply){
+
+      if (
+        !reply
+      ) {
+
         return res
           .status(500)
           .json({
+
             error:
               "OpenAI hat keine Antwort erzeugt."
+
           });
+
       }
 
-      const outgoing=
+
+      const outgoing =
         await saveMessage(
           jid,
           "outgoing",
@@ -3159,102 +11202,168 @@ app.post(
           `test-out-${Date.now()}`
         );
 
+
       await extractMemoryUpdates({
+
         jid,
-        contactId:c.id,
-        incomingText:text,
+
+        contactId:
+          contact.id,
+
+        incomingText:
+          text,
+
         incomingMessageDbId:
           incoming.id,
-        outgoingText:reply,
+
+        outgoingText:
+          reply,
+
         outgoingMessageDbId:
           outgoing.id
+
       });
 
+
       res.json({
-        ok:true,
-        duplicate:false,
+
+        ok:
+          true,
+
+        duplicate:
+          false,
+
         reply,
+
         snapshot:
           await getTestContactSnapshot(
             jid
           )
+
       });
-    }catch(e){
-      console.error(e);
+
+
+    } catch (error) {
+
+      console.error(
+        "Testnachricht Fehler:",
+        error
+      );
+
 
       res
         .status(500)
         .json({
+
           error:
+            error?.message
+            ||
             "Testnachricht konnte nicht verarbeitet werden."
+
         });
+
     }
+
   }
 );
 
+
+/* ==================================================
+   WHATSAPP INCOMING HANDLER
+================================================== */
+
 async function handleIncomingTextMessage(
   message
-){
-  const jid=
+) {
+
+  const jid =
     message.key.remoteJid;
 
-  if(
+
+  if (
     !jid
     ||
-    jid.endsWith("@g.us")
+    jid.endsWith(
+      "@g.us"
+    )
     ||
     message.key.fromMe
-  ){
+  ) {
+
     return;
+
   }
 
-  const text=
+
+  const text =
     extractTextFromMessageContent(
       message.message
     );
 
-  if(!text){
+
+  if (
+    !text
+  ) {
+
     return;
+
   }
 
-  let c=
-    await ensureContact(jid);
 
-  const dup=
+  let contact =
+    await ensureContact(
+      jid
+    );
+
+
+  const duplicate =
     await detectImmediateDuplicate(
       jid,
       text
     );
 
-  if(dup){
+
+  if (
+    duplicate
+  ) {
+
     await saveMessage(
       jid,
       "incoming",
       text,
-      message.key.id||null,
+      message.key.id || null,
       {
+
         processingStatus:
           "duplicate",
 
         duplicateOfMessageId:
-          dup.id
+          duplicate.id
+
       }
     );
 
-    if(
-      c?.auto_reply_enabled!==false
+
+    if (
+      contact?.auto_reply_enabled !== false
       &&
-      c?.date_lock_enabled!==true
-    ){
-      const reply=
-        duplicateReplyForContact(c);
+      contact?.date_lock_enabled !== true
+    ) {
+
+      const reply =
+        duplicateReplyForContact(
+          contact
+        );
+
 
       await sock.sendMessage(
         jid,
         {
-          text:reply
+          text:
+            reply
         }
       );
+
 
       await saveMessage(
         jid,
@@ -3266,240 +11375,378 @@ async function handleIncomingTextMessage(
             "duplicate_reply"
         }
       );
+
     }
 
+
     return;
+
   }
 
-  const incoming=
+
+  const incoming =
     await saveMessage(
       jid,
       "incoming",
       text,
-      message.key.id||null
+      message.key.id || null
     );
 
-  c=
-    await getContactByJid(jid);
 
-  if(
-    c?.auto_reply_enabled===false
+  contact =
+    await getContactByJid(
+      jid
+    );
+
+
+  if (
+    contact?.auto_reply_enabled === false
     ||
-    c?.date_lock_enabled===true
-  ){
+    contact?.date_lock_enabled === true
+  ) {
+
     return;
+
   }
 
-  const reply=
+
+  const reply =
     await generateAIReply(
       jid,
       text,
       incoming.id
     );
 
-  if(!reply){
+
+  if (
+    !reply
+  ) {
+
     return;
+
   }
+
 
   await sock.sendMessage(
     jid,
     {
-      text:reply
+      text:
+        reply
     }
   );
 
-  const outgoing=
+
+  const outgoing =
     await saveMessage(
       jid,
       "outgoing",
       reply
     );
 
+
   scheduleMemoryUpdate({
+
     jid,
-    contactId:c.id,
-    incomingText:text,
+
+    contactId:
+      contact.id,
+
+    incomingText:
+      text,
+
     incomingMessageDbId:
       incoming.id,
-    outgoingText:reply,
+
+    outgoingText:
+      reply,
+
     outgoingMessageDbId:
       outgoing.id
+
   });
+
 }
+
+
+/* ==================================================
+   WHATSAPP EDIT HANDLER
+================================================== */
 
 async function handleEditedMessageUpdate(
   entry
-){
-  try{
-    const jid=
+) {
+
+  try {
+
+    const jid =
       entry
         ?.key
         ?.remoteJid;
 
-    const id=
+
+    const whatsappMessageId =
       entry
         ?.key
         ?.id;
 
-    if(
+
+    if (
       !jid
       ||
-      !id
+      !whatsappMessageId
       ||
       entry?.key?.fromMe
       ||
-      jid.endsWith("@g.us")
-    ){
+      jid.endsWith(
+        "@g.us"
+      )
+    ) {
+
       return;
+
     }
 
-    const text=
+
+    const text =
       extractEditedText(
         entry.update
       );
 
-    if(!text){
+
+    if (
+      !text
+    ) {
+
       return;
+
     }
 
-    const u=
+
+    const updated =
       await updateEditedIncomingMessage({
+
         jid,
-        whatsappMessageId:id,
-        newText:text
+
+        whatsappMessageId,
+
+        newText:
+          text
+
       });
 
-    if(u){
+
+    if (
+      updated
+    ) {
+
       console.log(
         "WhatsApp-Nachricht bearbeitet:",
-        id,
+        whatsappMessageId,
         text
       );
+
     }
-  }catch(e){
+
+
+  } catch (error) {
+
     console.error(
       "Edit-Verarbeitung fehlgeschlagen:",
-      e
+      error
     );
+
   }
+
 }
 
-async function startWhatsApp(){
-  if(!WHATSAPP_ENABLED){
-    whatsappStatus=
+
+/* ==================================================
+   WHATSAPP START
+================================================== */
+
+async function startWhatsApp() {
+
+  if (
+    !WHATSAPP_ENABLED
+  ) {
+
+    whatsappStatus =
       "disabled";
+
 
     console.log(
       "WhatsApp deaktiviert. Kein Socket, kein Pairing, kein Reconnect."
     );
 
+
     return;
+
   }
 
-  whatsappStatus=
+
+  whatsappStatus =
     "starting";
+
 
   const {
     state,
     saveCreds
-  }=
+  } =
     await useMultiFileAuthState(
       "/app/auth_info"
     );
 
+
   const {
     version
-  }=
+  } =
     await fetchLatestBaileysVersion();
 
-  sock=
+
+  sock =
     makeWASocket({
+
       version,
-      auth:state,
+
+      auth:
+        state,
+
       logger,
+
       shouldSyncHistoryMessage:
-        ()=>false
+        () => false
+
     });
+
 
   sock.ev.on(
     "creds.update",
     saveCreds
   );
 
+
   sock.ev.on(
     "messages.upsert",
-    async event=>{
-      if(
-        event.type!=="notify"
+    async event => {
+
+      if (
+        event.type !== "notify"
         ||
         event.requestId
-      ){
+      ) {
+
         return;
+
       }
 
-      for(const m of event.messages){
-        try{
-          await handleIncomingTextMessage(m);
-        }catch(e){
+
+      for (
+        const message
+        of event.messages
+      ) {
+
+        try {
+
+          await handleIncomingTextMessage(
+            message
+          );
+
+
+        } catch (error) {
+
           console.error(
             "Incoming Fehler:",
-            e
+            error
           );
+
         }
+
       }
+
     }
   );
+
 
   sock.ev.on(
     "messages.update",
-    async updates=>{
-      for(const e of updates){
-        await handleEditedMessageUpdate(e);
+    async updates => {
+
+      for (
+        const entry
+        of updates
+      ) {
+
+        await handleEditedMessageUpdate(
+          entry
+        );
+
       }
+
     }
   );
 
+
   sock.ev.on(
     "connection.update",
-    async update=>{
+    async update => {
+
       const {
         connection,
         lastDisconnect,
         qr
-      }=
+      } =
         update;
 
-      if(
-        connection==="open"
-      ){
-        whatsappStatus=
+
+      if (
+        connection === "open"
+      ) {
+
+        whatsappStatus =
           "connected";
 
-        pairingCode=
+
+        pairingCode =
           null;
+
+
+        console.log(
+          "WhatsApp verbunden."
+        );
+
       }
 
-      if(
-        connection==="connecting"
-      ){
-        whatsappStatus=
+
+      if (
+        connection === "connecting"
+      ) {
+
+        whatsappStatus =
           "connecting";
+
       }
 
-      if(
+
+      if (
         qr
         &&
         !state.creds.registered
         &&
         !pairingCode
-      ){
-        const phone=
+      ) {
+
+        const phone =
           process.env
             .WHATSAPP_PHONE_NUMBER;
 
-        if(phone){
-          try{
-            pairingCode=
+
+        if (
+          phone
+        ) {
+
+          try {
+
+            pairingCode =
               await sock.requestPairingCode(
                 phone.replace(
                   /\D/g,
@@ -3507,65 +11754,106 @@ async function startWhatsApp(){
                 )
               );
 
+
             console.log(
               "PAIRING CODE:",
               pairingCode
             );
-          }catch(e){
+
+
+          } catch (error) {
+
             console.error(
               "Pairing-Code Fehler:",
-              e
+              error
             );
+
           }
+
         }
+
       }
 
-      if(
-        connection==="close"
-      ){
-        whatsappStatus=
+
+      if (
+        connection === "close"
+      ) {
+
+        whatsappStatus =
           "disconnected";
 
-        const statusCode=
+
+        const statusCode =
           lastDisconnect
             ?.error
             ?.output
             ?.statusCode;
 
-        if(
+
+        if (
           statusCode
           !==
           DisconnectReason.loggedOut
-        ){
+        ) {
+
+          console.log(
+            "WhatsApp getrennt. Neuer Verbindungsversuch in 5 Sekunden."
+          );
+
+
           setTimeout(
             startWhatsApp,
             5000
           );
+
+        } else {
+
+          console.log(
+            "WhatsApp wurde ausgeloggt."
+          );
+
         }
+
       }
+
     }
   );
+
 }
+
+
+/* ==================================================
+   SERVER START
+================================================== */
 
 app.listen(
   port,
-  async()=>{
+  async () => {
+
     console.log(
       `Server läuft auf Port ${port}`
     );
 
-    try{
+
+    try {
+
       await initDatabase();
-    }catch(e){
+
+
+    } catch (error) {
+
       console.error(
         "PostgreSQL Initialisierung fehlgeschlagen:",
-        e
+        error
       );
+
     }
+
 
     startWhatsApp()
       .catch(
         console.error
       );
+
   }
 );

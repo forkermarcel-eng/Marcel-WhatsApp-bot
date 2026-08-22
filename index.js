@@ -50,11 +50,11 @@ const MODEL =
 
 
 /* ==================================================
-   MARCEL PERSONA V1.7.1
+   MARCEL PERSONA V1.7.2
 ================================================== */
 
-const MARCEL_PERSONA_V1_7_1 = `
-MARCEL PERSONA V1.7.1
+const MARCEL_PERSONA_V1_7_2 = `
+MARCEL PERSONA V1.7.2
 
 Du schreibst private Dating-/WhatsApp-Nachrichten im Namen von Marcel.
 
@@ -148,6 +148,155 @@ SCHREIBSTIL
 
 
 ==================================================
+KNOW A LOT - REVEAL NATURALLY
+==================================================
+
+EXTREM WICHTIG:
+
+Marcel darf im Memory
+sehr viele Details über sich kennen.
+
+Das bedeutet NICHT,
+dass er bei einer passenden Frage
+sofort alle diese Details herausgibt.
+
+Wissen und Preisgeben
+sind zwei verschiedene Dinge.
+
+Marcel beantwortet zuerst
+nur das,
+was tatsächlich gefragt wurde,
+in einer natürlichen Tiefe.
+
+Weitere Details kommen:
+
+- wenn sie konkret danach fragt
+- wenn sie später natürlich passen
+- oder wenn sie für die aktuelle Antwort
+  wirklich nötig sind
+
+Nicht automatisch
+den kompletten bekannten Datensatz nennen.
+
+
+BEISPIEL KINDER:
+
+Sie fragt:
+
+"Hast du Kinder?"
+
+NICHT automatisch:
+
+"Ja, Finn ist 16
+und Charlotte ist 14."
+
+Besser zunächst:
+
+"Ja, zwei.
+Einen Jungen und ein Mädchen 😊"
+
+Fragt sie danach:
+
+"Wie alt sind sie?"
+
+Dann kann Marcel sagen:
+
+"Mein Sohn ist 16
+und meine Tochter 14."
+
+Fragt sie nach den Namen:
+
+Dann darf er
+Finn und Charlotte nennen.
+
+
+MEHRERE FRAGEN:
+
+Wenn sie mehrere echte Fragen stellt,
+soll Marcel sie natürlich beantworten.
+
+Beispiel:
+
+"Hast du Kinder
+und möchtest du noch welche?"
+
+Dann darf Marcel
+beide Fragen beantworten:
+
+"Ja, ich habe zwei,
+einen Jungen und ein Mädchen.
+Und ja, grundsätzlich bin ich
+für weitere Kinder offen,
+wenn es mit der richtigen Frau passt."
+
+Aber trotzdem NICHT automatisch:
+
+- Namen
+- Alter
+- komplette Beziehungsgeschichte
+- Familiengeschichte
+- weitere Memory-Details
+
+dazupacken,
+wenn sie nicht gefragt wurden.
+
+
+RÜCKFRAGEN:
+
+Bevor Marcel eine Rückfrage stellt,
+muss er prüfen,
+was er über die Frau bereits weiß.
+
+Wenn bereits bekannt ist,
+dass sie ein Kind hat:
+
+NICHT:
+
+"Und du, hast du Kinder?"
+
+Sondern je nach Kontext z.B.:
+
+"Und bist du noch offen für Kinder?"
+
+Oder kurz:
+
+"Und wie sieht's bei dir aus,
+noch offen für Kinder?"
+
+Natürlichkeit vor perfekter Grammatik.
+
+WhatsApp darf menschlich,
+kurz
+und leicht unperfekt klingen.
+
+
+ALLGEMEIN:
+
+Das Prinzip gilt auch für:
+
+- Alter
+- Kinder
+- Arbeit
+- frühere Beziehungen
+- Familie
+- Wohnsituation
+- Reisen
+- Vergangenheit
+- Religion
+- Sexualität
+- Zukunftspläne
+- persönliche Geschichten
+
+Know a lot.
+Reveal naturally.
+
+Memory ist Hintergrundwissen,
+kein Lebenslauf,
+der bei jeder Gelegenheit
+ausgegeben werden muss.
+
+
+==================================================
 SPRACHE
 ==================================================
 
@@ -235,6 +384,22 @@ Löwe.
 Kinder:
 Finn, 16.
 Charlotte, 14.
+
+Diese Kinderinformationen
+sind internes Wissen.
+
+Sie werden stufenweise preisgegeben.
+
+Bei einfacher Frage,
+ob Marcel Kinder hat:
+
+zunächst z.B.:
+
+"Ja, zwei.
+Einen Jungen und ein Mädchen."
+
+Namen und Alter
+nicht automatisch mit ausgeben.
 
 Aktuell:
 München,
@@ -696,7 +861,84 @@ function extractEditedText(update) {
 
 
 /* ==================================================
-   SPRACHERKENNUNG V1.7.1
+   PROFILE COLUMNS
+================================================== */
+
+const PROFILE_COLUMNS = [
+
+  "profile_summary",
+
+  "personality",
+
+  "humor_profile",
+
+  "relationship",
+
+  "family",
+
+  "children",
+
+  "social_circle",
+
+  "work_education",
+
+  "financial_context",
+
+  "health",
+
+  "religion_values",
+
+  "sexuality_intimacy",
+
+  "communication",
+
+  "lifestyle_routines",
+
+  "preferences",
+
+  "dislikes",
+
+  "goals_dreams",
+
+  "travel_future_location",
+
+  "living_situation",
+
+  "personal_boundaries",
+
+  "stress_support_style",
+
+  "decision_style",
+
+  "social_media",
+
+  "cultural_interest",
+
+  "investment",
+
+  "interaction_patterns",
+
+  "meaningful_details",
+
+  "shared_history",
+
+  "running_gags",
+
+  "open_threads",
+
+  "plans",
+
+  "promises",
+
+  "marcel_knowledge_map",
+
+  "current_context"
+
+];
+
+
+/* ==================================================
+   SPRACHERKENNUNG V1.7.2
 ================================================== */
 
 function languageCodeFromStoredValue(
@@ -1123,15 +1365,11 @@ function languageFromCountry(
 
     "mexico",
 
-    "méxico",
-
     "argentina",
 
     "chile",
 
     "peru",
-
-    "perú",
 
     "ecuador",
 
@@ -1142,8 +1380,6 @@ function languageFromCountry(
     "uruguay",
 
     "panama",
-
-    "panamá",
 
     "costa rica",
 
@@ -1159,13 +1395,9 @@ function languageFromCountry(
 
     "republica dominicana",
 
-    "república dominicana",
-
     "spain",
 
-    "espana",
-
-    "españa"
+    "espana"
 
   ];
 
@@ -1186,8 +1418,7 @@ function languageFromCountry(
       "germany",
       "deutschland",
       "austria",
-      "osterreich",
-      "österreich"
+      "osterreich"
     ].includes(
       normalized
     )
@@ -1367,11 +1598,6 @@ async function resolveReplyLanguage(
   currentText = ""
 ) {
 
-  /*
-    1.
-    Primäre Kontaktsprache
-  */
-
   const directLanguage =
     languageCodeFromStoredValue(
       contact?.primary_language
@@ -1386,11 +1612,6 @@ async function resolveReplyLanguage(
 
   }
 
-
-  /*
-    2.
-    Gespeicherte Memory-Hinweise
-  */
 
   if (
     contact?.id
@@ -1507,11 +1728,6 @@ async function resolveReplyLanguage(
   }
 
 
-  /*
-    3.
-    Aktuelle eingehende Nachricht
-  */
-
   const currentLanguage =
     detectLanguageFromText(
       currentText
@@ -1526,11 +1742,6 @@ async function resolveReplyLanguage(
 
   }
 
-
-  /*
-    4.
-    Bisheriger Gesprächsverlauf
-  */
 
   if (
     jid
@@ -1593,11 +1804,6 @@ async function resolveReplyLanguage(
   }
 
 
-  /*
-    5.
-    Land als letzter sinnvoller Hinweis
-  */
-
   const countryLanguage =
     languageFromCountry(
       contact?.country
@@ -1613,91 +1819,9 @@ async function resolveReplyLanguage(
   }
 
 
-  /*
-    6.
-    Letzter Fallback
-  */
-
   return "en";
 
 }
-
-
-/* ==================================================
-   PROFILE COLUMNS
-================================================== */
-
-const PROFILE_COLUMNS = [
-
-  "profile_summary",
-
-  "personality",
-
-  "humor_profile",
-
-  "relationship",
-
-  "family",
-
-  "children",
-
-  "social_circle",
-
-  "work_education",
-
-  "financial_context",
-
-  "health",
-
-  "religion_values",
-
-  "sexuality_intimacy",
-
-  "communication",
-
-  "lifestyle_routines",
-
-  "preferences",
-
-  "dislikes",
-
-  "goals_dreams",
-
-  "travel_future_location",
-
-  "living_situation",
-
-  "personal_boundaries",
-
-  "stress_support_style",
-
-  "decision_style",
-
-  "social_media",
-
-  "cultural_interest",
-
-  "investment",
-
-  "interaction_patterns",
-
-  "meaningful_details",
-
-  "shared_history",
-
-  "running_gags",
-
-  "open_threads",
-
-  "plans",
-
-  "promises",
-
-  "marcel_knowledge_map",
-
-  "current_context"
-
-];
 
 
 /* ==================================================
@@ -5373,7 +5497,7 @@ async function initDatabase() {
 
 
   console.log(
-    "PostgreSQL + Langzeit-Memory V1.7.1 + Frauen-Memory + Identity Registry + Sprachschutz bereit."
+    "PostgreSQL + Langzeit-Memory V1.7.2 + Progressive Disclosure + Frauen-Memory + Identity Registry + Sprachschutz bereit."
   );
 
 }
@@ -5449,7 +5573,7 @@ async function seedMarcelMemory() {
 
       3,
 
-      "Aktuelle konkrete Tätigkeit niemals erfinden."
+      "Aktuelle konkrete Tätigkeit niemals erfinden. Details nur natürlich preisgeben."
     ],
 
 
@@ -5475,7 +5599,49 @@ async function seedMarcelMemory() {
 
       5,
 
-      "Know a lot, reveal naturally."
+      "Know a lot, reveal naturally. Bei einfacher Frage zunächst nur zwei Kinder, einen Jungen und ein Mädchen nennen. Namen und Alter erst bei Nachfrage oder wenn später natürlich relevant."
+    ],
+
+
+    [
+      "communication",
+
+      "progressive_disclosure",
+
+      {
+        know_a_lot_reveal_naturally:
+          true,
+
+        answer_only_asked_depth:
+          true,
+
+        do_not_dump_memory:
+          true,
+
+        answer_multiple_real_questions:
+          true,
+
+        check_woman_memory_before_followup_question:
+          true,
+
+        reveal_extra_details_only_if_asked_or_natural:
+          true,
+
+        children_example: {
+          first_level:
+            "Ja, zwei. Einen Jungen und ein Mädchen.",
+
+          second_level:
+            "Mein Sohn ist 16 und meine Tochter 14.",
+
+          third_level:
+            "Namen Finn und Charlotte nur bei Nachfrage oder natürlichem Kontext."
+        }
+      },
+
+      5,
+
+      "Memory ist Hintergrundwissen, kein Lebenslauf. Persönliche Details stufenweise preisgeben und Rückfragen an bereits bekanntes Frauen-Memory anpassen."
     ],
 
 
@@ -5657,7 +5823,7 @@ async function seedMarcelMemory() {
 
       1,
 
-      "Nur passend."
+      "Nur passend und nicht ungefragt erzählen."
     ],
 
 
@@ -5673,7 +5839,7 @@ async function seedMarcelMemory() {
 
       1,
 
-      "Nur passend."
+      "Nur passend und nicht ungefragt erzählen."
     ],
 
 
@@ -5692,7 +5858,7 @@ async function seedMarcelMemory() {
 
       2,
 
-      "Nur wenn relevant."
+      "Nur wenn relevant und nicht als Zusatzinformation anhängen."
     ],
 
 
@@ -5711,7 +5877,7 @@ async function seedMarcelMemory() {
 
       3,
 
-      "Nicht ungefragt."
+      "Nicht ungefragt. Nur passende Informationstiefe preisgeben."
     ],
 
 
@@ -5761,7 +5927,7 @@ async function seedMarcelMemory() {
 
       3,
 
-      "Nur wenn relevant."
+      "Nur wenn relevant. Nicht alle Teilinformationen auf einmal nennen."
     ],
 
 
@@ -5783,7 +5949,7 @@ async function seedMarcelMemory() {
 
       5,
 
-      "Nur bei offenem Sexualgespräch."
+      "Nur bei offenem Sexualgespräch und nur in benötigter Tiefe."
     ],
 
 
@@ -5829,7 +5995,7 @@ async function seedMarcelMemory() {
 
       4,
 
-      "Keine konkrete Gegend erfinden."
+      "Keine konkrete Gegend erfinden. Detailtiefe an tatsächliche Frage anpassen."
     ]
 
   ];
@@ -5998,7 +6164,7 @@ async function addContactIdentifier({
     ) {
 
       throw new Error(
-        `Identity-Konflikt: ${type} ${clean} gehört bereits Kontakt ${existingStrong.rows[0].contact_id}`
+        \`Identity-Konflikt: \${type} \${clean} gehört bereits Kontakt \${existingStrong.rows[0].contact_id}\`
       );
 
     }
@@ -6887,7 +7053,7 @@ async function applyProfileSnapshot(
   const assignments =
     PROFILE_COLUMNS.map(
       (column, index) =>
-        `${column} = $${index + 1}::jsonb`
+        \`\${column} = $\${index + 1}::jsonb\`
     );
 
 
@@ -6991,7 +7157,7 @@ async function seedWomenMemory() {
             key,
 
           memoryKey:
-            `seed_${key}`,
+            \`seed_\${key}\`,
 
           memoryValue:
             value,
@@ -7019,7 +7185,7 @@ async function seedWomenMemory() {
 
 
   console.log(
-    `Frauen-Memory geladen: ${WOMEN_SEED.length} getrennte Profile.`
+    \`Frauen-Memory geladen: \${WOMEN_SEED.length} getrennte Profile.\`
   );
 
 }
@@ -7147,7 +7313,7 @@ async function ensureContact(
       ) {
 
         throw new Error(
-          `WhatsApp-JID ${jid} ist bereits einem anderen Kontakt zugeordnet.`
+          \`WhatsApp-JID \${jid} ist bereits einem anderen Kontakt zugeordnet.\`
         );
 
       }
@@ -7537,7 +7703,7 @@ async function createTestContact({
 
 
   const jid =
-    `test-${createTestSlug(cleanName)}@persona.test`;
+    \`test-\${createTestSlug(cleanName)}@persona.test\`;
 
 
   const result =
@@ -7904,7 +8070,7 @@ async function detectImmediateDuplicate(
 
 
 /* ==================================================
-   DUPLIKAT ANTWORT MIT SPRACHERKENNUNG V1.7.1
+   DUPLIKAT ANTWORT MIT SPRACHERKENNUNG V1.7.2
 ================================================== */
 
 async function duplicateReplyForContact(
@@ -8458,17 +8624,17 @@ function buildMemoryContext({
 
 
               return (
-                `#${item.id}`
+                \`#\${item.id}\`
                 +
-                `|${item.category}.${item.memory_key}`
+                \`|\${item.category}.\${item.memory_key}\`
                 +
-                `|${item.memory_type}`
+                \`|\${item.memory_type}\`
                 +
-                `|review=${item.human_review_status}`
+                \`|review=\${item.human_review_status}\`
                 +
-                `|importance=${item.importance}`
+                \`|importance=\${item.importance}\`
                 +
-                `|${renderJson(value)}`
+                \`|\${renderJson(value)}\`
               );
 
             }
@@ -8486,11 +8652,11 @@ function buildMemoryContext({
       ? memoryEvents
           .map(
             event =>
-              `#${event.id}`
+              \`#\${event.id}\`
               +
-              `|${event.event_type}/${event.event_subtype || "-"}`
+              \`|\${event.event_type}/\${event.event_subtype || "-"}\`
               +
-              `|${renderJson(event.event_data)}`
+              \`|\${renderJson(event.event_data)}\`
           )
           .join(
             "\n"
@@ -8505,11 +8671,11 @@ function buildMemoryContext({
       ? marcelMemory
           .map(
             memory =>
-              `${memory.category}.${memory.memory_key}`
+              \`\${memory.category}.\${memory.memory_key}\`
               +
-              `|${renderJson(memory.memory_value)}`
+              \`|\${renderJson(memory.memory_value)}\`
               +
-              `|${memory.usage_notes || ""}`
+              \`|\${memory.usage_notes || ""}\`
           )
           .join(
             "\n"
@@ -8520,7 +8686,7 @@ function buildMemoryContext({
 
   return `
 ==================================================
-LANGZEIT-GEDÄCHTNIS V1.7.1
+LANGZEIT-GEDÄCHTNIS V1.7.2
 ==================================================
 
 KONTAKT:
@@ -8638,6 +8804,38 @@ REGELN
 
 - Sprache des Kontakts
   und des aktuellen Gesprächs beachten.
+
+- Memory bedeutet NICHT,
+  alle bekannten Details
+  in einer Antwort auszugeben.
+
+- Persönliche Informationen über Marcel
+  stufenweise preisgeben.
+
+- Erst die tatsächlich gestellte Frage
+  in natürlicher Tiefe beantworten.
+
+- Wenn sie mehrere echte Fragen stellt,
+  diese beantworten,
+  aber keine zusätzlichen Memory-Details
+  ungefragt anhängen.
+
+- Vor einer Rückfrage prüfen,
+  was über die Frau bereits bekannt ist.
+
+- Niemals nach etwas fragen,
+  das das Frauen-Memory
+  bereits eindeutig beantwortet.
+
+- Beispiel:
+  Wenn bekannt ist,
+  dass sie ein Kind hat,
+  nicht fragen:
+  "Hast du Kinder?"
+
+  Falls das Thema weitere Kinder ist,
+  eher kurz:
+  "Und bist du noch offen für Kinder?"
 `;
 
 }
@@ -8720,7 +8918,7 @@ async function generateAIReply(
       history
         .map(
           item =>
-            `${item.direction === "incoming" ? "Andere Person" : "Marcel"}: ${item.message_text}`
+            \`\${item.direction === "incoming" ? "Andere Person" : "Marcel"}: \${item.message_text}\`
         )
         .join(
           "\n"
@@ -8779,7 +8977,7 @@ async function generateAIReply(
 
 
       instructions: `
-${MARCEL_PERSONA_V1_7_1}
+${MARCEL_PERSONA_V1_7_2}
 
 ${memoryContext}
 
@@ -8793,6 +8991,53 @@ als Langzeitwissen.
 Widersprich bekannten Fakten nicht.
 
 Frage nichts erneut.
+
+SEHR WICHTIG:
+
+Memory ist Hintergrundwissen
+und keine Aufforderung,
+alle Details auszugeben.
+
+Beantworte nur die tatsächlich
+gestellten Fragen
+in natürlicher Tiefe.
+
+Wenn Marcel z.B.
+nach seinen Kindern gefragt wird,
+reiche nicht automatisch
+Namen und Alter mit,
+nur weil sie im Memory stehen.
+
+Bei einfacher Frage:
+"Ja, zwei.
+Einen Jungen und ein Mädchen."
+
+Weitere Details erst,
+wenn danach gefragt wird
+oder sie später natürlich relevant sind.
+
+Wenn die Frau mehrere Fragen stellt,
+beantworte ihre echten Fragen,
+aber füge keine unnötigen
+zusätzlichen Marcel-Fakten hinzu.
+
+Bevor du eine Rückfrage stellst,
+prüfe Frauenprofil,
+aktive Memories
+und Gesprächsverlauf.
+
+Frage niemals etwas,
+das über sie bereits bekannt ist.
+
+Formuliere Rückfragen kurz
+und wie ein echter WhatsApp-Chat.
+
+Nicht:
+"Und du, würdest du irgendwann gerne
+noch weitere Kinder haben?"
+
+Wenn passend eher:
+"Und bist du noch offen für Kinder?"
 
 Keine KI-Füllsätze.
 
@@ -8827,6 +9072,15 @@ AUFGABE
 ==================================================
 
 Schreibe Marcels Antwort.
+
+Beantworte,
+was wirklich gefragt wurde.
+
+Nutze Memory,
+aber schütte es nicht aus.
+
+Prüfe vor Rückfragen,
+was über die Frau bereits bekannt ist.
 `
     });
 
@@ -9933,13 +10187,13 @@ async function extractMemoryUpdates({
     items
       .map(
         item =>
-          `ID=${item.id}`
+          \`ID=\${item.id}\`
           +
-          `|${item.category}.${item.memory_key}`
+          \`|\${item.category}.\${item.memory_key}\`
           +
-          `|review=${item.human_review_status}`
+          \`|review=\${item.human_review_status}\`
           +
-          `|${renderJson(
+          \`|\${renderJson(
             item.human_review_status
             ===
             "corrected"
@@ -9949,7 +10203,7 @@ async function extractMemoryUpdates({
               ? item.human_corrected_value
 
               : item.memory_value
-          )}`
+          )}\`
       )
       .join(
         "\n"
@@ -10005,6 +10259,22 @@ darf diese Information
 im Bereich communication
 gespeichert werden.
 
+WICHTIG:
+
+Progressive Disclosure
+ist eine Antwortregel
+und verändert NICHT,
+wie vollständig Memory
+intern gespeichert werden darf.
+
+Der Extractor darf also
+weiterhin genaue Fakten speichern.
+
+Nur der Reply-Bot
+darf nicht automatisch
+alle gespeicherten Details
+in einer Antwort preisgeben.
+
 Gib ausschließlich JSON:
 
 {
@@ -10015,7 +10285,7 @@ Gib ausschließlich JSON:
     ${PROFILE_COLUMNS
       .map(
         column =>
-          `"${column}": {}`
+          \`"\${column}": {}\`
       )
       .join(",")}
   }
@@ -10059,7 +10329,7 @@ ${history
   )
   .map(
     item =>
-      `${item.direction === "incoming" ? "Sie" : "Marcel"}: ${item.message_text}`
+      \`\${item.direction === "incoming" ? "Sie" : "Marcel"}: \${item.message_text}\`
   )
   .join(
     "\n"
@@ -10154,7 +10424,7 @@ Aktualisiere Memory.
 
 
   console.log(
-    "Langzeit-Memory V1.7.1 aktualisiert."
+    "Langzeit-Memory V1.7.2 aktualisiert."
   );
 
 }
@@ -10302,7 +10572,7 @@ app.get(
   (req, res) => {
 
     res.send(
-      `Marcel WhatsApp Bot V1.7.1 läuft. WhatsApp-Status: ${whatsappStatus}`
+      \`Marcel WhatsApp Bot V1.7.2 läuft. WhatsApp-Status: \${whatsappStatus}\`
     );
 
   }
@@ -10480,7 +10750,7 @@ app.get(
     ) {
 
       return res.send(
-        `Pairing Code: ${pairingCode}`
+        \`Pairing Code: \${pairingCode}\`
       );
 
     }
@@ -10503,7 +10773,7 @@ app.get(
   (req, res) => {
 
     res.send(
-`<!doctype html>
+\`<!doctype html>
 
 <html lang="de">
 
@@ -10517,7 +10787,7 @@ app.get(
 >
 
 <title>
-Marcel Memory Test V1.7.1
+Marcel Memory Test V1.7.2
 </title>
 
 <style>
@@ -10666,7 +10936,7 @@ pre{
 
 
 <h1>
-Marcel Memory Test V1.7.1
+Marcel Memory Test V1.7.2
 </h1>
 
 
@@ -11745,7 +12015,7 @@ Memory / Profil
 
 </body>
 
-</html>`
+</html>\`
     );
 
   }
@@ -12143,7 +12413,7 @@ app.post(
           jid,
           "incoming",
           text,
-          `test-in-${Date.now()}`,
+          \`test-in-\${Date.now()}\`,
           {
 
             processingStatus:
@@ -12176,7 +12446,7 @@ app.post(
           jid,
           "outgoing",
           reply,
-          `test-out-${Date.now()}`,
+          \`test-out-\${Date.now()}\`,
           {
 
             processingStatus:
@@ -12213,7 +12483,7 @@ app.post(
           jid,
           "incoming",
           text,
-          `test-in-${Date.now()}`
+          \`test-in-\${Date.now()}\`
         );
 
 
@@ -12254,7 +12524,7 @@ app.post(
           jid,
           "outgoing",
           reply,
-          `test-out-${Date.now()}`
+          \`test-out-\${Date.now()}\`
         );
 
 
@@ -12890,7 +13160,7 @@ app.listen(
   async () => {
 
     console.log(
-      `Server läuft auf Port ${port}`
+      \`Server läuft auf Port \${port}\`
     );
 
 

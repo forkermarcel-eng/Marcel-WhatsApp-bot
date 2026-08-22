@@ -14,7 +14,10 @@ export default function handler(req, res) {
   const correctPassword = process.env.DASHBOARD_PASSWORD;
 
   if (!correctUsername || !correctPassword) {
-    console.error("Dashboard-Zugangsdaten fehlen in Vercel.");
+    console.error("Dashboard-Zugangsdaten fehlen in Vercel.", {
+      hasUsername: Boolean(correctUsername),
+      hasPassword: Boolean(correctPassword)
+    });
 
     return res.status(500).json({
       ok: false,
@@ -22,20 +25,27 @@ export default function handler(req, res) {
     });
   }
 
-  if (
-    username !== correctUsername ||
-    password !== correctPassword
-  ) {
+  const usernameMatches = username === correctUsername;
+  const passwordMatches = password === correctPassword;
+
+  console.log("Dashboard Login Test:", {
+    usernameMatches,
+    passwordMatches,
+    receivedUsernameLength: String(username || "").length,
+    storedUsernameLength: String(correctUsername || "").length,
+    receivedPasswordLength: String(password || "").length,
+    storedPasswordLength: String(correctPassword || "").length
+  });
+
+  if (!usernameMatches || !passwordMatches) {
     return res.status(401).json({
       ok: false,
       error: "Benutzername oder Passwort ist falsch."
     });
   }
 
-  // Zufälliges Session-Token erzeugen
   const token = crypto.randomBytes(32).toString("hex");
 
-  // Signatur mit dem Passwort erzeugen
   const signature = crypto
     .createHmac("sha256", correctPassword)
     .update(token)
@@ -43,7 +53,6 @@ export default function handler(req, res) {
 
   const session = `${token}.${signature}`;
 
-  // Login-Cookie setzen
   res.setHeader(
     "Set-Cookie",
     `marcel_dashboard_session=${session}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`

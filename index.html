@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Marcel Marlow</title>
+  <meta name="description" content="Marcel Marlow – Official Website">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 50% 25%, #1d2730 0%, #0d1217 38%, #050709 100%);
+      color: #ffffff;
+    }
+
+    /* NAVIGATION */
+
+    .navbar {
+      width: 100%;
+      height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 7%;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(5,7,9,0.75);
+      backdrop-filter: blur(12px);
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      font-size: 21px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+
+    .logo span {
+      color: #42c763;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .nav-links a {
+      color: #bfc6cc;
+      text-decoration: none;
+      font-size: 14px;
+      transition: 0.2s;
+    }
+
+    .nav-links a:hover {
+      color: #ffffff;
+    }
+
+    .login-button {
+      border: 1px solid rgba(255,255,255,0.22);
+      padding: 9px 16px;
+      border-radius: 8px;
+    }
+
+    /* HERO */
+
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 120px 25px 60px;
+    }
+
+    .hero-content {
+      max-width: 850px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      color: #42c763;
+      border: 1px solid rgba(66,199,99,0.3);
+      background: rgba(66,199,99,0.08);
+      padding: 8px 15px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 25px;
+    }
+
+    h1 {
+      font-size: clamp(48px, 8vw, 92px);
+      line-height: 0.98;
+      letter-spacing: -4px;
+      margin-bottom: 25px;
+    }
+
+    h1 span {
+      color: #42c763;
+    }
+
+    .subtitle {
+      max-width: 650px;
+      margin: 0 auto;
+      color: #aeb7bf;
+      font-size: 19px;
+      line-height: 1.7;
+    }
+
+    .divider {
+      width: 55px;
+      height: 3px;
+      background: #42c763;
+      margin: 35px auto;
+      border-radius: 10px;
+    }
+
+    .quote {
+      color: #d7dce0;
+      font-size: 16px;
+      font-style: italic;
+    }
+
+    /* ABOUT */
+
+    .about {
+      padding: 100px 8%;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      background: rgba(0,0,0,0.16);
+    }
+
+    .about-inner {
+      max-width: 1000px;
+      margin: auto;
+      text-align: center;
+    }
+
+    .section-label {
+      color: #42c763;
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: 2px;
+      font-weight: 700;
+      margin-bottom: 15px;
+    }
+
+    .about h2 {
+      font-size: 38px;
+      margin-bottom: 22px;
+    }
+
+    .about p {
+      color: #aeb7bf;
+      max-width: 720px;
+      margin: auto;
+      font-size: 17px;
+      line-height: 1.8;
+    }
+
+    /* FOOTER */
+
+    footer {
+      min-height: 100px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 25px 7%;
+      color: #737d85;
+      font-size: 12px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .footer-name {
+      color: #aab2b8;
+    }
+
+    /* MOBILE / TABLET */
+
+    @media (max-width: 700px) {
+      .navbar {
+        padding: 0 22px;
+      }
+
+      .nav-links a:not(.login-button) {
+        display: none;
+      }
+
+      h1 {
+        letter-spacing: -2px;
+      }
+
+      .subtitle {
+        font-size: 16px;
+      }
+
+      footer {
+        flex-direction: column;
+        gap: 10px;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <header class="navbar">
+    <div class="logo">MARCEL <span>MARLOW</span></div>
+
+    <nav class="nav-links">
+      <a href="#about">Über mich</a>
+
+      <!-- Dashboard-Zugang.
+           Der eigentliche Passwortschutz wird im nächsten Schritt eingerichtet. -->
+      <a href="/Dashboard/" class="login-button">Login</a>
+    </nav>
+  </header>
+
+
+  <main>
+
+    <section class="hero">
+
+      <div class="hero-content">
+
+        <div class="eyebrow">
+          Official Website
+        </div>
+
+        <h1>
+          Marcel<br>
+          <span>Marlow.</span>
+        </h1>
+
+        <p class="subtitle">
+          Unternehmer. Reisender. Visionär.<br>
+          Ideen entwickeln, Möglichkeiten schaffen und das Leben
+          nicht nur planen, sondern leben.
+        </p>
+
+        <div class="divider"></div>
+
+        <p class="quote">
+          „Taten sagen mehr als tausend Worte.“
+        </p>
+
+      </div>
+
+    </section>
+
+
+    <section class="about" id="about">
+
+      <div class="about-inner">
+
+        <div class="section-label">
+          Über mich
+        </div>
+
+        <h2>
+          Mehr als nur ein Ort.
+        </h2>
+
+        <p>
+          Diese Seite ist die digitale Heimat von Marcel Marlow.
+          Hier entstehen nach und nach neue Projekte, Ideen und
+          Einblicke in meine Arbeit und meinen Weg.
+        </p>
+
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <footer>
+
+    <div class="footer-name">
+      © 2026 Marcel Marlow
+    </div>
+
+    <div>
+      Official Website
+    </div>
+
+  </footer>
+
+</body>
+</html>

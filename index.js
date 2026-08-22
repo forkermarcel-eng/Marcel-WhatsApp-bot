@@ -50,11 +50,11 @@ const MODEL =
 
 
 /* ==================================================
-   MARCEL PERSONA V1.7
+   MARCEL PERSONA V1.7.1
 ================================================== */
 
-const MARCEL_PERSONA_V1_7 = `
-MARCEL PERSONA V1.7
+const MARCEL_PERSONA_V1_7_1 = `
+MARCEL PERSONA V1.7.1
 
 Du schreibst private Dating-/WhatsApp-Nachrichten im Namen von Marcel.
 
@@ -145,6 +145,46 @@ SCHREIBSTIL
   Nachrichten hängen
 
 - Emojis sparsam und natürlich
+
+
+==================================================
+SPRACHE
+==================================================
+
+SEHR WICHTIG:
+
+Antworte grundsätzlich in der Sprache,
+in der die Frau mit Marcel kommuniziert.
+
+Wenn ihre primäre Sprache bekannt ist,
+berücksichtige diese.
+
+Wenn ihre aktuelle Nachricht
+klar in einer anderen Sprache geschrieben ist,
+darfst du diese aktuelle Sprache spiegeln.
+
+Bei spanischsprachigen Frauen:
+Antwort auf Spanisch.
+
+Bei englischsprachigen Frauen:
+Antwort auf Englisch.
+
+Bei deutschsprachigen Frauen:
+Antwort auf Deutsch.
+
+Marcel selbst spricht kein Spanisch,
+benutzt aber Übersetzungshilfe.
+
+Das bedeutet:
+
+Die geschriebene WhatsApp-Antwort
+darf korrektes Spanisch sein.
+
+Aber niemals so tun,
+als könne Marcel deshalb
+spontan fließend Spanisch sprechen,
+telefonieren
+oder persönlich ohne Übersetzung kommunizieren.
 
 
 ==================================================
@@ -272,6 +312,22 @@ Paola Maza
 Karla Tinder
 !=
 Karla Instagram
+
+
+==================================================
+DOPPELTE NACHRICHTEN
+==================================================
+
+Wenn dieselbe Nachricht
+unmittelbar noch einmal ankommt,
+nicht erneut inhaltlich beantworten.
+
+Kurz und menschlich darauf hinweisen,
+dass sie zweimal angekommen ist.
+
+Die Duplikat-Antwort MUSS
+in der passenden Sprache
+des Kontakts bzw. Gesprächs erfolgen.
 
 
 ==================================================
@@ -635,6 +691,934 @@ function extractEditedText(update) {
       ?.editedMessage
       ?.message
   );
+
+}
+
+
+/* ==================================================
+   SPRACHERKENNUNG V1.7.1
+================================================== */
+
+function languageCodeFromStoredValue(
+  value
+) {
+
+  const language =
+    normalizeText(
+      value
+    )
+      .toLowerCase();
+
+
+  if (
+    !language
+  ) {
+
+    return null;
+
+  }
+
+
+  if (
+    language.includes(
+      "span"
+    )
+    ||
+    language.includes(
+      "españ"
+    )
+    ||
+    language === "es"
+    ||
+    language === "spa"
+  ) {
+
+    return "es";
+
+  }
+
+
+  if (
+    language.includes(
+      "german"
+    )
+    ||
+    language.includes(
+      "deutsch"
+    )
+    ||
+    language === "de"
+    ||
+    language === "ger"
+  ) {
+
+    return "de";
+
+  }
+
+
+  if (
+    language.includes(
+      "english"
+    )
+    ||
+    language.includes(
+      "englisch"
+    )
+    ||
+    language === "en"
+    ||
+    language === "eng"
+  ) {
+
+    return "en";
+
+  }
+
+
+  return null;
+
+}
+
+
+function detectLanguageFromText(
+  value
+) {
+
+  const text =
+    normalizeText(
+      value
+    )
+      .toLowerCase();
+
+
+  if (
+    !text
+  ) {
+
+    return null;
+
+  }
+
+
+  let spanishScore =
+    0;
+
+  let germanScore =
+    0;
+
+  let englishScore =
+    0;
+
+
+  if (
+    /[¿¡]/.test(
+      text
+    )
+  ) {
+
+    spanishScore +=
+      4;
+
+  }
+
+
+  if (
+    /[ñáéíóúü]/i.test(
+      text
+    )
+  ) {
+
+    spanishScore +=
+      3;
+
+  }
+
+
+  if (
+    /[äöüß]/i.test(
+      text
+    )
+  ) {
+
+    germanScore +=
+      3;
+
+  }
+
+
+  const spanishWords = [
+    "hola",
+    "gracias",
+    "amor",
+    "cariño",
+    "hermosa",
+    "hermoso",
+    "buenos",
+    "buenas",
+    "días",
+    "dias",
+    "noche",
+    "tengo",
+    "tienes",
+    "tiene",
+    "hijo",
+    "hija",
+    "años",
+    "anos",
+    "llama",
+    "acuerdas",
+    "conté",
+    "conte",
+    "quiero",
+    "quieres",
+    "puedo",
+    "puedes",
+    "trabajo",
+    "trabajas",
+    "madre",
+    "padre",
+    "comida",
+    "favorita",
+    "enfermera",
+    "domingo",
+    "siempre",
+    "mucho",
+    "también",
+    "tambien",
+    "porque",
+    "pero",
+    "cuando",
+    "donde",
+    "cómo",
+    "como",
+    "qué",
+    "que"
+  ];
+
+
+  const germanWords = [
+    "hallo",
+    "danke",
+    "schatz",
+    "guten",
+    "morgen",
+    "abend",
+    "nacht",
+    "ich",
+    "habe",
+    "bist",
+    "bin",
+    "mein",
+    "meine",
+    "mutter",
+    "vater",
+    "sohn",
+    "tochter",
+    "arbeit",
+    "arbeite",
+    "warum",
+    "wie",
+    "was",
+    "heute",
+    "morgen",
+    "gerne",
+    "liebe",
+    "schön",
+    "schönes"
+  ];
+
+
+  const englishWords = [
+    "hello",
+    "thanks",
+    "thank",
+    "good",
+    "morning",
+    "night",
+    "love",
+    "beautiful",
+    "have",
+    "son",
+    "daughter",
+    "mother",
+    "father",
+    "work",
+    "working",
+    "why",
+    "what",
+    "how",
+    "today",
+    "tomorrow",
+    "remember",
+    "told",
+    "favorite",
+    "favourite",
+    "nurse"
+  ];
+
+
+  const words =
+    text
+      .replace(
+        /[^\p{L}\p{N}]+/gu,
+        " "
+      )
+      .split(
+        /\s+/
+      )
+      .filter(
+        Boolean
+      );
+
+
+  for (
+    const word
+    of words
+  ) {
+
+    if (
+      spanishWords.includes(
+        word
+      )
+    ) {
+
+      spanishScore +=
+        1;
+
+    }
+
+
+    if (
+      germanWords.includes(
+        word
+      )
+    ) {
+
+      germanScore +=
+        1;
+
+    }
+
+
+    if (
+      englishWords.includes(
+        word
+      )
+    ) {
+
+      englishScore +=
+        1;
+
+    }
+
+  }
+
+
+  const scores = [
+    {
+      code:
+        "es",
+
+      score:
+        spanishScore
+    },
+
+    {
+      code:
+        "de",
+
+      score:
+        germanScore
+    },
+
+    {
+      code:
+        "en",
+
+      score:
+        englishScore
+    }
+  ]
+    .sort(
+      (
+        a,
+        b
+      ) =>
+        b.score
+        -
+        a.score
+    );
+
+
+  if (
+    scores[0].score
+    <=
+    0
+  ) {
+
+    return null;
+
+  }
+
+
+  if (
+    scores[0].score
+    ===
+    scores[1].score
+  ) {
+
+    return null;
+
+  }
+
+
+  return scores[0].code;
+
+}
+
+
+function languageNameFromCode(
+  code
+) {
+
+  if (
+    code === "es"
+  ) {
+
+    return "Spanish";
+
+  }
+
+
+  if (
+    code === "de"
+  ) {
+
+    return "German";
+
+  }
+
+
+  return "English";
+
+}
+
+
+function languageFromCountry(
+  country
+) {
+
+  const normalized =
+    normalizeIdentityValue(
+      country
+    );
+
+
+  const spanishCountries = [
+
+    "colombia",
+
+    "venezuela",
+
+    "mexico",
+
+    "méxico",
+
+    "argentina",
+
+    "chile",
+
+    "peru",
+
+    "perú",
+
+    "ecuador",
+
+    "bolivia",
+
+    "paraguay",
+
+    "uruguay",
+
+    "panama",
+
+    "panamá",
+
+    "costa rica",
+
+    "guatemala",
+
+    "honduras",
+
+    "el salvador",
+
+    "nicaragua",
+
+    "dominican republic",
+
+    "republica dominicana",
+
+    "república dominicana",
+
+    "spain",
+
+    "espana",
+
+    "españa"
+
+  ];
+
+
+  if (
+    spanishCountries.includes(
+      normalized
+    )
+  ) {
+
+    return "es";
+
+  }
+
+
+  if (
+    [
+      "germany",
+      "deutschland",
+      "austria",
+      "osterreich",
+      "österreich"
+    ].includes(
+      normalized
+    )
+  ) {
+
+    return "de";
+
+  }
+
+
+  return null;
+
+}
+
+
+function extractLanguageHintsFromObject(
+  value
+) {
+
+  if (
+    !value
+    ||
+    typeof value !== "object"
+  ) {
+
+    return [];
+
+  }
+
+
+  const hints =
+    [];
+
+
+  const stack = [
+    value
+  ];
+
+
+  while (
+    stack.length
+  ) {
+
+    const current =
+      stack.pop();
+
+
+    if (
+      !current
+      ||
+      typeof current !== "object"
+    ) {
+
+      continue;
+
+    }
+
+
+    if (
+      Array.isArray(
+        current
+      )
+    ) {
+
+      for (
+        const item
+        of current
+      ) {
+
+        if (
+          item
+          &&
+          typeof item === "object"
+        ) {
+
+          stack.push(
+            item
+          );
+
+        }
+
+      }
+
+
+      continue;
+
+    }
+
+
+    for (
+      const [
+        key,
+        item
+      ]
+      of Object.entries(
+        current
+      )
+    ) {
+
+      const normalizedKey =
+        normalizeIdentityValue(
+          key
+        );
+
+
+      if (
+        normalizedKey.includes(
+          "language"
+        )
+        ||
+        normalizedKey.includes(
+          "sprache"
+        )
+        ||
+        normalizedKey.includes(
+          "spanish"
+        )
+        ||
+        normalizedKey.includes(
+          "english"
+        )
+        ||
+        normalizedKey.includes(
+          "german"
+        )
+      ) {
+
+        if (
+          typeof item === "string"
+        ) {
+
+          hints.push(
+            item
+          );
+
+        }
+
+
+        if (
+          item === true
+        ) {
+
+          hints.push(
+            key
+          );
+
+        }
+
+      }
+
+
+      if (
+        item
+        &&
+        typeof item === "object"
+      ) {
+
+        stack.push(
+          item
+        );
+
+      }
+
+    }
+
+  }
+
+
+  return hints;
+
+}
+
+
+async function resolveReplyLanguage(
+  contact,
+  jid,
+  currentText = ""
+) {
+
+  /*
+    1.
+    Primäre Kontaktsprache
+  */
+
+  const directLanguage =
+    languageCodeFromStoredValue(
+      contact?.primary_language
+    );
+
+
+  if (
+    directLanguage
+  ) {
+
+    return directLanguage;
+
+  }
+
+
+  /*
+    2.
+    Gespeicherte Memory-Hinweise
+  */
+
+  if (
+    contact?.id
+  ) {
+
+    try {
+
+      const profile =
+        await getContactMemoryProfile(
+          contact.id
+        );
+
+
+      const profileHints =
+        extractLanguageHintsFromObject(
+          profile
+        );
+
+
+      for (
+        const hint
+        of profileHints
+      ) {
+
+        const code =
+          languageCodeFromStoredValue(
+            hint
+          );
+
+
+        if (
+          code
+        ) {
+
+          return code;
+
+        }
+
+      }
+
+
+      const memoryItems =
+        await getRelevantMemoryItems(
+          contact.id,
+          120
+        );
+
+
+      for (
+        const item
+        of memoryItems
+      ) {
+
+        const keyText =
+          (
+            normalizeText(
+              item.category
+            )
+            +
+            " "
+            +
+            normalizeText(
+              item.memory_key
+            )
+          );
+
+
+        if (
+          /language|sprache|spanish|english|german/i.test(
+            keyText
+          )
+        ) {
+
+          const code =
+            languageCodeFromStoredValue(
+              renderJson(
+                item.human_review_status
+                ===
+                "corrected"
+                &&
+                item.human_corrected_value
+
+                  ? item.human_corrected_value
+
+                  : item.memory_value
+              )
+            );
+
+
+          if (
+            code
+          ) {
+
+            return code;
+
+          }
+
+        }
+
+      }
+
+
+    } catch (
+      error
+    ) {
+
+      console.error(
+        "Sprach-Memory konnte nicht gelesen werden:",
+        error
+      );
+
+    }
+
+  }
+
+
+  /*
+    3.
+    Aktuelle eingehende Nachricht
+  */
+
+  const currentLanguage =
+    detectLanguageFromText(
+      currentText
+    );
+
+
+  if (
+    currentLanguage
+  ) {
+
+    return currentLanguage;
+
+  }
+
+
+  /*
+    4.
+    Bisheriger Gesprächsverlauf
+  */
+
+  if (
+    jid
+  ) {
+
+    try {
+
+      const history =
+        await getConversationHistory(
+          jid
+        );
+
+
+      const incomingHistory =
+        history
+          .filter(
+            item =>
+              item.direction
+              ===
+              "incoming"
+          )
+          .slice(
+            -8
+          )
+          .map(
+            item =>
+              item.message_text
+          )
+          .join(
+            "\n"
+          );
+
+
+      const historyLanguage =
+        detectLanguageFromText(
+          incomingHistory
+        );
+
+
+      if (
+        historyLanguage
+      ) {
+
+        return historyLanguage;
+
+      }
+
+
+    } catch (
+      error
+    ) {
+
+      console.error(
+        "Sprache aus Verlauf konnte nicht erkannt werden:",
+        error
+      );
+
+    }
+
+  }
+
+
+  /*
+    5.
+    Land als letzter sinnvoller Hinweis
+  */
+
+  const countryLanguage =
+    languageFromCountry(
+      contact?.country
+    );
+
+
+  if (
+    countryLanguage
+  ) {
+
+    return countryLanguage;
+
+  }
+
+
+  /*
+    6.
+    Letzter Fallback
+  */
+
+  return "en";
 
 }
 
@@ -4385,12 +5369,11 @@ async function initDatabase() {
 
   await seedMarcelMemory();
 
-
   await seedWomenMemory();
 
 
   console.log(
-    "PostgreSQL + Langzeit-Memory V1.7 + Frauen-Memory + Identity Registry bereit."
+    "PostgreSQL + Langzeit-Memory V1.7.1 + Frauen-Memory + Identity Registry + Sprachschutz bereit."
   );
 
 }
@@ -6920,22 +7903,37 @@ async function detectImmediateDuplicate(
 }
 
 
-function duplicateReplyForContact(
-  contact
+/* ==================================================
+   DUPLIKAT ANTWORT MIT SPRACHERKENNUNG V1.7.1
+================================================== */
+
+async function duplicateReplyForContact(
+  contact,
+  jid,
+  incomingText
 ) {
 
   const language =
-    normalizeText(
-      contact?.primary_language
-    )
-      .toLowerCase();
+    await resolveReplyLanguage(
+      contact,
+      jid,
+      incomingText
+    );
+
+
+  console.log(
+    "Duplikat-Sprache erkannt:",
+    language,
+    "Kontakt:",
+    contact?.display_name
+    ||
+    contact?.canonical_name
+    ||
+    jid
+  );
 
 
   if (
-    language.includes(
-      "span"
-    )
-    ||
     language === "es"
   ) {
 
@@ -6949,14 +7947,6 @@ function duplicateReplyForContact(
 
 
   if (
-    language.includes(
-      "german"
-    )
-    ||
-    language.includes(
-      "deutsch"
-    )
-    ||
     language === "de"
   ) {
 
@@ -7530,7 +8520,7 @@ function buildMemoryContext({
 
   return `
 ==================================================
-LANGZEIT-GEDÄCHTNIS V1.7
+LANGZEIT-GEDÄCHTNIS V1.7.1
 ==================================================
 
 KONTAKT:
@@ -7645,6 +8635,9 @@ REGELN
 
 - Nach Plattformwechsel
   Verlauf fortsetzen.
+
+- Sprache des Kontakts
+  und des aktuellen Gesprächs beachten.
 `;
 
 }
@@ -7666,6 +8659,9 @@ async function generateAIReply(
 
   let memoryContext =
     "";
+
+  let resolvedLanguage =
+    null;
 
 
   if (
@@ -7748,7 +8744,31 @@ async function generateAIReply(
 
       });
 
+
+    resolvedLanguage =
+      await resolveReplyLanguage(
+        contact,
+        jid,
+        incomingText
+      );
+
   }
+
+
+  const languageInstruction =
+    resolvedLanguage
+
+      ? (
+          "Bevorzugte Antwortsprache für diese Nachricht: "
+          +
+          languageNameFromCode(
+            resolvedLanguage
+          )
+          +
+          "."
+        )
+
+      : "";
 
 
   const response =
@@ -7759,9 +8779,11 @@ async function generateAIReply(
 
 
       instructions: `
-${MARCEL_PERSONA_V1_7}
+${MARCEL_PERSONA_V1_7_1}
 
 ${memoryContext}
+
+${languageInstruction}
 
 Nutze Verlauf
 als Kurzzeitgedächtnis
@@ -8975,6 +9997,14 @@ strikt trennen.
 marcel_knowledge_map
 nur für Wissen dieser Frau über Marcel.
 
+Wenn die Frau überwiegend
+in einer bestimmten Sprache schreibt
+und das für zukünftige Antworten
+relevant ist,
+darf diese Information
+im Bereich communication
+gespeichert werden.
+
 Gib ausschließlich JSON:
 
 {
@@ -9124,7 +10154,7 @@ Aktualisiere Memory.
 
 
   console.log(
-    "Langzeit-Memory V1.7 aktualisiert."
+    "Langzeit-Memory V1.7.1 aktualisiert."
   );
 
 }
@@ -9272,7 +10302,7 @@ app.get(
   (req, res) => {
 
     res.send(
-      `Marcel WhatsApp Bot V1.7 läuft. WhatsApp-Status: ${whatsappStatus}`
+      `Marcel WhatsApp Bot V1.7.1 läuft. WhatsApp-Status: ${whatsappStatus}`
     );
 
   }
@@ -9487,7 +10517,7 @@ app.get(
 >
 
 <title>
-Marcel Memory Test V1.7
+Marcel Memory Test V1.7.1
 </title>
 
 <style>
@@ -9636,7 +10666,7 @@ pre{
 
 
 <h1>
-Marcel Memory Test V1.7
+Marcel Memory Test V1.7.1
 </h1>
 
 
@@ -10600,7 +11630,12 @@ Memory / Profil
             data.reply,
 
           duplicate:
-            data.duplicate
+            data.duplicate,
+
+          replyLanguage:
+            data.replyLanguage
+            ||
+            null
 
         }
       );
@@ -11121,9 +12156,19 @@ app.post(
         );
 
 
+        const replyLanguage =
+          await resolveReplyLanguage(
+            contact,
+            jid,
+            text
+          );
+
+
         const reply =
-          duplicateReplyForContact(
-            contact
+          await duplicateReplyForContact(
+            contact,
+            jid,
+            text
           );
 
 
@@ -11151,6 +12196,8 @@ app.post(
 
           reply,
 
+          replyLanguage,
+
           snapshot:
             await getTestContactSnapshot(
               jid
@@ -11167,6 +12214,14 @@ app.post(
           "incoming",
           text,
           `test-in-${Date.now()}`
+        );
+
+
+      const replyLanguage =
+        await resolveReplyLanguage(
+          contact,
+          jid,
+          text
         );
 
 
@@ -11234,6 +12289,8 @@ app.post(
           false,
 
         reply,
+
+        replyLanguage,
 
         snapshot:
           await getTestContactSnapshot(
@@ -11351,8 +12408,10 @@ async function handleIncomingTextMessage(
     ) {
 
       const reply =
-        duplicateReplyForContact(
-          contact
+        await duplicateReplyForContact(
+          contact,
+          jid,
+          text
         );
 
 

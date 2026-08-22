@@ -2,133 +2,309 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1015">
+
   <title>Marcel AI Dashboard</title>
 
   <style>
+    :root {
+      --bg: #090d11;
+      --panel: #0d1217;
+      --panel-2: #10161c;
+      --panel-3: #171e25;
+      --panel-hover: #202830;
+      --border: #293139;
+
+      --text: #f5f7f8;
+      --muted: #98a2ab;
+
+      --green: #31b457;
+      --green-2: #43cc67;
+      --green-dark: #1e7d3a;
+
+      --red: #d95b5b;
+      --red-bg: #2a191b;
+
+      --chat-bg: #e9e3da;
+      --incoming: #ffffff;
+      --outgoing: #d7f5d5;
+      --translation: #fff2d5;
+
+      --shadow: 0 2px 12px rgba(0,0,0,.16);
+      --radius: 12px;
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
 
+    html,
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #090d11;
-      color: #f5f5f5;
-      height: 100vh;
+      width: 100%;
+      height: 100%;
+    }
+
+    body {
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Arial,
+        sans-serif;
+
+      background: var(--bg);
+      color: var(--text);
       overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
 
     .app {
       display: grid;
-      grid-template-columns: 190px 280px 1fr 300px;
-      height: 100vh;
-      background: #0b1015;
+      grid-template-columns:
+        190px
+        285px
+        minmax(420px, 1fr)
+        310px;
+
+      height: 100dvh;
+      min-height: 100vh;
+      background: var(--bg);
     }
 
-    /* SIDEBAR */
+    /* ==================================================
+       SIDEBAR
+    ================================================== */
 
     .sidebar {
-      background: #0d1217;
-      border-right: 1px solid #252c33;
-      padding: 22px 14px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding:
+        calc(18px + env(safe-area-inset-top))
+        14px
+        calc(16px + env(safe-area-inset-bottom));
+
       display: flex;
       flex-direction: column;
+      min-width: 0;
     }
 
     .logo {
       font-size: 22px;
+      line-height: 1;
       font-weight: 800;
-      margin-bottom: 25px;
+      margin: 8px 4px 24px;
+      white-space: nowrap;
     }
 
     .logo span {
-      color: #39b65a;
+      color: var(--green);
     }
 
     .new-message {
-      background: #2ca84f;
+      background: var(--green);
       color: white;
-      border: none;
-      border-radius: 9px;
-      padding: 12px;
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 10px;
       font-size: 14px;
+      font-weight: 700;
       margin-bottom: 20px;
     }
 
-    .nav-item {
-      padding: 12px;
-      margin: 3px 0;
-      border-radius: 8px;
-      color: #c7cdd3;
-      font-size: 14px;
+    .new-message:active {
+      transform: scale(.98);
     }
 
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .nav-item {
+      border: 0;
+      background: transparent;
+      text-align: left;
+
+      padding: 12px;
+      border-radius: 9px;
+
+      color: #c7cdd3;
+      font-size: 14px;
+
+      transition: background .15s ease;
+    }
+
+    .nav-item:hover,
     .nav-item.active {
-      background: #20272e;
+      background: var(--panel-hover);
       color: white;
     }
 
+    .sidebar-spacer {
+      flex: 1;
+      min-height: 15px;
+    }
+
     .auto-box {
-      margin-top: auto;
-      border: 1px solid #293139;
-      border-radius: 10px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
       padding: 13px;
+
       font-size: 12px;
+      line-height: 1.45;
+
       color: #c8cdd2;
+      background: rgba(255,255,255,.01);
     }
 
     .auto-title {
       display: flex;
       justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+
       margin-bottom: 12px;
     }
 
     .green {
-      color: #42c763;
+      color: var(--green-2);
     }
 
     .pause {
       margin-top: 14px;
+
       width: 100%;
-      border: 1px solid #8a3535;
-      color: #ff8181;
-      background: #28191b;
-      padding: 8px;
-      border-radius: 7px;
+      border: 1px solid #7a3636;
+
+      color: #ff8d8d;
+      background: var(--red-bg);
+
+      padding: 9px;
+      border-radius: 8px;
+      font-weight: 700;
     }
 
-    /* CHAT LIST */
+    .pause.paused {
+      color: #b9f3c5;
+      border-color: #2e8346;
+      background: #15311f;
+    }
+
+    /* ==================================================
+       CHAT LIST
+    ================================================== */
 
     .chat-list {
-      border-right: 1px solid #252c33;
-      background: #10161c;
+      border-right: 1px solid var(--border);
+      background: var(--panel-2);
+
       overflow-y: auto;
+      min-width: 0;
     }
 
     .chat-header {
-      padding: 18px;
-      border-bottom: 1px solid #252c33;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+
+      padding:
+        calc(17px + env(safe-area-inset-top))
+        16px
+        14px;
+
+      background: rgba(16,22,28,.97);
+      backdrop-filter: blur(15px);
+
+      border-bottom: 1px solid var(--border);
+    }
+
+    .chat-title-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+
+      margin-bottom: 12px;
     }
 
     .chat-header h2 {
       font-size: 18px;
-      margin-bottom: 12px;
+      white-space: nowrap;
     }
 
-    .search {
+    .unread-count {
+      color: var(--green-2);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .search-wrap {
+      position: relative;
+    }
+
+    .search-wrap span {
+      position: absolute;
+      left: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
+      opacity: .7;
+    }
+
+    .search-input {
+      width: 100%;
+      border: 1px solid transparent;
+      outline: none;
+
       background: #20272e;
-      padding: 10px;
-      border-radius: 8px;
-      color: #89929b;
+      color: white;
+
+      padding: 10px 10px 10px 35px;
+      border-radius: 9px;
+
       font-size: 13px;
     }
 
+    .search-input:focus {
+      border-color: #3a4d5f;
+    }
+
+    .contacts {
+      padding-bottom: 40px;
+    }
+
     .contact {
-      padding: 14px 16px;
+      width: 100%;
+      border: 0;
       border-bottom: 1px solid #20272e;
-      cursor: pointer;
+
+      text-align: left;
+      background: transparent;
+      color: white;
+
+      padding: 14px 16px;
+
+      transition: background .12s ease;
+    }
+
+    .contact:hover {
+      background: #182027;
     }
 
     .contact.active {
@@ -138,137 +314,338 @@
     .contact-top {
       display: flex;
       justify-content: space-between;
+      gap: 10px;
       margin-bottom: 5px;
     }
 
     .contact-name {
-      font-weight: 700;
+      font-weight: 750;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .time {
       font-size: 11px;
       color: #8e979f;
+      flex-shrink: 0;
     }
 
     .preview {
       color: #9ba3aa;
       font-size: 12px;
+      line-height: 1.35;
+
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    /* MAIN CHAT */
+    .contact-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 7px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+
+      min-height: 19px;
+      padding: 2px 7px;
+
+      border-radius: 999px;
+
+      font-size: 10px;
+      font-weight: 700;
+
+      color: #cbd3da;
+      background: #273039;
+    }
+
+    .badge.green-badge {
+      color: #a6efb6;
+      background: #183722;
+    }
+
+    /* ==================================================
+       MAIN CHAT
+    ================================================== */
 
     .main {
+      min-width: 0;
+      min-height: 0;
+
       display: flex;
       flex-direction: column;
-      background: #e9e3da;
+
+      background: var(--chat-bg);
       color: #202020;
     }
 
     .topbar {
-      height: 70px;
-      background: #10161c;
+      min-height: 70px;
+      padding:
+        calc(12px + env(safe-area-inset-top))
+        18px
+        12px;
+
+      background: var(--panel-2);
       color: white;
-      padding: 15px 20px;
+
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 15px;
+
+      border-bottom: 1px solid var(--border);
+    }
+
+    .topbar-person {
+      min-width: 0;
+    }
+
+    .topbar-name {
+      display: block;
+      font-size: 16px;
+      font-weight: 800;
+
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .online {
-      color: #49cf6c;
+      color: var(--green-2);
       font-size: 12px;
     }
 
+    .offline {
+      color: #a6adb3;
+      font-size: 12px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: nowrap;
+    }
+
     .actions button {
-      background: #252d34;
-      border: none;
+      border: 0;
       color: white;
-      padding: 9px 14px;
-      border-radius: 7px;
-      margin-left: 5px;
+      background: #252d34;
+
+      padding: 9px 12px;
+      border-radius: 8px;
+
+      font-size: 12px;
+      white-space: nowrap;
     }
 
     .actions .auto {
-      background: #299b49;
+      background: var(--green-dark);
+    }
+
+    .actions .auto.off {
+      color: #ddd;
+      background: #4d3232;
     }
 
     .messages {
       flex: 1;
-      padding: 28px;
+      min-height: 0;
+
+      padding: 24px;
       overflow-y: auto;
+
+      background:
+        radial-gradient(
+          circle at 20% 20%,
+          rgba(255,255,255,.12),
+          transparent 34%
+        ),
+        var(--chat-bg);
+    }
+
+    .day-label {
+      width: max-content;
+
+      margin: 0 auto 18px;
+      padding: 5px 10px;
+
+      background: rgba(255,255,255,.72);
+      color: #696969;
+
+      border-radius: 8px;
+      font-size: 11px;
+    }
+
+    .message-row {
+      display: flex;
+      margin-bottom: 9px;
+    }
+
+    .message-row.mine {
+      justify-content: flex-end;
     }
 
     .bubble {
-      max-width: 68%;
-      padding: 13px 16px;
+      max-width: 72%;
+      padding: 11px 13px;
+
       border-radius: 10px;
-      margin-bottom: 10px;
-      line-height: 1.4;
-      box-shadow: 0 1px 2px rgba(0,0,0,.15);
+      line-height: 1.42;
+
+      font-size: 14px;
+
+      box-shadow: 0 1px 2px rgba(0,0,0,.13);
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
     }
 
     .incoming {
-      background: white;
+      background: var(--incoming);
+      border-top-left-radius: 4px;
     }
 
-    .translation {
-      background: #fff2d5;
-      font-size: 13px;
+    .outgoing {
+      background: var(--outgoing);
+      border-top-right-radius: 4px;
     }
 
-    .suggestion {
+    .message-time {
+      display: block;
+      text-align: right;
+
+      font-size: 10px;
+      color: #838383;
+
+      margin-top: 5px;
+    }
+
+    .translation-box {
+      max-width: 72%;
+      margin: -3px 0 13px;
+
+      background: var(--translation);
+
+      padding: 10px 13px;
+      border-radius: 9px;
+
+      font-size: 12px;
+      line-height: 1.45;
+
+      box-shadow: 0 1px 2px rgba(0,0,0,.09);
+    }
+
+    .translation-box.mine {
       margin-left: auto;
-      background: #d7f5d5;
     }
+
+    .translation-label {
+      display: block;
+      font-size: 10px;
+      font-weight: 800;
+      color: #7c6842;
+      margin-bottom: 3px;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+
+    /* ==================================================
+       AI SUGGESTION CARD
+    ================================================== */
 
     .ai-card {
-      background: white;
-      width: 72%;
-      margin: 25px auto;
+      width: min(78%, 650px);
+
+      margin: 24px auto;
+
       padding: 16px;
-      border-radius: 12px;
-      box-shadow: 0 2px 12px rgba(0,0,0,.15);
+
+      border-radius: var(--radius);
+      background: white;
+      box-shadow: var(--shadow);
     }
 
-    .ai-card h4 {
+    .ai-card.hidden {
+      display: none;
+    }
+
+    .ai-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+
       margin-bottom: 12px;
     }
 
+    .ai-heading h4 {
+      font-size: 14px;
+    }
+
+    .ai-chip {
+      font-size: 10px;
+      font-weight: 800;
+
+      color: #256b39;
+      background: #dff5e5;
+
+      padding: 4px 7px;
+      border-radius: 999px;
+    }
+
     .ai-answer {
-      background: #d7f5d5;
-      padding: 14px;
+      background: var(--outgoing);
+
+      padding: 13px 14px;
       border-radius: 8px;
+
+      font-size: 14px;
+      line-height: 1.45;
+
       margin-bottom: 10px;
     }
 
     .ai-translation {
-      background: #fff1d1;
-      padding: 14px;
+      background: var(--translation);
+
+      padding: 12px 14px;
       border-radius: 8px;
-      font-size: 13px;
+
+      font-size: 12px;
+      line-height: 1.45;
     }
 
     .ai-buttons {
       display: flex;
-      gap: 10px;
-      margin-top: 14px;
+      gap: 8px;
+      margin-top: 13px;
     }
 
     .ai-buttons button {
       flex: 1;
-      padding: 10px;
-      border: none;
-      border-radius: 7px;
-      font-weight: 600;
+
+      border: 0;
+      border-radius: 8px;
+
+      padding: 10px 8px;
+
+      font-weight: 750;
+      font-size: 12px;
     }
 
     .send {
-      background: #2ca84f;
+      background: var(--green);
       color: white;
     }
 
     .edit {
-      background: #e6e6e6;
+      background: #e6e7e8;
+      color: #303030;
     }
 
     .reject {
@@ -276,57 +653,208 @@
       color: #9d3030;
     }
 
-    .composer {
-      padding: 15px;
-      background: #e9e3da;
+    .feedback-row {
       display: flex;
-      gap: 10px;
+      gap: 7px;
+      margin-top: 9px;
     }
 
-    .composer input {
+    .feedback-row button {
+      border: 1px solid #e3e3e3;
+      background: #f6f6f6;
+      color: #3c3c3c;
+
+      padding: 7px 9px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+
+    /* ==================================================
+       EDIT PANEL
+    ================================================== */
+
+    .edit-panel {
+      display: none;
+      margin-top: 12px;
+    }
+
+    .edit-panel.open {
+      display: block;
+    }
+
+    .edit-panel textarea {
+      width: 100%;
+      min-height: 85px;
+
+      border: 1px solid #c7c7c7;
+      outline: none;
+
+      resize: vertical;
+
+      border-radius: 8px;
+      padding: 10px;
+
+      background: white;
+      color: #222;
+
+      line-height: 1.4;
+    }
+
+    .edit-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .edit-actions button {
       flex: 1;
-      padding: 14px;
-      border: none;
-      border-radius: 10px;
+
+      border: 0;
+      border-radius: 8px;
+      padding: 9px;
+
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .save-edit {
+      background: var(--green);
+      color: white;
+    }
+
+    .cancel-edit {
+      background: #ededed;
+      color: #333;
+    }
+
+    /* ==================================================
+       COMPOSER
+    ================================================== */
+
+    .composer {
+      padding:
+        12px
+        15px
+        calc(12px + env(safe-area-inset-bottom));
+
+      background: var(--chat-bg);
+
+      display: flex;
+      gap: 9px;
+      align-items: flex-end;
+
+      border-top: 1px solid rgba(0,0,0,.05);
+    }
+
+    .composer textarea {
+      flex: 1;
+
+      min-height: 45px;
+      max-height: 130px;
+
+      border: 0;
+      outline: none;
+      resize: none;
+
+      padding: 12px 13px;
+      border-radius: 11px;
+
+      background: white;
+      color: #222;
+
       font-size: 14px;
+      line-height: 1.4;
     }
 
     .composer button {
-      width: 48px;
-      border: none;
+      flex: 0 0 46px;
+      width: 46px;
+      height: 46px;
+
+      border: 0;
       border-radius: 50%;
-      background: #2ca84f;
+
+      background: var(--green);
       color: white;
-      font-size: 20px;
+
+      font-size: 19px;
     }
 
-    /* PROFILE */
+    /* ==================================================
+       PROFILE
+    ================================================== */
 
     .profile {
-      background: #10161c;
-      border-left: 1px solid #252c33;
+      min-width: 0;
+
+      background: var(--panel-2);
+      border-left: 1px solid var(--border);
+
       overflow-y: auto;
+
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
     .profile-section {
-      padding: 20px;
-      border-bottom: 1px solid #293139;
+      padding: 19px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .profile-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
     }
 
     .profile h2 {
-      margin-bottom: 15px;
+      font-size: 19px;
+    }
+
+    .close-profile {
+      display: none;
+
+      border: 0;
+      background: #252d34;
+      color: white;
+
+      border-radius: 8px;
+      padding: 7px 9px;
     }
 
     .avatar {
-      width: 82px;
-      height: 82px;
+      width: 78px;
+      height: 78px;
+
       border-radius: 50%;
-      background: linear-gradient(135deg,#6d747b,#252a30);
-      margin: 5px auto 15px;
+
+      background:
+        linear-gradient(
+          135deg,
+          #77818a,
+          #252a30
+        );
+
+      margin: 12px auto 13px;
+
       display: flex;
       justify-content: center;
       align-items: center;
-      font-size: 30px;
+
+      font-size: 28px;
+      font-weight: 800;
+    }
+
+    .profile-status {
+      text-align: center;
+      margin-bottom: 15px;
+
+      font-size: 12px;
+      color: #c9d0d5;
+    }
+
+    .status-dot {
+      color: var(--green-2);
     }
 
     .profile-data {
@@ -336,33 +864,268 @@
     }
 
     .profile-section h3 {
-      font-size: 15px;
-      margin-bottom: 10px;
+      font-size: 14px;
+      margin-bottom: 9px;
     }
 
     .profile-section p,
     .profile-section li {
       font-size: 13px;
       color: #c1c8ce;
-      line-height: 1.6;
+      line-height: 1.55;
     }
 
-    ul {
+    .profile-section ul {
       list-style: none;
     }
 
-    .status-dot {
-      color: #43cc67;
+    .profile-section li {
+      margin: 4px 0;
     }
 
-    @media (max-width: 1000px) {
+    .profile-note {
+      background: #181f26;
+      border: 1px solid #2d3740;
+      padding: 10px;
+      border-radius: 9px;
+    }
+
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ==================================================
+       TOAST
+    ================================================== */
+
+    .toast {
+      position: fixed;
+
+      left: 50%;
+      bottom: calc(20px + env(safe-area-inset-bottom));
+
+      transform: translate(-50%, 20px);
+
+      max-width: min(90vw, 450px);
+
+      background: #111820;
+      color: white;
+
+      border: 1px solid #303b45;
+      border-radius: 10px;
+
+      padding: 11px 15px;
+
+      box-shadow: 0 8px 30px rgba(0,0,0,.3);
+
+      font-size: 13px;
+
+      opacity: 0;
+      pointer-events: none;
+
+      transition:
+        opacity .2s ease,
+        transform .2s ease;
+
+      z-index: 100;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    /* ==================================================
+       TABLET
+    ================================================== */
+
+    @media (max-width: 1180px) {
+
       .app {
-        grid-template-columns: 160px 240px 1fr;
+        grid-template-columns:
+          155px
+          235px
+          minmax(390px, 1fr);
       }
 
       .profile {
         display: none;
+
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+
+        z-index: 30;
+
+        width: min(360px, 88vw);
+
+        box-shadow: -15px 0 40px rgba(0,0,0,.4);
       }
+
+      .profile.open {
+        display: block;
+      }
+
+      .close-profile {
+        display: inline-block;
+      }
+
+      .sidebar {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+
+      .nav-item {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+
+      .ai-card {
+        width: 88%;
+      }
+
+    }
+
+    /* ==================================================
+       SMALL TABLET / PHONE
+    ================================================== */
+
+    @media (max-width: 820px) {
+
+      body {
+        overflow: auto;
+      }
+
+      .app {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto minmax(65vh, 1fr);
+
+        height: auto;
+        min-height: 100dvh;
+      }
+
+      .sidebar {
+        position: relative;
+
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+
+        padding:
+          calc(10px + env(safe-area-inset-top))
+          10px
+          10px;
+      }
+
+      .logo {
+        margin: 5px 4px 12px;
+      }
+
+      .new-message {
+        display: none;
+      }
+
+      .nav {
+        display: flex;
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 5px;
+
+        padding-bottom: 2px;
+      }
+
+      .nav-item {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        padding: 9px 11px;
+      }
+
+      .sidebar-spacer,
+      .auto-box {
+        display: none;
+      }
+
+      .chat-list {
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+
+        max-height: 260px;
+      }
+
+      .chat-header {
+        padding:
+          13px
+          12px
+          10px;
+      }
+
+      .contact {
+        padding: 11px 13px;
+      }
+
+      .main {
+        min-height: 68dvh;
+      }
+
+      .topbar {
+        padding:
+          10px
+          12px;
+      }
+
+      .actions button {
+        padding: 8px 9px;
+      }
+
+      .messages {
+        padding: 15px 12px;
+      }
+
+      .bubble,
+      .translation-box {
+        max-width: 88%;
+      }
+
+      .ai-card {
+        width: 96%;
+      }
+
+      .ai-buttons {
+        flex-wrap: wrap;
+      }
+
+      .ai-buttons button {
+        min-width: 30%;
+      }
+
+    }
+
+    @media (max-width: 520px) {
+
+      .actions .notes-btn {
+        display: none;
+      }
+
+      .bubble,
+      .translation-box {
+        max-width: 94%;
+      }
+
+      .ai-heading {
+        align-items: flex-start;
+      }
+
+      .ai-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .ai-buttons .send {
+        grid-column: span 2;
+      }
+
     }
   </style>
 </head>
@@ -371,23 +1134,96 @@
 
 <div class="app">
 
+  <!-- ==================================================
+       SIDEBAR
+  ================================================== -->
+
   <aside class="sidebar">
-    <div class="logo">👑 Marcel <span>AI</span></div>
 
-    <button class="new-message">＋ Neue Nachricht</button>
+    <div class="logo">
+      👑 Marcel <span>AI</span>
+    </div>
 
-    <div class="nav-item active">⌂ Übersicht</div>
-    <div class="nav-item">💬 Chats</div>
-    <div class="nav-item">📅 Dates</div>
-    <div class="nav-item">👤 Kontakte</div>
-    <div class="nav-item">🖼 Medien</div>
-    <div class="nav-item">📊 Analyse</div>
-    <div class="nav-item">⚙ Einstellungen</div>
+    <button
+      class="new-message"
+      id="newMessageButton"
+      type="button"
+    >
+      ＋ Neue Nachricht
+    </button>
+
+    <nav class="nav">
+
+      <button
+        class="nav-item active"
+        type="button"
+        data-nav="overview"
+      >
+        ⌂ Übersicht
+      </button>
+
+      <button
+        class="nav-item"
+        type="button"
+        data-nav="chats"
+      >
+        💬 Chats
+      </button>
+
+      <button
+        class="nav-item"
+        type="button"
+        data-nav="dates"
+      >
+        📅 Dates
+      </button>
+
+      <button
+        class="nav-item"
+        type="button"
+        data-nav="contacts"
+      >
+        👤 Kontakte
+      </button>
+
+      <button
+        class="nav-item"
+        type="button"
+        data-nav="media"
+      >
+        🖼 Medien
+      </button>
+
+      <button
+        class="nav-item"
+        type="button"
+        data-nav="analysis"
+      >
+        📊 Analyse
+      </button>
+
+      <button
+        class="nav-item"
+        type="button"
+        data-nav="settings"
+      >
+        ⚙ Einstellungen
+      </button>
+
+    </nav>
+
+    <div class="sidebar-spacer"></div>
 
     <div class="auto-box">
+
       <div class="auto-title">
         <b>Auto-Modus</b>
-        <span class="green">Aktiv</span>
+        <span
+          id="globalAutoStatus"
+          class="green"
+        >
+          Aktiv
+        </span>
       </div>
 
       Antwortverzögerung<br>
@@ -398,143 +1234,194 @@
       Ruhezeiten<br>
       <b>23:00–08:00</b>
 
-      <button class="pause">Pause für alle</button>
+      <button
+        class="pause"
+        id="pauseAllButton"
+        type="button"
+      >
+        Pause für alle
+      </button>
+
     </div>
+
   </aside>
 
+
+  <!-- ==================================================
+       CONTACT LIST
+  ================================================== -->
 
   <section class="chat-list">
 
     <div class="chat-header">
-      <h2>Alle Chats <span class="green">12 ungelesen</span></h2>
-      <div class="search">🔍 Suchen</div>
+
+      <div class="chat-title-row">
+
+        <h2>
+          Alle Chats
+        </h2>
+
+        <span
+          id="unreadCount"
+          class="unread-count"
+        >
+          0 ungelesen
+        </span>
+
+      </div>
+
+      <div class="search-wrap">
+
+        <span>🔍</span>
+
+        <input
+          id="searchInput"
+          class="search-input"
+          type="search"
+          placeholder="Suchen"
+          autocomplete="off"
+        >
+
+      </div>
+
     </div>
 
-    <div class="contact active">
-      <div class="contact-top">
-        <span class="contact-name">Daniela</span>
-        <span class="time">14:28</span>
-      </div>
-      <div class="preview">¿Qué haces esta noche? 😉</div>
-    </div>
-
-    <div class="contact">
-      <div class="contact-top">
-        <span class="contact-name">Karla</span>
-        <span class="time">14:15</span>
-      </div>
-      <div class="preview">Jajaja me encantó lo que dijiste 😂</div>
-    </div>
-
-    <div class="contact">
-      <div class="contact-top">
-        <span class="contact-name">Valentina</span>
-        <span class="time">13:42</span>
-      </div>
-      <div class="preview">Te extraño...</div>
-    </div>
-
-    <div class="contact">
-      <div class="contact-top">
-        <span class="contact-name">Camila</span>
-        <span class="time">12:55</span>
-      </div>
-      <div class="preview">¿Vamos a la playa este finde?</div>
-    </div>
-
-    <div class="contact">
-      <div class="contact-top">
-        <span class="contact-name">Sofía</span>
-        <span class="time">10:45</span>
-      </div>
-      <div class="preview">Buenos días ☀️</div>
-    </div>
+    <div
+      id="contactsContainer"
+      class="contacts"
+    ></div>
 
   </section>
 
+
+  <!-- ==================================================
+       MAIN CHAT
+  ================================================== -->
 
   <main class="main">
 
     <div class="topbar">
 
-      <div>
-        <strong>Daniela</strong><br>
-        <span class="online">● Online</span>
+      <div class="topbar-person">
+
+        <span
+          id="topbarName"
+          class="topbar-name"
+        >
+          —
+        </span>
+
+        <span
+          id="topbarStatus"
+          class="offline"
+        >
+          ● Kein Kontakt
+        </span>
+
       </div>
 
       <div class="actions">
-        <button>Profil</button>
-        <button>Notizen</button>
-        <button class="auto">Auto ✓</button>
-      </div>
 
-    </div>
+        <button
+          id="profileButton"
+          type="button"
+        >
+          Profil
+        </button>
 
+        <button
+          id="notesButton"
+          class="notes-btn"
+          type="button"
+        >
+          Notizen
+        </button>
 
-    <div class="messages">
-
-      <div class="bubble incoming">
-        ¿Qué haces esta noche? 😉
-      </div>
-
-      <div class="bubble translation">
-        <b>Übersetzung für dich:</b><br>
-        Was machst du heute Abend? 😉
-      </div>
-
-
-      <div class="ai-card">
-
-        <h4>Vorgeschlagene Antwort von Marcel AI</h4>
-
-        <div class="ai-answer">
-          Todavía no tengo nada planeado...
-          aunque eso podría cambiar 😉
-        </div>
-
-        <div class="ai-translation">
-          <b>Übersetzung für dich:</b><br>
-          Ich habe noch nichts geplant...
-          obwohl sich das ändern könnte 😉
-        </div>
-
-        <div class="ai-buttons">
-          <button class="send">Senden</button>
-          <button class="edit">Ändern</button>
-          <button class="reject">Nicht senden</button>
-        </div>
+        <button
+          id="contactAutoButton"
+          class="auto"
+          type="button"
+        >
+          Auto ✓
+        </button>
 
       </div>
 
     </div>
+
+
+    <div
+      id="messagesContainer"
+      class="messages"
+    ></div>
 
 
     <div class="composer">
-      <input placeholder="Nachricht schreiben...">
-      <button>➤</button>
+
+      <textarea
+        id="composerInput"
+        placeholder="Nachricht schreiben..."
+        rows="1"
+      ></textarea>
+
+      <button
+        id="composerSendButton"
+        type="button"
+        aria-label="Nachricht senden"
+      >
+        ➤
+      </button>
+
     </div>
 
   </main>
 
 
-  <aside class="profile">
+  <!-- ==================================================
+       PROFILE
+  ================================================== -->
+
+  <aside
+    id="profilePanel"
+    class="profile"
+  >
 
     <div class="profile-section">
 
-      <h2>Daniela</h2>
+      <div class="profile-title">
 
-      <div class="avatar">D</div>
+        <h2 id="profileName">
+          —
+        </h2>
 
-      <div style="text-align:center;margin-bottom:15px">
-        <span class="status-dot">●</span> Online
+        <button
+          id="closeProfileButton"
+          class="close-profile"
+          type="button"
+        >
+          ✕
+        </button>
+
       </div>
 
-      <div class="profile-data">
-        Alter: 27<br>
-        Stadt: Medellín<br>
-        Beruf: Architektin<br>
-        Sprache: 🇨🇴 Spanisch
+      <div
+        id="profileAvatar"
+        class="avatar"
+      >
+        ?
       </div>
+
+      <div
+        id="profileStatus"
+        class="profile-status"
+      >
+        Offline
+      </div>
+
+      <div
+        id="profileData"
+        class="profile-data"
+      ></div>
 
     </div>
 
@@ -543,9 +1430,8 @@
 
       <h3>Über sie</h3>
 
-      <p>
-        Familienorientiert, humorvoll und offen.
-        Mag Reisen, Strand und gute Restaurants.
+      <p id="profileAbout">
+        —
       </p>
 
     </div>
@@ -555,13 +1441,7 @@
 
       <h3>Interessen</h3>
 
-      <ul>
-        <li>✈ Reisen</li>
-        <li>🏖 Strand</li>
-        <li>🍣 Restaurants</li>
-        <li>💬 Gute Gespräche</li>
-        <li>🏋 Fitness</li>
-      </ul>
+      <ul id="profileInterests"></ul>
 
     </div>
 
@@ -570,9 +1450,8 @@
 
       <h3>Nächstes Date</h3>
 
-      <p>
-        📅 Freitag – 19:00<br>
-        📍 Medellín
+      <p id="profileDate">
+        Kein Date gespeichert.
       </p>
 
     </div>
@@ -582,17 +1461,1863 @@
 
       <h3>Notizen</h3>
 
-      <p>
-        Reagiert gut auf Humor und kleine Neckereien.
-        Wichtige Informationen werden später automatisch
-        aus dem Kontakt-Memory geladen.
-      </p>
+      <div class="profile-note">
+
+        <p id="profileNotes">
+          —
+        </p>
+
+      </div>
+
+    </div>
+
+
+    <div class="profile-section">
+
+      <h3>Memory Status</h3>
+
+      <div
+        id="profileMemoryStatus"
+        class="profile-data"
+      ></div>
 
     </div>
 
   </aside>
 
 </div>
+
+
+<div
+  id="toast"
+  class="toast"
+></div>
+
+
+<script>
+(function () {
+
+  "use strict";
+
+
+  /* ==================================================
+     DEMO DATA
+
+     Dieser Block wird im nächsten Backend-Schritt
+     durch echte Railway-API-Daten ersetzt.
+  ================================================== */
+
+  const contacts = [
+
+    {
+      id: "daniela",
+
+      name: "Daniela",
+
+      age: 27,
+
+      city: "Medellín",
+
+      country: "Kolumbien",
+
+      language: "Spanisch",
+
+      profession: "—",
+
+      online: true,
+
+      unread: 3,
+
+      autoReply: true,
+
+      about:
+        "Extrovertiert, aber mit ernster Seite. Lernt Marcel ohne Eile kennen.",
+
+      interests: [
+        "🎁 Geschenke als Liebessprache",
+        "💬 Gute Gespräche",
+        "🏙 Medellín"
+      ],
+
+      nextDate:
+        "Noch kein festes Date gespeichert.",
+
+      notes:
+        "Sie hat Marcel vor Medellín gewarnt. Nicht erneut nach Dingen fragen, die bereits im Memory stehen.",
+
+      memoryStatus: {
+        active: 12,
+        historical: 3,
+        events: 2
+      },
+
+      messages: [
+
+        {
+          direction: "incoming",
+          text: "¿Qué haces esta noche? 😉",
+          translation: "Was machst du heute Abend? 😉",
+          time: "14:28"
+        },
+
+        {
+          direction: "outgoing",
+          text: "Todavía no tengo nada planeado... aunque eso podría cambiar 😉",
+          translation: "Ich habe noch nichts geplant... obwohl sich das ändern könnte 😉",
+          time: "14:29"
+        }
+
+      ],
+
+      suggestion: {
+        text:
+          "Depende... ¿tenías algo interesante en mente? 😄",
+
+        translation:
+          "Kommt drauf an ... hattest du etwas Interessantes im Kopf? 😄"
+      }
+    },
+
+
+    {
+      id: "karla",
+
+      name: "Karla",
+
+      age: null,
+
+      city: "—",
+
+      country: "Kolumbien",
+
+      language: "Spanisch",
+
+      profession: "—",
+
+      online: false,
+
+      unread: 1,
+
+      autoReply: true,
+
+      about:
+        "Dieser Demo-Kontakt ist getrennt zu behandeln. Gleichnamige Kontakte dürfen später niemals automatisch zusammengeführt werden.",
+
+      interests: [
+        "💬 Kennenlernen",
+        "❤️ Zuneigung"
+      ],
+
+      nextDate:
+        "Kein Date gespeichert.",
+
+      notes:
+        "Identität immer eindeutig prüfen. Keine Memory-Daten einer anderen Karla verwenden.",
+
+      memoryStatus: {
+        active: 7,
+        historical: 1,
+        events: 0
+      },
+
+      messages: [
+
+        {
+          direction: "incoming",
+          text: "Jajaja me encantó lo que dijiste 😂",
+          translation: "Hahaha, ich fand toll, was du gesagt hast 😂",
+          time: "14:15"
+        }
+
+      ],
+
+      suggestion: {
+        text:
+          "Entonces al menos hice algo bien hoy 😄",
+
+        translation:
+          "Dann habe ich heute wenigstens etwas richtig gemacht 😄"
+      }
+    },
+
+
+    {
+      id: "valentina",
+
+      name: "Valentina",
+
+      age: 28,
+
+      city: "Medellín",
+
+      country: "Kolumbien",
+
+      language: "Spanisch",
+
+      profession: "—",
+
+      online: true,
+
+      unread: 4,
+
+      autoReply: false,
+
+      about:
+        "Demo-Kontakt für die Dashboard-Oberfläche.",
+
+      interests: [
+        "✈ Reisen",
+        "🌴 Strand",
+        "🎵 Musik"
+      ],
+
+      nextDate:
+        "Kein Date gespeichert.",
+
+      notes:
+        "Auto-Antwort für diesen Kontakt ist aktuell deaktiviert.",
+
+      memoryStatus: {
+        active: 5,
+        historical: 2,
+        events: 1
+      },
+
+      messages: [
+
+        {
+          direction: "incoming",
+          text: "Te extraño...",
+          translation: "Ich vermisse dich ...",
+          time: "13:42"
+        }
+
+      ],
+
+      suggestion: {
+        text:
+          "Eso suena peligroso... porque podría acostumbrarme a escucharlo 😏",
+
+        translation:
+          "Das klingt gefährlich ... weil ich mich daran gewöhnen könnte, das zu hören 😏"
+      }
+    },
+
+
+    {
+      id: "camila",
+
+      name: "Camila",
+
+      age: 25,
+
+      city: "Cartagena",
+
+      country: "Kolumbien",
+
+      language: "Spanisch",
+
+      profession: "—",
+
+      online: false,
+
+      unread: 2,
+
+      autoReply: true,
+
+      about:
+        "Demo-Kontakt für spätere Reise- und Date-Funktionen.",
+
+      interests: [
+        "🏖 Strand",
+        "🍤 Essen",
+        "🌅 Meer"
+      ],
+
+      nextDate:
+        "Kein Date gespeichert.",
+
+      notes:
+        "Reisepläne dürfen später nicht automatisch als festes Date interpretiert werden.",
+
+      memoryStatus: {
+        active: 4,
+        historical: 0,
+        events: 1
+      },
+
+      messages: [
+
+        {
+          direction: "incoming",
+          text: "¿Vamos a la playa este finde?",
+          translation: "Gehen wir dieses Wochenende an den Strand?",
+          time: "12:55"
+        }
+
+      ],
+
+      suggestion: {
+        text:
+          "Suena tentador 😄 Pero primero tendría que estar un poco más cerca de Colombia.",
+
+        translation:
+          "Klingt verlockend 😄 Aber dafür müsste ich erst einmal etwas näher an Kolumbien sein."
+      }
+    },
+
+
+    {
+      id: "sofia",
+
+      name: "Sofía",
+
+      age: 30,
+
+      city: "Medellín",
+
+      country: "Kolumbien",
+
+      language: "Spanisch",
+
+      profession: "—",
+
+      online: true,
+
+      unread: 2,
+
+      autoReply: true,
+
+      about:
+        "Demo-Kontakt für Morgen-/Routine-Nachrichten.",
+
+      interests: [
+        "☕ Kaffee",
+        "🏋 Fitness",
+        "🌞 Ruhige Pläne"
+      ],
+
+      nextDate:
+        "Kein Date gespeichert.",
+
+      notes:
+        "Routine-Grüße werden später separat gesteuert.",
+
+      memoryStatus: {
+        active: 3,
+        historical: 1,
+        events: 0
+      },
+
+      messages: [
+
+        {
+          direction: "incoming",
+          text: "Buenos días ☀️",
+          translation: "Guten Morgen ☀️",
+          time: "10:45"
+        }
+
+      ],
+
+      suggestion: {
+        text:
+          "Buenos días, hermosa 😊 Espero que hayas empezado bien el día.",
+
+        translation:
+          "Guten Morgen, meine Schöne 😊 Ich hoffe, du bist gut in den Tag gestartet."
+      }
+    }
+
+  ];
+
+
+  /* ==================================================
+     STATE
+  ================================================== */
+
+  let selectedContactId =
+    contacts[0]?.id || null;
+
+
+  let globalPaused =
+    false;
+
+
+  /* ==================================================
+     ELEMENTS
+  ================================================== */
+
+  const contactsContainer =
+    document.getElementById(
+      "contactsContainer"
+    );
+
+
+  const searchInput =
+    document.getElementById(
+      "searchInput"
+    );
+
+
+  const unreadCount =
+    document.getElementById(
+      "unreadCount"
+    );
+
+
+  const topbarName =
+    document.getElementById(
+      "topbarName"
+    );
+
+
+  const topbarStatus =
+    document.getElementById(
+      "topbarStatus"
+    );
+
+
+  const messagesContainer =
+    document.getElementById(
+      "messagesContainer"
+    );
+
+
+  const profilePanel =
+    document.getElementById(
+      "profilePanel"
+    );
+
+
+  const profileButton =
+    document.getElementById(
+      "profileButton"
+    );
+
+
+  const closeProfileButton =
+    document.getElementById(
+      "closeProfileButton"
+    );
+
+
+  const notesButton =
+    document.getElementById(
+      "notesButton"
+    );
+
+
+  const contactAutoButton =
+    document.getElementById(
+      "contactAutoButton"
+    );
+
+
+  const pauseAllButton =
+    document.getElementById(
+      "pauseAllButton"
+    );
+
+
+  const globalAutoStatus =
+    document.getElementById(
+      "globalAutoStatus"
+    );
+
+
+  const composerInput =
+    document.getElementById(
+      "composerInput"
+    );
+
+
+  const composerSendButton =
+    document.getElementById(
+      "composerSendButton"
+    );
+
+
+  const toast =
+    document.getElementById(
+      "toast"
+    );
+
+
+  /* ==================================================
+     HELPERS
+  ================================================== */
+
+  function escapeHtml(value) {
+
+    return String(
+      value ?? ""
+    )
+      .replaceAll(
+        "&",
+        "&amp;"
+      )
+      .replaceAll(
+        "<",
+        "&lt;"
+      )
+      .replaceAll(
+        ">",
+        "&gt;"
+      )
+      .replaceAll(
+        '"',
+        "&quot;"
+      )
+      .replaceAll(
+        "'",
+        "&#039;"
+      );
+
+  }
+
+
+  function selectedContact() {
+
+    return contacts.find(
+      contact =>
+        contact.id === selectedContactId
+    ) || null;
+
+  }
+
+
+  function showToast(
+    text
+  ) {
+
+    toast.textContent =
+      text;
+
+
+    toast.classList.add(
+      "show"
+    );
+
+
+    window.clearTimeout(
+      showToast.timer
+    );
+
+
+    showToast.timer =
+      window.setTimeout(
+        () => {
+
+          toast.classList.remove(
+            "show"
+          );
+
+        },
+        2200
+      );
+
+  }
+
+
+  function initials(
+    name
+  ) {
+
+    return String(
+      name || "?"
+    )
+      .trim()
+      .split(
+        /\s+/
+      )
+      .slice(
+        0,
+        2
+      )
+      .map(
+        part =>
+          part.charAt(0)
+      )
+      .join("")
+      .toUpperCase()
+      ||
+      "?";
+
+  }
+
+
+  function resizeComposer() {
+
+    composerInput.style.height =
+      "auto";
+
+
+    composerInput.style.height =
+      Math.min(
+        composerInput.scrollHeight,
+        130
+      )
+      +
+      "px";
+
+  }
+
+
+  /* ==================================================
+     CONTACT LIST
+  ================================================== */
+
+  function renderContacts() {
+
+    const query =
+      String(
+        searchInput.value || ""
+      )
+        .trim()
+        .toLowerCase();
+
+
+    const filtered =
+      contacts.filter(
+        contact => {
+
+          const haystack =
+            [
+              contact.name,
+              contact.city,
+              contact.country,
+              contact.language
+            ]
+              .filter(
+                Boolean
+              )
+              .join(
+                " "
+              )
+              .toLowerCase();
+
+
+          return haystack.includes(
+            query
+          );
+
+        }
+      );
+
+
+    if (
+      filtered.length === 0
+    ) {
+
+      contactsContainer.innerHTML =
+        '<div class="empty">Kein Kontakt gefunden.</div>';
+
+
+    } else {
+
+      contactsContainer.innerHTML =
+        filtered
+          .map(
+            contact => {
+
+              const lastMessage =
+                contact.messages[
+                  contact.messages.length - 1
+                ];
+
+
+              return `
+                <button
+                  class="contact ${
+                    contact.id === selectedContactId
+                      ? "active"
+                      : ""
+                  }"
+                  type="button"
+                  data-contact-id="${escapeHtml(contact.id)}"
+                >
+
+                  <div class="contact-top">
+
+                    <span class="contact-name">
+                      ${escapeHtml(contact.name)}
+                    </span>
+
+                    <span class="time">
+                      ${escapeHtml(lastMessage?.time || "")}
+                    </span>
+
+                  </div>
+
+                  <div class="preview">
+                    ${escapeHtml(lastMessage?.text || "Noch keine Nachricht")}
+                  </div>
+
+                  <div class="contact-meta">
+
+                    ${
+                      contact.unread > 0
+                        ? `
+                          <span class="badge green-badge">
+                            ${contact.unread} neu
+                          </span>
+                        `
+                        : ""
+                    }
+
+                    <span class="badge">
+                      ${
+                        contact.autoReply
+                          ? "Auto"
+                          : "Manuell"
+                      }
+                    </span>
+
+                  </div>
+
+                </button>
+              `;
+
+            }
+          )
+          .join("");
+
+    }
+
+
+    const unread =
+      contacts.reduce(
+        (
+          total,
+          contact
+        ) =>
+          total
+          +
+          Number(
+            contact.unread || 0
+          ),
+        0
+      );
+
+
+    unreadCount.textContent =
+      `${unread} ungelesen`;
+
+
+    contactsContainer
+      .querySelectorAll(
+        "[data-contact-id]"
+      )
+      .forEach(
+        button => {
+
+          button.addEventListener(
+            "click",
+            () => {
+
+              selectedContactId =
+                button.dataset.contactId;
+
+
+              const contact =
+                selectedContact();
+
+
+              if (
+                contact
+              ) {
+
+                contact.unread =
+                  0;
+
+              }
+
+
+              renderAll();
+
+            }
+          );
+
+        }
+      );
+
+  }
+
+
+  /* ==================================================
+     CHAT
+  ================================================== */
+
+  function messageHtml(
+    message
+  ) {
+
+    const mine =
+      message.direction === "outgoing";
+
+
+    return `
+      <div class="message-row ${mine ? "mine" : ""}">
+
+        <div class="bubble ${mine ? "outgoing" : "incoming"}">
+
+          ${escapeHtml(message.text)}
+
+          <span class="message-time">
+            ${escapeHtml(message.time || "")}
+          </span>
+
+        </div>
+
+      </div>
+
+      ${
+        message.translation
+          ? `
+            <div class="translation-box ${mine ? "mine" : ""}">
+
+              <span class="translation-label">
+                Deutsche Übersetzung
+              </span>
+
+              ${escapeHtml(message.translation)}
+
+            </div>
+          `
+          : ""
+      }
+    `;
+
+  }
+
+
+  function aiCardHtml(
+    contact
+  ) {
+
+    if (
+      !contact?.suggestion?.text
+    ) {
+
+      return "";
+
+    }
+
+
+    return `
+      <div
+        class="ai-card"
+        id="aiCard"
+      >
+
+        <div class="ai-heading">
+
+          <h4>
+            Vorgeschlagene Antwort von Marcel AI
+          </h4>
+
+          <span class="ai-chip">
+            Vorschlag
+          </span>
+
+        </div>
+
+
+        <div
+          id="aiAnswerText"
+          class="ai-answer"
+        >
+          ${escapeHtml(contact.suggestion.text)}
+        </div>
+
+
+        <div class="ai-translation">
+
+          <span class="translation-label">
+            Deutsche Übersetzung
+          </span>
+
+          <span id="aiTranslationText">
+            ${escapeHtml(contact.suggestion.translation || "")}
+          </span>
+
+        </div>
+
+
+        <div class="ai-buttons">
+
+          <button
+            id="aiSendButton"
+            class="send"
+            type="button"
+          >
+            Senden
+          </button>
+
+          <button
+            id="aiEditButton"
+            class="edit"
+            type="button"
+          >
+            Ändern
+          </button>
+
+          <button
+            id="aiRejectButton"
+            class="reject"
+            type="button"
+          >
+            Nicht senden
+          </button>
+
+        </div>
+
+
+        <div class="feedback-row">
+
+          <button
+            id="positiveFeedbackButton"
+            type="button"
+          >
+            👍 Passt zu mir
+          </button>
+
+          <button
+            id="negativeFeedbackButton"
+            type="button"
+          >
+            👎 Passt nicht
+          </button>
+
+        </div>
+
+
+        <div
+          id="editPanel"
+          class="edit-panel"
+        >
+
+          <textarea
+            id="editSuggestionInput"
+          ></textarea>
+
+          <div class="edit-actions">
+
+            <button
+              id="saveEditButton"
+              class="save-edit"
+              type="button"
+            >
+              Korrektur übernehmen
+            </button>
+
+            <button
+              id="cancelEditButton"
+              class="cancel-edit"
+              type="button"
+            >
+              Abbrechen
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+    `;
+
+  }
+
+
+  function bindAiCard(
+    contact
+  ) {
+
+    const aiCard =
+      document.getElementById(
+        "aiCard"
+      );
+
+
+    if (
+      !aiCard
+    ) {
+
+      return;
+
+    }
+
+
+    const aiSendButton =
+      document.getElementById(
+        "aiSendButton"
+      );
+
+
+    const aiEditButton =
+      document.getElementById(
+        "aiEditButton"
+      );
+
+
+    const aiRejectButton =
+      document.getElementById(
+        "aiRejectButton"
+      );
+
+
+    const positiveFeedbackButton =
+      document.getElementById(
+        "positiveFeedbackButton"
+      );
+
+
+    const negativeFeedbackButton =
+      document.getElementById(
+        "negativeFeedbackButton"
+      );
+
+
+    const editPanel =
+      document.getElementById(
+        "editPanel"
+      );
+
+
+    const editSuggestionInput =
+      document.getElementById(
+        "editSuggestionInput"
+      );
+
+
+    const saveEditButton =
+      document.getElementById(
+        "saveEditButton"
+      );
+
+
+    const cancelEditButton =
+      document.getElementById(
+        "cancelEditButton"
+      );
+
+
+    aiSendButton.addEventListener(
+      "click",
+      () => {
+
+        if (
+          globalPaused
+        ) {
+
+          showToast(
+            "Globaler Auto-Modus ist pausiert."
+          );
+
+
+          return;
+
+        }
+
+
+        contact.messages.push({
+
+          direction:
+            "outgoing",
+
+          text:
+            contact.suggestion.text,
+
+          translation:
+            contact.suggestion.translation,
+
+          time:
+            new Date()
+              .toLocaleTimeString(
+                "de-DE",
+                {
+                  hour:
+                    "2-digit",
+
+                  minute:
+                    "2-digit"
+                }
+              )
+
+        });
+
+
+        contact.suggestion =
+          null;
+
+
+        renderAll();
+
+
+        showToast(
+          "Demo: Antwort wurde in den Chat übernommen."
+        );
+
+      }
+    );
+
+
+    aiEditButton.addEventListener(
+      "click",
+      () => {
+
+        editSuggestionInput.value =
+          contact.suggestion.text;
+
+
+        editPanel.classList.add(
+          "open"
+        );
+
+
+        editSuggestionInput.focus();
+
+      }
+    );
+
+
+    aiRejectButton.addEventListener(
+      "click",
+      () => {
+
+        contact.suggestion =
+          null;
+
+
+        renderChat(
+          contact
+        );
+
+
+        showToast(
+          "Vorschlag verworfen."
+        );
+
+      }
+    );
+
+
+    positiveFeedbackButton
+      .addEventListener(
+        "click",
+        () => {
+
+          showToast(
+            "👍 Feedback vorgemerkt. Speicherung kommt mit Railway-Anbindung."
+          );
+
+        }
+      );
+
+
+    negativeFeedbackButton
+      .addEventListener(
+        "click",
+        () => {
+
+          editSuggestionInput.value =
+            contact.suggestion.text;
+
+
+          editPanel.classList.add(
+            "open"
+          );
+
+
+          editSuggestionInput.focus();
+
+
+          showToast(
+            "👎 Du kannst direkt deine bessere Version eintragen."
+          );
+
+        }
+      );
+
+
+    saveEditButton.addEventListener(
+      "click",
+      () => {
+
+        const corrected =
+          String(
+            editSuggestionInput.value || ""
+          )
+            .trim();
+
+
+        if (
+          !corrected
+        ) {
+
+          showToast(
+            "Bitte zuerst deine Korrektur eingeben."
+          );
+
+
+          return;
+
+        }
+
+
+        contact.suggestion.text =
+          corrected;
+
+
+        document.getElementById(
+          "aiAnswerText"
+        ).textContent =
+          corrected;
+
+
+        editPanel.classList.remove(
+          "open"
+        );
+
+
+        showToast(
+          "Korrektur übernommen. Persistenz folgt mit Backend-Anbindung."
+        );
+
+      }
+    );
+
+
+    cancelEditButton
+      .addEventListener(
+        "click",
+        () => {
+
+          editPanel.classList.remove(
+            "open"
+          );
+
+        }
+      );
+
+  }
+
+
+  function renderChat(
+    contact
+  ) {
+
+    if (
+      !contact
+    ) {
+
+      messagesContainer.innerHTML =
+        '<div class="empty">Bitte einen Kontakt auswählen.</div>';
+
+
+      return;
+
+    }
+
+
+    topbarName.textContent =
+      contact.name;
+
+
+    topbarStatus.textContent =
+      contact.online
+        ? "● Online"
+        : "● Offline";
+
+
+    topbarStatus.className =
+      contact.online
+        ? "online"
+        : "offline";
+
+
+    messagesContainer.innerHTML = `
+      <div class="day-label">
+        Heute
+      </div>
+
+      ${contact.messages
+        .map(
+          messageHtml
+        )
+        .join("")}
+
+      ${aiCardHtml(contact)}
+    `;
+
+
+    bindAiCard(
+      contact
+    );
+
+
+    contactAutoButton.textContent =
+      contact.autoReply
+        ? "Auto ✓"
+        : "Auto aus";
+
+
+    contactAutoButton.classList.toggle(
+      "off",
+      !contact.autoReply
+    );
+
+
+    requestAnimationFrame(
+      () => {
+
+        messagesContainer.scrollTop =
+          messagesContainer.scrollHeight;
+
+      }
+    );
+
+  }
+
+
+  /* ==================================================
+     PROFILE
+  ================================================== */
+
+  function renderProfile(
+    contact
+  ) {
+
+    const profileName =
+      document.getElementById(
+        "profileName"
+      );
+
+
+    const profileAvatar =
+      document.getElementById(
+        "profileAvatar"
+      );
+
+
+    const profileStatus =
+      document.getElementById(
+        "profileStatus"
+      );
+
+
+    const profileData =
+      document.getElementById(
+        "profileData"
+      );
+
+
+    const profileAbout =
+      document.getElementById(
+        "profileAbout"
+      );
+
+
+    const profileInterests =
+      document.getElementById(
+        "profileInterests"
+      );
+
+
+    const profileDate =
+      document.getElementById(
+        "profileDate"
+      );
+
+
+    const profileNotes =
+      document.getElementById(
+        "profileNotes"
+      );
+
+
+    const profileMemoryStatus =
+      document.getElementById(
+        "profileMemoryStatus"
+      );
+
+
+    if (
+      !contact
+    ) {
+
+      profileName.textContent =
+        "—";
+
+
+      profileAvatar.textContent =
+        "?";
+
+
+      profileStatus.textContent =
+        "Kein Kontakt";
+
+
+      profileData.textContent =
+        "";
+
+
+      profileAbout.textContent =
+        "—";
+
+
+      profileInterests.innerHTML =
+        "";
+
+
+      profileDate.textContent =
+        "—";
+
+
+      profileNotes.textContent =
+        "—";
+
+
+      profileMemoryStatus.textContent =
+        "";
+
+
+      return;
+
+    }
+
+
+    profileName.textContent =
+      contact.name;
+
+
+    profileAvatar.textContent =
+      initials(
+        contact.name
+      );
+
+
+    profileStatus.innerHTML =
+      contact.online
+
+        ? '<span class="status-dot">●</span> Online'
+
+        : '● Offline';
+
+
+    profileData.innerHTML = `
+
+      Alter:
+      <b>${contact.age ?? "—"}</b>
+      <br>
+
+      Stadt:
+      <b>${escapeHtml(contact.city || "—")}</b>
+      <br>
+
+      Land:
+      <b>${escapeHtml(contact.country || "—")}</b>
+      <br>
+
+      Beruf:
+      <b>${escapeHtml(contact.profession || "—")}</b>
+      <br>
+
+      Sprache:
+      <b>${escapeHtml(contact.language || "—")}</b>
+    `;
+
+
+    profileAbout.textContent =
+      contact.about || "—";
+
+
+    profileInterests.innerHTML =
+      (
+        contact.interests || []
+      )
+        .map(
+          interest =>
+            `<li>${escapeHtml(interest)}</li>`
+        )
+        .join("")
+      ||
+      "<li>Keine gespeichert.</li>";
+
+
+    profileDate.textContent =
+      contact.nextDate
+      ||
+      "Kein Date gespeichert.";
+
+
+    profileNotes.textContent =
+      contact.notes || "—";
+
+
+    profileMemoryStatus.innerHTML = `
+
+      ACTIVE:
+      <b>${contact.memoryStatus?.active ?? 0}</b>
+      <br>
+
+      HISTORIE:
+      <b>${contact.memoryStatus?.historical ?? 0}</b>
+      <br>
+
+      EVENTS:
+      <b>${contact.memoryStatus?.events ?? 0}</b>
+
+    `;
+
+  }
+
+
+  /* ==================================================
+     GLOBAL RENDER
+  ================================================== */
+
+  function renderAll() {
+
+    const contact =
+      selectedContact();
+
+
+    renderContacts();
+
+    renderChat(
+      contact
+    );
+
+    renderProfile(
+      contact
+    );
+
+  }
+
+
+  /* ==================================================
+     EVENTS
+  ================================================== */
+
+  searchInput.addEventListener(
+    "input",
+    () => {
+
+      renderContacts();
+
+    }
+  );
+
+
+  profileButton.addEventListener(
+    "click",
+    () => {
+
+      profilePanel.classList.add(
+        "open"
+      );
+
+    }
+  );
+
+
+  closeProfileButton.addEventListener(
+    "click",
+    () => {
+
+      profilePanel.classList.remove(
+        "open"
+      );
+
+    }
+  );
+
+
+  notesButton.addEventListener(
+    "click",
+    () => {
+
+      profilePanel.classList.add(
+        "open"
+      );
+
+
+      showToast(
+        "Notizen stehen rechts im Kontaktprofil."
+      );
+
+    }
+  );
+
+
+  contactAutoButton.addEventListener(
+    "click",
+    () => {
+
+      const contact =
+        selectedContact();
+
+
+      if (
+        !contact
+      ) {
+
+        return;
+
+      }
+
+
+      contact.autoReply =
+        !contact.autoReply;
+
+
+      renderAll();
+
+
+      showToast(
+        contact.autoReply
+          ? `Auto-Modus für ${contact.name} aktiviert.`
+          : `Auto-Modus für ${contact.name} deaktiviert.`
+      );
+
+    }
+  );
+
+
+  pauseAllButton.addEventListener(
+    "click",
+    () => {
+
+      globalPaused =
+        !globalPaused;
+
+
+      pauseAllButton.classList.toggle(
+        "paused",
+        globalPaused
+      );
+
+
+      pauseAllButton.textContent =
+        globalPaused
+          ? "Auto-Modus fortsetzen"
+          : "Pause für alle";
+
+
+      globalAutoStatus.textContent =
+        globalPaused
+          ? "Pausiert"
+          : "Aktiv";
+
+
+      globalAutoStatus.classList.toggle(
+        "green",
+        !globalPaused
+      );
+
+
+      showToast(
+        globalPaused
+          ? "Globaler Auto-Modus pausiert."
+          : "Globaler Auto-Modus wieder aktiv."
+      );
+
+    }
+  );
+
+
+  composerInput.addEventListener(
+    "input",
+    resizeComposer
+  );
+
+
+  composerInput.addEventListener(
+    "keydown",
+    event => {
+
+      if (
+        event.key === "Enter"
+        &&
+        !event.shiftKey
+      ) {
+
+        event.preventDefault();
+
+
+        sendManualMessage();
+
+      }
+
+    }
+  );
+
+
+  composerSendButton.addEventListener(
+    "click",
+    sendManualMessage
+  );
+
+
+  function sendManualMessage() {
+
+    const contact =
+      selectedContact();
+
+
+    const text =
+      String(
+        composerInput.value || ""
+      )
+        .trim();
+
+
+    if (
+      !contact
+    ) {
+
+      showToast(
+        "Bitte zuerst einen Kontakt auswählen."
+      );
+
+
+      return;
+
+    }
+
+
+    if (
+      !text
+    ) {
+
+      return;
+
+    }
+
+
+    contact.messages.push({
+
+      direction:
+        "outgoing",
+
+      text,
+
+      translation:
+        null,
+
+      time:
+        new Date()
+          .toLocaleTimeString(
+            "de-DE",
+            {
+              hour:
+                "2-digit",
+
+              minute:
+                "2-digit"
+            }
+          )
+
+    });
+
+
+    composerInput.value =
+      "";
+
+
+    resizeComposer();
+
+
+    renderAll();
+
+
+    showToast(
+      "Demo: Manuelle Nachricht wurde in den Chat übernommen."
+    );
+
+  }
+
+
+  document
+    .querySelectorAll(
+      "[data-nav]"
+    )
+    .forEach(
+      button => {
+
+        button.addEventListener(
+          "click",
+          () => {
+
+            document
+              .querySelectorAll(
+                "[data-nav]"
+              )
+              .forEach(
+                item =>
+                  item.classList.remove(
+                    "active"
+                  )
+              );
+
+
+            button.classList.add(
+              "active"
+            );
+
+
+            const section =
+              button.dataset.nav;
+
+
+            if (
+              section !== "overview"
+              &&
+              section !== "chats"
+            ) {
+
+              showToast(
+                "Dieser Bereich wird als nächster Dashboard-Block angeschlossen."
+              );
+
+            }
+
+          }
+        );
+
+      }
+    );
+
+
+  document
+    .getElementById(
+      "newMessageButton"
+    )
+    .addEventListener(
+      "click",
+      () => {
+
+        composerInput.focus();
+
+
+        showToast(
+          "Kontakt auswählen und Nachricht unten schreiben."
+        );
+
+      }
+    );
+
+
+  /* ==================================================
+     START
+  ================================================== */
+
+  renderAll();
+
+})();
+</script>
 
 </body>
 </html>

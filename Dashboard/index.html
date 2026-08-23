@@ -536,6 +536,8 @@
 
       overflow-y: auto;
 
+      scroll-behavior: smooth;
+
       background:
         radial-gradient(
           circle at 20% 20%,
@@ -575,10 +577,30 @@
       font-size: 16px;
     }
 
+    .chat-loading {
+      width: min(420px, 90%);
+
+      margin: 70px auto 0;
+
+      padding: 18px;
+
+      border-radius: 12px;
+
+      background: rgba(255,255,255,.72);
+
+      color: #697177;
+
+      text-align: center;
+
+      line-height: 1.5;
+
+      box-shadow: var(--shadow);
+    }
+
     .day-label {
       width: max-content;
 
-      margin: 0 auto 18px;
+      margin: 8px auto 18px;
 
       padding: 5px 10px;
 
@@ -615,6 +637,8 @@
 
       word-wrap: break-word;
       overflow-wrap: anywhere;
+
+      white-space: pre-wrap;
     }
 
     .incoming {
@@ -637,6 +661,14 @@
       color: #838383;
 
       margin-top: 5px;
+    }
+
+    .edited-label {
+      font-size: 9px;
+
+      color: #8b8b8b;
+
+      margin-left: 5px;
     }
 
     .translation-box {
@@ -1396,7 +1428,7 @@
 
       <textarea
         id="composerInput"
-        placeholder="Nachrichten werden im nächsten Schritt angeschlossen."
+        placeholder="Schreibfunktion ist noch deaktiviert."
         rows="1"
         disabled
       ></textarea>
@@ -1480,10 +1512,21 @@
     <div class="profile-section">
 
       <h3>
-        Plattform / Status
+        Interessen
       </h3>
 
       <ul id="profileInterests"></ul>
+
+    </div>
+
+
+    <div class="profile-section">
+
+      <h3>
+        Plattform / Status
+      </h3>
+
+      <ul id="profilePlatformStatus"></ul>
 
     </div>
 
@@ -1560,12 +1603,20 @@
     null;
 
 
+  let selectedDetail =
+    null;
+
+
   let globalPaused =
     false;
 
 
   let contactsLoaded =
     false;
+
+
+  let detailRequestToken =
+    0;
 
 
   /* ==================================================
@@ -1665,6 +1716,66 @@
   const toast =
     document.getElementById(
       "toast"
+    );
+
+
+  const profileName =
+    document.getElementById(
+      "profileName"
+    );
+
+
+  const profileAvatar =
+    document.getElementById(
+      "profileAvatar"
+    );
+
+
+  const profileStatus =
+    document.getElementById(
+      "profileStatus"
+    );
+
+
+  const profileData =
+    document.getElementById(
+      "profileData"
+    );
+
+
+  const profileAbout =
+    document.getElementById(
+      "profileAbout"
+    );
+
+
+  const profileInterests =
+    document.getElementById(
+      "profileInterests"
+    );
+
+
+  const profilePlatformStatus =
+    document.getElementById(
+      "profilePlatformStatus"
+    );
+
+
+  const profileDate =
+    document.getElementById(
+      "profileDate"
+    );
+
+
+  const profileNotes =
+    document.getElementById(
+      "profileNotes"
+    );
+
+
+  const profileMemoryStatus =
+    document.getElementById(
+      "profileMemoryStatus"
     );
 
 
@@ -1799,12 +1910,8 @@
     value
   ) {
 
-    if (
-      !value
-    ) {
-
+    if (!value) {
       return "";
-
     }
 
 
@@ -1847,9 +1954,7 @@
       now.getDate();
 
 
-    if (
-      sameDay
-    ) {
+    if (sameDay) {
 
       return date.toLocaleTimeString(
         "de-DE",
@@ -1873,6 +1978,193 @@
 
         month:
           "2-digit"
+      }
+    );
+
+  }
+
+
+  function formatMessageTime(
+    value
+  ) {
+
+    if (!value) {
+      return "";
+    }
+
+
+    const date =
+      new Date(
+        value
+      );
+
+
+    if (
+      Number.isNaN(
+        date.getTime()
+      )
+    ) {
+
+      return "";
+
+    }
+
+
+    return date.toLocaleTimeString(
+      "de-DE",
+      {
+        hour:
+          "2-digit",
+
+        minute:
+          "2-digit"
+      }
+    );
+
+  }
+
+
+  function dayKey(
+    value
+  ) {
+
+    if (!value) {
+      return "";
+    }
+
+
+    const date =
+      new Date(
+        value
+      );
+
+
+    if (
+      Number.isNaN(
+        date.getTime()
+      )
+    ) {
+
+      return "";
+
+    }
+
+
+    return [
+      date.getFullYear(),
+      String(
+        date.getMonth() + 1
+      ).padStart(
+        2,
+        "0"
+      ),
+      String(
+        date.getDate()
+      ).padStart(
+        2,
+        "0"
+      )
+    ].join("-");
+
+  }
+
+
+  function formatDayLabel(
+    value
+  ) {
+
+    if (!value) {
+      return "";
+    }
+
+
+    const date =
+      new Date(
+        value
+      );
+
+
+    if (
+      Number.isNaN(
+        date.getTime()
+      )
+    ) {
+
+      return "";
+
+    }
+
+
+    const today =
+      new Date();
+
+
+    const yesterday =
+      new Date();
+
+
+    yesterday.setDate(
+      today.getDate() - 1
+    );
+
+
+    const sameCalendarDay =
+      (
+        left,
+        right
+      ) =>
+        left.getFullYear()
+        ===
+        right.getFullYear()
+
+        &&
+
+        left.getMonth()
+        ===
+        right.getMonth()
+
+        &&
+
+        left.getDate()
+        ===
+        right.getDate();
+
+
+    if (
+      sameCalendarDay(
+        date,
+        today
+      )
+    ) {
+
+      return "Heute";
+
+    }
+
+
+    if (
+      sameCalendarDay(
+        date,
+        yesterday
+      )
+    ) {
+
+      return "Gestern";
+
+    }
+
+
+    return date.toLocaleDateString(
+      "de-DE",
+      {
+        day:
+          "2-digit",
+
+        month:
+          "2-digit",
+
+        year:
+          "numeric"
       }
     );
 
@@ -2021,6 +2313,194 @@
       .endsWith(
         "@memory.local"
       );
+
+  }
+
+
+  function getProfileObject() {
+
+    return (
+      selectedDetail?.profile
+      &&
+      typeof selectedDetail.profile
+      ===
+      "object"
+    )
+      ? selectedDetail.profile
+      : {};
+
+  }
+
+
+  function objectHasContent(
+    value
+  ) {
+
+    return (
+      value
+      &&
+      typeof value === "object"
+      &&
+      !Array.isArray(
+        value
+      )
+      &&
+      Object.keys(
+        value
+      ).length > 0
+    );
+
+  }
+
+
+  function flattenReadableValues(
+    value,
+    result = []
+  ) {
+
+    if (
+      value === null
+      ||
+      value === undefined
+    ) {
+
+      return result;
+
+    }
+
+
+    if (
+      typeof value === "string"
+    ) {
+
+      const clean =
+        normalizeText(
+          value
+        );
+
+
+      if (clean) {
+
+        result.push(
+          clean
+        );
+
+      }
+
+
+      return result;
+
+    }
+
+
+    if (
+      typeof value === "number"
+    ) {
+
+      result.push(
+        String(
+          value
+        )
+      );
+
+
+      return result;
+
+    }
+
+
+    if (
+      typeof value === "boolean"
+    ) {
+
+      return result;
+
+    }
+
+
+    if (
+      Array.isArray(
+        value
+      )
+    ) {
+
+      for (
+        const item
+        of value
+      ) {
+
+        flattenReadableValues(
+          item,
+          result
+        );
+
+      }
+
+
+      return result;
+
+    }
+
+
+    if (
+      typeof value === "object"
+    ) {
+
+      for (
+        const item
+        of Object.values(
+          value
+        )
+      ) {
+
+        flattenReadableValues(
+          item,
+          result
+        );
+
+      }
+
+    }
+
+
+    return result;
+
+  }
+
+
+  function uniqueReadableValues(
+    value,
+    limit = 8
+  ) {
+
+    const values =
+      flattenReadableValues(
+        value
+      );
+
+
+    return [
+      ...new Set(
+        values
+      )
+    ].slice(
+      0,
+      limit
+    );
+
+  }
+
+
+  function scrollMessagesToBottom() {
+
+    window.requestAnimationFrame(
+      () => {
+
+        messagesContainer.scrollTop =
+          messagesContainer.scrollHeight;
+
+      }
+    );
 
   }
 
@@ -2197,15 +2677,27 @@
         selectedContactId =
           contacts[0].id;
 
+
+        renderContacts();
+
+
+        await loadContactDetail(
+          selectedContactId
+        );
+
       } else {
 
         selectedContactId =
           null;
 
+
+        selectedDetail =
+          null;
+
+
+        renderAll();
+
       }
-
-
-      renderAll();
 
 
       showToast(
@@ -2228,6 +2720,10 @@
 
 
       selectedContactId =
+        null;
+
+
+      selectedDetail =
         null;
 
 
@@ -2280,6 +2776,164 @@
   }
 
 
+  async function loadContactDetail(
+    contactId
+  ) {
+
+    const requestToken =
+      ++detailRequestToken;
+
+
+    selectedDetail =
+      null;
+
+
+    renderContacts();
+
+
+    renderChatLoading(
+      selectedContact()
+    );
+
+
+    renderProfile(
+      selectedContact()
+    );
+
+
+    try {
+
+      const data =
+        await apiRequest(
+          `/api/dashboard/contacts?id=${encodeURIComponent(
+            String(
+              contactId
+            )
+          )}`
+        );
+
+
+      if (
+        requestToken
+        !==
+        detailRequestToken
+      ) {
+
+        return;
+
+      }
+
+
+      if (
+        !data?.contact
+      ) {
+
+        throw new Error(
+          "Die API hat keinen Kontakt zurückgegeben."
+        );
+
+      }
+
+
+      selectedDetail =
+        data;
+
+
+      const listIndex =
+        contacts.findIndex(
+          contact =>
+            String(
+              contact.id
+            )
+            ===
+            String(
+              data.contact.id
+            )
+        );
+
+
+      if (
+        listIndex !== -1
+      ) {
+
+        contacts[listIndex] = {
+
+          ...contacts[listIndex],
+
+          ...data.contact,
+
+          memoryStatus:
+            data.memoryStatus
+            ||
+            contacts[listIndex].memoryStatus
+
+        };
+
+      }
+
+
+      renderAll();
+
+
+    } catch (
+      error
+    ) {
+
+      if (
+        requestToken
+        !==
+        detailRequestToken
+      ) {
+
+        return;
+
+      }
+
+
+      console.error(
+        "Kontakt-Details laden fehlgeschlagen:",
+        error
+      );
+
+
+      selectedDetail =
+        null;
+
+
+      renderContacts();
+
+
+      renderProfile(
+        selectedContact()
+      );
+
+
+      messagesContainer.innerHTML = `
+        <div class="empty-chat">
+
+          <strong>
+            Chat konnte nicht geladen werden
+          </strong>
+
+          ${escapeHtml(
+            error?.message
+            ||
+            "Unbekannter Fehler."
+          )}
+
+        </div>
+      `;
+
+
+      showToast(
+        "Kontakt-Details konnten nicht geladen werden."
+      );
+
+    }
+
+  }
+
+
   /* ==================================================
      CONTACT LIST
   ================================================== */
@@ -2318,7 +2972,8 @@
               contact?.sourcePlatform,
               contact?.currentPlatform,
               contact?.platformStatus,
-              contact?.phoneNumber
+              contact?.phoneNumber,
+              contact?.identityKey
             ]
               .filter(
                 Boolean
@@ -2422,7 +3077,9 @@
                     : ""
                 }"
                 type="button"
-                data-contact-id="${escapeHtml(contact.id)}"
+                data-contact-id="${escapeHtml(
+                  contact.id
+                )}"
               >
 
                 <div class="contact-top">
@@ -2508,13 +3165,43 @@
 
           button.addEventListener(
             "click",
-            () => {
+            async () => {
 
-              selectedContactId =
+              const nextId =
                 button.dataset.contactId;
 
 
-              renderAll();
+              if (
+                String(
+                  nextId
+                )
+                ===
+                String(
+                  selectedContactId
+                )
+                &&
+                selectedDetail
+              ) {
+
+                return;
+
+              }
+
+
+              selectedContactId =
+                nextId;
+
+
+              selectedDetail =
+                null;
+
+
+              renderContacts();
+
+
+              await loadContactDetail(
+                nextId
+              );
 
             }
           );
@@ -2526,8 +3213,39 @@
 
 
   /* ==================================================
-     MAIN CHAT PLACEHOLDER
+     CHAT
   ================================================== */
+
+  function renderChatLoading(
+    contact
+  ) {
+
+    const name =
+      contactDisplayName(
+        contact
+      );
+
+
+    topbarName.textContent =
+      name;
+
+
+    topbarStatus.textContent =
+      "● Chat wird geladen";
+
+
+    topbarStatus.className =
+      "offline";
+
+
+    messagesContainer.innerHTML = `
+      <div class="chat-loading">
+        Chatverlauf und Memory werden geladen …
+      </div>
+    `;
+
+  }
+
 
   function renderChat(
     contact
@@ -2576,9 +3294,15 @@
     }
 
 
+    const detailContact =
+      selectedDetail?.contact
+      ||
+      contact;
+
+
     const name =
       contactDisplayName(
-        contact
+        detailContact
       );
 
 
@@ -2588,7 +3312,7 @@
 
     if (
       profileOnly(
-        contact
+        detailContact
       )
     ) {
 
@@ -2602,7 +3326,7 @@
     } else {
 
       topbarStatus.textContent =
-        "● Kontakt gespeichert";
+        "● Chat aus PostgreSQL";
 
 
       topbarStatus.className =
@@ -2612,7 +3336,7 @@
 
 
     const autoOn =
-      contact?.autoReply
+      detailContact?.autoReply
       !==
       false;
 
@@ -2629,14 +3353,16 @@
     );
 
 
-    const preview =
-      lastMessageText(
-        contact
-      );
+    const messages =
+      Array.isArray(
+        selectedDetail?.messages
+      )
+        ? selectedDetail.messages
+        : [];
 
 
     if (
-      preview
+      messages.length === 0
     ) {
 
       messagesContainer.innerHTML = `
@@ -2646,50 +3372,129 @@
             ${escapeHtml(name)}
           </strong>
 
-          Kontakt und letzter Nachrichtenstatus
-          wurden erfolgreich aus PostgreSQL geladen.
-
-          <br><br>
-
-          Der vollständige echte Chatverlauf
-          wird im nächsten Schritt angeschlossen.
-
-          <br><br>
-
-          <b>Letzte gespeicherte Nachricht:</b>
-          <br>
-
-          ${escapeHtml(preview)}
-
-        </div>
-      `;
-
-    } else {
-
-      messagesContainer.innerHTML = `
-        <div class="empty-chat">
-
-          <strong>
-            ${escapeHtml(name)}
-          </strong>
-
-          Der echte Kontakt wurde erfolgreich
-          aus PostgreSQL geladen.
-
-          <br><br>
-
           ${
             profileOnly(
-              contact
+              detailContact
             )
               ? "Für diesen Kontakt existiert aktuell ein Memory-Profil, aber noch kein echter WhatsApp-Chat."
-              : "Der vollständige Chatverlauf wird im nächsten Schritt angeschlossen."
+              : "Für diesen Kontakt sind aktuell noch keine Nachrichten in PostgreSQL gespeichert."
           }
 
         </div>
       `;
 
+
+      return;
+
     }
+
+
+    let html =
+      "";
+
+
+    let previousDay =
+      null;
+
+
+    for (
+      const message
+      of messages
+    ) {
+
+      const currentDay =
+        dayKey(
+          message?.createdAt
+        );
+
+
+      if (
+        currentDay
+        &&
+        currentDay !== previousDay
+      ) {
+
+        html += `
+          <div class="day-label">
+            ${escapeHtml(
+              formatDayLabel(
+                message.createdAt
+              )
+            )}
+          </div>
+        `;
+
+
+        previousDay =
+          currentDay;
+
+      }
+
+
+      const mine =
+        message?.direction
+        ===
+        "outgoing";
+
+
+      const messageText =
+        normalizeText(
+          message?.text
+        );
+
+
+      const time =
+        formatMessageTime(
+          message?.createdAt
+        );
+
+
+      html += `
+        <div class="message-row ${
+          mine
+            ? "mine"
+            : ""
+        }">
+
+          <div class="bubble ${
+            mine
+              ? "outgoing"
+              : "incoming"
+          }">
+
+            ${escapeHtml(
+              messageText
+            )}
+
+            <span class="message-time">
+
+              ${escapeHtml(time)}
+
+              ${
+                message?.edited
+                  ? `
+                    <span class="edited-label">
+                      · bearbeitet
+                    </span>
+                  `
+                  : ""
+              }
+
+            </span>
+
+          </div>
+
+        </div>
+      `;
+
+    }
+
+
+    messagesContainer.innerHTML =
+      html;
+
+
+    scrollMessagesToBottom();
 
   }
 
@@ -2702,63 +3507,7 @@
     contact
   ) {
 
-    const profileName =
-      document.getElementById(
-        "profileName"
-      );
-
-
-    const profileAvatar =
-      document.getElementById(
-        "profileAvatar"
-      );
-
-
-    const profileStatus =
-      document.getElementById(
-        "profileStatus"
-      );
-
-
-    const profileData =
-      document.getElementById(
-        "profileData"
-      );
-
-
-    const profileAbout =
-      document.getElementById(
-        "profileAbout"
-      );
-
-
-    const profileInterests =
-      document.getElementById(
-        "profileInterests"
-      );
-
-
-    const profileDate =
-      document.getElementById(
-        "profileDate"
-      );
-
-
-    const profileNotes =
-      document.getElementById(
-        "profileNotes"
-      );
-
-
-    const profileMemoryStatus =
-      document.getElementById(
-        "profileMemoryStatus"
-      );
-
-
-    if (
-      !contact
-    ) {
+    if (!contact) {
 
       profileName.textContent =
         "—";
@@ -2784,6 +3533,10 @@
         "";
 
 
+      profilePlatformStatus.innerHTML =
+        "";
+
+
       profileDate.textContent =
         "Noch nicht angeschlossen.";
 
@@ -2801,9 +3554,19 @@
     }
 
 
+    const detailContact =
+      selectedDetail?.contact
+      ||
+      contact;
+
+
+    const profile =
+      getProfileObject();
+
+
     const name =
       contactDisplayName(
-        contact
+        detailContact
       );
 
 
@@ -2819,7 +3582,7 @@
 
     profileStatus.innerHTML =
       profileOnly(
-        contact
+        detailContact
       )
         ? "● Memory-Profil"
         : '<span class="status-dot">●</span> Kontakt gespeichert';
@@ -2831,7 +3594,7 @@
       <b>
         ${escapeHtml(
           labelOrDash(
-            contact?.city
+            detailContact?.city
           )
         )}
       </b>
@@ -2842,7 +3605,7 @@
       <b>
         ${escapeHtml(
           labelOrDash(
-            contact?.country
+            detailContact?.country
           )
         )}
       </b>
@@ -2853,7 +3616,18 @@
       <b>
         ${escapeHtml(
           labelOrDash(
-            contact?.language
+            detailContact?.language
+          )
+        )}
+      </b>
+
+      <br>
+
+      Alter:
+      <b>
+        ${escapeHtml(
+          labelOrDash(
+            detailContact?.age
           )
         )}
       </b>
@@ -2864,7 +3638,7 @@
       <b>
         ${escapeHtml(
           labelOrDash(
-            contact?.phoneNumber
+            detailContact?.phoneNumber
           )
         )}
       </b>
@@ -2875,7 +3649,7 @@
       <b>
         ${escapeHtml(
           labelOrDash(
-            contact?.relationshipStage
+            detailContact?.relationshipStage
           )
         )}
       </b>
@@ -2883,24 +3657,96 @@
     `;
 
 
-    const identityText =
-      contact?.identityKey
-        ? `Identity: ${contact.identityKey}`
-        : "Noch kein Memory-Identity-Key gespeichert.";
+    const aboutValues =
+      uniqueReadableValues(
+        {
+          profile_summary:
+            profile?.profile_summary,
+
+          personality:
+            profile?.personality,
+
+          relationship:
+            profile?.relationship
+        },
+        6
+      );
 
 
-    profileAbout.textContent =
-      identityText;
+    if (
+      aboutValues.length > 0
+    ) {
+
+      profileAbout.textContent =
+        aboutValues.join(
+          " · "
+        );
+
+    } else if (
+      detailContact?.identityKey
+    ) {
+
+      profileAbout.textContent =
+        `Identity: ${detailContact.identityKey}`;
+
+    } else {
+
+      profileAbout.textContent =
+        "Noch keine zusätzlichen Profildetails gespeichert.";
+
+    }
 
 
-    profileInterests.innerHTML = `
+    const interestValues =
+      uniqueReadableValues(
+        {
+          preferences:
+            profile?.preferences,
+
+          lifestyle:
+            profile?.lifestyle_routines,
+
+          cultural:
+            profile?.cultural_interest
+        },
+        10
+      );
+
+
+    if (
+      interestValues.length > 0
+    ) {
+
+      profileInterests.innerHTML =
+        interestValues
+          .map(
+            value => `
+              <li>
+                • ${escapeHtml(value)}
+              </li>
+            `
+          )
+          .join("");
+
+    } else {
+
+      profileInterests.innerHTML = `
+        <li>
+          Noch keine Interessen gespeichert.
+        </li>
+      `;
+
+    }
+
+
+    profilePlatformStatus.innerHTML = `
 
       <li>
         Quelle:
         <b>
           ${escapeHtml(
             labelOrDash(
-              contact?.sourcePlatform
+              detailContact?.sourcePlatform
             )
           )}
         </b>
@@ -2911,7 +3757,7 @@
         <b>
           ${escapeHtml(
             labelOrDash(
-              contact?.currentPlatform
+              detailContact?.currentPlatform
             )
           )}
         </b>
@@ -2922,7 +3768,7 @@
         <b>
           ${escapeHtml(
             labelOrDash(
-              contact?.platformStatus
+              detailContact?.platformStatus
             )
           )}
         </b>
@@ -2933,7 +3779,7 @@
         <b>
           ${escapeHtml(
             labelOrDash(
-              contact?.contactStatus
+              detailContact?.contactStatus
             )
           )}
         </b>
@@ -2943,7 +3789,7 @@
 
 
     profileDate.textContent =
-      contact?.dateLock
+      detailContact?.dateLock
         ? "Date-Lock ist für diesen Kontakt aktiv."
         : "Kein Date im aktuellen API-Block gespeichert.";
 
@@ -2953,7 +3799,7 @@
 
 
     if (
-      contact?.manualReviewRequired
+      detailContact?.manualReviewRequired
     ) {
 
       noteParts.push(
@@ -2964,7 +3810,7 @@
 
 
     if (
-      contact?.identityLocked
+      detailContact?.identityLocked
     ) {
 
       noteParts.push(
@@ -2976,12 +3822,30 @@
 
     if (
       profileOnly(
-        contact
+        detailContact
       )
     ) {
 
       noteParts.push(
         "Profil existiert aktuell als Memory-Profil."
+      );
+
+    }
+
+
+    const openThreadValues =
+      uniqueReadableValues(
+        profile?.open_threads,
+        4
+      );
+
+
+    if (
+      openThreadValues.length
+    ) {
+
+      noteParts.push(
+        `Offene Hinweise: ${openThreadValues.join(" · ")}`
       );
 
     }
@@ -3005,15 +3869,25 @@
 
 
     const memory =
-      contact?.memoryStatus
+      selectedDetail?.memoryStatus
       &&
-      typeof contact.memoryStatus
+      typeof selectedDetail.memoryStatus
       ===
       "object"
 
-        ? contact.memoryStatus
+        ? selectedDetail.memoryStatus
 
-        : {};
+        : (
+            detailContact?.memoryStatus
+            &&
+            typeof detailContact.memoryStatus
+            ===
+            "object"
+
+              ? detailContact.memoryStatus
+
+              : {}
+          );
 
 
     profileMemoryStatus.innerHTML = `
@@ -3050,6 +3924,19 @@
         ${Number(
           memory.reviewRequired || 0
         )}
+      </b>
+
+      <br>
+
+      NACHRICHTEN:
+      <b>
+        ${
+          Array.isArray(
+            selectedDetail?.messages
+          )
+            ? selectedDetail.messages.length
+            : 0
+        }
       </b>
 
     `;
@@ -3130,7 +4017,7 @@
 
 
       showToast(
-        "Die aktuellen Kontakt-Hinweise stehen rechts."
+        "Die gespeicherten Kontakt-Hinweise stehen rechts."
       );
 
     }
@@ -3145,12 +4032,8 @@
         selectedContact();
 
 
-      if (
-        !contact
-      ) {
-
+      if (!contact) {
         return;
-
       }
 
 
@@ -3207,7 +4090,7 @@
     () => {
 
       showToast(
-        "Nachrichten senden wird erst nach dem echten Chatverlauf angeschlossen."
+        "Nachrichten senden ist noch deaktiviert."
       );
 
     }

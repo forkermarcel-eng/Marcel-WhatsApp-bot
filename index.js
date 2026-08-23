@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "crypto";
 import OpenAI from "openai";
 import makeWASocket, {
   DisconnectReason,
@@ -10561,6 +10562,549 @@ async function getTestContactSnapshot(
   };
 
 }
+
+
+/* ==================================================
+   DASHBOARD API AUTH
+   READ ONLY V0.1
+================================================== */
+
+function dashboardApiAuthorized(
+  req
+) {
+
+  const expectedSecret =
+    normalizeText(
+      process.env.DASHBOARD_API_SECRET
+    );
+
+
+  if (
+    !expectedSecret
+  ) {
+
+    return false;
+
+  }
+
+
+  const authorization =
+    normalizeText(
+      req.headers.authorization
+    );
+
+
+  if (
+    !authorization.startsWith(
+      "Bearer "
+    )
+  ) {
+
+    return false;
+
+  }
+
+
+  const receivedSecret =
+    normalizeText(
+      authorization.slice(
+        "Bearer ".length
+      )
+    );
+
+
+  if (
+    !receivedSecret
+  ) {
+
+    return false;
+
+  }
+
+
+  const expectedBuffer =
+    Buffer.from(
+      expectedSecret,
+      "utf8"
+    );
+
+
+  const receivedBuffer =
+    Buffer.from(
+      receivedSecret,
+      "utf8"
+    );
+
+
+  if (
+    expectedBuffer.length
+    !==
+    receivedBuffer.length
+  ) {
+
+    return false;
+
+  }
+
+
+  return crypto.timingSafeEqual(
+    expectedBuffer,
+    receivedBuffer
+  );
+
+}
+
+
+/* ==================================================
+   DASHBOARD KONTAKTLISTE
+   READ ONLY
+================================================== */
+
+app.get(
+  "/dashboard-api/contacts",
+  async (req, res) => {
+
+    try {
+
+      if (
+        !process.env.DASHBOARD_API_SECRET
+      ) {
+
+        console.error(
+          "DASHBOARD_API_SECRET fehlt in Railway."
+        );
+
+
+        return res
+          .status(500)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              "Dashboard-API ist nicht konfiguriert."
+
+          });
+
+      }
+
+
+      if (
+        !dashboardApiAuthorized(
+          req
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              "Nicht autorisiert."
+
+          });
+
+      }
+
+
+      const result =
+        await pool.query(
+          `
+            SELECT
+
+              c.id,
+
+              c.whatsapp_jid,
+
+              c.phone_number,
+
+              c.display_name,
+
+              c.nickname,
+
+              c.canonical_name,
+
+              c.whatsapp_display_name,
+
+              c.country,
+
+              c.city,
+
+              c.timezone,
+
+              c.primary_language,
+
+              c.source_platform,
+
+              c.current_platform,
+
+              c.platform_status,
+
+              c.contact_status,
+
+              c.relationship_stage,
+
+              c.auto_reply_enabled,
+
+              c.date_lock_enabled,
+
+              c.manual_review_required,
+
+              c.first_contact_at,
+
+              c.last_message_at,
+
+              c.memory_identity_key,
+
+              c.identity_locked,
+
+              c.created_at,
+
+              c.updated_at,
+
+              last_message.id
+                AS last_message_id,
+
+              last_message.direction
+                AS last_message_direction,
+
+              last_message.message_text
+                AS last_message_text,
+
+              last_message.is_edited
+                AS last_message_is_edited,
+
+              last_message.created_at
+                AS last_message_created_at,
+
+              (
+                SELECT COUNT(*)
+
+                FROM memory_items mi
+
+                WHERE mi.contact_id =
+                  c.id
+
+                  AND mi.status =
+                    'active'
+
+                  AND mi.human_review_status
+                    <> 'rejected'
+              )::integer
+                AS active_memory_count,
+
+              (
+                SELECT COUNT(*)
+
+                FROM memory_items mi
+
+                WHERE mi.contact_id =
+                  c.id
+
+                  AND mi.status
+                    <> 'active'
+              )::integer
+                AS historical_memory_count,
+
+              (
+                SELECT COUNT(*)
+
+                FROM memory_events me
+
+                WHERE me.contact_id =
+                  c.id
+              )::integer
+                AS event_count,
+
+              (
+                SELECT COUNT(*)
+
+                FROM memory_events me
+
+                WHERE me.contact_id =
+                  c.id
+
+                  AND me.marcel_review_required =
+                    TRUE
+
+                  AND me.event_status IN (
+                    'active',
+                    'open'
+                  )
+              )::integer
+                AS review_required_count
+
+            FROM contacts c
+
+
+            LEFT JOIN LATERAL (
+
+              SELECT
+
+                m.id,
+
+                m.direction,
+
+                m.message_text,
+
+                m.is_edited,
+
+                m.created_at
+
+              FROM messages m
+
+              WHERE m.whatsapp_jid =
+                c.whatsapp_jid
+
+                AND m.message_text
+                  IS NOT NULL
+
+              ORDER BY
+                m.id DESC
+
+              LIMIT 1
+
+            ) last_message
+              ON TRUE
+
+
+            WHERE c.whatsapp_jid
+              NOT LIKE '%@persona.test'
+
+
+            ORDER BY
+
+              COALESCE(
+                last_message.created_at,
+                c.last_message_at,
+                c.updated_at,
+                c.created_at
+              )
+              DESC,
+
+              COALESCE(
+                c.canonical_name,
+                c.display_name,
+                c.whatsapp_display_name,
+                c.whatsapp_jid
+              )
+              ASC
+          `
+        );
+
+
+      const contacts =
+        result.rows.map(
+          contact => {
+
+            const isProfileOnly =
+              isProfileJid(
+                contact.whatsapp_jid
+              );
+
+
+            return {
+
+              id:
+                contact.id,
+
+              jid:
+                contact.whatsapp_jid,
+
+              phoneNumber:
+                contact.phone_number,
+
+              name:
+                contact.canonical_name
+                ||
+                contact.display_name
+                ||
+                contact.whatsapp_display_name
+                ||
+                "Unbekannter Kontakt",
+
+              displayName:
+                contact.display_name,
+
+              whatsappDisplayName:
+                contact.whatsapp_display_name,
+
+              nickname:
+                contact.nickname,
+
+              city:
+                contact.city,
+
+              country:
+                contact.country,
+
+              timezone:
+                contact.timezone,
+
+              language:
+                contact.primary_language,
+
+              sourcePlatform:
+                contact.source_platform,
+
+              currentPlatform:
+                contact.current_platform,
+
+              platformStatus:
+                contact.platform_status,
+
+              contactStatus:
+                contact.contact_status,
+
+              relationshipStage:
+                contact.relationship_stage,
+
+              autoReply:
+                contact.auto_reply_enabled
+                !==
+                false,
+
+              dateLock:
+                contact.date_lock_enabled
+                ===
+                true,
+
+              manualReviewRequired:
+                contact.manual_review_required
+                ===
+                true,
+
+              identityKey:
+                contact.memory_identity_key,
+
+              identityLocked:
+                contact.identity_locked
+                ===
+                true,
+
+              profileOnly:
+                isProfileOnly,
+
+              firstContactAt:
+                contact.first_contact_at,
+
+              lastMessageAt:
+                contact.last_message_created_at
+                ||
+                contact.last_message_at,
+
+              createdAt:
+                contact.created_at,
+
+              updatedAt:
+                contact.updated_at,
+
+              lastMessage:
+                contact.last_message_text
+                  ? {
+
+                      id:
+                        contact.last_message_id,
+
+                      direction:
+                        contact.last_message_direction,
+
+                      text:
+                        contact.last_message_text,
+
+                      edited:
+                        contact.last_message_is_edited
+                        ===
+                        true,
+
+                      createdAt:
+                        contact.last_message_created_at
+
+                    }
+                  : null,
+
+              memoryStatus: {
+
+                active:
+                  Number(
+                    contact.active_memory_count
+                    ||
+                    0
+                  ),
+
+                historical:
+                  Number(
+                    contact.historical_memory_count
+                    ||
+                    0
+                  ),
+
+                events:
+                  Number(
+                    contact.event_count
+                    ||
+                    0
+                  ),
+
+                reviewRequired:
+                  Number(
+                    contact.review_required_count
+                    ||
+                    0
+                  )
+
+              }
+
+            };
+
+          }
+        );
+
+
+      return res.json({
+
+        ok:
+          true,
+
+        readOnly:
+          true,
+
+        count:
+          contacts.length,
+
+        contacts
+
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Dashboard Kontakte Fehler:",
+        error
+      );
+
+
+      return res
+        .status(500)
+        .json({
+
+          ok:
+            false,
+
+          error:
+            "Dashboard-Kontakte konnten nicht geladen werden."
+
+        });
+
+    }
+
+  }
+);
 
 
 /* ==================================================

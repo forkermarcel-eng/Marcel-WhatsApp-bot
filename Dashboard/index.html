@@ -2,11 +2,16 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
+
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0, viewport-fit=cover"
   >
-  <meta name="theme-color" content="#0b1015">
+
+  <meta
+    name="theme-color"
+    content="#0b1015"
+  >
 
   <title>Marcel AI Dashboard</title>
 
@@ -60,7 +65,9 @@
 
       background: var(--bg);
       color: var(--text);
+
       overflow: hidden;
+
       -webkit-font-smoothing: antialiased;
     }
 
@@ -145,6 +152,7 @@
     .nav {
       display: flex;
       flex-direction: column;
+
       gap: 3px;
     }
 
@@ -371,7 +379,6 @@
 
     .time {
       font-size: 11px;
-
       color: #8e979f;
 
       flex-shrink: 0;
@@ -390,7 +397,6 @@
 
     .contact-meta {
       display: flex;
-
       align-items: center;
 
       gap: 6px;
@@ -402,7 +408,6 @@
 
     .badge {
       display: inline-flex;
-
       align-items: center;
 
       min-height: 19px;
@@ -453,9 +458,9 @@
       min-height: 70px;
 
       padding:
-        calc(12px + env(safe-area-inset-top))
+        calc(10px + env(safe-area-inset-top))
         18px
-        12px;
+        10px;
 
       background: var(--panel-2);
       color: white;
@@ -472,6 +477,11 @@
 
     .topbar-person {
       min-width: 0;
+
+      display: flex;
+      flex-direction: column;
+
+      gap: 2px;
     }
 
     .topbar-name {
@@ -485,6 +495,17 @@
       white-space: nowrap;
     }
 
+    .topbar-meta {
+      display: flex;
+      align-items: center;
+
+      gap: 7px;
+
+      min-width: 0;
+
+      flex-wrap: wrap;
+    }
+
     .online {
       color: var(--green-2);
       font-size: 12px;
@@ -493,6 +514,29 @@
     .offline {
       color: #a6adb3;
       font-size: 12px;
+    }
+
+    .message-count {
+      display: none;
+
+      color: #c9d0d5;
+
+      background: #202830;
+
+      border: 1px solid #303942;
+
+      border-radius: 999px;
+
+      padding: 2px 7px;
+
+      font-size: 10px;
+      font-weight: 700;
+
+      white-space: nowrap;
+    }
+
+    .message-count.visible {
+      display: inline-flex;
     }
 
     .actions {
@@ -532,9 +576,12 @@
 
       min-height: 0;
 
-      padding: 24px;
+      padding: 20px 22px;
 
       overflow-y: auto;
+      overflow-x: hidden;
+
+      -webkit-overflow-scrolling: touch;
 
       scroll-behavior: smooth;
 
@@ -612,10 +659,22 @@
       font-size: 11px;
     }
 
+    /* ==================================================
+       CHAT BUBBLES
+
+       Inhalt bestimmt die Größe.
+       Kurzer Text = kleine Blase.
+       Langer Text = wächst nur bis Maximalbreite.
+    ================================================== */
+
     .message-row {
       display: flex;
 
-      margin-bottom: 9px;
+      width: 100%;
+
+      align-items: flex-end;
+
+      margin-bottom: 6px;
     }
 
     .message-row.mine {
@@ -623,69 +682,118 @@
     }
 
     .bubble {
-      max-width: 72%;
+      display: inline-flex;
+      flex-direction: column;
 
-      padding: 11px 13px;
+      width: fit-content;
 
-      border-radius: 10px;
+      min-width: 0;
 
-      line-height: 1.42;
+      max-width:
+        min(
+          72%,
+          640px
+        );
+
+      padding: 7px 9px 5px;
+
+      border-radius: 11px;
+
+      line-height: 1.38;
 
       font-size: 14px;
 
-      box-shadow: 0 1px 2px rgba(0,0,0,.13);
+      box-shadow:
+        0 1px 2px
+        rgba(0,0,0,.13);
 
-      word-wrap: break-word;
+      word-break: normal;
       overflow-wrap: anywhere;
 
-      white-space: pre-wrap;
+      white-space: normal;
     }
 
     .incoming {
       background: var(--incoming);
+
       border-top-left-radius: 4px;
     }
 
     .outgoing {
       background: var(--outgoing);
+
       border-top-right-radius: 4px;
     }
 
-    .message-time {
+    .message-text {
       display: block;
 
-      text-align: right;
+      white-space: pre-wrap;
+
+      min-width: 0;
+
+      word-break: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .message-footer {
+      display: flex;
+
+      justify-content: flex-end;
+      align-items: center;
+
+      gap: 4px;
+
+      margin-top: 2px;
+
+      min-height: 12px;
+    }
+
+    .message-time {
+      display: inline-block;
+
+      flex-shrink: 0;
 
       font-size: 10px;
+      line-height: 1;
 
       color: #838383;
 
-      margin-top: 5px;
+      white-space: nowrap;
     }
 
     .edited-label {
       font-size: 9px;
+      line-height: 1;
 
       color: #8b8b8b;
 
-      margin-left: 5px;
+      white-space: nowrap;
     }
 
     .translation-box {
-      max-width: 72%;
+      width: fit-content;
 
-      margin: -3px 0 13px;
+      max-width:
+        min(
+          72%,
+          640px
+        );
+
+      margin: -1px 0 9px;
 
       background: var(--translation);
 
-      padding: 10px 13px;
+      padding: 7px 9px;
 
       border-radius: 9px;
 
       font-size: 12px;
-      line-height: 1.45;
+      line-height: 1.4;
 
-      box-shadow: 0 1px 2px rgba(0,0,0,.09);
+      box-shadow:
+        0 1px 2px
+        rgba(0,0,0,.09);
     }
 
     .translation-box.mine {
@@ -725,7 +833,9 @@
 
       align-items: flex-end;
 
-      border-top: 1px solid rgba(0,0,0,.05);
+      border-top:
+        1px solid
+        rgba(0,0,0,.05);
     }
 
     .composer textarea {
@@ -788,13 +898,15 @@
 
       overflow-y: auto;
 
-      padding-bottom: env(safe-area-inset-bottom);
+      padding-bottom:
+        env(safe-area-inset-bottom);
     }
 
     .profile-section {
       padding: 19px;
 
-      border-bottom: 1px solid var(--border);
+      border-bottom:
+        1px solid var(--border);
     }
 
     .profile-title {
@@ -836,7 +948,8 @@
           #252a30
         );
 
-      margin: 12px auto 13px;
+      margin:
+        12px auto 13px;
 
       display: flex;
 
@@ -1070,16 +1183,22 @@
         position: relative;
 
         border-right: 0;
-        border-bottom: 1px solid var(--border);
+        border-bottom:
+          1px solid var(--border);
 
         padding:
-          calc(10px + env(safe-area-inset-top))
+          calc(
+            10px
+            +
+            env(safe-area-inset-top)
+          )
           10px
           10px;
       }
 
       .logo {
-        margin: 5px 4px 12px;
+        margin:
+          5px 4px 12px;
       }
 
       .new-message {
@@ -1101,7 +1220,8 @@
 
         white-space: nowrap;
 
-        padding: 9px 11px;
+        padding:
+          9px 11px;
       }
 
       .sidebar-spacer,
@@ -1111,7 +1231,9 @@
 
       .chat-list {
         border-right: 0;
-        border-bottom: 1px solid var(--border);
+
+        border-bottom:
+          1px solid var(--border);
 
         max-height: 260px;
       }
@@ -1124,7 +1246,8 @@
       }
 
       .contact {
-        padding: 11px 13px;
+        padding:
+          11px 13px;
       }
 
       .main {
@@ -1132,15 +1255,18 @@
       }
 
       .topbar {
-        padding: 10px 12px;
+        padding:
+          9px 12px;
       }
 
       .actions button {
-        padding: 8px 9px;
+        padding:
+          8px 9px;
       }
 
       .messages {
-        padding: 15px 12px;
+        padding:
+          14px 10px;
       }
 
       .bubble,
@@ -1367,12 +1493,21 @@
           —
         </span>
 
-        <span
-          id="topbarStatus"
-          class="offline"
-        >
-          ● Kein Kontakt
-        </span>
+        <div class="topbar-meta">
+
+          <span
+            id="topbarStatus"
+            class="offline"
+          >
+            ● Kein Kontakt
+          </span>
+
+          <span
+            id="topbarMessageCount"
+            class="message-count"
+          ></span>
+
+        </div>
 
       </div>
 
@@ -1595,28 +1730,17 @@
      STATE
   ================================================== */
 
-  let contacts =
-    [];
+  let contacts = [];
 
+  let selectedContactId = null;
 
-  let selectedContactId =
-    null;
+  let selectedDetail = null;
 
+  let globalPaused = false;
 
-  let selectedDetail =
-    null;
+  let contactsLoaded = false;
 
-
-  let globalPaused =
-    false;
-
-
-  let contactsLoaded =
-    false;
-
-
-  let detailRequestToken =
-    0;
+  let detailRequestToken = 0;
 
 
   /* ==================================================
@@ -1650,6 +1774,12 @@
   const topbarStatus =
     document.getElementById(
       "topbarStatus"
+    );
+
+
+  const topbarMessageCount =
+    document.getElementById(
+      "topbarMessageCount"
     );
 
 
@@ -1820,8 +1950,7 @@
 
     return String(
       value ?? ""
-    )
-      .trim();
+    ).trim();
 
   }
 
@@ -2332,27 +2461,6 @@
   }
 
 
-  function objectHasContent(
-    value
-  ) {
-
-    return (
-      value
-      &&
-      typeof value === "object"
-      &&
-      !Array.isArray(
-        value
-      )
-      &&
-      Object.keys(
-        value
-      ).length > 0
-    );
-
-  }
-
-
   function flattenReadableValues(
     value,
     result = []
@@ -2505,6 +2613,122 @@
   }
 
 
+  function getLoadedMessageCount() {
+
+    return Array.isArray(
+      selectedDetail?.messages
+    )
+      ? selectedDetail.messages.length
+      : 0;
+
+  }
+
+
+  function getTotalMessageCount() {
+
+    const candidates = [
+      selectedDetail?.totalMessages,
+      selectedDetail?.messageCount,
+      selectedDetail?.messagesTotal,
+      selectedDetail?.pagination?.total,
+      selectedDetail?.messageStatus?.total,
+      selectedDetail?.contact?.totalMessages,
+      selectedDetail?.contact?.messageCount
+    ];
+
+
+    for (
+      const candidate
+      of candidates
+    ) {
+
+      const number =
+        Number(
+          candidate
+        );
+
+
+      if (
+        Number.isFinite(
+          number
+        )
+        &&
+        number >= 0
+      ) {
+
+        return number;
+
+      }
+
+    }
+
+
+    return null;
+
+  }
+
+
+  function renderMessageCount() {
+
+    const loaded =
+      getLoadedMessageCount();
+
+
+    const total =
+      getTotalMessageCount();
+
+
+    if (
+      loaded <= 0
+      &&
+      total === null
+    ) {
+
+      topbarMessageCount.textContent =
+        "";
+
+
+      topbarMessageCount.classList.remove(
+        "visible"
+      );
+
+
+      return;
+
+    }
+
+
+    if (
+      total !== null
+      &&
+      total > loaded
+    ) {
+
+      topbarMessageCount.textContent =
+        `${total} gesamt · ${loaded} geladen`;
+
+    } else if (
+      total !== null
+    ) {
+
+      topbarMessageCount.textContent =
+        `${total} Nachrichten`;
+
+    } else {
+
+      topbarMessageCount.textContent =
+        `${loaded} geladen`;
+
+    }
+
+
+    topbarMessageCount.classList.add(
+      "visible"
+    );
+
+  }
+
+
   /* ==================================================
      API
   ================================================== */
@@ -2550,9 +2774,7 @@
 
 
     if (
-      response.status
-      ===
-      401
+      response.status === 401
     ) {
 
       window.location.href =
@@ -2570,8 +2792,7 @@
       await response.text();
 
 
-    let data =
-      {};
+    let data = {};
 
 
     try {
@@ -2715,16 +2936,11 @@
       );
 
 
-      contacts =
-        [];
+      contacts = [];
 
+      selectedContactId = null;
 
-      selectedContactId =
-        null;
-
-
-      selectedDetail =
-        null;
+      selectedDetail = null;
 
 
       unreadCount.textContent =
@@ -2765,6 +2981,15 @@
 
         </div>
       `;
+
+
+      topbarMessageCount.textContent =
+        "";
+
+
+      topbarMessageCount.classList.remove(
+        "visible"
+      );
 
 
       renderProfile(
@@ -2905,6 +3130,15 @@
 
       renderProfile(
         selectedContact()
+      );
+
+
+      topbarMessageCount.textContent =
+        "";
+
+
+      topbarMessageCount.classList.remove(
+        "visible"
       );
 
 
@@ -3238,6 +3472,15 @@
       "offline";
 
 
+    topbarMessageCount.textContent =
+      "";
+
+
+    topbarMessageCount.classList.remove(
+      "visible"
+    );
+
+
     messagesContainer.innerHTML = `
       <div class="chat-loading">
         Chatverlauf und Memory werden geladen …
@@ -3265,6 +3508,15 @@
 
       topbarStatus.className =
         "offline";
+
+
+      topbarMessageCount.textContent =
+        "";
+
+
+      topbarMessageCount.classList.remove(
+        "visible"
+      );
 
 
       contactAutoButton.textContent =
@@ -3361,6 +3613,9 @@
         : [];
 
 
+    renderMessageCount();
+
+
     if (
       messages.length === 0
     ) {
@@ -3389,12 +3644,9 @@
     }
 
 
-    let html =
-      "";
+    let html = "";
 
-
-    let previousDay =
-      null;
+    let previousDay = null;
 
 
     for (
@@ -3462,23 +3714,25 @@
               : "incoming"
           }">
 
-            ${escapeHtml(
+            <span class="message-text">${escapeHtml(
               messageText
-            )}
+            )}</span>
 
-            <span class="message-time">
-
-              ${escapeHtml(time)}
+            <span class="message-footer">
 
               ${
                 message?.edited
                   ? `
                     <span class="edited-label">
-                      · bearbeitet
+                      bearbeitet
                     </span>
                   `
                   : ""
               }
+
+              <span class="message-time">
+                ${escapeHtml(time)}
+              </span>
 
             </span>
 
@@ -3794,8 +4048,7 @@
         : "Kein Date im aktuellen API-Block gespeichert.";
 
 
-    const noteParts =
-      [];
+    const noteParts = [];
 
 
     if (
@@ -3928,15 +4181,9 @@
 
       <br>
 
-      NACHRICHTEN:
+      NACHRICHTEN GELADEN:
       <b>
-        ${
-          Array.isArray(
-            selectedDetail?.messages
-          )
-            ? selectedDetail.messages.length
-            : 0
-        }
+        ${getLoadedMessageCount()}
       </b>
 
     `;

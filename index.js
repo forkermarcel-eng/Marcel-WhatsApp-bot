@@ -2271,9 +2271,10 @@ const WOMEN_SEED = [
       "sandy_san_32",
 
     canonicalName:
-      "Sandy",
+      "Sandry",
 
     aliases: [
+      "Sandy",
       "San"
     ],
 

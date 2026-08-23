@@ -142,18 +142,43 @@
       border: 0;
       background: transparent;
 
+      display: inline-flex;
+      align-items: center;
+
+      gap: 5px;
+
       color: #7f8781;
 
       padding: 5px 1px;
 
       cursor: pointer;
 
-      transition: color 0.2s ease;
+      transition:
+        color 0.2s ease,
+        opacity 0.2s ease;
     }
 
     .language-switcher button:hover,
     .language-switcher button.active {
       color: var(--green);
+    }
+
+    .language-flag {
+      font-size: 14px;
+      line-height: 1;
+
+      filter:
+        saturate(0.88)
+        brightness(0.92);
+
+      transform:
+        translateY(-0.5px);
+    }
+
+    .language-switcher button.active .language-flag {
+      filter:
+        saturate(1)
+        brightness(1);
     }
 
     .language-divider {
@@ -584,13 +609,6 @@
       background: var(--bg);
     }
 
-    /*
-      WICHTIGE ÄNDERUNG:
-      Der Bereich selbst bleibt gleich groß.
-      Das Foto wird nur innerhalb des Bereichs
-      weniger stark gezoomt.
-    */
-
     .story-photo {
       position: absolute;
 
@@ -609,19 +627,15 @@
 
       background-repeat: no-repeat;
 
-      /*
-        Statt cover:
-        Bildhöhe wird an den vorhandenen Bereich angepasst.
-        Dadurch sieht man mehr vom Originalmotiv.
-      */
       background-size: auto 100%;
 
-      /*
-        Rechts ausgerichtet, damit Meer/Sonnenlicht
-        und Marcel sauber im sichtbaren Bereich bleiben.
-      */
       background-position: right center;
     }
+
+    /*
+      Standard-Fade für My Story.
+      Links, oben und unten weich in Schwarz.
+    */
 
     .story-photo::before {
       content: "";
@@ -629,6 +643,8 @@
       position: absolute;
 
       inset: 0;
+
+      pointer-events: none;
 
       background:
         linear-gradient(
@@ -644,11 +660,39 @@
         linear-gradient(
           180deg,
           #030403 0%,
-          rgba(3,4,3,0.38) 13%,
-          transparent 28%,
-          transparent 74%,
-          rgba(3,4,3,0.34) 88%,
+          rgba(3,4,3,0.68) 8%,
+          rgba(3,4,3,0.30) 17%,
+          rgba(3,4,3,0.06) 28%,
+          transparent 40%,
+          transparent 72%,
+          rgba(3,4,3,0.18) 83%,
+          rgba(3,4,3,0.62) 92%,
           #030403 100%
+        );
+    }
+
+    /*
+      Zusätzliche weiche Außen-Vignette.
+      Dadurch verschwindet die Rechteckwirkung.
+    */
+
+    .story-photo::after {
+      content: "";
+
+      position: absolute;
+
+      inset: 0;
+
+      pointer-events: none;
+
+      background:
+        radial-gradient(
+          ellipse at 67% 50%,
+          transparent 0%,
+          transparent 45%,
+          rgba(3,4,3,0.05) 60%,
+          rgba(3,4,3,0.28) 82%,
+          rgba(3,4,3,0.72) 100%
         );
     }
 
@@ -1325,19 +1369,64 @@
           );
       }
 
-      /*
-        IPAD QUER:
-        leicht größer als 100 %, damit es hochwertig
-        bleibt, aber deutlich weniger Zoom als cover.
-      */
-
       .story-photo {
         width: 66%;
-        top: -15%;
-        bottom: -14%;
 
-        background-size: auto 104%;
-        background-position: right 47%;
+        top: -18%;
+        bottom: -18%;
+
+        background-size:
+          auto 100%;
+
+        background-position:
+          right 48%;
+      }
+
+      /*
+        Querformat:
+        viel stärkerer oberer und unterer Fade.
+        Genau gegen die sichtbare rechteckige Kante.
+      */
+
+      .story-photo::before {
+        background:
+          linear-gradient(
+            90deg,
+            #030403 0%,
+            rgba(3,4,3,0.99) 8%,
+            rgba(3,4,3,0.94) 17%,
+            rgba(3,4,3,0.72) 31%,
+            rgba(3,4,3,0.36) 46%,
+            rgba(3,4,3,0.10) 64%,
+            transparent 81%
+          ),
+          linear-gradient(
+            180deg,
+            #030403 0%,
+            rgba(3,4,3,0.90) 7%,
+            rgba(3,4,3,0.58) 15%,
+            rgba(3,4,3,0.22) 24%,
+            rgba(3,4,3,0.04) 33%,
+            transparent 42%,
+            transparent 68%,
+            rgba(3,4,3,0.07) 76%,
+            rgba(3,4,3,0.28) 84%,
+            rgba(3,4,3,0.70) 93%,
+            #030403 100%
+          );
+      }
+
+      .story-photo::after {
+        background:
+          radial-gradient(
+            ellipse at 66% 49%,
+            transparent 0%,
+            transparent 38%,
+            rgba(3,4,3,0.04) 54%,
+            rgba(3,4,3,0.18) 70%,
+            rgba(3,4,3,0.48) 87%,
+            rgba(3,4,3,0.88) 100%
+          );
       }
 
       .story-inner {
@@ -1529,8 +1618,11 @@
       .story-photo {
         width: 72%;
 
-        background-size: auto 102%;
-        background-position: right 46%;
+        background-size:
+          auto 102%;
+
+        background-position:
+          right 46%;
       }
 
       .story-inner {
@@ -1615,8 +1707,15 @@
 
       .language-switcher {
         order: 1;
-
         font-size: 11px;
+      }
+
+      .language-switcher button {
+        gap: 4px;
+      }
+
+      .language-flag {
+        font-size: 13px;
       }
 
       .login-button {
@@ -1812,8 +1911,11 @@
         top: auto;
         bottom: auto;
 
-        background-size: auto 100%;
-        background-position: center center;
+        background-size:
+          auto 100%;
+
+        background-position:
+          center center;
       }
 
       .story-photo::before {
@@ -1821,19 +1923,35 @@
           linear-gradient(
             180deg,
             #030403 0%,
-            rgba(3,4,3,0.72) 10%,
-            rgba(3,4,3,0.17) 27%,
-            transparent 46%,
-            transparent 70%,
-            rgba(3,4,3,0.25) 87%,
+            rgba(3,4,3,0.80) 8%,
+            rgba(3,4,3,0.40) 19%,
+            rgba(3,4,3,0.12) 31%,
+            transparent 43%,
+            transparent 68%,
+            rgba(3,4,3,0.12) 79%,
+            rgba(3,4,3,0.44) 90%,
             #030403 100%
           ),
           linear-gradient(
             90deg,
-            rgba(3,4,3,0.18) 0%,
-            transparent 26%,
-            transparent 82%,
-            rgba(3,4,3,0.12) 100%
+            rgba(3,4,3,0.32) 0%,
+            rgba(3,4,3,0.08) 16%,
+            transparent 32%,
+            transparent 72%,
+            rgba(3,4,3,0.08) 88%,
+            rgba(3,4,3,0.28) 100%
+          );
+      }
+
+      .story-photo::after {
+        background:
+          radial-gradient(
+            ellipse at center,
+            transparent 0%,
+            transparent 47%,
+            rgba(3,4,3,0.08) 65%,
+            rgba(3,4,3,0.36) 84%,
+            rgba(3,4,3,0.80) 100%
           );
       }
 
@@ -1877,7 +1995,15 @@
       }
 
       .language-switcher {
-        gap: 5px;
+        gap: 4px;
+      }
+
+      .language-switcher button {
+        gap: 3px;
+      }
+
+      .language-flag {
+        font-size: 12px;
       }
 
       .hero-content {
@@ -1959,8 +2085,11 @@
             330px
           );
 
-        background-size: auto 100%;
-        background-position: center center;
+        background-size:
+          auto 100%;
+
+        background-position:
+          center center;
       }
 
       .areas {
@@ -2008,6 +2137,14 @@
         gap: 7px;
       }
 
+      .language-switcher button {
+        gap: 2px;
+      }
+
+      .language-flag {
+        font-size: 11px;
+      }
+
       .login-button span {
         display: none;
       }
@@ -2042,6 +2179,33 @@
     and
     (max-width: 950px) {
 
+      :root {
+        --nav-height: 52px;
+      }
+
+      .navbar {
+        padding-left:
+          max(
+            14px,
+            env(safe-area-inset-left)
+          );
+
+        padding-right:
+          max(
+            14px,
+            env(safe-area-inset-right)
+          );
+      }
+
+      .language-switcher {
+        font-size: 10px;
+        gap: 4px;
+      }
+
+      .language-flag {
+        font-size: 11px;
+      }
+
       .hero-content {
         padding-top: 30px;
         padding-bottom: 26px;
@@ -2067,8 +2231,55 @@
       .story-photo {
         height: 290px;
 
-        background-size: auto 100%;
-        background-position: center center;
+        background-size:
+          auto 100%;
+
+        background-position:
+          center 48%;
+      }
+
+      /*
+        Smartphone Querformat:
+        derselbe weiche Look wie Hochkant.
+      */
+
+      .story-photo::before {
+        background:
+          linear-gradient(
+            180deg,
+            #030403 0%,
+            rgba(3,4,3,0.91) 7%,
+            rgba(3,4,3,0.60) 15%,
+            rgba(3,4,3,0.25) 25%,
+            rgba(3,4,3,0.05) 35%,
+            transparent 44%,
+            transparent 67%,
+            rgba(3,4,3,0.08) 76%,
+            rgba(3,4,3,0.34) 85%,
+            rgba(3,4,3,0.74) 94%,
+            #030403 100%
+          ),
+          linear-gradient(
+            90deg,
+            rgba(3,4,3,0.32) 0%,
+            rgba(3,4,3,0.12) 15%,
+            transparent 29%,
+            transparent 74%,
+            rgba(3,4,3,0.10) 88%,
+            rgba(3,4,3,0.30) 100%
+          );
+      }
+
+      .story-photo::after {
+        background:
+          radial-gradient(
+            ellipse at center,
+            transparent 0%,
+            transparent 40%,
+            rgba(3,4,3,0.07) 58%,
+            rgba(3,4,3,0.28) 76%,
+            rgba(3,4,3,0.75) 100%
+          );
       }
     }
 
@@ -2088,36 +2299,71 @@
 
     <div class="nav-inner">
 
+
       <div class="language-switcher">
 
         <button
           type="button"
           data-language="en"
           class="active"
+          aria-label="English"
         >
-          EN
+          <span
+            class="language-flag"
+            aria-hidden="true"
+          >
+            🇬🇧
+          </span>
+
+          <span>
+            EN
+          </span>
         </button>
+
 
         <span class="language-divider">
           |
         </span>
+
 
         <button
           type="button"
           data-language="de"
+          aria-label="Deutsch"
         >
-          DE
+          <span
+            class="language-flag"
+            aria-hidden="true"
+          >
+            🇩🇪
+          </span>
+
+          <span>
+            DE
+          </span>
         </button>
+
 
         <span class="language-divider">
           |
         </span>
 
+
         <button
           type="button"
           data-language="es"
+          aria-label="Español"
         >
-          ES
+          <span
+            class="language-flag"
+            aria-hidden="true"
+          >
+            🇪🇸
+          </span>
+
+          <span>
+            ES
+          </span>
         </button>
 
       </div>
@@ -2187,9 +2433,12 @@
 
     <section class="hero">
 
+
       <div class="hero-inner">
 
+
         <div class="hero-content">
+
 
           <h1>
             Marcel

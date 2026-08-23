@@ -1,13 +1,32 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <title>Marcel Marlow</title>
-  <meta name="description" content="Marcel Marlow – Official Website">
+
+  <meta
+    name="description"
+    content="Marcel Marlow – Entrepreneur, Investor, Traveler & AI Automation"
+  >
 
   <style>
+    :root {
+      --bg: #050706;
+      --bg-soft: #090c0a;
+      --card: #0b0e0c;
+
+      --green: #39f04f;
+      --green-soft: #67ff79;
+
+      --white: #ffffff;
+      --text: #f0f2f0;
+      --muted: #a3aaa5;
+
+      --border: rgba(255,255,255,0.10);
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
@@ -20,177 +39,463 @@
 
     body {
       min-height: 100vh;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Arial,
+        sans-serif;
+
       background:
-        radial-gradient(circle at 50% 25%, #1d2730 0%, #0d1217 38%, #050709 100%);
-      color: #ffffff;
+        radial-gradient(
+          circle at 70% 10%,
+          #101611 0%,
+          #070907 35%,
+          #030403 100%
+        );
+
+      color: var(--white);
     }
 
-    /* NAVIGATION */
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+
+    /* ==================================================
+       NAVIGATION
+    ================================================== */
 
     .navbar {
-      width: 100%;
       height: 76px;
+
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 0 7%;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      background: rgba(5,7,9,0.75);
-      backdrop-filter: blur(12px);
+      justify-content: flex-end;
+
+      gap: 34px;
+
+      padding: 0 4.5%;
+
       position: fixed;
       top: 0;
       left: 0;
+      right: 0;
+
       z-index: 100;
-    }
 
-    .logo {
-      font-size: 21px;
-      font-weight: 800;
-      letter-spacing: 1px;
-    }
+      background: rgba(3,4,3,0.88);
+      border-bottom: 1px solid var(--border);
 
-    .logo span {
-      color: #42c763;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
     }
 
     .nav-links {
       display: flex;
       align-items: center;
-      gap: 28px;
+      gap: 34px;
     }
 
-    .nav-links a,
-    .nav-links button {
-      color: #bfc6cc;
+    .nav-links a {
+      color: var(--text);
       text-decoration: none;
       font-size: 14px;
-      transition: 0.2s;
+      transition: 0.2s ease;
     }
 
-    .nav-links a:hover,
-    .nav-links button:hover {
-      color: #ffffff;
+    .nav-links a:hover {
+      color: var(--green);
     }
 
     .login-button {
-      border: 1px solid rgba(255,255,255,0.22);
-      padding: 9px 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+
+      padding: 9px 18px;
+
+      border: 1px solid var(--green);
       border-radius: 8px;
+
       background: transparent;
+      color: var(--white);
+
       cursor: pointer;
+
+      transition: 0.2s ease;
     }
 
-    /* HERO */
+    .login-button:hover {
+      background: rgba(57,240,79,0.08);
+      box-shadow: 0 0 22px rgba(57,240,79,0.12);
+    }
 
-    .hero {
-      min-height: 100vh;
+
+    /* ==================================================
+       LANGUAGE
+    ================================================== */
+
+    .language-switcher {
       display: flex;
       align-items: center;
-      justify-content: center;
-      text-align: center;
-      padding: 120px 25px 60px;
+      gap: 8px;
+
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .language-switcher button {
+      border: 0;
+      background: none;
+
+      color: #888f8a;
+
+      cursor: pointer;
+
+      padding: 5px 2px;
+    }
+
+    .language-switcher button.active {
+      color: var(--green);
+    }
+
+    .language-divider {
+      color: #555b57;
+    }
+
+
+    /* ==================================================
+       HERO
+    ================================================== */
+
+    .hero {
+      min-height: 660px;
+
+      display: grid;
+      grid-template-columns: 43% 57%;
+
+      margin-top: 76px;
+
+      border-bottom: 1px solid var(--border);
+
+      overflow: hidden;
+    }
+
+    .hero-left {
+      display: flex;
+      align-items: center;
+
+      padding: 70px 4% 70px 6%;
+
+      position: relative;
+
+      z-index: 2;
+
+      background:
+        linear-gradient(
+          90deg,
+          #030403 0%,
+          #030403 72%,
+          rgba(3,4,3,0.92) 88%,
+          rgba(3,4,3,0.25) 100%
+        );
     }
 
     .hero-content {
-      max-width: 850px;
-    }
-
-    .eyebrow {
-      display: inline-block;
-      color: #42c763;
-      border: 1px solid rgba(66,199,99,0.3);
-      background: rgba(66,199,99,0.08);
-      padding: 8px 15px;
-      border-radius: 100px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      margin-bottom: 25px;
-    }
-
-    h1 {
-      font-size: clamp(48px, 8vw, 92px);
-      line-height: 0.98;
-      letter-spacing: -4px;
-      margin-bottom: 25px;
-    }
-
-    h1 span {
-      color: #42c763;
-    }
-
-    .subtitle {
       max-width: 650px;
+    }
+
+    .hero h1 {
+      font-size: clamp(58px, 6vw, 94px);
+      line-height: 0.92;
+
+      letter-spacing: -4px;
+
+      margin-bottom: 26px;
+    }
+
+    .hero h1 .green {
+      color: var(--green);
+    }
+
+    .positioning {
+      display: flex;
+      flex-wrap: wrap;
+
+      gap: 8px 12px;
+
+      margin-bottom: 28px;
+
+      color: var(--white);
+
+      font-size: 17px;
+      font-weight: 500;
+    }
+
+    .positioning .dot {
+      color: var(--green);
+    }
+
+    .hero-text {
+      max-width: 540px;
+
+      color: #d3d8d4;
+
+      font-size: 17px;
+      line-height: 1.65;
+    }
+
+    .hero-text strong {
+      color: var(--green);
+      font-weight: 600;
+    }
+
+    .hero-image {
+      min-height: 660px;
+
+      background-image:
+        linear-gradient(
+          90deg,
+          rgba(3,4,3,0.65) 0%,
+          rgba(3,4,3,0.12) 24%,
+          rgba(3,4,3,0.02) 100%
+        ),
+        url("056AF29B-36B3-4514-AC41-73FD52DA4818.png");
+
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+
+
+    /* ==================================================
+       STORY
+    ================================================== */
+
+    .story {
+      max-width: 1240px;
+
       margin: 0 auto;
-      color: #aeb7bf;
-      font-size: 19px;
-      line-height: 1.7;
-    }
 
-    .divider {
-      width: 55px;
-      height: 3px;
-      background: #42c763;
-      margin: 35px auto;
-      border-radius: 10px;
-    }
+      padding: 70px 5%;
 
-    .quote {
-      color: #d7dce0;
-      font-size: 16px;
-      font-style: italic;
-    }
+      display: grid;
+      grid-template-columns: 0.9fr 1.25fr;
 
-    /* ABOUT */
+      gap: 55px;
 
-    .about {
-      padding: 100px 8%;
-      border-top: 1px solid rgba(255,255,255,0.07);
-      background: rgba(0,0,0,0.16);
-    }
-
-    .about-inner {
-      max-width: 1000px;
-      margin: auto;
-      text-align: center;
+      align-items: center;
     }
 
     .section-label {
-      color: #42c763;
-      text-transform: uppercase;
+      color: var(--green);
+
       font-size: 12px;
-      letter-spacing: 2px;
       font-weight: 700;
-      margin-bottom: 15px;
+
+      letter-spacing: 2px;
+      text-transform: uppercase;
+
+      margin-bottom: 18px;
     }
 
-    .about h2 {
-      font-size: 38px;
-      margin-bottom: 22px;
+    .story h2 {
+      font-size: clamp(30px, 3.5vw, 44px);
+      line-height: 1.2;
+
+      margin-bottom: 20px;
     }
 
-    .about p {
-      color: #aeb7bf;
-      max-width: 720px;
-      margin: auto;
-      font-size: 17px;
-      line-height: 1.8;
+    .story p {
+      color: var(--muted);
+
+      font-size: 15px;
+      line-height: 1.75;
+
+      max-width: 500px;
     }
 
-    /* LOGIN MODAL */
+    .story-image {
+      min-height: 330px;
+
+      background-image:
+        linear-gradient(
+          rgba(0,0,0,0.06),
+          rgba(0,0,0,0.18)
+        ),
+        url("16039A0E-7334-460B-8EFA-C19BCED679B3.png");
+
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+
+      border-radius: 12px;
+
+      border: 1px solid var(--border);
+
+      box-shadow:
+        0 24px 60px rgba(0,0,0,0.35);
+    }
+
+
+    /* ==================================================
+       CARDS
+    ================================================== */
+
+    .areas {
+      max-width: 1240px;
+
+      margin: 0 auto;
+
+      padding: 0 5% 70px;
+
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+
+      gap: 18px;
+    }
+
+    .area-card {
+      min-height: 150px;
+
+      display: flex;
+      align-items: center;
+
+      gap: 22px;
+
+      padding: 28px;
+
+      border: 1px solid var(--border);
+      border-radius: 12px;
+
+      background:
+        linear-gradient(
+          145deg,
+          rgba(255,255,255,0.025),
+          rgba(255,255,255,0.008)
+        );
+    }
+
+    .area-icon {
+      width: 58px;
+      height: 58px;
+
+      flex: 0 0 58px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      color: var(--green);
+    }
+
+    .area-icon svg {
+      width: 48px;
+      height: 48px;
+
+      stroke: currentColor;
+      fill: none;
+
+      stroke-width: 1.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .area-card h3 {
+      font-size: 20px;
+      margin-bottom: 7px;
+    }
+
+    .area-card p {
+      color: var(--muted);
+
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+
+    /* ==================================================
+       FOOTER
+    ================================================== */
+
+    footer {
+      max-width: 1240px;
+
+      margin: 0 auto;
+
+      padding: 25px 5% 35px;
+
+      border-top: 1px solid var(--border);
+
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      gap: 20px;
+
+      color: #777e79;
+
+      font-size: 12px;
+    }
+
+    .footer-name span {
+      color: var(--green);
+    }
+
+    .instagram-link {
+      width: 42px;
+      height: 42px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 50%;
+
+      color: #d6dad7;
+
+      transition: 0.2s ease;
+    }
+
+    .instagram-link:hover {
+      color: var(--green);
+      border-color: var(--green);
+
+      transform: translateY(-2px);
+    }
+
+    .instagram-link svg {
+      width: 20px;
+      height: 20px;
+    }
+
+
+    /* ==================================================
+       LOGIN
+    ================================================== */
 
     .login-overlay {
       position: fixed;
       inset: 0;
+
       display: none;
       align-items: center;
       justify-content: center;
+
       padding: 20px;
 
-      background: rgba(0,0,0,0.78);
-      backdrop-filter: blur(12px);
+      background: rgba(0,0,0,0.82);
+
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
 
       z-index: 1000;
     }
@@ -200,107 +505,165 @@
     }
 
     .login-card {
-      width: min(420px, 100%);
+      width: min(430px, 100%);
 
-      background: #10161c;
-      border: 1px solid rgba(255,255,255,0.12);
-
-      border-radius: 18px;
       padding: 30px;
 
+      border-radius: 18px;
+
+      background: #0c100e;
+
+      border: 1px solid rgba(255,255,255,0.14);
+
       box-shadow:
-        0 25px 80px rgba(0,0,0,0.55);
+        0 30px 90px rgba(0,0,0,0.7);
     }
 
     .login-top {
       display: flex;
       align-items: center;
       justify-content: space-between;
+
       gap: 20px;
 
-      margin-bottom: 25px;
+      margin-bottom: 22px;
     }
 
     .login-title {
-      font-size: 24px;
+      font-size: 25px;
       font-weight: 800;
     }
 
     .login-title span {
-      color: #42c763;
+      color: var(--green);
     }
 
     .close-login {
       width: 38px;
       height: 38px;
 
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
       border: 0;
       border-radius: 50%;
 
-      background: #202830;
+      background: #191f1b;
       color: white;
 
-      font-size: 18px;
       cursor: pointer;
+
+      font-size: 18px;
     }
 
     .login-description {
-      color: #9fa8b0;
+      color: #a7afa9;
+
       font-size: 14px;
-      line-height: 1.6;
-      margin-bottom: 22px;
+      line-height: 1.5;
+
+      margin-bottom: 24px;
     }
 
     .login-field {
-      margin-bottom: 16px;
+      margin-bottom: 17px;
     }
 
     .login-field label {
       display: block;
 
-      color: #bfc7cd;
-      font-size: 12px;
+      color: #cbd0cc;
+
+      font-size: 13px;
       font-weight: 700;
 
-      margin-bottom: 7px;
+      margin-bottom: 8px;
+    }
+
+    .input-wrap {
+      position: relative;
     }
 
     .login-field input {
       width: 100%;
 
-      border: 1px solid #303a43;
+      height: 50px;
+
+      padding: 0 48px 0 14px;
+
+      border: 1px solid #303731;
+      border-radius: 10px;
+
       outline: none;
 
-      background: #0a0f13;
+      background: #070a08;
       color: white;
 
-      border-radius: 10px;
-      padding: 13px 14px;
-
       font-size: 15px;
+
+      transition: 0.2s;
+    }
+
+    .login-field input[type="text"] {
+      padding-right: 14px;
     }
 
     .login-field input:focus {
-      border-color: #42c763;
+      border-color: var(--green);
+
+      box-shadow:
+        0 0 0 3px rgba(57,240,79,0.08);
+    }
+
+    .password-toggle {
+      position: absolute;
+
+      right: 9px;
+      top: 50%;
+
+      transform: translateY(-50%);
+
+      width: 36px;
+      height: 36px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      border: 0;
+
+      background: transparent;
+      color: #858d87;
+
+      cursor: pointer;
+    }
+
+    .password-toggle:hover {
+      color: var(--green);
+    }
+
+    .password-toggle svg {
+      width: 21px;
+      height: 21px;
     }
 
     .login-submit {
       width: 100%;
+      height: 50px;
 
       border: 0;
       border-radius: 10px;
 
-      padding: 13px 15px;
+      background: var(--green);
+      color: #031005;
 
-      background: #42c763;
-      color: white;
-
-      font-weight: 800;
       font-size: 15px;
+      font-weight: 800;
 
       cursor: pointer;
 
-      margin-top: 5px;
+      margin-top: 4px;
     }
 
     .login-submit:disabled {
@@ -319,67 +682,148 @@
       margin-top: 14px;
     }
 
-    /* FOOTER */
 
-    footer {
-      min-height: 100px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 25px 7%;
-      color: #737d85;
-      font-size: 12px;
-      border-top: 1px solid rgba(255,255,255,0.07);
-    }
+    /* ==================================================
+       TABLET
+    ================================================== */
 
-    .footer-name {
-      color: #aab2b8;
-    }
+    @media (max-width: 900px) {
 
-    /* MOBILE / TABLET */
-
-    @media (max-width: 700px) {
       .navbar {
-        padding: 0 22px;
+        padding: 0 24px;
       }
 
-      .nav-links a:not(.login-button) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-left {
+        min-height: 520px;
+
+        padding: 70px 7%;
+
+        background:
+          linear-gradient(
+            rgba(3,4,3,0.92),
+            rgba(3,4,3,0.82)
+          );
+      }
+
+      .hero-image {
+        min-height: 430px;
+      }
+
+      .story {
+        grid-template-columns: 1fr;
+      }
+
+      .story-image {
+        min-height: 400px;
+      }
+
+      .areas {
+        grid-template-columns: 1fr;
+      }
+
+    }
+
+
+    /* ==================================================
+       MOBILE
+    ================================================== */
+
+    @media (max-width: 650px) {
+
+      .navbar {
+        height: auto;
+
+        min-height: 70px;
+
+        gap: 15px;
+
+        padding: 13px 18px;
+      }
+
+      .nav-links {
+        gap: 14px;
+      }
+
+      .nav-links a {
         display: none;
       }
 
-      h1 {
+      .language-switcher {
+        gap: 5px;
+      }
+
+      .login-button {
+        padding: 8px 12px;
+      }
+
+      .hero {
+        margin-top: 70px;
+      }
+
+      .hero h1 {
         letter-spacing: -2px;
       }
 
-      .subtitle {
-        font-size: 16px;
+      .positioning {
+        font-size: 14px;
+      }
+
+      .story {
+        padding: 55px 7%;
+      }
+
+      .areas {
+        padding: 0 7% 55px;
       }
 
       footer {
+        margin: 0 7%;
+
+        padding-left: 0;
+        padding-right: 0;
+
         flex-direction: column;
-        gap: 10px;
+
         text-align: center;
       }
 
       .login-card {
         padding: 24px;
       }
+
     }
+
   </style>
 </head>
 
+
 <body>
+
+
+  <!-- ==================================================
+       NAV
+  ================================================== -->
 
   <header class="navbar">
 
-    <div class="logo">
-      MARCEL <span>MARLOW</span>
-    </div>
-
     <nav class="nav-links">
 
-      <a href="#about">
-        Über mich
+      <a
+        href="#top"
+        data-i18n="home"
+      >
+        Home
+      </a>
+
+      <a
+        href="#story"
+        data-i18n="about"
+      >
+        About
       </a>
 
       <button
@@ -387,89 +831,325 @@
         class="login-button"
         type="button"
       >
-        Login
+        🔒
+        <span data-i18n="login">
+          Login
+        </span>
       </button>
 
     </nav>
 
+
+    <div class="language-switcher">
+
+      <button
+        type="button"
+        data-language="en"
+        class="active"
+      >
+        EN
+      </button>
+
+      <span class="language-divider">
+        |
+      </span>
+
+      <button
+        type="button"
+        data-language="de"
+      >
+        DE
+      </button>
+
+      <span class="language-divider">
+        |
+      </span>
+
+      <button
+        type="button"
+        data-language="es"
+      >
+        ES
+      </button>
+
+    </div>
+
   </header>
 
 
-  <main>
+  <main id="top">
+
+
+    <!-- ==================================================
+         HERO
+    ================================================== -->
 
     <section class="hero">
 
-      <div class="hero-content">
+      <div class="hero-left">
 
-        <div class="eyebrow">
-          Official Website
+        <div class="hero-content">
+
+          <h1>
+            Marcel
+            <span class="green">
+              Marlow
+            </span>
+          </h1>
+
+
+          <div class="positioning">
+
+            <span>
+              Entrepreneur
+            </span>
+
+            <span class="dot">
+              •
+            </span>
+
+            <span>
+              Investor
+            </span>
+
+            <span class="dot">
+              •
+            </span>
+
+            <span>
+              Traveler
+            </span>
+
+            <span class="dot">
+              •
+            </span>
+
+            <span>
+              AI Automation
+            </span>
+
+          </div>
+
+
+          <p
+            class="hero-text"
+            data-i18n-html="heroText"
+          >
+            Building digital businesses and systems that
+            create freedom.
+            <strong>AI-optimized.</strong>
+            Location independent.
+          </p>
+
         </div>
 
-        <h1>
-          Marcel<br>
-          <span>Marlow.</span>
-        </h1>
-
-        <p class="subtitle">
-          Unternehmer. Reisender. Visionär.<br>
-          Ideen entwickeln, Möglichkeiten schaffen und das Leben
-          nicht nur planen, sondern leben.
-        </p>
-
-        <div class="divider"></div>
-
-        <p class="quote">
-          „Taten sagen mehr als tausend Worte.“
-        </p>
-
       </div>
+
+
+      <div
+        class="hero-image"
+        aria-label="Working remotely by the sea"
+      ></div>
 
     </section>
 
 
+    <!-- ==================================================
+         STORY
+    ================================================== -->
+
     <section
-      class="about"
-      id="about"
+      class="story"
+      id="story"
     >
 
-      <div class="about-inner">
+      <div>
 
-        <div class="section-label">
-          Über mich
+        <div
+          class="section-label"
+          data-i18n="storyLabel"
+        >
+          My Story
         </div>
 
-        <h2>
-          Mehr als nur ein Ort.
+
+        <h2
+          data-i18n-html="storyTitle"
+        >
+          Designing a life of freedom.<br>
+          Building with purpose.
         </h2>
 
-        <p>
-          Diese Seite ist die digitale Heimat von Marcel Marlow.
-          Hier entstehen nach und nach neue Projekte, Ideen und
-          Einblicke in meine Arbeit und meinen Weg.
+
+        <p
+          data-i18n="storyText"
+        >
+          Building businesses, exploring opportunities and using
+          technology to create more freedom. Always curious about
+          new places, new ideas and what comes next.
         </p>
 
       </div>
+
+
+      <div
+        class="story-image"
+        aria-label="Coastal sunset"
+      ></div>
+
+    </section>
+
+
+    <!-- ==================================================
+         BUSINESS / TRAVEL / LIFE
+    ================================================== -->
+
+    <section class="areas">
+
+
+      <article class="area-card">
+
+        <div class="area-icon">
+
+          <svg viewBox="0 0 64 64">
+            <path d="M10 52V35h10v17"/>
+            <path d="M27 52V25h10v27"/>
+            <path d="M44 52V14h10v38"/>
+            <path d="M10 24l12-6 11 2 18-12"/>
+            <path d="M45 8h6v6"/>
+          </svg>
+
+        </div>
+
+        <div>
+
+          <h3 data-i18n="businessTitle">
+            Business
+          </h3>
+
+          <p data-i18n="businessText">
+            Building scalable digital businesses powered by systems and AI.
+          </p>
+
+        </div>
+
+      </article>
+
+
+      <article class="area-card">
+
+        <div class="area-icon">
+
+          <svg viewBox="0 0 64 64">
+            <path d="M55 9L9 30l18 7 7 18 21-46z"/>
+            <path d="M27 37l28-28"/>
+          </svg>
+
+        </div>
+
+        <div>
+
+          <h3 data-i18n="travelTitle">
+            Travel
+          </h3>
+
+          <p data-i18n="travelText">
+            New places, new perspectives and freedom through movement.
+          </p>
+
+        </div>
+
+      </article>
+
+
+      <article class="area-card">
+
+        <div class="area-icon">
+
+          <svg viewBox="0 0 64 64">
+            <path d="M51 10C29 11 14 22 13 42c13 4 29 0 38-32z"/>
+            <path d="M13 50c8-14 18-22 31-29"/>
+          </svg>
+
+        </div>
+
+        <div>
+
+          <h3 data-i18n="lifeTitle">
+            Life
+          </h3>
+
+          <p data-i18n="lifeText">
+            Freedom, experiences and enjoying the journey along the way.
+          </p>
+
+        </div>
+
+      </article>
 
     </section>
 
   </main>
 
 
+  <!-- ==================================================
+       FOOTER
+  ================================================== -->
+
   <footer>
 
     <div class="footer-name">
-      © 2026 Marcel Marlow
+      © 2026
+      <span>
+        MARCEL_MARLOW
+      </span>
     </div>
 
-    <div>
-      Official Website
-    </div>
+
+    <a
+      class="instagram-link"
+      href="https://www.instagram.com/Marcel_Marlow/"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Instagram Marcel Marlow"
+    >
+
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+      >
+        <rect
+          x="3"
+          y="3"
+          width="18"
+          height="18"
+          rx="5"
+        />
+
+        <circle
+          cx="12"
+          cy="12"
+          r="4"
+        />
+
+        <circle
+          cx="17.5"
+          cy="6.5"
+          r="1"
+          fill="currentColor"
+          stroke="none"
+        />
+      </svg>
+
+    </a>
 
   </footer>
 
 
   <!-- ==================================================
-       LOGIN
+       LOGIN MODAL
   ================================================== -->
 
   <div
@@ -482,14 +1162,15 @@
       <div class="login-top">
 
         <div class="login-title">
-          Marcel <span>AI</span>
+          Marcel<span>_Marlow</span>
         </div>
+
 
         <button
           id="closeLoginButton"
           class="close-login"
           type="button"
-          aria-label="Login schließen"
+          aria-label="Close login"
         >
           ✕
         </button>
@@ -497,17 +1178,24 @@
       </div>
 
 
-      <p class="login-description">
-        Geschützter Zugang zum Marcel AI Dashboard.
+      <p
+        class="login-description"
+        data-i18n="loginDescription"
+      >
+        Secure access to the Marcel_Marlow Dashboard.
       </p>
 
 
       <form id="loginForm">
 
+
         <div class="login-field">
 
-          <label for="usernameInput">
-            Benutzername
+          <label
+            for="usernameInput"
+            data-i18n="username"
+          >
+            Username
           </label>
 
           <input
@@ -523,17 +1211,54 @@
 
         <div class="login-field">
 
-          <label for="passwordInput">
-            Passwort
+          <label
+            for="passwordInput"
+            data-i18n="password"
+          >
+            Password
           </label>
 
-          <input
-            id="passwordInput"
-            name="password"
-            type="password"
-            autocomplete="current-password"
-            required
-          >
+
+          <div class="input-wrap">
+
+            <input
+              id="passwordInput"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            >
+
+
+            <button
+              id="passwordToggle"
+              class="password-toggle"
+              type="button"
+              aria-label="Show password"
+            >
+
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+
+                <path
+                  d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"
+                />
+
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="2.7"
+                />
+
+              </svg>
+
+            </button>
+
+          </div>
 
         </div>
 
@@ -542,8 +1267,9 @@
           id="loginSubmitButton"
           class="login-submit"
           type="submit"
+          data-i18n="loginSubmit"
         >
-          Anmelden
+          Sign in
         </button>
 
 
@@ -560,10 +1286,331 @@
 
 
   <script>
+
     (function () {
 
       "use strict";
 
+
+      /* ==================================================
+         TRANSLATIONS
+      ================================================== */
+
+      const translations = {
+
+        en: {
+
+          home:
+            "Home",
+
+          about:
+            "About",
+
+          login:
+            "Login",
+
+          heroText:
+            'Building digital businesses and systems that create freedom. <strong>AI-optimized.</strong> Location independent.',
+
+          storyLabel:
+            "My Story",
+
+          storyTitle:
+            "Designing a life of freedom.<br>Building with purpose.",
+
+          storyText:
+            "Building businesses, exploring opportunities and using technology to create more freedom. Always curious about new places, new ideas and what comes next.",
+
+          businessTitle:
+            "Business",
+
+          businessText:
+            "Building scalable digital businesses powered by systems and AI.",
+
+          travelTitle:
+            "Travel",
+
+          travelText:
+            "New places, new perspectives and freedom through movement.",
+
+          lifeTitle:
+            "Life",
+
+          lifeText:
+            "Freedom, experiences and enjoying the journey along the way.",
+
+          loginDescription:
+            "Secure access to the Marcel_Marlow Dashboard.",
+
+          username:
+            "Username",
+
+          password:
+            "Password",
+
+          loginSubmit:
+            "Sign in",
+
+          loggingIn:
+            "Signing in ...",
+
+          missingLogin:
+            "Please enter username and password.",
+
+          loginFailed:
+            "Login failed."
+
+        },
+
+
+        de: {
+
+          home:
+            "Home",
+
+          about:
+            "Über mich",
+
+          login:
+            "Login",
+
+          heroText:
+            'Digitale Unternehmen und Systeme aufbauen, die Freiheit schaffen. <strong>KI-optimiert.</strong> Ortsunabhängig.',
+
+          storyLabel:
+            "Meine Story",
+
+          storyTitle:
+            "Ein Leben mit Freiheit gestalten.<br>Mit Sinn aufbauen.",
+
+          storyText:
+            "Unternehmen aufbauen, Chancen erkennen und Technologie nutzen, um mehr Freiheit zu schaffen. Immer neugierig auf neue Orte, neue Ideen und das, was als Nächstes kommt.",
+
+          businessTitle:
+            "Business",
+
+          businessText:
+            "Skalierbare digitale Unternehmen mit Systemen und KI aufbauen.",
+
+          travelTitle:
+            "Travel",
+
+          travelText:
+            "Neue Orte, neue Perspektiven und Freiheit durch Bewegung.",
+
+          lifeTitle:
+            "Life",
+
+          lifeText:
+            "Freiheit, Erfahrungen und den Weg bewusst genießen.",
+
+          loginDescription:
+            "Geschützter Zugang zum Marcel_Marlow Dashboard.",
+
+          username:
+            "Benutzername",
+
+          password:
+            "Passwort",
+
+          loginSubmit:
+            "Anmelden",
+
+          loggingIn:
+            "Anmeldung läuft ...",
+
+          missingLogin:
+            "Bitte Benutzername und Passwort eingeben.",
+
+          loginFailed:
+            "Anmeldung fehlgeschlagen."
+
+        },
+
+
+        es: {
+
+          home:
+            "Inicio",
+
+          about:
+            "Sobre mí",
+
+          login:
+            "Acceso",
+
+          heroText:
+            'Creando negocios digitales y sistemas que generan libertad. <strong>Optimizados con IA.</strong> Sin depender de un lugar.',
+
+          storyLabel:
+            "Mi historia",
+
+          storyTitle:
+            "Diseñando una vida con libertad.<br>Construyendo con propósito.",
+
+          storyText:
+            "Creando negocios, explorando oportunidades y utilizando tecnología para generar más libertad. Siempre con curiosidad por nuevos lugares, nuevas ideas y lo que viene después.",
+
+          businessTitle:
+            "Negocios",
+
+          businessText:
+            "Creando negocios digitales escalables impulsados por sistemas e inteligencia artificial.",
+
+          travelTitle:
+            "Viajes",
+
+          travelText:
+            "Nuevos lugares, nuevas perspectivas y libertad a través del movimiento.",
+
+          lifeTitle:
+            "Vida",
+
+          lifeText:
+            "Libertad, experiencias y disfrutar conscientemente del camino.",
+
+          loginDescription:
+            "Acceso protegido al Dashboard Marcel_Marlow.",
+
+          username:
+            "Usuario",
+
+          password:
+            "Contraseña",
+
+          loginSubmit:
+            "Entrar",
+
+          loggingIn:
+            "Ingresando ...",
+
+          missingLogin:
+            "Introduce usuario y contraseña.",
+
+          loginFailed:
+            "No se pudo iniciar sesión."
+
+        }
+
+      };
+
+
+      let currentLanguage =
+        "en";
+
+
+      function setLanguage(language) {
+
+        if (
+          !translations[language]
+        ) {
+
+          return;
+
+        }
+
+
+        currentLanguage =
+          language;
+
+
+        document.documentElement.lang =
+          language;
+
+
+        document
+          .querySelectorAll(
+            "[data-i18n]"
+          )
+          .forEach(
+            element => {
+
+              const key =
+                element.dataset.i18n;
+
+
+              if (
+                translations[language][key]
+                !== undefined
+              ) {
+
+                element.textContent =
+                  translations[language][key];
+
+              }
+
+            }
+          );
+
+
+        document
+          .querySelectorAll(
+            "[data-i18n-html]"
+          )
+          .forEach(
+            element => {
+
+              const key =
+                element.dataset.i18nHtml;
+
+
+              if (
+                translations[language][key]
+                !== undefined
+              ) {
+
+                element.innerHTML =
+                  translations[language][key];
+
+              }
+
+            }
+          );
+
+
+        document
+          .querySelectorAll(
+            "[data-language]"
+          )
+          .forEach(
+            button => {
+
+              button.classList.toggle(
+                "active",
+                button.dataset.language === language
+              );
+
+            }
+          );
+
+      }
+
+
+      document
+        .querySelectorAll(
+          "[data-language]"
+        )
+        .forEach(
+          button => {
+
+            button.addEventListener(
+              "click",
+              () => {
+
+                setLanguage(
+                  button.dataset.language
+                );
+
+              }
+            );
+
+          }
+        );
+
+
+      /* ==================================================
+         LOGIN
+      ================================================== */
 
       const openLoginButton =
         document.getElementById(
@@ -598,6 +1645,12 @@
       const passwordInput =
         document.getElementById(
           "passwordInput"
+        );
+
+
+      const passwordToggle =
+        document.getElementById(
+          "passwordToggle"
         );
 
 
@@ -693,6 +1746,38 @@
       );
 
 
+      /* ==================================================
+         PASSWORD EYE
+      ================================================== */
+
+      passwordToggle.addEventListener(
+        "click",
+        () => {
+
+          const currentlyHidden =
+            passwordInput.type ===
+            "password";
+
+
+          passwordInput.type =
+            currentlyHidden
+              ? "text"
+              : "password";
+
+
+          passwordToggle.style.color =
+            currentlyHidden
+              ? "var(--green)"
+              : "";
+
+        }
+      );
+
+
+      /* ==================================================
+         LOGIN REQUEST
+      ================================================== */
+
       loginForm.addEventListener(
         "submit",
         async event => {
@@ -703,8 +1788,7 @@
           const username =
             String(
               usernameInput.value || ""
-            )
-              .trim();
+            ).trim();
 
 
           const password =
@@ -720,7 +1804,8 @@
           ) {
 
             loginError.textContent =
-              "Bitte Benutzername und Passwort eingeben.";
+              translations[currentLanguage]
+                .missingLogin;
 
 
             return;
@@ -733,7 +1818,8 @@
 
 
           loginSubmitButton.textContent =
-            "Anmeldung läuft ...";
+            translations[currentLanguage]
+              .loggingIn;
 
 
           loginError.textContent =
@@ -751,9 +1837,14 @@
                     "POST",
 
                   headers: {
+
                     "Content-Type":
                       "application/json"
+
                   },
+
+                  credentials:
+                    "same-origin",
 
                   body:
                     JSON.stringify({
@@ -781,7 +1872,8 @@
               throw new Error(
                 data.error
                 ||
-                "Anmeldung fehlgeschlagen."
+                translations[currentLanguage]
+                  .loginFailed
               );
 
             }
@@ -796,7 +1888,8 @@
             loginError.textContent =
               error?.message
               ||
-              "Anmeldung fehlgeschlagen.";
+              translations[currentLanguage]
+                .loginFailed;
 
 
           } finally {
@@ -806,15 +1899,27 @@
 
 
             loginSubmitButton.textContent =
-              "Anmelden";
+              translations[currentLanguage]
+                .loginSubmit;
 
           }
 
         }
       );
 
+
+      /* ==================================================
+         DEFAULT LANGUAGE = ENGLISH
+      ================================================== */
+
+      setLanguage(
+        "en"
+      );
+
     })();
+
   </script>
+
 
 </body>
 </html>

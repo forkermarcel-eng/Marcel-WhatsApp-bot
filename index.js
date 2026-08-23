@@ -8130,6 +8130,45 @@ async function getDashboardConversationHistory(
 
 
 /* ==================================================
+   DASHBOARD NACHRICHTENANZAHL
+   READ ONLY
+================================================== */
+
+async function getDashboardMessageCount(
+  jid
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+          COUNT(*)::integer
+            AS count
+
+        FROM messages
+
+        WHERE whatsapp_jid =
+          $1
+
+          AND message_text
+            IS NOT NULL
+      `,
+      [
+        jid
+      ]
+    );
+
+
+  return Number(
+    result.rows[0]?.count
+    ||
+    0
+  );
+
+}
+
+
+/* ==================================================
    MEMORY ITEMS
 ================================================== */
 
@@ -11022,6 +11061,7 @@ app.get(
 
       const [
         messages,
+        totalMessages,
         profile,
         activeItems,
         historicalItems,
@@ -11032,6 +11072,10 @@ app.get(
           getDashboardConversationHistory(
             contact.whatsapp_jid,
             200
+          ),
+
+          getDashboardMessageCount(
+            contact.whatsapp_jid
           ),
 
           getContactMemoryProfile(
@@ -11360,6 +11404,9 @@ app.get(
 
         readOnly:
           true,
+
+        totalMessages:
+          totalMessages,
 
         contact: {
 

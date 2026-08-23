@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  >
 
   <title>Marcel Marlow</title>
 
@@ -11,21 +15,32 @@
     content="Marcel Marlow – Entrepreneur, Investor, Traveler & AI Automation"
   >
 
+
   <style>
+
+    /* ==================================================
+       GLOBAL
+    ================================================== */
+
     :root {
-      --bg: #050706;
-      --bg-soft: #090c0a;
-      --card: #0b0e0c;
+
+      --bg: #030403;
+      --bg-soft: #070907;
+      --card: #090c0a;
 
       --green: #39f04f;
-      --green-soft: #67ff79;
+      --green-soft: #6cff7c;
 
       --white: #ffffff;
-      --text: #f0f2f0;
-      --muted: #a3aaa5;
+      --text: #f2f4f2;
+      --muted: #a4aba6;
 
       --border: rgba(255,255,255,0.10);
+
+      --max-width: 1380px;
+
     }
+
 
     * {
       box-sizing: border-box;
@@ -33,12 +48,18 @@
       padding: 0;
     }
 
+
     html {
       scroll-behavior: smooth;
+      background: var(--bg);
     }
 
+
     body {
+
       min-height: 100vh;
+
+      overflow-x: hidden;
 
       font-family:
         -apple-system,
@@ -49,23 +70,35 @@
 
       background:
         radial-gradient(
-          circle at 70% 10%,
-          #101611 0%,
-          #070907 35%,
-          #030403 100%
-        );
+          circle at 80% 5%,
+          rgba(34,55,37,0.22) 0%,
+          rgba(11,15,12,0.18) 24%,
+          transparent 48%
+        ),
+        var(--bg);
 
       color: var(--white);
+
+      -webkit-font-smoothing: antialiased;
+
     }
+
 
     button,
     input {
       font: inherit;
     }
 
+
     button {
       -webkit-tap-highlight-color: transparent;
     }
+
+
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
 
 
     /* ==================================================
@@ -73,69 +106,139 @@
     ================================================== */
 
     .navbar {
-      height: 76px;
-
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-
-      gap: 34px;
-
-      padding: 0 4.5%;
 
       position: fixed;
+
       top: 0;
       left: 0;
       right: 0;
 
       z-index: 100;
 
-      background: rgba(3,4,3,0.88);
-      border-bottom: 1px solid var(--border);
+      width: 100%;
 
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-    }
+      min-height: 72px;
 
-    .nav-links {
       display: flex;
       align-items: center;
-      gap: 34px;
+      justify-content: flex-end;
+
+      gap: 30px;
+
+      padding:
+        env(safe-area-inset-top)
+        max(4.5vw, 28px)
+        0;
+
+      background:
+        linear-gradient(
+          180deg,
+          rgba(3,4,3,0.96) 0%,
+          rgba(3,4,3,0.89) 75%,
+          rgba(3,4,3,0.72) 100%
+        );
+
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+
     }
 
-    .nav-links a {
-      color: var(--text);
-      text-decoration: none;
-      font-size: 14px;
-      transition: 0.2s ease;
+
+    .nav-links {
+
+      display: flex;
+      align-items: center;
+
+      gap: clamp(18px, 2.4vw, 34px);
+
     }
+
+
+    .nav-links a {
+
+      color: #d9ddda;
+
+      text-decoration: none;
+
+      font-size: 14px;
+      font-weight: 500;
+
+      transition:
+        color 0.2s ease,
+        opacity 0.2s ease;
+
+    }
+
 
     .nav-links a:hover {
       color: var(--green);
     }
 
+
     .login-button {
+
+      min-height: 40px;
+
       display: inline-flex;
       align-items: center;
+      justify-content: center;
+
       gap: 8px;
 
-      padding: 9px 18px;
+      padding: 8px 17px;
 
-      border: 1px solid var(--green);
+      border:
+        1px solid
+        rgba(57,240,79,0.78);
+
       border-radius: 8px;
 
-      background: transparent;
+      background:
+        rgba(57,240,79,0.025);
+
       color: var(--white);
 
       cursor: pointer;
 
-      transition: 0.2s ease;
+      transition:
+        background 0.2s ease,
+        box-shadow 0.2s ease,
+        border-color 0.2s ease;
+
     }
 
+
     .login-button:hover {
-      background: rgba(57,240,79,0.08);
-      box-shadow: 0 0 22px rgba(57,240,79,0.12);
+
+      background:
+        rgba(57,240,79,0.09);
+
+      border-color:
+        var(--green);
+
+      box-shadow:
+        0 0 22px
+        rgba(57,240,79,0.13);
+
     }
+
+
+    .login-lock {
+
+      width: 15px;
+      height: 15px;
+
+      stroke: currentColor;
+
+      fill: none;
+
+      stroke-width: 1.8;
+
+      stroke-linecap: round;
+      stroke-linejoin: round;
+
+    }
+
 
 
     /* ==================================================
@@ -143,32 +246,49 @@
     ================================================== */
 
     .language-switcher {
+
       display: flex;
       align-items: center;
-      gap: 8px;
+
+      gap: 7px;
+
+      white-space: nowrap;
 
       font-size: 12px;
       font-weight: 700;
+
     }
 
+
     .language-switcher button {
+
       border: 0;
+
+      padding: 5px 2px;
+
       background: none;
 
-      color: #888f8a;
+      color: #818882;
 
       cursor: pointer;
 
-      padding: 5px 2px;
+      transition: color 0.2s ease;
+
     }
 
+
+    .language-switcher button:hover,
     .language-switcher button.active {
+
       color: var(--green);
+
     }
+
 
     .language-divider {
-      color: #555b57;
+      color: #444a46;
     }
+
 
 
     /* ==================================================
@@ -176,103 +296,362 @@
     ================================================== */
 
     .hero {
-      min-height: 660px;
 
-      display: grid;
-      grid-template-columns: 43% 57%;
+      position: relative;
 
-      margin-top: 76px;
+      isolation: isolate;
 
-      border-bottom: 1px solid var(--border);
+      min-height: 720px;
+
+      padding-top: 72px;
 
       overflow: hidden;
+
+      background:
+        #030403;
+
     }
 
-    .hero-left {
+
+    /*
+      Das Bild sitzt als Hintergrundebene.
+      Dadurch gibt es KEINE harte Kante mehr
+      zwischen Textblock und Foto.
+    */
+
+    .hero-photo {
+
+      position: absolute;
+
+      z-index: -3;
+
+      top: 72px;
+      right: 0;
+      bottom: 0;
+
+      width: 68%;
+
+      background-image:
+        url("056AF29B-36B3-4514-AC41-73FD52DA4818.png");
+
+      background-repeat: no-repeat;
+      background-size: cover;
+      background-position: center center;
+
+      transform: scale(1.01);
+
+    }
+
+
+    /*
+      Weicher Übergang vom Foto nach links
+      in das Schwarz hinein.
+    */
+
+    .hero-photo::before {
+
+      content: "";
+
+      position: absolute;
+
+      inset: 0;
+
+      background:
+
+        linear-gradient(
+          90deg,
+          #030403 0%,
+          rgba(3,4,3,0.98) 7%,
+          rgba(3,4,3,0.92) 15%,
+          rgba(3,4,3,0.68) 28%,
+          rgba(3,4,3,0.30) 43%,
+          rgba(3,4,3,0.06) 61%,
+          transparent 78%
+        ),
+
+        linear-gradient(
+          180deg,
+          rgba(3,4,3,0.10) 0%,
+          transparent 68%,
+          rgba(3,4,3,0.22) 84%,
+          #030403 100%
+        );
+
+    }
+
+
+    /*
+      Zusätzlich ein großer weicher Schatten,
+      damit kein "Rechteck-Bild"-Gefühl entsteht.
+    */
+
+    .hero::after {
+
+      content: "";
+
+      position: absolute;
+
+      pointer-events: none;
+
+      z-index: -1;
+
+      left: 0;
+      right: 0;
+      bottom: -1px;
+
+      height: 150px;
+
+      background:
+        linear-gradient(
+          to bottom,
+          rgba(3,4,3,0),
+          rgba(3,4,3,0.58) 48%,
+          #030403 100%
+        );
+
+    }
+
+
+    .hero-inner {
+
+      width: min(
+        calc(100% - 8vw),
+        var(--max-width)
+      );
+
+      min-height: 648px;
+
+      margin: 0 auto;
+
       display: flex;
       align-items: center;
-
-      padding: 70px 4% 70px 6%;
 
       position: relative;
 
       z-index: 2;
 
-      background:
-        linear-gradient(
-          90deg,
-          #030403 0%,
-          #030403 72%,
-          rgba(3,4,3,0.92) 88%,
-          rgba(3,4,3,0.25) 100%
-        );
     }
+
 
     .hero-content {
-      max-width: 650px;
+
+      width: min(590px, 48vw);
+
+      padding:
+        clamp(50px, 7vh, 90px)
+        0
+        clamp(52px, 7vh, 88px);
+
     }
+
 
     .hero h1 {
-      font-size: clamp(58px, 6vw, 94px);
-      line-height: 0.92;
 
-      letter-spacing: -4px;
+      font-size:
+        clamp(
+          58px,
+          6.3vw,
+          94px
+        );
+
+      line-height: 0.96;
+
+      letter-spacing:
+        clamp(
+          -4px,
+          -0.26vw,
+          -2px
+        );
+
+      white-space: nowrap;
 
       margin-bottom: 26px;
+
     }
+
 
     .hero h1 .green {
       color: var(--green);
     }
 
+
     .positioning {
+
       display: flex;
+      align-items: center;
+
       flex-wrap: wrap;
 
-      gap: 8px 12px;
+      gap:
+        7px
+        clamp(8px, 1vw, 13px);
 
-      margin-bottom: 28px;
+      max-width: 620px;
 
-      color: var(--white);
+      margin-bottom: 27px;
 
-      font-size: 17px;
+      color: #f3f5f3;
+
+      font-size:
+        clamp(
+          14px,
+          1.25vw,
+          17px
+        );
+
       font-weight: 500;
+
+      line-height: 1.5;
+
     }
+
 
     .positioning .dot {
+
+      flex: 0 0 auto;
+
       color: var(--green);
+
+      font-weight: 800;
+
     }
+
 
     .hero-text {
-      max-width: 540px;
 
-      color: #d3d8d4;
+      max-width: 520px;
 
-      font-size: 17px;
-      line-height: 1.65;
+      color: #d0d5d1;
+
+      font-size:
+        clamp(
+          15px,
+          1.24vw,
+          17px
+        );
+
+      line-height: 1.68;
+
     }
+
 
     .hero-text strong {
+
       color: var(--green);
-      font-weight: 600;
+
+      font-weight: 650;
+
     }
 
-    .hero-image {
-      min-height: 660px;
 
-      background-image:
-        linear-gradient(
-          90deg,
-          rgba(3,4,3,0.65) 0%,
-          rgba(3,4,3,0.12) 24%,
-          rgba(3,4,3,0.02) 100%
-        ),
-        url("056AF29B-36B3-4514-AC41-73FD52DA4818.png");
 
-      background-size: cover;
-      background-position: center;
-      background-repeat: no-repeat;
+    /* ==================================================
+       INSTAGRAM HERO
+    ================================================== */
+
+    .hero-instagram {
+
+      margin-top: 34px;
+
+      display: inline-flex;
+      flex-direction: column;
+
+      align-items: flex-start;
+
+      gap: 10px;
+
     }
+
+
+    .instagram-button {
+
+      min-height: 48px;
+
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+
+      gap: 12px;
+
+      padding: 0 22px;
+
+      border:
+        1px solid
+        rgba(57,240,79,0.80);
+
+      border-radius: 999px;
+
+      color: #f1f4f2;
+
+      text-decoration: none;
+
+      background:
+        rgba(3,4,3,0.44);
+
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+
+      font-size: 13px;
+      font-weight: 650;
+
+      letter-spacing: 0.55px;
+
+      text-transform: uppercase;
+
+      transition:
+        color 0.22s ease,
+        background 0.22s ease,
+        box-shadow 0.22s ease,
+        transform 0.22s ease;
+
+    }
+
+
+    .instagram-button:hover {
+
+      color: var(--green);
+
+      background:
+        rgba(57,240,79,0.08);
+
+      box-shadow:
+        0 0 28px
+        rgba(57,240,79,0.13);
+
+      transform:
+        translateY(-1px);
+
+    }
+
+
+    .instagram-icon {
+
+      width: 21px;
+      height: 21px;
+
+      flex: 0 0 21px;
+
+      stroke: currentColor;
+
+      fill: none;
+
+      stroke-width: 1.75;
+
+    }
+
+
+    .instagram-handle {
+
+      padding-left: 15px;
+
+      color: #818982;
+
+      font-size: 12px;
+
+      letter-spacing: 0.25px;
+
+    }
+
 
 
     /* ==================================================
@@ -280,69 +659,179 @@
     ================================================== */
 
     .story {
-      max-width: 1240px;
+
+      width: min(
+        calc(100% - 8vw),
+        var(--max-width)
+      );
 
       margin: 0 auto;
 
-      padding: 70px 5%;
+      padding:
+        clamp(56px, 6vw, 82px)
+        0;
 
       display: grid;
-      grid-template-columns: 0.9fr 1.25fr;
 
-      gap: 55px;
+      grid-template-columns:
+        minmax(320px, 0.82fr)
+        minmax(480px, 1.28fr);
 
       align-items: center;
+
+      gap:
+        clamp(
+          38px,
+          5vw,
+          78px
+        );
+
     }
 
+
+    .story-copy {
+      min-width: 0;
+    }
+
+
     .section-label {
+
+      display: flex;
+      align-items: center;
+
+      gap: 15px;
+
+      margin-bottom: 18px;
+
       color: var(--green);
 
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 750;
 
       letter-spacing: 2px;
+
       text-transform: uppercase;
 
-      margin-bottom: 18px;
     }
+
+
+    .section-label::after {
+
+      content: "";
+
+      width: 42px;
+      height: 1px;
+
+      background:
+        var(--green);
+
+      opacity: 0.85;
+
+    }
+
 
     .story h2 {
-      font-size: clamp(30px, 3.5vw, 44px);
-      line-height: 1.2;
+
+      max-width: 520px;
 
       margin-bottom: 20px;
+
+      color: #f2f4f2;
+
+      font-size:
+        clamp(
+          29px,
+          3vw,
+          43px
+        );
+
+      font-weight: 600;
+
+      line-height: 1.22;
+
+      letter-spacing: -1px;
+
     }
+
 
     .story p {
+
+      max-width: 510px;
+
       color: var(--muted);
 
-      font-size: 15px;
+      font-size:
+        clamp(
+          14px,
+          1.12vw,
+          16px
+        );
+
       line-height: 1.75;
 
-      max-width: 500px;
     }
 
+
+    .story-image-wrap {
+
+      position: relative;
+
+      min-width: 0;
+
+    }
+
+
     .story-image {
+
+      width: 100%;
+
+      aspect-ratio: 16 / 8.7;
+
       min-height: 330px;
 
       background-image:
-        linear-gradient(
-          rgba(0,0,0,0.06),
-          rgba(0,0,0,0.18)
-        ),
         url("16039A0E-7334-460B-8EFA-C19BCED679B3.png");
 
-      background-size: cover;
-      background-position: center;
       background-repeat: no-repeat;
+      background-size: cover;
+      background-position: center 48%;
 
-      border-radius: 12px;
+      border-radius: 11px;
 
-      border: 1px solid var(--border);
+      overflow: hidden;
 
       box-shadow:
-        0 24px 60px rgba(0,0,0,0.35);
+        0 26px 70px
+        rgba(0,0,0,0.36);
+
+      position: relative;
+
     }
+
+
+    /*
+      Kein weißer Rand.
+      Stattdessen sehr dezenter dunkler Innenrand.
+    */
+
+    .story-image::after {
+
+      content: "";
+
+      position: absolute;
+
+      inset: 0;
+
+      border-radius: inherit;
+
+      box-shadow:
+        inset 0 0 0 1px
+        rgba(255,255,255,0.06);
+
+      pointer-events: none;
+
+    }
+
 
 
     /* ==================================================
@@ -350,75 +839,157 @@
     ================================================== */
 
     .areas {
-      max-width: 1240px;
+
+      width: min(
+        calc(100% - 8vw),
+        var(--max-width)
+      );
 
       margin: 0 auto;
 
-      padding: 0 5% 70px;
+      padding:
+        0
+        0
+        clamp(58px, 6vw, 84px);
 
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+
+      grid-template-columns:
+        repeat(
+          3,
+          minmax(0,1fr)
+        );
 
       gap: 18px;
+
     }
 
+
     .area-card {
-      min-height: 150px;
+
+      min-width: 0;
+
+      min-height: 158px;
 
       display: flex;
       align-items: center;
 
       gap: 22px;
 
-      padding: 28px;
+      padding:
+        clamp(
+          22px,
+          2.4vw,
+          30px
+        );
 
-      border: 1px solid var(--border);
+      border:
+        1px solid
+        rgba(255,255,255,0.095);
+
       border-radius: 12px;
 
       background:
+
         linear-gradient(
           145deg,
-          rgba(255,255,255,0.025),
+          rgba(255,255,255,0.030),
           rgba(255,255,255,0.008)
-        );
+        ),
+
+        rgba(4,6,4,0.55);
+
+      transition:
+        border-color 0.2s ease,
+        transform 0.2s ease,
+        background 0.2s ease;
+
     }
 
+
+    .area-card:hover {
+
+      transform:
+        translateY(-2px);
+
+      border-color:
+        rgba(57,240,79,0.34);
+
+      background:
+        rgba(8,13,9,0.76);
+
+    }
+
+
     .area-icon {
+
       width: 58px;
       height: 58px;
 
-      flex: 0 0 58px;
+      flex:
+        0
+        0
+        58px;
 
       display: flex;
       align-items: center;
       justify-content: center;
 
       color: var(--green);
+
     }
 
+
     .area-icon svg {
-      width: 48px;
-      height: 48px;
+
+      width: 47px;
+      height: 47px;
 
       stroke: currentColor;
+
       fill: none;
 
       stroke-width: 1.7;
+
       stroke-linecap: round;
       stroke-linejoin: round;
+
     }
+
 
     .area-card h3 {
-      font-size: 20px;
+
       margin-bottom: 7px;
+
+      color: #f4f6f4;
+
+      font-size:
+        clamp(
+          18px,
+          1.55vw,
+          21px
+        );
+
+      font-weight: 600;
+
     }
+
 
     .area-card p {
-      color: var(--muted);
 
-      font-size: 13px;
+      color: #969e98;
+
+      font-size:
+        clamp(
+          12px,
+          1vw,
+          14px
+        );
+
       line-height: 1.55;
+
     }
+
 
 
     /* ==================================================
@@ -426,56 +997,40 @@
     ================================================== */
 
     footer {
-      max-width: 1240px;
+
+      width: min(
+        calc(100% - 8vw),
+        var(--max-width)
+      );
 
       margin: 0 auto;
 
-      padding: 25px 5% 35px;
+      padding:
+        26px
+        0
+        38px;
 
-      border-top: 1px solid var(--border);
-
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-
-      gap: 20px;
-
-      color: #777e79;
-
-      font-size: 12px;
-    }
-
-    .footer-name span {
-      color: var(--green);
-    }
-
-    .instagram-link {
-      width: 42px;
-      height: 42px;
+      border-top:
+        1px solid
+        rgba(255,255,255,0.075);
 
       display: flex;
       align-items: center;
       justify-content: center;
 
-      border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 50%;
+      color: #747b76;
 
-      color: #d6dad7;
+      font-size: 12px;
 
-      transition: 0.2s ease;
+      text-align: center;
+
     }
 
-    .instagram-link:hover {
+
+    .footer-name span {
       color: var(--green);
-      border-color: var(--green);
-
-      transform: translateY(-2px);
     }
 
-    .instagram-link svg {
-      width: 20px;
-      height: 20px;
-    }
 
 
     /* ==================================================
@@ -483,43 +1038,78 @@
     ================================================== */
 
     .login-overlay {
+
       position: fixed;
+
       inset: 0;
+
+      z-index: 1000;
 
       display: none;
       align-items: center;
       justify-content: center;
 
-      padding: 20px;
+      padding:
+        max(
+          20px,
+          env(safe-area-inset-top)
+        )
+        max(
+          20px,
+          env(safe-area-inset-right)
+        )
+        max(
+          20px,
+          env(safe-area-inset-bottom)
+        )
+        max(
+          20px,
+          env(safe-area-inset-left)
+        );
 
-      background: rgba(0,0,0,0.82);
+      background:
+        rgba(0,0,0,0.84);
 
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
 
-      z-index: 1000;
     }
+
 
     .login-overlay.open {
       display: flex;
     }
 
-    .login-card {
-      width: min(430px, 100%);
 
-      padding: 30px;
+    .login-card {
+
+      width: min(430px,100%);
+
+      padding:
+        clamp(
+          24px,
+          5vw,
+          31px
+        );
+
+      border:
+        1px solid
+        rgba(255,255,255,0.12);
 
       border-radius: 18px;
 
-      background: #0c100e;
-
-      border: 1px solid rgba(255,255,255,0.14);
+      background:
+        #0b0f0c;
 
       box-shadow:
-        0 30px 90px rgba(0,0,0,0.7);
+        0 30px 90px
+        rgba(0,0,0,0.72);
+
     }
 
+
     .login-top {
+
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -527,18 +1117,146 @@
       gap: 20px;
 
       margin-bottom: 22px;
+
     }
 
+
     .login-title {
+
       font-size: 25px;
       font-weight: 800;
+
+      letter-spacing: -0.5px;
+
     }
+
 
     .login-title span {
       color: var(--green);
     }
 
+
     .close-login {
+
+      width: 38px;
+      height: 38px;
+
+      flex: 0 0 38px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      border: 0;
+      border-radius: 50%;
+
+      background: #171d18;
+
+      color: white;
+
+      cursor: pointer;
+
+      font-size: 18px;
+
+    }
+
+
+    .login-description {
+
+      margin-bottom: 24px;
+
+      color: #a5aca7;
+
+      font-size: 14px;
+
+      line-height: 1.5;
+
+    }
+
+
+    .login-field {
+      margin-bottom: 17px;
+    }
+
+
+    .login-field label {
+
+      display: block;
+
+      margin-bottom: 8px;
+
+      color: #cbd0cc;
+
+      font-size: 13px;
+      font-weight: 700;
+
+    }
+
+
+    .input-wrap {
+      position: relative;
+    }
+
+
+    .login-field input {
+
+      width: 100%;
+      height: 50px;
+
+      padding:
+        0
+        48px
+        0
+        14px;
+
+      border:
+        1px solid
+        #303731;
+
+      border-radius: 10px;
+
+      outline: none;
+
+      background:
+        #060907;
+
+      color: white;
+
+      font-size: 16px;
+
+      transition:
+        border-color 0.2s ease,
+        box-shadow 0.2s ease;
+
+    }
+
+
+    .login-field input[type="text"] {
+      padding-right: 14px;
+    }
+
+
+    .login-field input:focus {
+
+      border-color: var(--green);
+
+      box-shadow:
+        0 0 0 3px
+        rgba(57,240,79,0.08);
+
+    }
+
+
+    .password-toggle {
+
+      position: absolute;
+
+      top: 50%;
+      right: 8px;
+
+      transform:
+        translateY(-50%);
+
       width: 38px;
       height: 38px;
 
@@ -547,115 +1265,42 @@
       justify-content: center;
 
       border: 0;
-      border-radius: 50%;
-
-      background: #191f1b;
-      color: white;
-
-      cursor: pointer;
-
-      font-size: 18px;
-    }
-
-    .login-description {
-      color: #a7afa9;
-
-      font-size: 14px;
-      line-height: 1.5;
-
-      margin-bottom: 24px;
-    }
-
-    .login-field {
-      margin-bottom: 17px;
-    }
-
-    .login-field label {
-      display: block;
-
-      color: #cbd0cc;
-
-      font-size: 13px;
-      font-weight: 700;
-
-      margin-bottom: 8px;
-    }
-
-    .input-wrap {
-      position: relative;
-    }
-
-    .login-field input {
-      width: 100%;
-
-      height: 50px;
-
-      padding: 0 48px 0 14px;
-
-      border: 1px solid #303731;
-      border-radius: 10px;
-
-      outline: none;
-
-      background: #070a08;
-      color: white;
-
-      font-size: 15px;
-
-      transition: 0.2s;
-    }
-
-    .login-field input[type="text"] {
-      padding-right: 14px;
-    }
-
-    .login-field input:focus {
-      border-color: var(--green);
-
-      box-shadow:
-        0 0 0 3px rgba(57,240,79,0.08);
-    }
-
-    .password-toggle {
-      position: absolute;
-
-      right: 9px;
-      top: 50%;
-
-      transform: translateY(-50%);
-
-      width: 36px;
-      height: 36px;
-
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      border: 0;
 
       background: transparent;
+
       color: #858d87;
 
       cursor: pointer;
+
     }
+
 
     .password-toggle:hover {
       color: var(--green);
     }
 
+
     .password-toggle svg {
+
       width: 21px;
       height: 21px;
+
     }
 
+
     .login-submit {
+
       width: 100%;
       height: 50px;
+
+      margin-top: 4px;
 
       border: 0;
       border-radius: 10px;
 
-      background: var(--green);
+      background:
+        var(--green);
+
       color: #031005;
 
       font-size: 15px;
@@ -663,136 +1308,959 @@
 
       cursor: pointer;
 
-      margin-top: 4px;
     }
+
 
     .login-submit:disabled {
+
       opacity: 0.6;
+
       cursor: wait;
+
     }
 
+
     .login-error {
+
       min-height: 22px;
+
+      margin-top: 14px;
 
       color: #ff7777;
 
       font-size: 13px;
       line-height: 1.45;
 
-      margin-top: 14px;
     }
 
 
+
     /* ==================================================
-       TABLET
+       LARGE TABLET / SMALL LAPTOP
+       z.B. iPad Pro quer
+    ================================================== */
+
+    @media
+    (min-width: 901px)
+    and
+    (max-width: 1180px) {
+
+      .hero {
+
+        min-height: 650px;
+
+      }
+
+
+      .hero-inner {
+
+        min-height: 578px;
+
+        width:
+          calc(100% - 7vw);
+
+      }
+
+
+      .hero-photo {
+
+        width: 64%;
+
+      }
+
+
+      .hero-content {
+
+        width: 47%;
+
+        max-width: 500px;
+
+      }
+
+
+      .hero h1 {
+
+        font-size:
+          clamp(
+            52px,
+            6.3vw,
+            72px
+          );
+
+        letter-spacing: -3px;
+
+      }
+
+
+      .positioning {
+
+        max-width: 500px;
+
+        font-size:
+          clamp(
+            13px,
+            1.35vw,
+            15px
+          );
+
+      }
+
+
+      .hero-text {
+
+        max-width: 440px;
+
+        font-size:
+          clamp(
+            14px,
+            1.35vw,
+            16px
+          );
+
+      }
+
+
+      .story {
+
+        width:
+          calc(100% - 8vw);
+
+        grid-template-columns:
+          minmax(290px,0.85fr)
+          minmax(420px,1.15fr);
+
+        gap: 42px;
+
+      }
+
+
+      .story h2 {
+
+        font-size:
+          clamp(
+            28px,
+            3.25vw,
+            36px
+          );
+
+      }
+
+
+      .areas {
+
+        width:
+          calc(100% - 8vw);
+
+        gap: 14px;
+
+      }
+
+
+      .area-card {
+
+        gap: 15px;
+
+        padding: 22px;
+
+      }
+
+
+      .area-icon {
+
+        width: 48px;
+        height: 48px;
+
+        flex-basis: 48px;
+
+      }
+
+
+      .area-icon svg {
+
+        width: 42px;
+        height: 42px;
+
+      }
+
+    }
+
+
+
+    /* ==================================================
+       TABLET PORTRAIT
+       iPad / Android Tablet hochkant
     ================================================== */
 
     @media (max-width: 900px) {
 
       .navbar {
-        padding: 0 24px;
+
+        min-height: 70px;
+
+        padding-left: 24px;
+        padding-right: 24px;
+
       }
+
 
       .hero {
-        grid-template-columns: 1fr;
+
+        min-height: auto;
+
+        padding-top: 70px;
+
       }
 
-      .hero-left {
-        min-height: 520px;
 
-        padding: 70px 7%;
+      /*
+        Tablet: Text oben und Foto darunter.
+        Aber Foto läuft oben UND unten weich aus.
+      */
+
+      .hero-inner {
+
+        width: 100%;
+
+        min-height: auto;
+
+        display: block;
+
+      }
+
+
+      .hero-content {
+
+        width: 100%;
+
+        max-width: 700px;
+
+        padding:
+          60px
+          7%
+          44px;
+
+      }
+
+
+      .hero h1 {
+
+        font-size:
+          clamp(
+            48px,
+            9vw,
+            74px
+          );
+
+        white-space: normal;
+
+        letter-spacing: -3px;
+
+      }
+
+
+      .positioning {
+
+        max-width: 620px;
+
+        font-size:
+          clamp(
+            13px,
+            2vw,
+            16px
+          );
+
+        gap:
+          6px
+          9px;
+
+      }
+
+
+      .hero-text {
+
+        max-width: 560px;
+
+        font-size:
+          clamp(
+            15px,
+            2.15vw,
+            17px
+          );
+
+      }
+
+
+      .hero-instagram {
+        margin-top: 28px;
+      }
+
+
+      .hero-photo {
+
+        position: relative;
+
+        top: auto;
+        right: auto;
+        bottom: auto;
+
+        width: 100%;
+
+        height:
+          clamp(
+            360px,
+            56vw,
+            520px
+          );
+
+        background-position:
+          center center;
+
+        transform: none;
+
+      }
+
+
+      .hero-photo::before {
 
         background:
+
           linear-gradient(
-            rgba(3,4,3,0.92),
-            rgba(3,4,3,0.82)
+            180deg,
+            #030403 0%,
+            rgba(3,4,3,0.78) 8%,
+            rgba(3,4,3,0.22) 25%,
+            transparent 43%,
+            transparent 72%,
+            rgba(3,4,3,0.23) 86%,
+            #030403 100%
+          ),
+
+          linear-gradient(
+            90deg,
+            rgba(3,4,3,0.18) 0%,
+            transparent 20%,
+            transparent 80%,
+            rgba(3,4,3,0.10) 100%
           );
+
       }
 
-      .hero-image {
-        min-height: 430px;
+
+      .hero::after {
+        display: none;
       }
+
 
       .story {
-        grid-template-columns: 1fr;
+
+        width:
+          calc(100% - 12vw);
+
+        grid-template-columns:
+          1fr;
+
+        gap: 34px;
+
+        padding:
+          52px
+          0
+          58px;
+
       }
+
+
+      .story-copy {
+        max-width: 650px;
+      }
+
+
+      .story h2 {
+        max-width: 620px;
+      }
+
+
+      .story p {
+        max-width: 620px;
+      }
+
 
       .story-image {
-        min-height: 400px;
+
+        min-height: 0;
+
+        aspect-ratio:
+          16 / 9;
+
       }
 
+
       .areas {
-        grid-template-columns: 1fr;
+
+        width:
+          calc(100% - 12vw);
+
+        grid-template-columns:
+          1fr;
+
+        gap: 14px;
+
+        padding-bottom: 58px;
+
+      }
+
+
+      .area-card {
+
+        min-height: 135px;
+
+      }
+
+
+      footer {
+
+        width:
+          calc(100% - 12vw);
+
       }
 
     }
 
 
+
     /* ==================================================
-       MOBILE
+       SMALL TABLET / LARGE PHONE
     ================================================== */
 
-    @media (max-width: 650px) {
+    @media (max-width: 700px) {
 
       .navbar {
-        height: auto;
 
-        min-height: 70px;
+        justify-content:
+          space-between;
 
-        gap: 15px;
+        gap: 14px;
 
-        padding: 13px 18px;
+        padding-left:
+          max(
+            16px,
+            env(safe-area-inset-left)
+          );
+
+        padding-right:
+          max(
+            16px,
+            env(safe-area-inset-right)
+          );
+
       }
+
 
       .nav-links {
-        gap: 14px;
+
+        gap: 12px;
+
       }
+
 
       .nav-links a {
         display: none;
       }
 
-      .language-switcher {
-        gap: 5px;
-      }
 
       .login-button {
-        padding: 8px 12px;
+
+        min-height: 38px;
+
+        padding:
+          7px
+          13px;
+
+        font-size: 13px;
+
       }
 
-      .hero {
-        margin-top: 70px;
+
+      .language-switcher {
+
+        gap: 5px;
+
+        font-size: 11px;
+
       }
+
+
+      .hero-content {
+
+        padding:
+          48px
+          6%
+          38px;
+
+      }
+
 
       .hero h1 {
-        letter-spacing: -2px;
+
+        margin-bottom: 22px;
+
+        font-size:
+          clamp(
+            43px,
+            12vw,
+            65px
+          );
+
+        line-height: 0.98;
+
+        letter-spacing: -2.5px;
+
       }
+
 
       .positioning {
-        font-size: 14px;
+
+        font-size:
+          clamp(
+            12px,
+            3.5vw,
+            14px
+          );
+
+        line-height: 1.45;
+
+        margin-bottom: 22px;
+
       }
+
+
+      .hero-text {
+
+        max-width: 500px;
+
+        font-size:
+          clamp(
+            14px,
+            3.7vw,
+            16px
+          );
+
+      }
+
+
+      .instagram-button {
+
+        min-height: 46px;
+
+        padding:
+          0
+          18px;
+
+        font-size: 12px;
+
+      }
+
+
+      .hero-photo {
+
+        height:
+          clamp(
+            310px,
+            69vw,
+            430px
+          );
+
+      }
+
 
       .story {
-        padding: 55px 7%;
+
+        width:
+          calc(100% - 12vw);
+
+        padding-top: 46px;
+
       }
+
+
+      .story h2 {
+
+        font-size:
+          clamp(
+            28px,
+            7vw,
+            36px
+          );
+
+      }
+
+
+      .story p {
+
+        font-size:
+          clamp(
+            14px,
+            3.7vw,
+            16px
+          );
+
+      }
+
 
       .areas {
-        padding: 0 7% 55px;
+
+        width:
+          calc(100% - 12vw);
+
       }
+
+
+      .area-card {
+
+        min-height: 120px;
+
+        padding:
+          22px
+          20px;
+
+      }
+
+
+      .area-icon {
+
+        width: 48px;
+        height: 48px;
+
+        flex-basis: 48px;
+
+      }
+
+
+      .area-icon svg {
+
+        width: 40px;
+        height: 40px;
+
+      }
+
+    }
+
+
+
+    /* ==================================================
+       PHONE PORTRAIT
+       iPhone / Android
+    ================================================== */
+
+    @media (max-width: 480px) {
+
+      .navbar {
+
+        min-height: 66px;
+
+      }
+
+
+      .hero {
+        padding-top: 66px;
+      }
+
+
+      .hero-content {
+
+        padding:
+          42px
+          21px
+          34px;
+
+      }
+
+
+      .hero h1 {
+
+        font-size:
+          clamp(
+            39px,
+            13vw,
+            56px
+          );
+
+        margin-bottom: 20px;
+
+      }
+
+
+      .positioning {
+
+        max-width: 390px;
+
+        gap:
+          5px
+          7px;
+
+        margin-bottom: 20px;
+
+      }
+
+
+      .positioning .dot {
+        transform: scale(0.85);
+      }
+
+
+      .hero-instagram {
+
+        width: 100%;
+
+        margin-top: 26px;
+
+      }
+
+
+      .instagram-button {
+
+        width: auto;
+
+        max-width: 100%;
+
+      }
+
+
+      .instagram-handle {
+
+        padding-left: 14px;
+
+      }
+
+
+      .hero-photo {
+
+        height:
+          clamp(
+            280px,
+            80vw,
+            370px
+          );
+
+        background-position:
+          60% center;
+
+      }
+
+
+      .story {
+
+        width:
+          calc(100% - 42px);
+
+        padding:
+          42px
+          0
+          48px;
+
+        gap: 28px;
+
+      }
+
+
+      .section-label {
+
+        margin-bottom: 14px;
+
+        font-size: 11px;
+
+      }
+
+
+      .story h2 {
+
+        margin-bottom: 16px;
+
+        font-size:
+          clamp(
+            27px,
+            8.2vw,
+            34px
+          );
+
+      }
+
+
+      .story-image {
+
+        border-radius: 9px;
+
+        aspect-ratio:
+          4 / 3;
+
+        background-position:
+          center center;
+
+      }
+
+
+      .areas {
+
+        width:
+          calc(100% - 42px);
+
+        gap: 12px;
+
+        padding-bottom: 48px;
+
+      }
+
+
+      .area-card {
+
+        min-height: 112px;
+
+        gap: 16px;
+
+        padding:
+          20px
+          18px;
+
+      }
+
+
+      .area-card h3 {
+
+        font-size: 18px;
+
+      }
+
+
+      .area-card p {
+
+        font-size: 12.5px;
+
+      }
+
 
       footer {
-        margin: 0 7%;
 
-        padding-left: 0;
-        padding-right: 0;
+        width:
+          calc(100% - 42px);
 
-        flex-direction: column;
+        padding:
+          23px
+          0
+          calc(
+            28px +
+            env(safe-area-inset-bottom)
+          );
 
-        text-align: center;
       }
 
+
       .login-card {
-        padding: 24px;
+
+        border-radius: 15px;
+
+      }
+
+
+      .login-title {
+
+        font-size: 22px;
+
+      }
+
+    }
+
+
+
+    /* ==================================================
+       VERY SMALL PHONE
+    ================================================== */
+
+    @media (max-width: 360px) {
+
+      .language-divider {
+        display: none;
+      }
+
+
+      .language-switcher {
+        gap: 6px;
+      }
+
+
+      .login-button span {
+        display: none;
+      }
+
+
+      .login-button {
+
+        width: 38px;
+
+        padding: 0;
+
+      }
+
+
+      .hero h1 {
+
+        font-size:
+          clamp(
+            36px,
+            13.5vw,
+            48px
+          );
+
+      }
+
+
+      .instagram-button {
+
+        padding:
+          0
+          15px;
+
+        font-size: 11px;
+
+      }
+
+    }
+
+
+
+    /* ==================================================
+       LANDSCAPE PHONE
+    ================================================== */
+
+    @media
+    (max-height: 520px)
+    and
+    (orientation: landscape)
+    and
+    (max-width: 950px) {
+
+      .hero-content {
+
+        padding-top: 35px;
+        padding-bottom: 30px;
+
+      }
+
+
+      .hero h1 {
+
+        font-size:
+          clamp(
+            42px,
+            8vw,
+            60px
+          );
+
+      }
+
+
+      .hero-photo {
+
+        height: 350px;
+
       }
 
     }
@@ -801,11 +2269,12 @@
 </head>
 
 
+
 <body>
 
 
   <!-- ==================================================
-       NAV
+       NAVIGATION
   ================================================== -->
 
   <header class="navbar">
@@ -819,6 +2288,7 @@
         Home
       </a>
 
+
       <a
         href="#story"
         data-i18n="about"
@@ -826,15 +2296,35 @@
         About
       </a>
 
+
       <button
         id="openLoginButton"
         class="login-button"
         type="button"
       >
-        🔒
+
+        <svg
+          class="login-lock"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <rect
+            x="5"
+            y="10"
+            width="14"
+            height="10"
+            rx="2"
+          />
+
+          <path
+            d="M8 10V7a4 4 0 0 1 8 0v3"
+          />
+        </svg>
+
         <span data-i18n="login">
           Login
         </span>
+
       </button>
 
     </nav>
@@ -850,9 +2340,11 @@
         EN
       </button>
 
+
       <span class="language-divider">
         |
       </span>
+
 
       <button
         type="button"
@@ -861,9 +2353,11 @@
         DE
       </button>
 
+
       <span class="language-divider">
         |
       </span>
+
 
       <button
         type="button"
@@ -877,6 +2371,7 @@
   </header>
 
 
+
   <main id="top">
 
 
@@ -886,9 +2381,12 @@
 
     <section class="hero">
 
-      <div class="hero-left">
+
+      <div class="hero-inner">
+
 
         <div class="hero-content">
+
 
           <h1>
             Marcel
@@ -935,11 +2433,69 @@
             class="hero-text"
             data-i18n-html="heroText"
           >
-            Building digital businesses and systems that
-            create freedom.
+            Building digital businesses and systems that create freedom.
             <strong>AI-optimized.</strong>
             Location independent.
           </p>
+
+
+
+          <!-- INSTAGRAM -->
+
+          <div class="hero-instagram">
+
+            <a
+              class="instagram-button"
+              href="https://www.instagram.com/Marcel_Marlow/"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Follow Marcel Marlow on Instagram"
+            >
+
+              <svg
+                class="instagram-icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+
+                <rect
+                  x="3"
+                  y="3"
+                  width="18"
+                  height="18"
+                  rx="5"
+                />
+
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="4"
+                />
+
+                <circle
+                  cx="17.4"
+                  cy="6.6"
+                  r="1"
+                  fill="currentColor"
+                  stroke="none"
+                />
+
+              </svg>
+
+
+              <span data-i18n="instagramButton">
+                Follow me on Instagram
+              </span>
+
+            </a>
+
+
+            <div class="instagram-handle">
+              @Marcel_Marlow
+            </div>
+
+          </div>
+
 
         </div>
 
@@ -947,11 +2503,14 @@
 
 
       <div
-        class="hero-image"
+        class="hero-photo"
+        role="img"
         aria-label="Working remotely by the sea"
       ></div>
 
+
     </section>
+
 
 
     <!-- ==================================================
@@ -963,7 +2522,9 @@
       id="story"
     >
 
-      <div>
+
+      <div class="story-copy">
+
 
         <div
           class="section-label"
@@ -989,15 +2550,24 @@
           new places, new ideas and what comes next.
         </p>
 
+
       </div>
 
 
-      <div
-        class="story-image"
-        aria-label="Coastal sunset"
-      ></div>
+
+      <div class="story-image-wrap">
+
+        <div
+          class="story-image"
+          role="img"
+          aria-label="Marcel overlooking a coastal sunset"
+        ></div>
+
+      </div>
+
 
     </section>
+
 
 
     <!-- ==================================================
@@ -1007,25 +2577,45 @@
     <section class="areas">
 
 
+      <!-- BUSINESS -->
+
       <article class="area-card">
 
         <div class="area-icon">
 
           <svg viewBox="0 0 64 64">
-            <path d="M10 52V35h10v17"/>
-            <path d="M27 52V25h10v27"/>
-            <path d="M44 52V14h10v38"/>
-            <path d="M10 24l12-6 11 2 18-12"/>
-            <path d="M45 8h6v6"/>
+
+            <path
+              d="M10 52V35h10v17"
+            />
+
+            <path
+              d="M27 52V25h10v27"
+            />
+
+            <path
+              d="M44 52V14h10v38"
+            />
+
+            <path
+              d="M10 24l12-6 11 2 18-12"
+            />
+
+            <path
+              d="M45 8h6v6"
+            />
+
           </svg>
 
         </div>
+
 
         <div>
 
           <h3 data-i18n="businessTitle">
             Business
           </h3>
+
 
           <p data-i18n="businessText">
             Building scalable digital businesses powered by systems and AI.
@@ -1036,22 +2626,34 @@
       </article>
 
 
+
+      <!-- TRAVEL -->
+
       <article class="area-card">
 
         <div class="area-icon">
 
           <svg viewBox="0 0 64 64">
-            <path d="M55 9L9 30l18 7 7 18 21-46z"/>
-            <path d="M27 37l28-28"/>
+
+            <path
+              d="M55 9L9 30l18 7 7 18 21-46z"
+            />
+
+            <path
+              d="M27 37l28-28"
+            />
+
           </svg>
 
         </div>
+
 
         <div>
 
           <h3 data-i18n="travelTitle">
             Travel
           </h3>
+
 
           <p data-i18n="travelText">
             New places, new perspectives and freedom through movement.
@@ -1062,22 +2664,34 @@
       </article>
 
 
+
+      <!-- LIFE -->
+
       <article class="area-card">
 
         <div class="area-icon">
 
           <svg viewBox="0 0 64 64">
-            <path d="M51 10C29 11 14 22 13 42c13 4 29 0 38-32z"/>
-            <path d="M13 50c8-14 18-22 31-29"/>
+
+            <path
+              d="M51 10C29 11 14 22 13 42c13 4 29 0 38-32z"
+            />
+
+            <path
+              d="M13 50c8-14 18-22 31-29"
+            />
+
           </svg>
 
         </div>
+
 
         <div>
 
           <h3 data-i18n="lifeTitle">
             Life
           </h3>
+
 
           <p data-i18n="lifeText">
             Freedom, experiences and enjoying the journey along the way.
@@ -1087,9 +2701,12 @@
 
       </article>
 
+
     </section>
 
+
   </main>
+
 
 
   <!-- ==================================================
@@ -1099,57 +2716,26 @@
   <footer>
 
     <div class="footer-name">
-      © 2026
+
+      ©
+      <span id="currentYear">
+        2026
+      </span>
+
       <span>
         MARCEL_MARLOW
       </span>
+
+      · All rights reserved.
+
     </div>
-
-
-    <a
-      class="instagram-link"
-      href="https://www.instagram.com/Marcel_Marlow/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="Instagram Marcel Marlow"
-    >
-
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-      >
-        <rect
-          x="3"
-          y="3"
-          width="18"
-          height="18"
-          rx="5"
-        />
-
-        <circle
-          cx="12"
-          cy="12"
-          r="4"
-        />
-
-        <circle
-          cx="17.5"
-          cy="6.5"
-          r="1"
-          fill="currentColor"
-          stroke="none"
-        />
-      </svg>
-
-    </a>
 
   </footer>
 
 
+
   <!-- ==================================================
-       LOGIN MODAL
+       LOGIN
   ================================================== -->
 
   <div
@@ -1157,9 +2743,12 @@
     class="login-overlay"
   >
 
+
     <div class="login-card">
 
+
       <div class="login-top">
+
 
         <div class="login-title">
           Marcel<span>_Marlow</span>
@@ -1175,7 +2764,9 @@
           ✕
         </button>
 
+
       </div>
+
 
 
       <p
@@ -1186,10 +2777,12 @@
       </p>
 
 
+
       <form id="loginForm">
 
 
         <div class="login-field">
+
 
           <label
             for="usernameInput"
@@ -1197,6 +2790,7 @@
           >
             Username
           </label>
+
 
           <input
             id="usernameInput"
@@ -1206,10 +2800,13 @@
             required
           >
 
+
         </div>
 
 
+
         <div class="login-field">
+
 
           <label
             for="passwordInput"
@@ -1220,6 +2817,7 @@
 
 
           <div class="input-wrap">
+
 
             <input
               id="passwordInput"
@@ -1236,6 +2834,7 @@
               type="button"
               aria-label="Show password"
             >
+
 
               <svg
                 viewBox="0 0 24 24"
@@ -1256,11 +2855,15 @@
 
               </svg>
 
+
             </button>
+
 
           </div>
 
+
         </div>
+
 
 
         <button
@@ -1273,16 +2876,21 @@
         </button>
 
 
+
         <div
           id="loginError"
           class="login-error"
         ></div>
 
+
       </form>
+
 
     </div>
 
+
   </div>
+
 
 
   <script>
@@ -1298,6 +2906,7 @@
 
       const translations = {
 
+
         en: {
 
           home:
@@ -1311,6 +2920,9 @@
 
           heroText:
             'Building digital businesses and systems that create freedom. <strong>AI-optimized.</strong> Location independent.',
+
+          instagramButton:
+            "Follow me on Instagram",
 
           storyLabel:
             "My Story",
@@ -1363,6 +2975,7 @@
         },
 
 
+
         de: {
 
           home:
@@ -1376,6 +2989,9 @@
 
           heroText:
             'Digitale Unternehmen und Systeme aufbauen, die Freiheit schaffen. <strong>KI-optimiert.</strong> Ortsunabhängig.',
+
+          instagramButton:
+            "Folge mir auf Instagram",
 
           storyLabel:
             "Meine Story",
@@ -1428,6 +3044,7 @@
         },
 
 
+
         es: {
 
           home:
@@ -1441,6 +3058,9 @@
 
           heroText:
             'Creando negocios digitales y sistemas que generan libertad. <strong>Optimizados con IA.</strong> Sin depender de un lugar.',
+
+          instagramButton:
+            "Sígueme en Instagram",
 
           storyLabel:
             "Mi historia",
@@ -1495,11 +3115,18 @@
       };
 
 
+
       let currentLanguage =
         "en";
 
 
+
+      /* ==================================================
+         LANGUAGE SWITCH
+      ================================================== */
+
       function setLanguage(language) {
+
 
         if (
           !translations[language]
@@ -1518,12 +3145,14 @@
           language;
 
 
+
         document
           .querySelectorAll(
             "[data-i18n]"
           )
           .forEach(
             element => {
+
 
               const key =
                 element.dataset.i18n;
@@ -1543,12 +3172,14 @@
           );
 
 
+
         document
           .querySelectorAll(
             "[data-i18n-html]"
           )
           .forEach(
             element => {
+
 
               const key =
                 element.dataset.i18nHtml;
@@ -1568,12 +3199,14 @@
           );
 
 
+
         document
           .querySelectorAll(
             "[data-language]"
           )
           .forEach(
             button => {
+
 
               button.classList.toggle(
                 "active",
@@ -1586,6 +3219,7 @@
       }
 
 
+
       document
         .querySelectorAll(
           "[data-language]"
@@ -1593,9 +3227,11 @@
         .forEach(
           button => {
 
+
             button.addEventListener(
               "click",
               () => {
+
 
                 setLanguage(
                   button.dataset.language
@@ -1608,8 +3244,9 @@
         );
 
 
+
       /* ==================================================
-         LOGIN
+         LOGIN ELEMENTS
       ================================================== */
 
       const openLoginButton =
@@ -1666,7 +3303,13 @@
         );
 
 
+
+      /* ==================================================
+         OPEN / CLOSE LOGIN
+      ================================================== */
+
       function openLogin() {
+
 
         loginOverlay.classList.add(
           "open"
@@ -1675,6 +3318,10 @@
 
         loginError.textContent =
           "";
+
+
+        document.body.style.overflow =
+          "hidden";
 
 
         setTimeout(
@@ -1689,7 +3336,9 @@
       }
 
 
+
       function closeLogin() {
+
 
         loginOverlay.classList.remove(
           "open"
@@ -1699,7 +3348,12 @@
         loginError.textContent =
           "";
 
+
+        document.body.style.overflow =
+          "";
+
       }
+
 
 
       openLoginButton.addEventListener(
@@ -1708,18 +3362,22 @@
       );
 
 
+
       closeLoginButton.addEventListener(
         "click",
         closeLogin
       );
 
 
+
       loginOverlay.addEventListener(
         "click",
         event => {
 
+
           if (
-            event.target === loginOverlay
+            event.target ===
+            loginOverlay
           ) {
 
             closeLogin();
@@ -1728,14 +3386,17 @@
 
         }
       );
+
 
 
       document.addEventListener(
         "keydown",
         event => {
 
+
           if (
-            event.key === "Escape"
+            event.key ===
+            "Escape"
           ) {
 
             closeLogin();
@@ -1744,6 +3405,7 @@
 
         }
       );
+
 
 
       /* ==================================================
@@ -1753,6 +3415,7 @@
       passwordToggle.addEventListener(
         "click",
         () => {
+
 
           const currentlyHidden =
             passwordInput.type ===
@@ -1770,8 +3433,17 @@
               ? "var(--green)"
               : "";
 
+
+          passwordToggle.setAttribute(
+            "aria-label",
+            currentlyHidden
+              ? "Hide password"
+              : "Show password"
+          );
+
         }
       );
+
 
 
       /* ==================================================
@@ -1782,13 +3454,17 @@
         "submit",
         async event => {
 
+
           event.preventDefault();
+
 
 
           const username =
             String(
               usernameInput.value || ""
-            ).trim();
+            )
+              .trim();
+
 
 
           const password =
@@ -1797,11 +3473,13 @@
             );
 
 
+
           if (
             !username
             ||
             !password
           ) {
+
 
             loginError.textContent =
               translations[currentLanguage]
@@ -1813,8 +3491,10 @@
           }
 
 
+
           loginSubmitButton.disabled =
             true;
+
 
 
           loginSubmitButton.textContent =
@@ -1822,11 +3502,14 @@
               .loggingIn;
 
 
+
           loginError.textContent =
             "";
 
 
+
           try {
+
 
             const response =
               await fetch(
@@ -1859,8 +3542,10 @@
               );
 
 
+
             const data =
               await response.json();
+
 
 
             if (
@@ -1868,6 +3553,7 @@
               ||
               !data.ok
             ) {
+
 
               throw new Error(
                 data.error
@@ -1879,11 +3565,13 @@
             }
 
 
+
             window.location.href =
               "/Dashboard/";
 
 
           } catch (error) {
+
 
             loginError.textContent =
               error?.message
@@ -1894,8 +3582,10 @@
 
           } finally {
 
+
             loginSubmitButton.disabled =
               false;
+
 
 
             loginSubmitButton.textContent =
@@ -1908,13 +3598,38 @@
       );
 
 
+
       /* ==================================================
-         DEFAULT LANGUAGE = ENGLISH
+         YEAR
+      ================================================== */
+
+      const currentYear =
+        document.getElementById(
+          "currentYear"
+        );
+
+
+      if (
+        currentYear
+      ) {
+
+        currentYear.textContent =
+          String(
+            new Date().getFullYear()
+          );
+
+      }
+
+
+
+      /* ==================================================
+         DEFAULT LANGUAGE
       ================================================== */
 
       setLanguage(
         "en"
       );
+
 
     })();
 

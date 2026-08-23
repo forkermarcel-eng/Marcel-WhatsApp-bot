@@ -2,168 +2,83 @@ import fs from "fs";
 import crypto from "crypto";
 import pg from "pg";
 
-const {
-  Pool
-} = pg;
+const { Pool } = pg;
 
 
 /* ==================================================
-   CONFIG
+   SANDRY WHATSAPP IMPORT
+   - bestehender Kontakt: ID 48
+   - kein neuer Kontakt wird angelegt
+   - Persona-Testkontakte können nicht gewählt werden
+   - wiederholbarer / duplikatsicherer Import
 ================================================== */
 
-const IMPORT_FILE =
-  new URL(
-    "../imports/sandry/sandry_chat.txt",
-    import.meta.url
-  );
+const IMPORT_FILE = new URL(
+  "../imports/sandry/sandry_chat.txt",
+  import.meta.url
+);
 
+const SANDRY_CONTACT_ID = 48;
 
-const CONTACT_NAMES = [
-  "sandry",
-  "sandy",
-  "san"
-];
+const EXPECTED_SANDRY_JID =
+  "profile-sandy-san-32@memory.local";
 
+const INCOMING_SENDER = "sandry";
 
-const CONTACT_IDENTITY_KEYS = [
-  "sandy_san_32",
-  "sandry"
-];
-
-
-const INCOMING_NAMES = [
-  "sandry"
-];
-
-
-const OUTGOING_NAMES = [
-  "🤨"
-];
-
-
-/*
-  Der WhatsApp-Export wurde im August in Deutschland
-  erstellt. Deutschland = CEST = UTC+02:00.
-
-  Falls wir später andere Exporte importieren, können
-  wir diesen Wert bei Bedarf als Environment Variable
-  überschreiben.
-*/
+const OUTGOING_SENDER = "🤨";
 
 const IMPORT_TIMEZONE_OFFSET =
-  process.env.IMPORT_TIMEZONE_OFFSET
-  ||
-  "+02:00";
+  process.env.IMPORT_TIMEZONE_OFFSET || "+02:00";
 
 
 /* ==================================================
    DATABASE
 ================================================== */
 
-if (
-  !process.env.DATABASE_URL
-) {
-
-  console.error(
-    "❌ DATABASE_URL fehlt."
-  );
-
-  process.exit(
-    1
-  );
-
+if (!process.env.DATABASE_URL) {
+  console.error("❌ DATABASE_URL fehlt.");
+  process.exit(1);
 }
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
 
-const pool =
-  new Pool({
-    connectionString:
-      process.env.DATABASE_URL,
-
-    ssl:
-      process.env.DATABASE_URL.includes(
-        "localhost"
-      )
-        ? false
-        : {
-            rejectUnauthorized:
-              false
-          }
-  });
+  ssl: process.env.DATABASE_URL.includes("localhost")
+    ? false
+    : {
+        rejectUnauthorized: false
+      }
+});
 
 
 /* ==================================================
-   TEXT HELPERS
+   HELPERS
 ================================================== */
 
-function cleanInvisibleCharacters(
-  value
-) {
-
-  return String(
-    value ?? ""
-  )
-    .replace(
-      /[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,
-      ""
-    );
-
+function cleanInvisibleCharacters(value) {
+  return String(value ?? "").replace(
+    /[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g,
+    ""
+  );
 }
 
 
-function cleanText(
-  value
-) {
-
-  return cleanInvisibleCharacters(
-    value
-  )
-    .replace(
-      /\r/g,
-      ""
-    )
+function cleanText(value) {
+  return cleanInvisibleCharacters(value)
+    .replace(/\r/g, "")
     .trim();
-
 }
 
 
-function normalizeName(
-  value
-) {
-
-  return cleanText(
-    value
-  )
-    .toLowerCase();
-
+function normalizeName(value) {
+  return cleanText(value).toLowerCase();
 }
 
 
-/* ==================================================
-   MEDIA PLACEHOLDERS
-
-   Medien werden beim ersten Import NICHT als
-   Nachrichten gespeichert.
-
-   Wenn Text + "Bild weggelassen" in derselben
-   Nachricht stehen, bleibt nur der echte Text übrig.
-
-   Dadurch können wir später denselben Chat mit Medien
-   erneut importieren, ohne den Text doppelt anzulegen.
-================================================== */
-
-function stripMediaPlaceholders(
-  text
-) {
-
-  let result =
-    cleanText(
-      text
-    );
-
+function stripMediaPlaceholders(text) {
+  let result = cleanText(text);
 
   const patterns = [
-
     /\bSticker weggelassen\b/gi,
     /\bBild weggelassen\b/gi,
     /\bVideo weggelassen\b/gi,
@@ -174,93 +89,49 @@ function stripMediaPlaceholders(
     /\bsticker omitted\b/gi,
     /\bimage omitted\b/gi,
     /\bvideo omitted\b/gi,
-    /\bGIF omitted\b/gi,
+    /\bgif omitted\b/gi,
     /\baudio omitted\b/gi,
     /\bdocument omitted\b/gi
-
   ];
 
-
-  for (
-    const pattern
-    of patterns
-  ) {
-
-    result =
-      result.replace(
-        pattern,
-        ""
-      );
-
+  for (const pattern of patterns) {
+    result = result.replace(pattern, "");
   }
 
-
   return result
-    .replace(
-      /\s+/g,
-      " "
-    )
+    .replace(/\s+/g, " ")
     .trim();
-
 }
 
 
-/* ==================================================
-   SYSTEM MESSAGE FILTER
-================================================== */
-
-function isSystemMessage(
-  text
-) {
-
+function isSystemMessage(text) {
   const normalized =
-    cleanText(
-      text
-    )
-      .toLowerCase();
+    cleanText(text).toLowerCase();
 
-
-  if (
-    !normalized
-  ) {
-
+  if (!normalized) {
     return true;
-
   }
 
-
   const systemFragments = [
-
     "nachrichten und anrufe sind ende-zu-ende-verschlüsselt",
-
     "messages and calls are end-to-end encrypted",
 
     "ist ein kontakt.",
-
     "is a contact.",
 
     "sicherheitsnummer wurde geändert",
-
     "security code changed",
 
     "du hast diese nachricht gelöscht",
-
     "you deleted this message",
 
     "diese nachricht wurde gelöscht",
-
     "this message was deleted"
-
   ];
 
-
-  return systemFragments.some(
-    fragment =>
-      normalized.includes(
-        fragment
-      )
+  return systemFragments.some(fragment =>
+    normalized.includes(fragment)
   );
-
 }
 
 
@@ -268,259 +139,116 @@ function isSystemMessage(
    DATE
 ================================================== */
 
-function createIsoTimestamp(
-  datePart,
-  timePart
-) {
+function createIsoTimestamp(datePart, timePart) {
+  const pieces =
+    String(datePart).split(".");
 
-  const datePieces =
-    String(
-      datePart
-    )
-      .split(
-        "."
-      );
-
-
-  if (
-    datePieces.length !== 3
-  ) {
-
+  if (pieces.length !== 3) {
     throw new Error(
-      `Ungültiges Datum: ${datePart}`
+      `Ungültiges WhatsApp-Datum: ${datePart}`
     );
-
   }
 
+  let [day, month, year] = pieces;
 
-  let [
-    day,
-    month,
-    year
-  ] =
-    datePieces;
-
-
-  if (
-    year.length === 2
-  ) {
-
-    year =
-      `20${year}`;
-
+  if (year.length === 2) {
+    year = `20${year}`;
   }
 
-
-  day =
-    day.padStart(
-      2,
-      "0"
-    );
-
-
-  month =
-    month.padStart(
-      2,
-      "0"
-    );
-
+  day = day.padStart(2, "0");
+  month = month.padStart(2, "0");
 
   let normalizedTime =
-    String(
-      timePart
-    );
+    String(timePart);
 
-
-  if (
-    normalizedTime
-      .split(":")
-      .length === 2
-  ) {
-
-    normalizedTime +=
-      ":00";
-
+  if (normalizedTime.split(":").length === 2) {
+    normalizedTime += ":00";
   }
 
-
   return (
-    `${year}-${month}-${day}`
-    +
-    `T${normalizedTime}`
-    +
+    `${year}-${month}-${day}` +
+    `T${normalizedTime}` +
     IMPORT_TIMEZONE_OFFSET
   );
-
 }
 
 
 /* ==================================================
-   WHATSAPP EXPORT PARSER
+   WHATSAPP PARSER
 ================================================== */
 
-function parseWhatsAppExport(
-  rawText
-) {
-
+function parseWhatsAppExport(rawText) {
   const text =
-    cleanInvisibleCharacters(
-      rawText
-    )
-      .replace(
-        /\r\n/g,
-        "\n"
-      )
-      .replace(
-        /\r/g,
-        "\n"
-      );
-
+    cleanInvisibleCharacters(rawText)
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
 
   const lines =
-    text.split(
-      "\n"
-    );
-
+    text.split("\n");
 
   /*
     Beispiel:
-
     [18.08.26, 14:15:23] Sandry: Nachricht
   */
 
   const messagePattern =
     /^\[(\d{1,2}\.\d{1,2}\.\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?)\]\s*([^:]+):\s?(.*)$/;
 
-
-  /*
-    Erkennt auch WhatsApp-Systemzeilen mit Zeitstempel,
-    die keinen normalen Absender enthalten.
-  */
-
   const anyTimestampPattern =
     /^\[\d{1,2}\.\d{1,2}\.\d{2,4},\s*\d{1,2}:\d{2}(?::\d{2})?\]/;
 
+  const parsed = [];
 
-  const parsed =
-    [];
-
-
-  let currentMessage =
-    null;
+  let currentMessage = null;
 
 
   function finishCurrentMessage() {
-
-    if (
-      !currentMessage
-    ) {
-
+    if (!currentMessage) {
       return;
-
     }
-
 
     const sender =
-      normalizeName(
-        currentMessage.sender
-      );
+      normalizeName(currentMessage.sender);
 
+    let direction = null;
 
-    let direction =
-      null;
-
-
-    if (
-      INCOMING_NAMES.includes(
-        sender
-      )
-    ) {
-
-      direction =
-        "incoming";
-
+    if (sender === INCOMING_SENDER) {
+      direction = "incoming";
     }
 
-
-    if (
-      OUTGOING_NAMES.includes(
-        sender
-      )
-    ) {
-
-      direction =
-        "outgoing";
-
+    if (sender === OUTGOING_SENDER) {
+      direction = "outgoing";
     }
 
-
-    /*
-      Unbekannter Absender:
-      nicht raten, sondern Nachricht überspringen.
-    */
-
-    if (
-      !direction
-    ) {
-
+    if (!direction) {
       console.warn(
         `⚠️ Unbekannter Absender übersprungen: ${currentMessage.sender}`
       );
 
-
-      currentMessage =
-        null;
-
-
+      currentMessage = null;
       return;
-
     }
-
 
     const originalText =
-      cleanText(
-        currentMessage.text
-      );
+      cleanText(currentMessage.text);
 
-
-    if (
-      isSystemMessage(
-        originalText
-      )
-    ) {
-
-      currentMessage =
-        null;
-
-
+    if (isSystemMessage(originalText)) {
+      currentMessage = null;
       return;
-
     }
-
 
     const messageText =
-      stripMediaPlaceholders(
-        originalText
-      );
-
+      stripMediaPlaceholders(originalText);
 
     /*
-      Reine Sticker-/Bild-/Video-Platzhalter werden
-      zunächst nicht als Textnachricht gespeichert.
+      Reine Bild-/Sticker-/Video-Platzhalter
+      importieren wir jetzt noch nicht.
     */
 
-    if (
-      !messageText
-    ) {
-
-      currentMessage =
-        null;
-
-
+    if (!messageText) {
+      currentMessage = null;
       return;
-
     }
-
 
     const createdAt =
       createIsoTimestamp(
@@ -528,136 +256,68 @@ function parseWhatsAppExport(
         currentMessage.time
       );
 
-
     parsed.push({
-
-      sender:
-        currentMessage.sender,
-
+      sender: currentMessage.sender,
       direction,
-
       messageText,
-
-      originalText,
-
       createdAt
-
     });
 
-
-    currentMessage =
-      null;
-
+    currentMessage = null;
   }
 
 
-  for (
-    const rawLine
-    of lines
-  ) {
-
+  for (const rawLine of lines) {
     const line =
-      cleanInvisibleCharacters(
-        rawLine
-      );
-
+      cleanInvisibleCharacters(rawLine);
 
     const match =
-      line.match(
-        messagePattern
-      );
+      line.match(messagePattern);
 
-
-    if (
-      match
-    ) {
-
+    if (match) {
       finishCurrentMessage();
-
 
       currentMessage = {
-
-        date:
-          match[1],
-
-        time:
-          match[2],
-
-        sender:
-          cleanText(
-            match[3]
-          ),
-
-        text:
-          match[4] ?? ""
-
+        date: match[1],
+        time: match[2],
+        sender: cleanText(match[3]),
+        text: match[4] ?? ""
       };
 
-
       continue;
-
     }
 
-
     /*
-      Eine neue WhatsApp-Zeile mit Zeitstempel,
-      aber ohne erkennbaren normalen Absender:
-      vorherige Nachricht abschließen und Systemzeile
-      ignorieren.
+      Zeitstempel vorhanden, aber keine normale
+      Chatnachricht -> alte Nachricht abschließen.
     */
 
-    if (
-      anyTimestampPattern.test(
-        line
-      )
-    ) {
-
+    if (anyTimestampPattern.test(line)) {
       finishCurrentMessage();
-
-
-      currentMessage =
-        null;
-
-
+      currentMessage = null;
       continue;
-
     }
-
 
     /*
-      Mehrzeilige WhatsApp-Nachricht:
-      Folgezeilen werden an die vorherige Nachricht
-      angehängt.
+      Mehrzeilige WhatsApp-Nachricht.
     */
 
-    if (
-      currentMessage
-    ) {
-
-      currentMessage.text +=
-        `\n${line}`;
-
+    if (currentMessage) {
+      currentMessage.text += `\n${line}`;
     }
-
   }
-
 
   finishCurrentMessage();
 
-
   return parsed;
-
 }
 
 
 /* ==================================================
-   DATABASE SCHEMA HELPERS
+   DATABASE SCHEMA
 ================================================== */
 
-async function getTableColumns(
-  tableName
-) {
-
+async function getTableColumns(tableName) {
   const result =
     await pool.query(
       `
@@ -666,300 +326,151 @@ async function getTableColumns(
         WHERE table_schema = 'public'
           AND table_name = $1
       `,
-      [
-        tableName
-      ]
+      [tableName]
     );
-
 
   return new Set(
     result.rows.map(
-      row =>
-        row.column_name
+      row => row.column_name
     )
   );
-
 }
 
 
 /* ==================================================
-   FIND EXISTING SANDRY CONTACT
-
-   WICHTIG:
-   Es wird absichtlich KEIN neuer Kontakt angelegt.
-
-   Wir wollen das bestehende Sandy/San-Memory mit
-   Sandry verbinden.
-
-   Wenn kein eindeutiger Kontakt gefunden wird,
-   bricht der Import ab.
+   LOAD EXACT SANDRY CONTACT
 ================================================== */
 
-async function findSandryContact() {
-
-  const contactColumns =
-    await getTableColumns(
-      "contacts"
-    );
-
-
-  const searchableColumns =
-    [
-
-      "identity_key",
-      "name",
-      "display_name",
-      "whatsapp_display_name",
-      "nickname"
-
-    ]
-      .filter(
-        column =>
-          contactColumns.has(
-            column
-          )
-      );
-
-
-  if (
-    searchableColumns.length === 0
-  ) {
-
-    throw new Error(
-      "In contacts wurden keine verwendbaren Namensfelder gefunden."
-    );
-
-  }
-
-
-  const conditions =
-    [];
-
-
-  const values =
-    [];
-
-
-  function addValue(
-    value
-  ) {
-
-    values.push(
-      value
-    );
-
-
-    return `$${values.length}`;
-
-  }
-
-
-  for (
-    const column
-    of searchableColumns
-  ) {
-
-    if (
-      column === "identity_key"
-    ) {
-
-      for (
-        const identityKey
-        of CONTACT_IDENTITY_KEYS
-      ) {
-
-        const placeholder =
-          addValue(
-            identityKey.toLowerCase()
-          );
-
-
-        conditions.push(
-          `LOWER(COALESCE(${column}::text, '')) = ${placeholder}`
-        );
-
-      }
-
-    }
-
-
-    for (
-      const name
-      of CONTACT_NAMES
-    ) {
-
-      const placeholder =
-        addValue(
-          name.toLowerCase()
-        );
-
-
-      conditions.push(
-        `LOWER(COALESCE(${column}::text, '')) = ${placeholder}`
-      );
-
-    }
-
-  }
-
-
+async function getSandryContact() {
   const result =
     await pool.query(
       `
         SELECT *
         FROM contacts
-        WHERE
-          ${conditions.join(
-            "\nOR "
-          )}
-        ORDER BY id ASC
+        WHERE id = $1
+        LIMIT 1
       `,
-      values
+      [SANDRY_CONTACT_ID]
     );
 
-
-  if (
-    result.rows.length === 0
-  ) {
-
+  if (result.rows.length === 0) {
     throw new Error(
-      [
-        "Kein bestehender Sandry/Sandy/San-Kontakt gefunden.",
-        "Der Import wurde sicherheitshalber NICHT ausgeführt.",
-        "Es wurde KEIN neuer Kontakt erzeugt."
-      ].join(
-        " "
-      )
+      `Kontakt ID ${SANDRY_CONTACT_ID} existiert nicht. Import abgebrochen.`
     );
-
   }
+
+  const contact =
+    result.rows[0];
+
+  const actualJid =
+    String(
+      contact.whatsapp_jid || ""
+    ).trim();
 
 
   /*
-    Falls verschiedene Suchbegriffe denselben Kontakt
-    mehrfach treffen, PostgreSQL liefert ihn trotzdem
-    nur einmal.
-
-    Mehr als eine Zeile bedeutet daher tatsächlich,
-    dass mehrere Kontakte passen.
+    Entscheidende Sicherheitsprüfung:
+    ID UND JID müssen zusammenpassen.
   */
 
   if (
-    result.rows.length > 1
+    actualJid !== EXPECTED_SANDRY_JID
   ) {
-
     console.error(
-      "❌ Mehrere mögliche Sandry-Kontakte gefunden:"
+      "❌ Sicherheitsprüfung fehlgeschlagen."
     );
 
+    console.error({
+      expectedId:
+        SANDRY_CONTACT_ID,
 
-    for (
-      const row
-      of result.rows
-    ) {
+      actualId:
+        contact.id,
 
-      console.error({
+      expectedJid:
+        EXPECTED_SANDRY_JID,
 
-        id:
-          row.id,
-
-        name:
-          row.name,
-
-        display_name:
-          row.display_name,
-
-        whatsapp_display_name:
-          row.whatsapp_display_name,
-
-        nickname:
-          row.nickname,
-
-        identity_key:
-          row.identity_key,
-
-        whatsapp_jid:
-          row.whatsapp_jid
-
-      });
-
-    }
-
+      actualJid
+    });
 
     throw new Error(
-      "Mehrere passende Kontakte gefunden. Import abgebrochen, damit keine Identitäten vermischt werden."
+      "Kontakt ID 48 besitzt nicht die erwartete Sandry-JID. Import wurde NICHT ausgeführt."
     );
-
   }
 
 
-  return {
-    contact:
-      result.rows[0],
+  if (
+    actualJid.toLowerCase().includes(
+      "@persona.test"
+    )
+  ) {
+    throw new Error(
+      "Sicherheitsstopp: Persona-Testkontakt erkannt."
+    );
+  }
 
-    columns:
-      contactColumns
-  };
 
+  console.log(
+    "🔒 Kontakt-ID und JID erfolgreich geprüft."
+  );
+
+  console.log(
+    `🎯 Sandry-Kontakt: ID ${contact.id}`
+  );
+
+  console.log(
+    `🎯 JID: ${actualJid}`
+  );
+
+  return contact;
 }
 
 
 /* ==================================================
-   NORMALIZE SANDRY NAME
+   NORMALIZE CONTACT NAME
 ================================================== */
 
-async function normalizeSandryContactName(
+async function normalizeSandryContact(
+  client,
   contact,
   contactColumns
 ) {
-
-  const updates =
-    [];
-
-
-  const values =
-    [];
+  const updates = [];
+  const values = [];
 
 
   function addUpdate(
     column,
     value
   ) {
-
-    if (
-      !contactColumns.has(
-        column
-      )
-    ) {
-
+    if (!contactColumns.has(column)) {
       return;
-
     }
 
-
-    values.push(
-      value
-    );
-
+    values.push(value);
 
     updates.push(
       `${column} = $${values.length}`
     );
-
   }
 
+
+  /*
+    Wir korrigieren nur sichtbare Namensfelder.
+
+    whatsapp_jid bleibt unverändert.
+    Memory-Zuordnung bleibt unverändert.
+  */
 
   addUpdate(
     "name",
     "Sandry"
   );
 
-
   addUpdate(
     "display_name",
     "Sandry"
   );
-
 
   addUpdate(
     "whatsapp_display_name",
@@ -967,27 +478,24 @@ async function normalizeSandryContactName(
   );
 
 
-  /*
-    Identity-Key bleibt unverändert.
-    Dadurch geht das bisherige Memory nicht verloren.
-  */
-
-
   if (
-    updates.length === 0
+    contactColumns.has("updated_at")
   ) {
-
-    return;
-
+    updates.push(
+      "updated_at = NOW()"
+    );
   }
 
 
-  values.push(
-    contact.id
-  );
+  if (updates.length === 0) {
+    return;
+  }
 
 
-  await pool.query(
+  values.push(contact.id);
+
+
+  await client.query(
     `
       UPDATE contacts
       SET
@@ -996,287 +504,81 @@ async function normalizeSandryContactName(
     `,
     values
   );
-
 }
 
 
 /* ==================================================
-   IMPORT MESSAGE ID
+   STABLE IMPORT IDS
 
-   Diese ID ist deterministisch.
+   Der occurrence-Wert sorgt dafür, dass sogar zwei
+   identische Nachrichten in derselben Sekunde
+   auseinandergehalten werden können.
 
-   Derselbe Export erzeugt bei erneutem Import
-   für dieselbe Nachricht exakt dieselbe ID.
+   Beim erneuten Import entsteht wieder dieselbe ID,
+   solange der WhatsApp-Verlauf gleich ist.
 ================================================== */
 
 function createImportMessageId({
   contactId,
   direction,
   createdAt,
-  messageText
+  messageText,
+  occurrence
 }) {
-
   const canonical =
     [
+      "whatsapp-export",
       "sandry",
-      String(
-        contactId
-      ),
+      "v2",
+      String(contactId),
       direction,
       createdAt,
-      messageText
-    ].join(
-      "\n"
-    );
-
+      messageText,
+      String(occurrence)
+    ].join("\n");
 
   const hash =
     crypto
-      .createHash(
-        "sha256"
-      )
-      .update(
-        canonical,
-        "utf8"
-      )
-      .digest(
-        "hex"
-      );
-
+      .createHash("sha256")
+      .update(canonical, "utf8")
+      .digest("hex");
 
   return (
-    "wa-import-sandry-v1-"
-    +
+    "wa-import-sandry-v2-" +
     hash
   );
-
 }
 
 
 /* ==================================================
-   CHECK EXISTING MESSAGE
-
-   Zwei Schutzschichten:
-
-   1. gleiche deterministische Import-ID
-   2. gleicher JID + Richtung + Zeitpunkt + Text
-
-   Dadurch kann derselbe vollständige Export später
-   wiederholt importiert werden.
+   ADD STABLE OCCURRENCE NUMBERS
 ================================================== */
 
-async function messageAlreadyExists({
-  jid,
-  direction,
-  createdAt,
-  messageText,
-  importMessageId
-}) {
+function prepareMessagesForImport(messages) {
+  const occurrences =
+    new Map();
 
-  const result =
-    await pool.query(
-      `
-        SELECT id
-        FROM messages
-        WHERE
-          whatsapp_jid = $1
-          AND
-          (
-            whatsapp_message_id = $2
-
-            OR
-
-            (
-              direction = $3
-              AND created_at = $4::timestamptz
-              AND message_text = $5
-            )
-          )
-        LIMIT 1
-      `,
+  return messages.map(message => {
+    const baseKey =
       [
-        jid,
-        importMessageId,
-        direction,
-        createdAt,
-        messageText
-      ]
+        message.direction,
+        message.createdAt,
+        message.messageText
+      ].join("\n");
+
+    const nextOccurrence =
+      (occurrences.get(baseKey) || 0) + 1;
+
+    occurrences.set(
+      baseKey,
+      nextOccurrence
     );
 
-
-  return (
-    result.rows.length > 0
-  );
-
-}
-
-
-/* ==================================================
-   INSERT MESSAGE
-================================================== */
-
-async function insertMessage({
-  jid,
-  direction,
-  createdAt,
-  messageText,
-  importMessageId
-}) {
-
-  await pool.query(
-    `
-      INSERT INTO messages (
-        whatsapp_jid,
-        direction,
-        message_text,
-        whatsapp_message_id,
-        created_at,
-        is_edited,
-        processing_status
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5::timestamptz,
-        FALSE,
-        'imported'
-      )
-    `,
-    [
-      jid,
-      direction,
-      messageText,
-      importMessageId,
-      createdAt
-    ]
-  );
-
-}
-
-
-/* ==================================================
-   UPDATE CONTACT TIMESTAMPS
-================================================== */
-
-async function updateContactAfterImport(
-  contact,
-  contactColumns,
-  messages
-) {
-
-  if (
-    messages.length === 0
-  ) {
-
-    return;
-
-  }
-
-
-  const firstMessage =
-    messages[0];
-
-
-  const lastMessage =
-    messages[
-      messages.length - 1
-    ];
-
-
-  const updates =
-    [];
-
-
-  const values =
-    [];
-
-
-  function addUpdate(
-    column,
-    sqlValue,
-    value
-  ) {
-
-    if (
-      !contactColumns.has(
-        column
-      )
-    ) {
-
-      return;
-
-    }
-
-
-    values.push(
-      value
-    );
-
-
-    updates.push(
-      `${column} = ${sqlValue(
-        values.length
-      )}`
-    );
-
-  }
-
-
-  addUpdate(
-    "first_contact_at",
-    number =>
-      `COALESCE(first_contact_at, $${number}::timestamptz)`,
-    firstMessage.createdAt
-  );
-
-
-  addUpdate(
-    "last_message_at",
-    number =>
-      `$${number}::timestamptz`,
-    lastMessage.createdAt
-  );
-
-
-  if (
-    contactColumns.has(
-      "updated_at"
-    )
-  ) {
-
-    updates.push(
-      "updated_at = NOW()"
-    );
-
-  }
-
-
-  if (
-    updates.length === 0
-  ) {
-
-    return;
-
-  }
-
-
-  values.push(
-    contact.id
-  );
-
-
-  await pool.query(
-    `
-      UPDATE contacts
-      SET
-        ${updates.join(",\n        ")}
-      WHERE id = $${values.length}
-    `,
-    values
-  );
-
+    return {
+      ...message,
+      occurrence: nextOccurrence
+    };
+  });
 }
 
 
@@ -1285,44 +587,28 @@ async function updateContactAfterImport(
 ================================================== */
 
 async function runImport() {
-
-  console.log(
-    ""
-  );
-
-
+  console.log("");
   console.log(
     "=========================================="
   );
-
-
   console.log(
-    " Sandry WhatsApp Import"
+    " SANDRY WHATSAPP IMPORT V2"
   );
-
-
   console.log(
     "=========================================="
   );
+  console.log("");
 
 
-  console.log(
-    ""
-  );
+  /* ==================================================
+     FILE
+  ================================================== */
 
-
-  if (
-    !fs.existsSync(
-      IMPORT_FILE
-    )
-  ) {
-
+  if (!fs.existsSync(IMPORT_FILE)) {
     throw new Error(
-      "Importdatei imports/sandry/sandry_chat.txt wurde nicht gefunden."
+      "imports/sandry/sandry_chat.txt wurde nicht gefunden."
     );
-
   }
-
 
   console.log(
     "📄 WhatsApp-Datei gefunden."
@@ -1337,151 +623,138 @@ async function runImport() {
 
 
   const parsedMessages =
-    parseWhatsAppExport(
-      rawText
+    prepareMessagesForImport(
+      parseWhatsAppExport(rawText)
     );
 
 
-  console.log(
-    `💬 ${parsedMessages.length} importierbare Textnachrichten erkannt.`
-  );
+  if (parsedMessages.length === 0) {
+    throw new Error(
+      "Keine importierbaren Textnachrichten erkannt."
+    );
+  }
 
 
   const incomingCount =
     parsedMessages.filter(
       message =>
-        message.direction
-        ===
-        "incoming"
+        message.direction === "incoming"
     ).length;
 
 
   const outgoingCount =
     parsedMessages.filter(
       message =>
-        message.direction
-        ===
-        "outgoing"
+        message.direction === "outgoing"
     ).length;
 
+
+  console.log(
+    `💬 Importierbare Textnachrichten: ${parsedMessages.length}`
+  );
 
   console.log(
     `   Sandry → Marcel: ${incomingCount}`
   );
 
-
   console.log(
     `   Marcel → Sandry: ${outgoingCount}`
   );
 
-
-  console.log(
-    ""
-  );
+  console.log("");
 
 
-  const {
-    contact,
-    columns:
-      contactColumns
-  } =
-    await findSandryContact();
+  /* ==================================================
+     CONTACT
+  ================================================== */
+
+  const contact =
+    await getSandryContact();
 
 
-  console.log(
-    "✅ Bestehender Kontakt gefunden:"
-  );
-
-
-  console.log({
-    id:
-      contact.id,
-
-    name:
-      contact.name,
-
-    displayName:
-      contact.display_name,
-
-    whatsappDisplayName:
-      contact.whatsapp_display_name,
-
-    identityKey:
-      contact.identity_key,
-
-    jid:
-      contact.whatsapp_jid
-  });
-
-
-  if (
-    !contact.whatsapp_jid
-  ) {
-
-    throw new Error(
-      "Der gefundene Kontakt besitzt keinen whatsapp_jid. Import abgebrochen."
+  const contactColumns =
+    await getTableColumns(
+      "contacts"
     );
 
+
+  const messageColumns =
+    await getTableColumns(
+      "messages"
+    );
+
+
+  const requiredMessageColumns = [
+    "whatsapp_jid",
+    "direction",
+    "message_text",
+    "whatsapp_message_id",
+    "created_at"
+  ];
+
+
+  for (
+    const column
+    of requiredMessageColumns
+  ) {
+    if (!messageColumns.has(column)) {
+      throw new Error(
+        `messages.${column} fehlt. Import abgebrochen.`
+      );
+    }
   }
 
 
-  await normalizeSandryContactName(
-    contact,
-    contactColumns
-  );
-
-
-  console.log(
-    "✅ Kontaktname auf Sandry vereinheitlicht."
-  );
-
-
-  console.log(
-    ""
-  );
-
-
-  let inserted =
-    0;
-
-
-  let duplicates =
-    0;
-
-
-  let failed =
-    0;
-
+  /* ==================================================
+     TRANSACTION
+  ================================================== */
 
   const client =
     await pool.connect();
 
 
-  try {
+  let inserted = 0;
+  let duplicates = 0;
 
-    await client.query(
-      "BEGIN"
-    );
+
+  try {
+    await client.query("BEGIN");
 
 
     /*
-      Innerhalb der Transaktion verwenden wir denselben
-      Client für Prüfung und Insert.
+      Erst innerhalb der Transaktion wird der sichtbare
+      Name von Sandy auf Sandry korrigiert.
     */
+
+    await normalizeSandryContact(
+      client,
+      contact,
+      contactColumns
+    );
+
+
+    console.log(
+      "✅ Anzeigename auf Sandry vereinheitlicht."
+    );
+
+    console.log("");
+
+
+    /* ==================================================
+       MESSAGES
+    ================================================== */
 
     for (
       let index = 0;
       index < parsedMessages.length;
       index++
     ) {
-
       const message =
         parsedMessages[index];
 
 
       const importMessageId =
         createImportMessageId({
-
           contactId:
             contact.id,
 
@@ -1492,288 +765,323 @@ async function runImport() {
             message.createdAt,
 
           messageText:
-            message.messageText
+            message.messageText,
 
+          occurrence:
+            message.occurrence
         });
 
+
+      /*
+        Duplikatschutz:
+        Derselbe WhatsApp-Export erzeugt dieselbe
+        whatsapp_message_id.
+
+        Deshalb kann der gesamte Verlauf später erneut
+        importiert werden.
+      */
 
       const existing =
         await client.query(
           `
             SELECT id
             FROM messages
-            WHERE
-              whatsapp_jid = $1
-              AND
-              (
-                whatsapp_message_id = $2
-
-                OR
-
-                (
-                  direction = $3
-                  AND created_at = $4::timestamptz
-                  AND message_text = $5
-                )
-              )
+            WHERE whatsapp_message_id = $1
             LIMIT 1
           `,
-          [
-            contact.whatsapp_jid,
-            importMessageId,
-            message.direction,
-            message.createdAt,
-            message.messageText
-          ]
+          [importMessageId]
         );
+
+
+      if (existing.rows.length > 0) {
+        duplicates++;
+        continue;
+      }
+
+
+      const insertColumns = [
+        "whatsapp_jid",
+        "direction",
+        "message_text",
+        "whatsapp_message_id",
+        "created_at"
+      ];
+
+
+      const insertValues = [
+        contact.whatsapp_jid,
+        message.direction,
+        message.messageText,
+        importMessageId,
+        message.createdAt
+      ];
+
+
+      const placeholders = [
+        "$1",
+        "$2",
+        "$3",
+        "$4",
+        "$5::timestamptz"
+      ];
+
+
+      /*
+        Optionale bestehende DB-Spalten.
+      */
+
+      if (
+        messageColumns.has(
+          "is_edited"
+        )
+      ) {
+        insertColumns.push(
+          "is_edited"
+        );
+
+        insertValues.push(false);
+
+        placeholders.push(
+          `$${insertValues.length}`
+        );
+      }
 
 
       if (
-        existing.rows.length > 0
+        messageColumns.has(
+          "processing_status"
+        )
       ) {
+        insertColumns.push(
+          "processing_status"
+        );
 
-        duplicates++;
+        insertValues.push(
+          "imported"
+        );
 
-
-        continue;
-
+        placeholders.push(
+          `$${insertValues.length}`
+        );
       }
 
 
-      try {
-
-        await client.query(
-          `
-            INSERT INTO messages (
-              whatsapp_jid,
-              direction,
-              message_text,
-              whatsapp_message_id,
-              created_at,
-              is_edited,
-              processing_status
-            )
-            VALUES (
-              $1,
-              $2,
-              $3,
-              $4,
-              $5::timestamptz,
-              FALSE,
-              'imported'
-            )
-          `,
-          [
-            contact.whatsapp_jid,
-            message.direction,
-            message.messageText,
-            importMessageId,
-            message.createdAt
-          ]
-        );
+      await client.query(
+        `
+          INSERT INTO messages (
+            ${insertColumns.join(",\n            ")}
+          )
+          VALUES (
+            ${placeholders.join(",\n            ")}
+          )
+        `,
+        insertValues
+      );
 
 
-        inserted++;
+      inserted++;
 
 
-      } catch (
-        error
+      if (
+        inserted > 0
+        &&
+        inserted % 100 === 0
       ) {
-
-        failed++;
-
-
-        console.error(
-          `❌ Nachricht ${index + 1} konnte nicht importiert werden:`,
-          error.message
+        console.log(
+          `   ${inserted} Nachrichten importiert …`
         );
-
-
-        throw error;
-
       }
+    }
 
+
+    /* ==================================================
+       CONTACT TIMESTAMPS
+    ================================================== */
+
+    const firstMessage =
+      parsedMessages[0];
+
+
+    const lastMessage =
+      parsedMessages[
+        parsedMessages.length - 1
+      ];
+
+
+    const contactUpdates = [];
+    const updateValues = [];
+
+
+    if (
+      contactColumns.has(
+        "first_contact_at"
+      )
+    ) {
+      updateValues.push(
+        firstMessage.createdAt
+      );
+
+      contactUpdates.push(
+        `first_contact_at = LEAST(
+          COALESCE(
+            first_contact_at,
+            $${updateValues.length}::timestamptz
+          ),
+          $${updateValues.length}::timestamptz
+        )`
+      );
     }
 
 
     if (
-      parsedMessages.length > 0
+      contactColumns.has(
+        "last_message_at"
+      )
     ) {
+      updateValues.push(
+        lastMessage.createdAt
+      );
 
-      const firstMessage =
-        parsedMessages[0];
-
-
-      const lastMessage =
-        parsedMessages[
-          parsedMessages.length - 1
-        ];
-
-
-      const contactUpdates =
-        [];
-
-
-      const updateValues =
-        [];
-
-
-      if (
-        contactColumns.has(
-          "first_contact_at"
-        )
-      ) {
-
-        updateValues.push(
-          firstMessage.createdAt
-        );
-
-
-        contactUpdates.push(
-          `first_contact_at = COALESCE(first_contact_at, $${updateValues.length}::timestamptz)`
-        );
-
-      }
-
-
-      if (
-        contactColumns.has(
-          "last_message_at"
-        )
-      ) {
-
-        updateValues.push(
-          lastMessage.createdAt
-        );
-
-
-        contactUpdates.push(
-          `last_message_at = $${updateValues.length}::timestamptz`
-        );
-
-      }
-
-
-      if (
-        contactColumns.has(
-          "updated_at"
-        )
-      ) {
-
-        contactUpdates.push(
-          "updated_at = NOW()"
-        );
-
-      }
-
-
-      if (
-        contactUpdates.length > 0
-      ) {
-
-        updateValues.push(
-          contact.id
-        );
-
-
-        await client.query(
-          `
-            UPDATE contacts
-            SET
-              ${contactUpdates.join(",\n              ")}
-            WHERE id = $${updateValues.length}
-          `,
-          updateValues
-        );
-
-      }
-
+      contactUpdates.push(
+        `last_message_at = GREATEST(
+          COALESCE(
+            last_message_at,
+            $${updateValues.length}::timestamptz
+          ),
+          $${updateValues.length}::timestamptz
+        )`
+      );
     }
 
 
-    await client.query(
-      "COMMIT"
+    if (
+      contactColumns.has(
+        "updated_at"
+      )
+    ) {
+      contactUpdates.push(
+        "updated_at = NOW()"
+      );
+    }
+
+
+    if (contactUpdates.length > 0) {
+      updateValues.push(
+        contact.id
+      );
+
+      await client.query(
+        `
+          UPDATE contacts
+          SET
+            ${contactUpdates.join(",\n            ")}
+          WHERE id = $${updateValues.length}
+        `,
+        updateValues
+      );
+    }
+
+
+    /* ==================================================
+       FINAL SAFETY CHECK
+    ================================================== */
+
+    const importedCountResult =
+      await client.query(
+        `
+          SELECT COUNT(*)::integer AS count
+          FROM messages
+          WHERE whatsapp_jid = $1
+            AND whatsapp_message_id
+                LIKE 'wa-import-sandry-v2-%'
+        `,
+        [contact.whatsapp_jid]
+      );
+
+
+    const storedImportCount =
+      Number(
+        importedCountResult.rows[0]?.count || 0
+      );
+
+
+    console.log("");
+    console.log(
+      `🔎 Sandry-Importnachrichten jetzt in DB: ${storedImportCount}`
     );
 
 
-  } catch (
-    error
-  ) {
+    await client.query("COMMIT");
 
-    await client.query(
-      "ROLLBACK"
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    console.error("");
+    console.error(
+      "↩️ Transaktion wurde vollständig zurückgerollt."
     );
-
 
     throw error;
 
-
   } finally {
-
     client.release();
-
   }
 
 
-  console.log(
-    ""
-  );
+  /* ==================================================
+     SUCCESS
+  ================================================== */
 
-
+  console.log("");
   console.log(
     "=========================================="
   );
-
-
   console.log(
     " IMPORT ABGESCHLOSSEN"
   );
-
-
   console.log(
     "=========================================="
   );
-
 
   console.log(
     `✅ Neu importiert: ${inserted}`
   );
 
-
   console.log(
     `↩️ Bereits vorhanden: ${duplicates}`
   );
-
-
-  console.log(
-    `❌ Fehler: ${failed}`
-  );
-
 
   console.log(
     `💬 Gesamt erkannt: ${parsedMessages.length}`
   );
 
-
   console.log(
-    ""
+    `👤 Kontakt-ID: ${contact.id}`
   );
 
-
   console.log(
-    "Der Import kann später erneut ausgeführt werden."
+    "👤 Kontakt: Sandry"
   );
 
-
   console.log(
-    "Bereits vorhandene Nachrichten werden übersprungen."
+    `🔗 JID: ${contact.whatsapp_jid}`
   );
 
-
+  console.log("");
   console.log(
-    ""
+    "✅ Kein neuer Kontakt wurde angelegt."
   );
 
+  console.log(
+    "✅ Persona-Testkontakte wurden nicht verwendet."
+  );
+
+  console.log(
+    "✅ Der gleiche Export kann später erneut importiert werden."
+  );
+
+  console.log("");
 }
 
 
@@ -1782,58 +1090,35 @@ async function runImport() {
 ================================================== */
 
 try {
-
   await runImport();
-
 
   await pool.end();
 
+  process.exit(0);
 
-  process.exit(
-    0
-  );
-
-
-} catch (
-  error
-) {
-
-  console.error(
-    ""
-  );
-
-
+} catch (error) {
+  console.error("");
   console.error(
     "=========================================="
   );
-
-
   console.error(
     " IMPORT ABGEBROCHEN"
   );
-
-
   console.error(
     "=========================================="
   );
 
-
   console.error(
+    error?.stack ||
+    error?.message ||
     error
   );
 
-
   try {
-
     await pool.end();
-
   } catch {
     // nichts
   }
 
-
-  process.exit(
-    1
-  );
-
+  process.exit(1);
 }

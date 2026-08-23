@@ -1,38 +1,100 @@
 import crypto from "crypto";
 
-function getCookie(req, name) {
-  const cookieHeader = req.headers.cookie || "";
 
-  const cookies = cookieHeader
-    .split(";")
-    .map(cookie => cookie.trim());
+/* ==================================================
+   COOKIE
+================================================== */
 
-  for (const cookie of cookies) {
-    const separatorIndex = cookie.indexOf("=");
+function getCookie(
+  req,
+  name
+) {
 
-    if (separatorIndex === -1) {
+  const cookieHeader =
+    req.headers.cookie
+    ||
+    "";
+
+
+  const cookies =
+    cookieHeader
+      .split(";")
+      .map(
+        cookie =>
+          cookie.trim()
+      );
+
+
+  for (
+    const cookie
+    of cookies
+  ) {
+
+    const separatorIndex =
+      cookie.indexOf("=");
+
+
+    if (
+      separatorIndex
+      ===
+      -1
+    ) {
+
       continue;
+
     }
 
-    const key = cookie.slice(0, separatorIndex);
-    const value = cookie.slice(separatorIndex + 1);
 
-    if (key === name) {
+    const key =
+      cookie.slice(
+        0,
+        separatorIndex
+      );
+
+
+    const value =
+      cookie.slice(
+        separatorIndex + 1
+      );
+
+
+    if (
+      key === name
+    ) {
+
       return value;
+
     }
+
   }
 
+
   return null;
+
 }
 
 
-function validDashboardSession(req) {
-  const password =
-    process.env.DASHBOARD_PASSWORD;
+/* ==================================================
+   DASHBOARD SESSION
+================================================== */
 
-  if (!password) {
+function validDashboardSession(
+  req
+) {
+
+  const password =
+    process.env
+      .DASHBOARD_PASSWORD;
+
+
+  if (
+    !password
+  ) {
+
     return false;
+
   }
+
 
   const session =
     getCookie(
@@ -40,27 +102,46 @@ function validDashboardSession(req) {
       "marcel_dashboard_session"
     );
 
-  if (!session) {
+
+  if (
+    !session
+  ) {
+
     return false;
+
   }
+
 
   const parts =
     session.split(".");
 
-  if (parts.length !== 2) {
+
+  if (
+    parts.length !== 2
+  ) {
+
     return false;
+
   }
 
-  const [token, receivedSignature] =
+
+  const [
+    token,
+    receivedSignature
+  ] =
     parts;
+
 
   if (
     !token
     ||
     !receivedSignature
   ) {
+
     return false;
+
   }
+
 
   const expectedSignature =
     crypto
@@ -68,8 +149,13 @@ function validDashboardSession(req) {
         "sha256",
         password
       )
-      .update(token)
-      .digest("hex");
+      .update(
+        token
+      )
+      .digest(
+        "hex"
+      );
+
 
   const expectedBuffer =
     Buffer.from(
@@ -77,39 +163,119 @@ function validDashboardSession(req) {
       "utf8"
     );
 
+
   const receivedBuffer =
     Buffer.from(
       receivedSignature,
       "utf8"
     );
 
+
   if (
     expectedBuffer.length
     !==
     receivedBuffer.length
   ) {
+
     return false;
+
   }
+
 
   return crypto.timingSafeEqual(
     expectedBuffer,
     receivedBuffer
   );
+
 }
 
+
+/* ==================================================
+   NORMALIZE CONTACT ID
+================================================== */
+
+function normalizeContactId(
+  value
+) {
+
+  if (
+    Array.isArray(
+      value
+    )
+  ) {
+
+    value =
+      value[0];
+
+  }
+
+
+  if (
+    value === undefined
+    ||
+    value === null
+    ||
+    value === ""
+  ) {
+
+    return null;
+
+  }
+
+
+  const contactId =
+    Number(
+      value
+    );
+
+
+  if (
+    !Number.isInteger(
+      contactId
+    )
+    ||
+    contactId <= 0
+  ) {
+
+    return false;
+
+  }
+
+
+  return contactId;
+
+}
+
+
+/* ==================================================
+   HANDLER
+================================================== */
 
 export default async function handler(
   req,
   res
 ) {
 
-  if (req.method !== "GET") {
+  /* ==================================================
+     METHOD
+  ================================================== */
+
+  if (
+    req.method !== "GET"
+  ) {
+
+    res.setHeader(
+      "Allow",
+      "GET"
+    );
+
 
     return res
       .status(405)
       .json({
 
-        ok: false,
+        ok:
+          false,
 
         error:
           "Methode nicht erlaubt."
@@ -118,6 +284,10 @@ export default async function handler(
 
   }
 
+
+  /* ==================================================
+     LOGIN SESSION
+  ================================================== */
 
   if (
     !validDashboardSession(
@@ -129,7 +299,8 @@ export default async function handler(
       .status(401)
       .json({
 
-        ok: false,
+        ok:
+          false,
 
         error:
           "Nicht angemeldet."
@@ -138,6 +309,10 @@ export default async function handler(
 
   }
 
+
+  /* ==================================================
+     ENVIRONMENT
+  ================================================== */
 
   const railwayBackendUrl =
     String(
@@ -172,6 +347,7 @@ export default async function handler(
     console.error(
       "Dashboard API Konfiguration fehlt.",
       {
+
         hasRailwayBackendUrl:
           Boolean(
             railwayBackendUrl
@@ -181,6 +357,7 @@ export default async function handler(
           Boolean(
             dashboardApiSecret
           )
+
       }
     );
 
@@ -189,7 +366,8 @@ export default async function handler(
       .status(500)
       .json({
 
-        ok: false,
+        ok:
+          false,
 
         error:
           "Dashboard-Verbindung ist nicht konfiguriert."
@@ -199,11 +377,76 @@ export default async function handler(
   }
 
 
+  /* ==================================================
+     OPTIONAL CONTACT ID
+
+     Ohne ID:
+     /api/dashboard/contacts
+
+     Mit ID:
+     /api/dashboard/contacts?id=91
+  ================================================== */
+
+  const contactId =
+    normalizeContactId(
+      req.query?.id
+    );
+
+
+  if (
+    contactId === false
+  ) {
+
+    return res
+      .status(400)
+      .json({
+
+        ok:
+          false,
+
+        error:
+          "Ungültige Kontakt-ID."
+
+      });
+
+  }
+
+
+  /* ==================================================
+     RAILWAY TARGET
+  ================================================== */
+
+  const railwayPath =
+    contactId
+
+      ? (
+          "/dashboard-api/contacts/"
+          +
+          encodeURIComponent(
+            String(
+              contactId
+            )
+          )
+        )
+
+      : "/dashboard-api/contacts";
+
+
+  const railwayUrl =
+    railwayBackendUrl
+    +
+    railwayPath;
+
+
+  /* ==================================================
+     RAILWAY REQUEST
+  ================================================== */
+
   try {
 
     const railwayResponse =
       await fetch(
-        `${railwayBackendUrl}/dashboard-api/contacts`,
+        railwayUrl,
         {
 
           method:
@@ -217,7 +460,10 @@ export default async function handler(
             Accept:
               "application/json"
 
-          }
+          },
+
+          cache:
+            "no-store"
 
         }
       );
@@ -234,15 +480,24 @@ export default async function handler(
 
       data =
         rawText
+
           ? JSON.parse(
               rawText
             )
+
           : {};
 
     } catch {
 
       console.error(
-        "Railway lieferte keine gültige JSON-Antwort."
+        "Railway lieferte keine gültige JSON-Antwort.",
+        {
+          status:
+            railwayResponse.status,
+
+          path:
+            railwayPath
+        }
       );
 
 
@@ -250,7 +505,8 @@ export default async function handler(
         .status(502)
         .json({
 
-          ok: false,
+          ok:
+            false,
 
           error:
             "Ungültige Antwort vom Backend."
@@ -260,32 +516,130 @@ export default async function handler(
     }
 
 
+    /* ==================================================
+       RAILWAY ERRORS
+    ================================================== */
+
     if (
       !railwayResponse.ok
     ) {
 
       console.error(
         "Railway Dashboard API Fehler:",
-        railwayResponse.status,
-        data?.error
-        ||
-        "Unbekannter Fehler"
+        {
+          status:
+            railwayResponse.status,
+
+          path:
+            railwayPath,
+
+          error:
+            data?.error
+            ||
+            "Unbekannter Fehler"
+        }
       );
+
+
+      if (
+        railwayResponse.status
+        ===
+        400
+      ) {
+
+        return res
+          .status(400)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              data?.error
+              ||
+              "Ungültige Anfrage."
+
+          });
+
+      }
+
+
+      if (
+        railwayResponse.status
+        ===
+        404
+      ) {
+
+        return res
+          .status(404)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              data?.error
+              ||
+              "Kontakt nicht gefunden."
+
+          });
+
+      }
+
+
+      if (
+        railwayResponse.status
+        ===
+        401
+      ) {
+
+        return res
+          .status(502)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              "Dashboard-Backend konnte nicht autorisiert werden."
+
+          });
+
+      }
 
 
       return res
         .status(502)
         .json({
 
-          ok: false,
+          ok:
+            false,
 
           error:
-            "Backend konnte die Kontakte nicht liefern."
+            contactId
+
+              ? "Backend konnte den Kontakt nicht liefern."
+
+              : "Backend konnte die Kontakte nicht liefern."
 
         });
 
     }
 
+
+    /* ==================================================
+       RESPONSE HEADERS
+    ================================================== */
+
+    res.setHeader(
+      "Cache-Control",
+      "no-store, max-age=0"
+    );
+
+
+    /* ==================================================
+       SUCCESS
+    ================================================== */
 
     return res
       .status(200)
@@ -294,7 +648,9 @@ export default async function handler(
       );
 
 
-  } catch (error) {
+  } catch (
+    error
+  ) {
 
     console.error(
       "Verbindung zu Railway fehlgeschlagen:",
@@ -306,7 +662,8 @@ export default async function handler(
       .status(502)
       .json({
 
-        ok: false,
+        ok:
+          false,
 
         error:
           "Backend ist momentan nicht erreichbar."

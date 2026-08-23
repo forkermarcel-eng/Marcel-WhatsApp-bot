@@ -632,11 +632,6 @@
       background-position: right center;
     }
 
-    /*
-      Standard-Fade für My Story.
-      Links, oben und unten weich in Schwarz.
-    */
-
     .story-photo::before {
       content: "";
 
@@ -670,11 +665,6 @@
           #030403 100%
         );
     }
-
-    /*
-      Zusätzliche weiche Außen-Vignette.
-      Dadurch verschwindet die Rechteckwirkung.
-    */
 
     .story-photo::after {
       content: "";
@@ -1254,6 +1244,8 @@
 
     /* ==================================================
        SMALL LAPTOP / IPAD LANDSCAPE
+       NUR DIESER BEREICH BEKOMMT DEN NEUEN
+       ECHTEN MASKEN-FADE
     ================================================== */
 
     @media
@@ -1369,23 +1361,69 @@
           );
       }
 
-      .story-photo {
-        width: 66%;
+      /*
+        QUERFORMAT-FIX:
 
-        top: -18%;
-        bottom: -18%;
+        Das Foto wird größer als der sichtbare Story-Bereich.
+        Danach wird DIE BILDEBENE SELBST transparent ausgeblendet.
+
+        Dadurch kann keine harte obere, untere oder linke
+        Rechteckkante mehr sichtbar bleiben.
+      */
+
+      .story-photo {
+        width: 71%;
+
+        top: -30%;
+        bottom: -30%;
+        right: -1%;
 
         background-size:
           auto 100%;
 
         background-position:
           right 48%;
+
+        background-color:
+          transparent;
+
+        -webkit-mask-image:
+          radial-gradient(
+            ellipse 88% 76%
+            at 70% 50%,
+            #000 0%,
+            #000 43%,
+            rgba(0,0,0,0.97) 53%,
+            rgba(0,0,0,0.82) 64%,
+            rgba(0,0,0,0.54) 76%,
+            rgba(0,0,0,0.22) 88%,
+            transparent 100%
+          );
+
+        mask-image:
+          radial-gradient(
+            ellipse 88% 76%
+            at 70% 50%,
+            #000 0%,
+            #000 43%,
+            rgba(0,0,0,0.97) 53%,
+            rgba(0,0,0,0.82) 64%,
+            rgba(0,0,0,0.54) 76%,
+            rgba(0,0,0,0.22) 88%,
+            transparent 100%
+          );
+
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+
+        -webkit-mask-size: 100% 100%;
+        mask-size: 100% 100%;
       }
 
       /*
-        Querformat:
-        viel stärkerer oberer und unterer Fade.
-        Genau gegen die sichtbare rechteckige Kante.
+        Der normale dunkle Look bleibt,
+        aber die eigentliche Kante übernimmt jetzt
+        die Maske darüber.
       */
 
       .story-photo::before {
@@ -1393,39 +1431,36 @@
           linear-gradient(
             90deg,
             #030403 0%,
-            rgba(3,4,3,0.99) 8%,
-            rgba(3,4,3,0.94) 17%,
-            rgba(3,4,3,0.72) 31%,
-            rgba(3,4,3,0.36) 46%,
-            rgba(3,4,3,0.10) 64%,
-            transparent 81%
+            rgba(3,4,3,0.98) 7%,
+            rgba(3,4,3,0.91) 16%,
+            rgba(3,4,3,0.66) 30%,
+            rgba(3,4,3,0.28) 45%,
+            rgba(3,4,3,0.05) 63%,
+            transparent 79%
           ),
           linear-gradient(
             180deg,
-            #030403 0%,
-            rgba(3,4,3,0.90) 7%,
-            rgba(3,4,3,0.58) 15%,
-            rgba(3,4,3,0.22) 24%,
-            rgba(3,4,3,0.04) 33%,
-            transparent 42%,
-            transparent 68%,
-            rgba(3,4,3,0.07) 76%,
-            rgba(3,4,3,0.28) 84%,
-            rgba(3,4,3,0.70) 93%,
-            #030403 100%
+            rgba(3,4,3,0.74) 0%,
+            rgba(3,4,3,0.32) 13%,
+            rgba(3,4,3,0.08) 24%,
+            transparent 35%,
+            transparent 70%,
+            rgba(3,4,3,0.08) 81%,
+            rgba(3,4,3,0.36) 91%,
+            rgba(3,4,3,0.78) 100%
           );
       }
 
       .story-photo::after {
         background:
           radial-gradient(
-            ellipse at 66% 49%,
+            ellipse at 69% 50%,
             transparent 0%,
-            transparent 38%,
-            rgba(3,4,3,0.04) 54%,
-            rgba(3,4,3,0.18) 70%,
-            rgba(3,4,3,0.48) 87%,
-            rgba(3,4,3,0.88) 100%
+            transparent 50%,
+            rgba(3,4,3,0.04) 64%,
+            rgba(3,4,3,0.18) 78%,
+            rgba(3,4,3,0.48) 92%,
+            rgba(3,4,3,0.76) 100%
           );
       }
 
@@ -1508,6 +1543,7 @@
 
     /* ==================================================
        TABLET PORTRAIT
+       BLEIBT WIE BISHER
     ================================================== */
 
     @media (max-width: 900px) {
@@ -1986,6 +2022,7 @@
 
     /* ==================================================
        PHONE PORTRAIT
+       BLEIBT WIE BISHER
     ================================================== */
 
     @media (max-width: 480px) {
@@ -2170,6 +2207,7 @@
 
     /* ==================================================
        PHONE LANDSCAPE
+       AUCH HIER ECHTE MASKIERUNG
     ================================================== */
 
     @media
@@ -2228,45 +2266,82 @@
         padding-top: 30px;
       }
 
+      /*
+        PHONE LANDSCAPE:
+        Bildfläche bleibt vorhanden.
+        Jetzt aber echter transparenter Fade
+        an allen Außenkanten.
+      */
+
       .story-photo {
-        height: 290px;
+        height: 310px;
+
+        margin-top: -10px;
+        margin-bottom: -10px;
 
         background-size:
           auto 100%;
 
         background-position:
           center 48%;
-      }
 
-      /*
-        Smartphone Querformat:
-        derselbe weiche Look wie Hochkant.
-      */
+        background-color:
+          transparent;
+
+        -webkit-mask-image:
+          radial-gradient(
+            ellipse 89% 80%
+            at 50% 49%,
+            #000 0%,
+            #000 45%,
+            rgba(0,0,0,0.96) 56%,
+            rgba(0,0,0,0.76) 68%,
+            rgba(0,0,0,0.46) 80%,
+            rgba(0,0,0,0.18) 91%,
+            transparent 100%
+          );
+
+        mask-image:
+          radial-gradient(
+            ellipse 89% 80%
+            at 50% 49%,
+            #000 0%,
+            #000 45%,
+            rgba(0,0,0,0.96) 56%,
+            rgba(0,0,0,0.76) 68%,
+            rgba(0,0,0,0.46) 80%,
+            rgba(0,0,0,0.18) 91%,
+            transparent 100%
+          );
+
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+
+        -webkit-mask-size: 100% 100%;
+        mask-size: 100% 100%;
+      }
 
       .story-photo::before {
         background:
           linear-gradient(
             180deg,
-            #030403 0%,
-            rgba(3,4,3,0.91) 7%,
-            rgba(3,4,3,0.60) 15%,
-            rgba(3,4,3,0.25) 25%,
-            rgba(3,4,3,0.05) 35%,
-            transparent 44%,
-            transparent 67%,
-            rgba(3,4,3,0.08) 76%,
-            rgba(3,4,3,0.34) 85%,
-            rgba(3,4,3,0.74) 94%,
-            #030403 100%
+            rgba(3,4,3,0.72) 0%,
+            rgba(3,4,3,0.30) 13%,
+            rgba(3,4,3,0.07) 25%,
+            transparent 38%,
+            transparent 70%,
+            rgba(3,4,3,0.07) 81%,
+            rgba(3,4,3,0.33) 91%,
+            rgba(3,4,3,0.74) 100%
           ),
           linear-gradient(
             90deg,
-            rgba(3,4,3,0.32) 0%,
+            rgba(3,4,3,0.36) 0%,
             rgba(3,4,3,0.12) 15%,
-            transparent 29%,
-            transparent 74%,
-            rgba(3,4,3,0.10) 88%,
-            rgba(3,4,3,0.30) 100%
+            transparent 31%,
+            transparent 70%,
+            rgba(3,4,3,0.10) 86%,
+            rgba(3,4,3,0.34) 100%
           );
       }
 
@@ -2275,10 +2350,11 @@
           radial-gradient(
             ellipse at center,
             transparent 0%,
-            transparent 40%,
-            rgba(3,4,3,0.07) 58%,
-            rgba(3,4,3,0.28) 76%,
-            rgba(3,4,3,0.75) 100%
+            transparent 50%,
+            rgba(3,4,3,0.07) 66%,
+            rgba(3,4,3,0.24) 80%,
+            rgba(3,4,3,0.58) 94%,
+            rgba(3,4,3,0.78) 100%
           );
       }
     }

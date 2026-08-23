@@ -953,23 +953,15 @@ function languageCodeFromStoredValue(
       .toLowerCase();
 
 
-  if (
-    !language
-  ) {
-
+  if (!language) {
     return null;
-
   }
 
 
   if (
-    language.includes(
-      "span"
-    )
+    language.includes("span")
     ||
-    language.includes(
-      "españ"
-    )
+    language.includes("españ")
     ||
     language === "es"
     ||
@@ -982,13 +974,9 @@ function languageCodeFromStoredValue(
 
 
   if (
-    language.includes(
-      "german"
-    )
+    language.includes("german")
     ||
-    language.includes(
-      "deutsch"
-    )
+    language.includes("deutsch")
     ||
     language === "de"
     ||
@@ -1001,13 +989,9 @@ function languageCodeFromStoredValue(
 
 
   if (
-    language.includes(
-      "english"
-    )
+    language.includes("english")
     ||
-    language.includes(
-      "englisch"
-    )
+    language.includes("englisch")
     ||
     language === "en"
     ||
@@ -1035,58 +1019,28 @@ function detectLanguageFromText(
       .toLowerCase();
 
 
-  if (
-    !text
-  ) {
-
+  if (!text) {
     return null;
-
   }
 
 
-  let spanishScore =
-    0;
-
-  let germanScore =
-    0;
-
-  let englishScore =
-    0;
+  let spanishScore = 0;
+  let germanScore = 0;
+  let englishScore = 0;
 
 
-  if (
-    /[¿¡]/.test(
-      text
-    )
-  ) {
-
-    spanishScore +=
-      4;
-
+  if (/[¿¡]/.test(text)) {
+    spanishScore += 4;
   }
 
 
-  if (
-    /[ñáéíóúü]/i.test(
-      text
-    )
-  ) {
-
-    spanishScore +=
-      3;
-
+  if (/[ñáéíóúü]/i.test(text)) {
+    spanishScore += 3;
   }
 
 
-  if (
-    /[äöüß]/i.test(
-      text
-    )
-  ) {
-
-    germanScore +=
-      3;
-
+  if (/[äöüß]/i.test(text)) {
+    germanScore += 3;
   }
 
 
@@ -1207,52 +1161,24 @@ function detectLanguageFromText(
         /[^\p{L}\p{N}]+/gu,
         " "
       )
-      .split(
-        /\s+/
-      )
-      .filter(
-        Boolean
-      );
+      .split(/\s+/)
+      .filter(Boolean);
 
 
-  for (
-    const word
-    of words
-  ) {
+  for (const word of words) {
 
-    if (
-      spanishWords.includes(
-        word
-      )
-    ) {
-
-      spanishScore +=
-        1;
-
+    if (spanishWords.includes(word)) {
+      spanishScore += 1;
     }
 
 
-    if (
-      germanWords.includes(
-        word
-      )
-    ) {
-
-      germanScore +=
-        1;
-
+    if (germanWords.includes(word)) {
+      germanScore += 1;
     }
 
 
-    if (
-      englishWords.includes(
-        word
-      )
-    ) {
-
-      englishScore +=
-        1;
-
+    if (englishWords.includes(word)) {
+      englishScore += 1;
     }
 
   }
@@ -1260,44 +1186,26 @@ function detectLanguageFromText(
 
   const scores = [
     {
-      code:
-        "es",
-
-      score:
-        spanishScore
+      code: "es",
+      score: spanishScore
     },
-
     {
-      code:
-        "de",
-
-      score:
-        germanScore
+      code: "de",
+      score: germanScore
     },
-
     {
-      code:
-        "en",
-
-      score:
-        englishScore
+      code: "en",
+      score: englishScore
     }
   ]
     .sort(
-      (
-        a,
-        b
-      ) =>
-        b.score
-        -
-        a.score
+      (a, b) =>
+        b.score - a.score
     );
 
 
   if (
-    scores[0].score
-    <=
-    0
+    scores[0].score <= 0
   ) {
 
     return null;
@@ -1306,9 +1214,7 @@ function detectLanguageFromText(
 
 
   if (
-    scores[0].score
-    ===
-    scores[1].score
+    scores[0].score === scores[1].score
   ) {
 
     return null;
@@ -1325,21 +1231,13 @@ function languageNameFromCode(
   code
 ) {
 
-  if (
-    code === "es"
-  ) {
-
+  if (code === "es") {
     return "Spanish";
-
   }
 
 
-  if (
-    code === "de"
-  ) {
-
+  if (code === "de") {
     return "German";
-
   }
 
 
@@ -1359,47 +1257,26 @@ function languageFromCountry(
 
 
   const spanishCountries = [
-
     "colombia",
-
     "venezuela",
-
     "mexico",
-
     "argentina",
-
     "chile",
-
     "peru",
-
     "ecuador",
-
     "bolivia",
-
     "paraguay",
-
     "uruguay",
-
     "panama",
-
     "costa rica",
-
     "guatemala",
-
     "honduras",
-
     "el salvador",
-
     "nicaragua",
-
     "dominican republic",
-
     "republica dominicana",
-
     "spain",
-
     "espana"
-
   ];
 
 
@@ -1450,18 +1327,11 @@ function extractLanguageHintsFromObject(
   }
 
 
-  const hints =
-    [];
+  const hints = [];
+  const stack = [value];
 
 
-  const stack = [
-    value
-  ];
-
-
-  while (
-    stack.length
-  ) {
+  while (stack.length) {
 
     const current =
       stack.pop();
@@ -1495,9 +1365,7 @@ function extractLanguageHintsFromObject(
           typeof item === "object"
         ) {
 
-          stack.push(
-            item
-          );
+          stack.push(item);
 
         }
 
@@ -1605,12 +1473,8 @@ async function resolveReplyLanguage(
     );
 
 
-  if (
-    directLanguage
-  ) {
-
+  if (directLanguage) {
     return directLanguage;
-
   }
 
 
@@ -1643,12 +1507,8 @@ async function resolveReplyLanguage(
           );
 
 
-        if (
-          code
-        ) {
-
+        if (code) {
           return code;
-
         }
 
       }
@@ -1702,12 +1562,8 @@ async function resolveReplyLanguage(
             );
 
 
-          if (
-            code
-          ) {
-
+          if (code) {
             return code;
-
           }
 
         }
@@ -1735,18 +1591,12 @@ async function resolveReplyLanguage(
     );
 
 
-  if (
-    currentLanguage
-  ) {
-
+  if (currentLanguage) {
     return currentLanguage;
-
   }
 
 
-  if (
-    jid
-  ) {
+  if (jid) {
 
     try {
 
@@ -1764,16 +1614,12 @@ async function resolveReplyLanguage(
               ===
               "incoming"
           )
-          .slice(
-            -8
-          )
+          .slice(-8)
           .map(
             item =>
               item.message_text
           )
-          .join(
-            "\n"
-          );
+          .join("\n");
 
 
       const historyLanguage =
@@ -1782,12 +1628,8 @@ async function resolveReplyLanguage(
         );
 
 
-      if (
-        historyLanguage
-      ) {
-
+      if (historyLanguage) {
         return historyLanguage;
-
       }
 
 
@@ -1811,12 +1653,8 @@ async function resolveReplyLanguage(
     );
 
 
-  if (
-    countryLanguage
-  ) {
-
+  if (countryLanguage) {
     return countryLanguage;
-
   }
 
 
@@ -5498,7 +5336,7 @@ async function initDatabase() {
 
 
   console.log(
-    "PostgreSQL + Langzeit-Memory V1.7.2 + Progressive Disclosure + Frauen-Memory + Identity Registry + Sprachschutz bereit."
+    "PostgreSQL + Langzeit-Memory V1.7.2 + Progressive Disclosure + Frauen-Memory + Identity Registry + Sprachschutz + Dashboard Detail API bereit."
   );
 
 }
@@ -5514,75 +5352,53 @@ async function seedMarcelMemory() {
 
     [
       "identity",
-
       "age",
-
       {
         years: 41
       },
-
       4,
-
       "Nicht ungefragt mit Alter anfangen."
     ],
 
-
     [
       "identity",
-
       "birthday",
-
       {
         day: 7,
         month: "August",
         zodiac: "Leo"
       },
-
       2,
-
       "Nur natürlich verwenden."
     ],
 
-
     [
       "languages",
-
       "spoken_languages",
-
       {
         german: true,
         english: true,
         spanish: false
       },
-
       5,
-
       "Spanisch ist praktische Einschränkung."
     ],
 
-
     [
       "work",
-
       "self_employed",
-
       {
         self_employed: true,
         various_projects: true,
         location_flexible: true
       },
-
       3,
-
       "Aktuelle konkrete Tätigkeit niemals erfinden. Details nur natürlich preisgeben."
     ],
 
-
     [
       "family",
-
       "children",
-
       {
         count: 2,
 
@@ -5595,38 +5411,21 @@ async function seedMarcelMemory() {
           name: "Charlotte",
           age: 14
         }
-
       },
-
       5,
-
       "Know a lot, reveal naturally. Bei einfacher Frage zunächst nur zwei Kinder, einen Jungen und ein Mädchen nennen. Namen und Alter erst bei Nachfrage oder wenn später natürlich relevant."
     ],
 
-
     [
       "communication",
-
       "progressive_disclosure",
-
       {
-        know_a_lot_reveal_naturally:
-          true,
-
-        answer_only_asked_depth:
-          true,
-
-        do_not_dump_memory:
-          true,
-
-        answer_multiple_real_questions:
-          true,
-
-        check_woman_memory_before_followup_question:
-          true,
-
-        reveal_extra_details_only_if_asked_or_natural:
-          true,
+        know_a_lot_reveal_naturally: true,
+        answer_only_asked_depth: true,
+        do_not_dump_memory: true,
+        answer_multiple_real_questions: true,
+        check_woman_memory_before_followup_question: true,
+        reveal_extra_details_only_if_asked_or_natural: true,
 
         children_example: {
           first_level:
@@ -5639,18 +5438,13 @@ async function seedMarcelMemory() {
             "Namen Finn und Charlotte nur bei Nachfrage oder natürlichem Kontext."
         }
       },
-
       5,
-
       "Memory ist Hintergrundwissen, kein Lebenslauf. Persönliche Details stufenweise preisgeben und Rückfragen an bereits bekanntes Frauen-Memory anpassen."
     ],
 
-
     [
       "communication",
-
       "warmth_balance",
-
       {
         loving: true,
         cheeky: true,
@@ -5660,36 +5454,26 @@ async function seedMarcelMemory() {
         no_mechanical_question: true,
         avoid_trait_catalogues: true
       },
-
       5,
-
       "Menschlich schreiben."
     ],
 
-
     [
       "communication",
-
       "tinder_whatsapp_transition",
-
       {
         do_not_move_immediately: true,
         after_4_5_days_silence_short_busy_apology: true,
         translation_reason_valid: true,
         continue_history: true
       },
-
       5,
-
       "WhatsApp erst wenn Kommunikation läuft."
     ],
 
-
     [
       "nicknames",
-
       "romantic_address_style",
-
       {
         preferred: [
           "meine Schöne",
@@ -5703,40 +5487,28 @@ async function seedMarcelMemory() {
 
         avoid_artificial:
           true
-
       },
-
       5,
-
       "Keine künstlichen Spitznamen."
     ],
 
-
     [
       "communication",
-
       "emoji_style",
-
       {
         hearts_not_automatic:
           true,
 
         hearts_only_if_warmth_fits:
           true
-
       },
-
       4,
-
       "Freche Nachricht braucht kein Herz."
     ],
 
-
     [
       "lifestyle",
-
       "alcohol_and_smoking",
-
       {
         marcel_drinks_alcohol:
           false,
@@ -5746,36 +5518,25 @@ async function seedMarcelMemory() {
 
         partner_smoking_is_ok:
           true
-
       },
-
       4,
-
       "Nie behaupten Marcel trinkt."
     ],
 
-
     [
       "food_drinks",
-
       "favorite_food",
-
       {
         name:
           "German beef roulades"
       },
-
       2,
-
       "Natürlich verwenden."
     ],
 
-
     [
       "food_drinks",
-
       "favorite_drink",
-
       {
         name:
           "Spezi",
@@ -5783,18 +5544,13 @@ async function seedMarcelMemory() {
         explanation:
           "Cola-Orangen-Limonaden-Mix"
       },
-
       2,
-
       "Falls unbekannt kurz erklären."
     ],
 
-
     [
       "skills",
-
       "cooking",
-
       {
         likes_cooking:
           true,
@@ -5802,18 +5558,13 @@ async function seedMarcelMemory() {
         cooks_well:
           true
       },
-
       2,
-
       "Natürlich verwenden."
     ],
 
-
     [
       "personal_stories",
-
       "sister_burned_water",
-
       {
         sister_older_by_years:
           1.5,
@@ -5821,34 +5572,24 @@ async function seedMarcelMemory() {
         story:
           "Schwester hat einmal Wasser im Topf anbrennen lassen."
       },
-
       1,
-
       "Nur passend und nicht ungefragt erzählen."
     ],
 
-
     [
       "personal_stories",
-
       "fathers_car_at_14",
-
       {
         story:
           "Mit 14 Auto des Vaters genommen und von Polizei erwischt."
       },
-
       1,
-
       "Nur passend und nicht ungefragt erzählen."
     ],
 
-
     [
       "family",
-
       "parents_long_marriage",
-
       {
         parents_still_married:
           true,
@@ -5856,18 +5597,13 @@ async function seedMarcelMemory() {
         years_over:
           44
       },
-
       2,
-
       "Nur wenn relevant und nicht als Zusatzinformation anhängen."
     ],
 
-
     [
       "relationship_history",
-
       "longest_relationship",
-
       {
         years:
           14,
@@ -5875,18 +5611,13 @@ async function seedMarcelMemory() {
         partner:
           "mother_of_children"
       },
-
       3,
-
       "Nicht ungefragt. Nur passende Informationstiefe preisgeben."
     ],
 
-
     [
       "relationship_values",
-
       "partner_freedom",
-
       {
         partner_can_go_out_without_marcel:
           true,
@@ -5900,18 +5631,13 @@ async function seedMarcelMemory() {
         marcel_values_own_time:
           true
       },
-
       3,
-
       "Kontextabhängig."
     ],
 
-
     [
       "marriage_religion",
-
       "marriage_and_religion",
-
       {
         never_married:
           true,
@@ -5925,18 +5651,13 @@ async function seedMarcelMemory() {
         religion:
           "atheist"
       },
-
       3,
-
       "Nur wenn relevant. Nicht alle Teilinformationen auf einmal nennen."
     ],
 
-
     [
       "sexuality",
-
       "orientation_and_ffm",
-
       {
         orientation:
           "heterosexual",
@@ -5947,18 +5668,13 @@ async function seedMarcelMemory() {
         interested_in_male_third_party:
           false
       },
-
       5,
-
       "Nur bei offenem Sexualgespräch und nur in benötigter Tiefe."
     ],
 
-
     [
       "communication",
-
       "contact_style",
-
       {
         likes_frequent_contact:
           true,
@@ -5969,18 +5685,13 @@ async function seedMarcelMemory() {
         prolonged_silence_matters:
           true
       },
-
       4,
-
       "Viel Kontakt, nicht hinterherlaufen."
     ],
 
-
     [
       "housing",
-
       "arrival_housing_plan",
-
       {
         temporary_months:
           "1-2",
@@ -5993,9 +5704,7 @@ async function seedMarcelMemory() {
         permanent_plan:
           "Vor Ort feste Unterkunft in sicherer Gegend suchen."
       },
-
       4,
-
       "Keine konkrete Gegend erfinden. Detailtiefe an tatsächliche Frage anpassen."
     ]
 
@@ -6303,12 +6012,8 @@ async function findContactByIdentifier(
     );
 
 
-  if (
-    !normalized
-  ) {
-
+  if (!normalized) {
     return null;
-
   }
 
 
@@ -6423,9 +6128,7 @@ async function ensureWomanProfile(
   }
 
 
-  if (
-    !contact
-  ) {
+  if (!contact) {
 
     const result =
       await pool.query(
@@ -6719,9 +6422,7 @@ async function ensureWomanProfile(
   }
 
 
-  if (
-    phone
-  ) {
+  if (phone) {
 
     await addContactIdentifier({
 
@@ -7233,9 +6934,7 @@ async function ensureContact(
       : null;
 
 
-  if (
-    !contact
-  ) {
+  if (!contact) {
 
     contact =
       await findContactByIdentifier(
@@ -7246,9 +6945,7 @@ async function ensureContact(
   }
 
 
-  if (
-    !contact
-  ) {
+  if (!contact) {
 
     const direct =
       await pool.query(
@@ -7276,9 +6973,7 @@ async function ensureContact(
   }
 
 
-  if (
-    contact
-  ) {
+  if (contact) {
 
     if (
       phone
@@ -7438,9 +7133,7 @@ async function ensureContact(
     });
 
 
-    if (
-      phone
-    ) {
+    if (phone) {
 
       await addContactIdentifier({
 
@@ -7613,9 +7306,7 @@ async function ensureContact(
   });
 
 
-  if (
-    phone
-  ) {
+  if (phone) {
 
     await addContactIdentifier({
 
@@ -7675,6 +7366,37 @@ async function getContactByJid(
 }
 
 
+async function getContactById(
+  contactId
+) {
+
+  const result =
+    await pool.query(
+      `
+        SELECT *
+
+        FROM contacts
+
+        WHERE id =
+          $1
+
+        LIMIT 1
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  return (
+    result.rows[0]
+    ||
+    null
+  );
+
+}
+
+
 /* ==================================================
    TESTKONTAKT
 ================================================== */
@@ -7692,9 +7414,7 @@ async function createTestContact({
     );
 
 
-  if (
-    !cleanName
-  ) {
+  if (!cleanName) {
 
     throw new Error(
       "Testkontakt braucht einen Namen."
@@ -8017,12 +7737,8 @@ async function detectImmediateDuplicate(
     );
 
 
-  if (
-    !last
-  ) {
-
+  if (!last) {
     return null;
-
   }
 
 
@@ -8223,9 +7939,7 @@ async function getConversationHistory(
   let result;
 
 
-  if (
-    beforeMessageId
-  ) {
+  if (beforeMessageId) {
 
     result =
       await pool.query(
@@ -8303,6 +8017,114 @@ async function getConversationHistory(
 
 
   return result.rows.reverse();
+
+}
+
+
+/* ==================================================
+   DASHBOARD CHATVERLAUF
+   READ ONLY
+================================================== */
+
+async function getDashboardConversationHistory(
+  jid,
+  limit = 200
+) {
+
+  const safeLimit =
+    Math.max(
+      1,
+      Math.min(
+        500,
+        Number(limit) || 200
+      )
+    );
+
+
+  const result =
+    await pool.query(
+      `
+        SELECT
+
+          id,
+
+          direction,
+
+          message_text,
+
+          whatsapp_message_id,
+
+          is_edited,
+
+          edited_at,
+
+          original_message_text,
+
+          processing_status,
+
+          duplicate_of_message_id,
+
+          created_at
+
+        FROM messages
+
+        WHERE whatsapp_jid =
+          $1
+
+          AND message_text
+            IS NOT NULL
+
+        ORDER BY
+          id DESC
+
+        LIMIT $2
+      `,
+      [
+        jid,
+        safeLimit
+      ]
+    );
+
+
+  return result.rows
+    .reverse()
+    .map(
+      message => ({
+
+        id:
+          message.id,
+
+        direction:
+          message.direction,
+
+        text:
+          message.message_text,
+
+        whatsappMessageId:
+          message.whatsapp_message_id,
+
+        edited:
+          message.is_edited
+          ===
+          true,
+
+        editedAt:
+          message.edited_at,
+
+        originalText:
+          message.original_message_text,
+
+        processingStatus:
+          message.processing_status,
+
+        duplicateOfMessageId:
+          message.duplicate_of_message_id,
+
+        createdAt:
+          message.created_at
+
+      })
+    );
 
 }
 
@@ -8640,9 +8462,7 @@ function buildMemoryContext({
 
             }
           )
-          .join(
-            "\n"
-          )
+          .join("\n")
 
       : "[keine]";
 
@@ -8659,9 +8479,7 @@ function buildMemoryContext({
               +
               `|${renderJson(event.event_data)}`
           )
-          .join(
-            "\n"
-          )
+          .join("\n")
 
       : "[keine]";
 
@@ -8678,9 +8496,7 @@ function buildMemoryContext({
               +
               `|${memory.usage_notes || ""}`
           )
-          .join(
-            "\n"
-          )
+          .join("\n")
 
       : "[keine]";
 
@@ -8853,19 +8669,12 @@ async function generateAIReply(
   extraInstructions = ""
 ) {
 
-  let conversation =
-    "";
-
-  let memoryContext =
-    "";
-
-  let resolvedLanguage =
-    null;
+  let conversation = "";
+  let memoryContext = "";
+  let resolvedLanguage = null;
 
 
-  if (
-    jid
-  ) {
+  if (jid) {
 
     const contact =
       (
@@ -8921,9 +8730,7 @@ async function generateAIReply(
           item =>
             `${item.direction === "incoming" ? "Andere Person" : "Marcel"}: ${item.message_text}`
         )
-        .join(
-          "\n"
-        );
+        .join("\n");
 
 
     memoryContext =
@@ -9162,12 +8969,8 @@ async function retireMemoryItems(
     );
 
 
-  if (
-    !safeIds.length
-  ) {
-
+  if (!safeIds.length) {
     return;
-
   }
 
 
@@ -9358,12 +9161,8 @@ async function detectDeterministicContradiction(
     );
 
 
-  if (
-    !newSignal
-  ) {
-
+  if (!newSignal) {
     return null;
-
   }
 
 
@@ -9440,12 +9239,8 @@ async function detectDeterministicContradiction(
       );
 
 
-    if (
-      conflict
-    ) {
-
+    if (conflict) {
       return existing;
-
     }
 
   }
@@ -9637,9 +9432,7 @@ async function applyMemoryItems(
       );
 
 
-    if (
-      contradiction
-    ) {
+    if (contradiction) {
 
       await createContradictionEvent({
 
@@ -9745,9 +9538,7 @@ async function applyMemoryItems(
       null;
 
 
-    if (
-      existing
-    ) {
+    if (existing) {
 
       if (
         renderJson(
@@ -9988,12 +9779,8 @@ async function applyMemoryEvents(
       );
 
 
-    if (
-      !eventType
-    ) {
-
+    if (!eventType) {
       continue;
-
     }
 
 
@@ -10206,9 +9993,7 @@ async function extractMemoryUpdates({
               : item.memory_value
           )}`
       )
-      .join(
-        "\n"
-      );
+      .join("\n");
 
 
   const response =
@@ -10332,9 +10117,7 @@ ${history
     item =>
       `${item.direction === "incoming" ? "Sie" : "Marcel"}: ${item.message_text}`
   )
-  .join(
-    "\n"
-  )}
+  .join("\n")}
 
 
 ==================================================
@@ -10496,12 +10279,8 @@ async function getTestContactSnapshot(
     );
 
 
-  if (
-    !contact
-  ) {
-
+  if (!contact) {
     return null;
-
   }
 
 
@@ -10566,7 +10345,7 @@ async function getTestContactSnapshot(
 
 /* ==================================================
    DASHBOARD API AUTH
-   READ ONLY V0.1
+   READ ONLY V0.2
 ================================================== */
 
 function dashboardApiAuthorized(
@@ -10579,12 +10358,8 @@ function dashboardApiAuthorized(
     );
 
 
-  if (
-    !expectedSecret
-  ) {
-
+  if (!expectedSecret) {
     return false;
-
   }
 
 
@@ -10613,12 +10388,8 @@ function dashboardApiAuthorized(
     );
 
 
-  if (
-    !receivedSecret
-  ) {
-
+  if (!receivedSecret) {
     return false;
-
   }
 
 
@@ -10655,6 +10426,42 @@ function dashboardApiAuthorized(
 }
 
 
+function dashboardApiReady(
+  res
+) {
+
+  if (
+    !process.env.DASHBOARD_API_SECRET
+  ) {
+
+    console.error(
+      "DASHBOARD_API_SECRET fehlt in Railway."
+    );
+
+
+    res
+      .status(500)
+      .json({
+
+        ok:
+          false,
+
+        error:
+          "Dashboard-API ist nicht konfiguriert."
+
+      });
+
+
+    return false;
+
+  }
+
+
+  return true;
+
+}
+
+
 /* ==================================================
    DASHBOARD KONTAKTLISTE
    READ ONLY
@@ -10667,25 +10474,12 @@ app.get(
     try {
 
       if (
-        !process.env.DASHBOARD_API_SECRET
+        !dashboardApiReady(
+          res
+        )
       ) {
 
-        console.error(
-          "DASHBOARD_API_SECRET fehlt in Railway."
-        );
-
-
-        return res
-          .status(500)
-          .json({
-
-            ok:
-              false,
-
-            error:
-              "Dashboard-API ist nicht konfiguriert."
-
-          });
+        return;
 
       }
 
@@ -11108,6 +10902,632 @@ app.get(
 
 
 /* ==================================================
+   DASHBOARD EINZELKONTAKT
+   CHAT + PROFIL + MEMORY + EVENTS
+   READ ONLY V0.2
+================================================== */
+
+app.get(
+  "/dashboard-api/contacts/:id",
+  async (req, res) => {
+
+    try {
+
+      if (
+        !dashboardApiReady(
+          res
+        )
+      ) {
+
+        return;
+
+      }
+
+
+      if (
+        !dashboardApiAuthorized(
+          req
+        )
+      ) {
+
+        return res
+          .status(401)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              "Nicht autorisiert."
+
+          });
+
+      }
+
+
+      const contactId =
+        Number(
+          req.params.id
+        );
+
+
+      if (
+        !Number.isInteger(
+          contactId
+        )
+        ||
+        contactId <= 0
+      ) {
+
+        return res
+          .status(400)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              "Ungültige Kontakt-ID."
+
+          });
+
+      }
+
+
+      const contact =
+        await getContactById(
+          contactId
+        );
+
+
+      if (
+        !contact
+      ) {
+
+        return res
+          .status(404)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              "Kontakt nicht gefunden."
+
+          });
+
+      }
+
+
+      if (
+        isTestJid(
+          contact.whatsapp_jid
+        )
+      ) {
+
+        return res
+          .status(404)
+          .json({
+
+            ok:
+              false,
+
+            error:
+              "Kontakt nicht gefunden."
+
+          });
+
+      }
+
+
+      const [
+        messages,
+        profile,
+        activeItems,
+        historicalItems,
+        events
+      ] =
+        await Promise.all([
+
+          getDashboardConversationHistory(
+            contact.whatsapp_jid,
+            200
+          ),
+
+          getContactMemoryProfile(
+            contact.id
+          ),
+
+          getRelevantMemoryItems(
+            contact.id,
+            250
+          ),
+
+          getHistoricalMemoryItems(
+            contact.id,
+            250
+          ),
+
+          getAllMemoryEvents(
+            contact.id,
+            200
+          )
+
+        ]);
+
+
+      const cleanProfile =
+        profile
+
+          ? Object.fromEntries(
+              PROFILE_COLUMNS.map(
+                column => [
+                  column,
+                  profile[column] || {}
+                ]
+              )
+            )
+
+          : Object.fromEntries(
+              PROFILE_COLUMNS.map(
+                column => [
+                  column,
+                  {}
+                ]
+              )
+            );
+
+
+      const profileSummary =
+        cleanProfile.profile_summary
+        &&
+        typeof cleanProfile.profile_summary
+        ===
+        "object"
+
+          ? cleanProfile.profile_summary
+
+          : {};
+
+
+      const memoryStatus = {
+
+        active:
+          activeItems.length,
+
+        historical:
+          historicalItems.length,
+
+        events:
+          events.length,
+
+        reviewRequired:
+          events.filter(
+            event =>
+              event.marcel_review_required
+              ===
+              true
+              &&
+              [
+                "active",
+                "open"
+              ].includes(
+                event.event_status
+              )
+          ).length
+
+      };
+
+
+      const normalizedActiveItems =
+        activeItems.map(
+          item => ({
+
+            id:
+              item.id,
+
+            category:
+              item.category,
+
+            key:
+              item.memory_key,
+
+            value:
+              item.human_review_status
+              ===
+              "corrected"
+              &&
+              item.human_corrected_value
+
+                ? item.human_corrected_value
+
+                : item.memory_value,
+
+            originalValue:
+              item.memory_value,
+
+            memoryType:
+              item.memory_type,
+
+            confidence:
+              item.confidence == null
+                ? null
+                : Number(
+                    item.confidence
+                  ),
+
+            reviewStatus:
+              item.human_review_status,
+
+            humanCorrectedValue:
+              item.human_corrected_value,
+
+            humanNote:
+              item.human_note,
+
+            importance:
+              Number(
+                item.importance
+                ||
+                0
+              ),
+
+            sourceQuote:
+              item.source_quote,
+
+            validFrom:
+              item.valid_from,
+
+            validUntil:
+              item.valid_until,
+
+            useInReply:
+              item.use_in_reply
+              !==
+              false,
+
+            createdAt:
+              item.created_at,
+
+            updatedAt:
+              item.updated_at
+
+          })
+        );
+
+
+      const normalizedHistoricalItems =
+        historicalItems.map(
+          item => ({
+
+            id:
+              item.id,
+
+            category:
+              item.category,
+
+            key:
+              item.memory_key,
+
+            value:
+              item.human_review_status
+              ===
+              "corrected"
+              &&
+              item.human_corrected_value
+
+                ? item.human_corrected_value
+
+                : item.memory_value,
+
+            originalValue:
+              item.memory_value,
+
+            memoryType:
+              item.memory_type,
+
+            confidence:
+              item.confidence == null
+                ? null
+                : Number(
+                    item.confidence
+                  ),
+
+            status:
+              item.status,
+
+            reviewStatus:
+              item.human_review_status,
+
+            humanCorrectedValue:
+              item.human_corrected_value,
+
+            humanNote:
+              item.human_note,
+
+            importance:
+              Number(
+                item.importance
+                ||
+                0
+              ),
+
+            sourceQuote:
+              item.source_quote,
+
+            validFrom:
+              item.valid_from,
+
+            validUntil:
+              item.valid_until,
+
+            supersedesMemoryId:
+              item.supersedes_memory_id,
+
+            createdAt:
+              item.created_at,
+
+            updatedAt:
+              item.updated_at
+
+          })
+        );
+
+
+      const normalizedEvents =
+        events.map(
+          event => ({
+
+            id:
+              event.id,
+
+            type:
+              event.event_type,
+
+            subtype:
+              event.event_subtype,
+
+            title:
+              event.title,
+
+            data:
+              event.event_data,
+
+            status:
+              event.event_status,
+
+            importance:
+              Number(
+                event.importance
+                ||
+                0
+              ),
+
+            sensitivity:
+              event.sensitivity,
+
+            startedAt:
+              event.started_at,
+
+            endedAt:
+              event.ended_at,
+
+            evidenceSummary:
+              event.evidence_summary,
+
+            sourceMessageIds:
+              event.source_message_ids,
+
+            relatedMemoryItemIds:
+              event.related_memory_item_ids,
+
+            relatedEventId:
+              event.related_event_id,
+
+            requiresFollowUp:
+              event.requires_follow_up
+              ===
+              true,
+
+            followUpAfter:
+              event.follow_up_after,
+
+            followUpStatus:
+              event.follow_up_status,
+
+            botAction:
+              event.bot_action,
+
+            marcelReviewRequired:
+              event.marcel_review_required
+              ===
+              true,
+
+            createdAt:
+              event.created_at,
+
+            updatedAt:
+              event.updated_at
+
+          })
+        );
+
+
+      return res.json({
+
+        ok:
+          true,
+
+        readOnly:
+          true,
+
+        contact: {
+
+          id:
+            contact.id,
+
+          jid:
+            contact.whatsapp_jid,
+
+          phoneNumber:
+            contact.phone_number,
+
+          name:
+            contact.canonical_name
+            ||
+            contact.display_name
+            ||
+            contact.whatsapp_display_name
+            ||
+            "Unbekannter Kontakt",
+
+          displayName:
+            contact.display_name,
+
+          whatsappDisplayName:
+            contact.whatsapp_display_name,
+
+          nickname:
+            contact.nickname,
+
+          city:
+            contact.city,
+
+          country:
+            contact.country,
+
+          timezone:
+            contact.timezone,
+
+          language:
+            contact.primary_language,
+
+          sourcePlatform:
+            contact.source_platform,
+
+          sourceProfileName:
+            contact.source_profile_name,
+
+          currentPlatform:
+            contact.current_platform,
+
+          platformStatus:
+            contact.platform_status,
+
+          contactStatus:
+            contact.contact_status,
+
+          relationshipStage:
+            contact.relationship_stage,
+
+          autoReply:
+            contact.auto_reply_enabled
+            !==
+            false,
+
+          dateLock:
+            contact.date_lock_enabled
+            ===
+            true,
+
+          manualReviewRequired:
+            contact.manual_review_required
+            ===
+            true,
+
+          locationContext:
+            contact.location_context
+            ||
+            {},
+
+          relocationContext:
+            contact.relocation_context
+            ||
+            {},
+
+          identityKey:
+            contact.memory_identity_key,
+
+          identityLocked:
+            contact.identity_locked
+            ===
+            true,
+
+          profileOnly:
+            isProfileJid(
+              contact.whatsapp_jid
+            ),
+
+          firstContactAt:
+            contact.first_contact_at,
+
+          lastMessageAt:
+            contact.last_message_at,
+
+          createdAt:
+            contact.created_at,
+
+          updatedAt:
+            contact.updated_at,
+
+          age:
+            profileSummary.age
+            ??
+            null,
+
+          profession:
+            profileSummary.profession
+            ??
+            null
+
+        },
+
+        messages,
+
+        profile:
+          cleanProfile,
+
+        activeItems:
+          normalizedActiveItems,
+
+        historicalItems:
+          normalizedHistoricalItems,
+
+        events:
+          normalizedEvents,
+
+        memoryStatus
+
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "Dashboard Einzelkontakt Fehler:",
+        error
+      );
+
+
+      return res
+        .status(500)
+        .json({
+
+          ok:
+            false,
+
+          error:
+            "Dashboard-Kontakt konnte nicht geladen werden."
+
+        });
+
+    }
+
+  }
+);
+
+
+/* ==================================================
    STARTSEITE
 ================================================== */
 
@@ -11289,9 +11709,7 @@ app.get(
     }
 
 
-    if (
-      pairingCode
-    ) {
+    if (pairingCode) {
 
       return res.send(
         `Pairing Code: ${pairingCode}`
@@ -12667,9 +13085,7 @@ app.post(
         );
 
 
-      if (
-        !name
-      ) {
+      if (!name) {
 
         return res
           .status(400)
@@ -12800,9 +13216,7 @@ app.post(
         );
 
 
-      if (
-        !snapshot
-      ) {
+      if (!snapshot) {
 
         return res
           .status(404)
@@ -12904,9 +13318,7 @@ app.post(
       }
 
 
-      if (
-        !text
-      ) {
+      if (!text) {
 
         return res
           .status(400)
@@ -12926,9 +13338,7 @@ app.post(
         );
 
 
-      if (
-        !contact
-      ) {
+      if (!contact) {
 
         return res
           .status(404)
@@ -12949,9 +13359,7 @@ app.post(
         );
 
 
-      if (
-        duplicate
-      ) {
+      if (duplicate) {
 
         await saveMessage(
           jid,
@@ -13047,9 +13455,7 @@ app.post(
         );
 
 
-      if (
-        !reply
-      ) {
+      if (!reply) {
 
         return res
           .status(500)
@@ -13172,12 +13578,8 @@ async function handleIncomingTextMessage(
     );
 
 
-  if (
-    !text
-  ) {
-
+  if (!text) {
     return;
-
   }
 
 
@@ -13194,9 +13596,7 @@ async function handleIncomingTextMessage(
     );
 
 
-  if (
-    duplicate
-  ) {
+  if (duplicate) {
 
     await saveMessage(
       jid,
@@ -13291,12 +13691,8 @@ async function handleIncomingTextMessage(
     );
 
 
-  if (
-    !reply
-  ) {
-
+  if (!reply) {
     return;
-
   }
 
 
@@ -13386,12 +13782,8 @@ async function handleEditedMessageUpdate(
       );
 
 
-    if (
-      !text
-    ) {
-
+    if (!text) {
       return;
-
     }
 
 
@@ -13408,9 +13800,7 @@ async function handleEditedMessageUpdate(
       });
 
 
-    if (
-      updated
-    ) {
+    if (updated) {
 
       console.log(
         "WhatsApp-Nachricht bearbeitet:",
@@ -13613,9 +14003,7 @@ async function startWhatsApp() {
             .WHATSAPP_PHONE_NUMBER;
 
 
-        if (
-          phone
-        ) {
+        if (phone) {
 
           try {
 

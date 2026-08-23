@@ -661,10 +661,6 @@
 
     /* ==================================================
        CHAT BUBBLES
-
-       Inhalt bestimmt die Größe.
-       Kurzer Text = kleine Blase.
-       Langer Text = wächst nur bis Maximalbreite.
     ================================================== */
 
     .message-row {
@@ -1295,10 +1291,6 @@
 
 <div class="app">
 
-  <!-- ==================================================
-       SIDEBAR
-  ================================================== -->
-
   <aside class="sidebar">
 
     <div class="logo">
@@ -1421,10 +1413,6 @@
   </aside>
 
 
-  <!-- ==================================================
-       CONTACT LIST
-  ================================================== -->
-
   <section class="chat-list">
 
     <div class="chat-header">
@@ -1475,10 +1463,6 @@
 
   </section>
 
-
-  <!-- ==================================================
-       MAIN
-  ================================================== -->
 
   <main class="main">
 
@@ -1581,10 +1565,6 @@
 
   </main>
 
-
-  <!-- ==================================================
-       PROFILE
-  ================================================== -->
 
   <aside
     id="profilePanel"
@@ -2446,6 +2426,86 @@
   }
 
 
+  function hasStoredChat(
+    contact
+  ) {
+
+    if (!contact) {
+      return false;
+    }
+
+
+    const selectedMatches =
+      selectedDetail?.contact
+      &&
+      String(
+        selectedDetail.contact.id
+      )
+      ===
+      String(
+        contact.id
+      );
+
+
+    if (
+      selectedMatches
+      &&
+      Array.isArray(
+        selectedDetail?.messages
+      )
+      &&
+      selectedDetail.messages.length > 0
+    ) {
+
+      return true;
+
+    }
+
+
+    if (
+      lastMessageText(
+        contact
+      )
+    ) {
+
+      return true;
+
+    }
+
+
+    if (
+      lastMessageDate(
+        contact
+      )
+    ) {
+
+      return true;
+
+    }
+
+
+    return false;
+
+  }
+
+
+  function isMemoryProfileWithoutChat(
+    contact
+  ) {
+
+    return (
+      profileOnly(
+        contact
+      )
+      &&
+      !hasStoredChat(
+        contact
+      )
+    );
+
+  }
+
+
   function getProfileObject() {
 
     return (
@@ -3257,13 +3317,19 @@
               );
 
 
+            const hasChat =
+              hasStoredChat(
+                contact
+              );
+
+
             const preview =
               lastMessageText(
                 contact
               )
               ||
               (
-                profileOnly(
+                isMemoryProfileWithoutChat(
                   contact
                 )
                   ? "Profil-Memory · noch kein WhatsApp-Chat"
@@ -3349,12 +3415,22 @@
                   </span>
 
                   ${
-                    profileOnly(
+                    isMemoryProfileWithoutChat(
                       contact
                     )
                       ? `
                         <span class="badge blue-badge">
                           Profil
+                        </span>
+                      `
+                      : ""
+                  }
+
+                  ${
+                    hasChat
+                      ? `
+                        <span class="badge blue-badge">
+                          Chat
                         </span>
                       `
                       : ""
@@ -3562,7 +3638,24 @@
       name;
 
 
+    const hasChat =
+      hasStoredChat(
+        detailContact
+      );
+
+
     if (
+      hasChat
+    ) {
+
+      topbarStatus.textContent =
+        "● Chat aus PostgreSQL";
+
+
+      topbarStatus.className =
+        "online";
+
+    } else if (
       profileOnly(
         detailContact
       )
@@ -3578,11 +3671,11 @@
     } else {
 
       topbarStatus.textContent =
-        "● Chat aus PostgreSQL";
+        "● Kontakt gespeichert";
 
 
       topbarStatus.className =
-        "online";
+        "offline";
 
     }
 
@@ -3628,10 +3721,10 @@
           </strong>
 
           ${
-            profileOnly(
+            isMemoryProfileWithoutChat(
               detailContact
             )
-              ? "Für diesen Kontakt existiert aktuell ein Memory-Profil, aber noch kein echter WhatsApp-Chat."
+              ? "Für diesen Kontakt existiert aktuell ein Memory-Profil, aber noch kein gespeicherter Chat."
               : "Für diesen Kontakt sind aktuell noch keine Nachrichten in PostgreSQL gespeichert."
           }
 
@@ -3824,6 +3917,12 @@
       );
 
 
+    const hasChat =
+      hasStoredChat(
+        detailContact
+      );
+
+
     profileName.textContent =
       name;
 
@@ -3834,12 +3933,28 @@
       );
 
 
-    profileStatus.innerHTML =
+    if (
+      hasChat
+    ) {
+
+      profileStatus.innerHTML =
+        '<span class="status-dot">●</span> Chat gespeichert';
+
+    } else if (
       profileOnly(
         detailContact
       )
-        ? "● Memory-Profil"
-        : '<span class="status-dot">●</span> Kontakt gespeichert';
+    ) {
+
+      profileStatus.textContent =
+        "● Memory-Profil";
+
+    } else {
+
+      profileStatus.innerHTML =
+        '<span class="status-dot">●</span> Kontakt gespeichert';
+
+    }
 
 
     profileData.innerHTML = `
@@ -4074,13 +4189,28 @@
 
 
     if (
-      profileOnly(
+      isMemoryProfileWithoutChat(
         detailContact
       )
     ) {
 
       noteParts.push(
-        "Profil existiert aktuell als Memory-Profil."
+        "Profil existiert aktuell nur als Memory-Profil."
+      );
+
+    }
+
+
+    if (
+      profileOnly(
+        detailContact
+      )
+      &&
+      hasChat
+    ) {
+
+      noteParts.push(
+        "Historischer Chat wurde diesem bestehenden Kontaktprofil zugeordnet."
       );
 
     }
@@ -4143,6 +4273,14 @@
           );
 
 
+    const loadedMessages =
+      getLoadedMessageCount();
+
+
+    const totalMessages =
+      getTotalMessageCount();
+
+
     profileMemoryStatus.innerHTML = `
 
       ACTIVE:
@@ -4181,9 +4319,22 @@
 
       <br>
 
+      NACHRICHTEN GESAMT:
+      <b>
+        ${
+          totalMessages !== null
+            ? Number(
+                totalMessages
+              )
+            : "—"
+        }
+      </b>
+
+      <br>
+
       NACHRICHTEN GELADEN:
       <b>
-        ${getLoadedMessageCount()}
+        ${loadedMessages}
       </b>
 
     `;

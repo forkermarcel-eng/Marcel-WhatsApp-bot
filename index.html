@@ -1244,14 +1244,18 @@
 
     /* ==================================================
        SMALL LAPTOP / IPAD LANDSCAPE
-       NUR DIESER BEREICH BEKOMMT DEN NEUEN
-       ECHTEN MASKEN-FADE
+
+       WICHTIG:
+       Der Fix gilt ausschließlich im Querformat.
+       Hochkant wird von diesem Block nicht verändert.
     ================================================== */
 
     @media
     (min-width: 901px)
     and
-    (max-width: 1180px) {
+    (max-width: 1180px)
+    and
+    (orientation: landscape) {
 
       :root {
         --nav-height: 58px;
@@ -1362,68 +1366,83 @@
       }
 
       /*
-        QUERFORMAT-FIX:
+        QUERFORMAT – LINKER BILDRAND
 
-        Das Foto wird größer als der sichtbare Story-Bereich.
-        Danach wird DIE BILDEBENE SELBST transparent ausgeblendet.
+        Das Foto wird nicht mehr nur anhand seiner Höhe
+        skaliert. Es füllt jetzt die Fläche horizontal
+        vollständig und läuft sogar leicht über.
 
-        Dadurch kann keine harte obere, untere oder linke
-        Rechteckkante mehr sichtbar bleiben.
+        Dadurch liegt die echte linke Dateikante nicht mehr
+        sichtbar mitten im My-Story-Bereich.
       */
 
       .story-photo {
-        width: 71%;
+        width: 74%;
 
         top: -30%;
         bottom: -30%;
-        right: -1%;
-
-        background-size:
-          auto 100%;
-
-        background-position:
-          right 48%;
+        right: -2%;
 
         background-color:
           transparent;
 
+        background-size:
+          cover;
+
+        background-position:
+          center 48%;
+
+        /*
+          Nur die LINKE Seite wird ausgeblendet.
+          Oben und unten werden durch diese Maske
+          nicht transparent gemacht.
+        */
+
         -webkit-mask-image:
-          radial-gradient(
-            ellipse 88% 76%
-            at 70% 50%,
-            #000 0%,
-            #000 43%,
-            rgba(0,0,0,0.97) 53%,
-            rgba(0,0,0,0.82) 64%,
-            rgba(0,0,0,0.54) 76%,
-            rgba(0,0,0,0.22) 88%,
-            transparent 100%
+          linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(0,0,0,0.04) 8%,
+            rgba(0,0,0,0.14) 16%,
+            rgba(0,0,0,0.32) 24%,
+            rgba(0,0,0,0.56) 33%,
+            rgba(0,0,0,0.78) 42%,
+            rgba(0,0,0,0.94) 50%,
+            #000 58%,
+            #000 100%
           );
 
         mask-image:
-          radial-gradient(
-            ellipse 88% 76%
-            at 70% 50%,
-            #000 0%,
-            #000 43%,
-            rgba(0,0,0,0.97) 53%,
-            rgba(0,0,0,0.82) 64%,
-            rgba(0,0,0,0.54) 76%,
-            rgba(0,0,0,0.22) 88%,
-            transparent 100%
+          linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(0,0,0,0.04) 8%,
+            rgba(0,0,0,0.14) 16%,
+            rgba(0,0,0,0.32) 24%,
+            rgba(0,0,0,0.56) 33%,
+            rgba(0,0,0,0.78) 42%,
+            rgba(0,0,0,0.94) 50%,
+            #000 58%,
+            #000 100%
           );
 
-        -webkit-mask-repeat: no-repeat;
-        mask-repeat: no-repeat;
+        -webkit-mask-repeat:
+          no-repeat;
 
-        -webkit-mask-size: 100% 100%;
-        mask-size: 100% 100%;
+        mask-repeat:
+          no-repeat;
+
+        -webkit-mask-size:
+          100% 100%;
+
+        mask-size:
+          100% 100%;
       }
 
       /*
-        Der normale dunkle Look bleibt,
-        aber die eigentliche Kante übernimmt jetzt
-        die Maske darüber.
+        Schwarzer Übergang zusätzlich von links.
+        Hier liegt der Fokus bewusst nur auf der
+        senkrechten linken Kante.
       */
 
       .story-photo::before {
@@ -1431,12 +1450,14 @@
           linear-gradient(
             90deg,
             #030403 0%,
-            rgba(3,4,3,0.98) 7%,
-            rgba(3,4,3,0.91) 16%,
-            rgba(3,4,3,0.66) 30%,
-            rgba(3,4,3,0.28) 45%,
-            rgba(3,4,3,0.05) 63%,
-            transparent 79%
+            rgba(3,4,3,1) 12%,
+            rgba(3,4,3,0.98) 22%,
+            rgba(3,4,3,0.90) 32%,
+            rgba(3,4,3,0.72) 43%,
+            rgba(3,4,3,0.47) 54%,
+            rgba(3,4,3,0.23) 64%,
+            rgba(3,4,3,0.07) 73%,
+            transparent 82%
           ),
           linear-gradient(
             180deg,
@@ -1454,13 +1475,13 @@
       .story-photo::after {
         background:
           radial-gradient(
-            ellipse at 69% 50%,
+            ellipse at 72% 50%,
             transparent 0%,
-            transparent 50%,
-            rgba(3,4,3,0.04) 64%,
-            rgba(3,4,3,0.18) 78%,
-            rgba(3,4,3,0.48) 92%,
-            rgba(3,4,3,0.76) 100%
+            transparent 52%,
+            rgba(3,4,3,0.04) 66%,
+            rgba(3,4,3,0.16) 80%,
+            rgba(3,4,3,0.42) 94%,
+            rgba(3,4,3,0.70) 100%
           );
       }
 
@@ -2207,7 +2228,10 @@
 
     /* ==================================================
        PHONE LANDSCAPE
-       AUCH HIER ECHTE MASKIERUNG
+
+       Ebenfalls nur Querformat.
+       Auch hier wird die echte linke Bildkante
+       aus dem sichtbaren Bereich genommen.
     ================================================== */
 
     @media
@@ -2266,63 +2290,81 @@
         padding-top: 30px;
       }
 
-      /*
-        PHONE LANDSCAPE:
-        Bildfläche bleibt vorhanden.
-        Jetzt aber echter transparenter Fade
-        an allen Außenkanten.
-      */
-
       .story-photo {
         height: 310px;
 
         margin-top: -10px;
         margin-bottom: -10px;
 
+        background-color:
+          transparent;
+
+        /*
+          Im Handy-Querformat wird das Foto ebenfalls
+          über die komplette Fläche gezogen.
+        */
+
         background-size:
-          auto 100%;
+          cover;
 
         background-position:
           center 48%;
 
-        background-color:
-          transparent;
+        /*
+          Ausschließlich linker Fade.
+        */
 
         -webkit-mask-image:
-          radial-gradient(
-            ellipse 89% 80%
-            at 50% 49%,
-            #000 0%,
-            #000 45%,
-            rgba(0,0,0,0.96) 56%,
-            rgba(0,0,0,0.76) 68%,
-            rgba(0,0,0,0.46) 80%,
-            rgba(0,0,0,0.18) 91%,
-            transparent 100%
+          linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(0,0,0,0.08) 7%,
+            rgba(0,0,0,0.24) 14%,
+            rgba(0,0,0,0.48) 22%,
+            rgba(0,0,0,0.72) 30%,
+            rgba(0,0,0,0.90) 38%,
+            #000 46%,
+            #000 100%
           );
 
         mask-image:
-          radial-gradient(
-            ellipse 89% 80%
-            at 50% 49%,
-            #000 0%,
-            #000 45%,
-            rgba(0,0,0,0.96) 56%,
-            rgba(0,0,0,0.76) 68%,
-            rgba(0,0,0,0.46) 80%,
-            rgba(0,0,0,0.18) 91%,
-            transparent 100%
+          linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(0,0,0,0.08) 7%,
+            rgba(0,0,0,0.24) 14%,
+            rgba(0,0,0,0.48) 22%,
+            rgba(0,0,0,0.72) 30%,
+            rgba(0,0,0,0.90) 38%,
+            #000 46%,
+            #000 100%
           );
 
-        -webkit-mask-repeat: no-repeat;
-        mask-repeat: no-repeat;
+        -webkit-mask-repeat:
+          no-repeat;
 
-        -webkit-mask-size: 100% 100%;
-        mask-size: 100% 100%;
+        mask-repeat:
+          no-repeat;
+
+        -webkit-mask-size:
+          100% 100%;
+
+        mask-size:
+          100% 100%;
       }
 
       .story-photo::before {
         background:
+          linear-gradient(
+            90deg,
+            #030403 0%,
+            rgba(3,4,3,0.98) 10%,
+            rgba(3,4,3,0.88) 21%,
+            rgba(3,4,3,0.62) 33%,
+            rgba(3,4,3,0.31) 45%,
+            rgba(3,4,3,0.10) 57%,
+            transparent 69%
+          ),
           linear-gradient(
             180deg,
             rgba(3,4,3,0.72) 0%,
@@ -2333,28 +2375,18 @@
             rgba(3,4,3,0.07) 81%,
             rgba(3,4,3,0.33) 91%,
             rgba(3,4,3,0.74) 100%
-          ),
-          linear-gradient(
-            90deg,
-            rgba(3,4,3,0.36) 0%,
-            rgba(3,4,3,0.12) 15%,
-            transparent 31%,
-            transparent 70%,
-            rgba(3,4,3,0.10) 86%,
-            rgba(3,4,3,0.34) 100%
           );
       }
 
       .story-photo::after {
         background:
           radial-gradient(
-            ellipse at center,
+            ellipse at 62% 50%,
             transparent 0%,
-            transparent 50%,
-            rgba(3,4,3,0.07) 66%,
-            rgba(3,4,3,0.24) 80%,
-            rgba(3,4,3,0.58) 94%,
-            rgba(3,4,3,0.78) 100%
+            transparent 52%,
+            rgba(3,4,3,0.05) 68%,
+            rgba(3,4,3,0.20) 83%,
+            rgba(3,4,3,0.55) 100%
           );
       }
     }

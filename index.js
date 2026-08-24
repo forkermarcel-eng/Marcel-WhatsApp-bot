@@ -861,6 +861,94 @@ function extractEditedText(update) {
 }
 
 
+function isPlainObject(
+  value
+) {
+
+  return (
+    value
+    &&
+    typeof value === "object"
+    &&
+    !Array.isArray(
+      value
+    )
+  );
+
+}
+
+
+function mergeProfileObjects(
+  currentValue,
+  incomingValue
+) {
+
+  const current =
+    isPlainObject(
+      currentValue
+    )
+
+      ? currentValue
+
+      : {};
+
+
+  const incoming =
+    isPlainObject(
+      incomingValue
+    )
+
+      ? incomingValue
+
+      : {};
+
+
+  const merged = {
+    ...current
+  };
+
+
+  for (
+    const [
+      key,
+      value
+    ]
+    of Object.entries(
+      incoming
+    )
+  ) {
+
+    if (
+      isPlainObject(
+        value
+      )
+      &&
+      isPlainObject(
+        merged[key]
+      )
+    ) {
+
+      merged[key] =
+        mergeProfileObjects(
+          merged[key],
+          value
+        );
+
+    } else {
+
+      merged[key] =
+        value;
+
+    }
+
+  }
+
+
+  return merged;
+
+}
+
+
 /* ==================================================
    PROFILE COLUMNS
 ================================================== */
@@ -6720,17 +6808,39 @@ async function applyProfileSnapshot(
             : {};
 
 
-        if (
-          !humanSeed
-          &&
+        const currentColumn =
           current?.[column]
           &&
           typeof current[column]
           ===
           "object"
           &&
-          Object.keys(
+          !Array.isArray(
             current[column]
+          )
+
+            ? current[column]
+
+            : {};
+
+
+        if (
+          humanSeed
+        ) {
+
+          return JSON.stringify(
+            mergeProfileObjects(
+              currentColumn,
+              incoming
+            )
+          );
+
+        }
+
+
+        if (
+          Object.keys(
+            currentColumn
           ).length > 0
           &&
           Object.keys(
@@ -6739,7 +6849,7 @@ async function applyProfileSnapshot(
         ) {
 
           return JSON.stringify(
-            current[column]
+            currentColumn
           );
 
         }

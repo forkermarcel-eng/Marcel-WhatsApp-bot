@@ -30,74 +30,33 @@
 <script>
 
 const DASH_DE_LABELS={
- "age":"Alter","profession":"Beruf","birthday":"Geburtstag","birth_day":"Geburtstag","birth_month":"Geburtsmonat",
- "height":"Größe","height_centimeters":"Größe","centimeters":"Zentimeter","city":"Stadt","country":"Land",
- "language":"Sprache","current_job":"Aktuelle Arbeit","job":"Arbeit","work":"Arbeit","job_search":"Jobsuche",
- "job_interview":"Vorstellungsgespräch","mother":"Mutter","father":"Vater","son":"Sohn","daughter":"Tochter",
- "children":"Kinder","family":"Familie","health":"Gesundheit","neck_pain":"Nackenschmerzen",
- "attaches_quickly":"Bindet sich schnell","does_not_want_to_develop_false_hopes":"Möchte keine falschen Hoffnungen wecken",
- "responds_well_to_warmth_and_heart_emojis":"Reagiert positiv auf Wärme und Herz-Emojis",
- "seeks_life_partner":"Sucht eine langfristige Partnerschaft","sexual_tension":"Sexuelle Spannung",
- "sexual_openness":"Erotische Offenheit","kissing":"Küssen","oral_intimacy":"Orale Intimität",
- "communication":"Kommunikation","personality":"Persönlichkeit","relationship":"Beziehung & Gefühle",
- "sexuality_intimacy":"Nähe & Intimität","work_education":"Arbeit & Bildung","family_children":"Familie & Kinder",
- "goals_dreams":"Ziele & Pläne","shared_history":"Gemeinsame Geschichte","preferences":"Vorlieben",
- "religion_values":"Werte & Überzeugungen","living_situation":"Wohnen & Lebenssituation","open_threads":"Offene Themen",
- "plans":"Pläne","current_context":"Aktueller Kontext","profile_summary":"Kurzprofil","interests":"Interessen & Alltag",
- "importance":"Wichtigkeit","confirmed":"Bestätigt","review_open":"Prüfung offen"
+"age":"Alter","profession":"Beruf","occupation":"Beruf","birthday":"Geburtstag","birth_day":"Geburtstag","birth_month":"Geburtsmonat","birth_year":"Geburtsjahr","height":"Größe","height_centimeters":"Größe","centimeters":"Zentimeter","city":"Stadt","country":"Land","language":"Sprache","languages":"Sprachen","phone":"Telefon","phone_number":"Telefonnummer",
+"current_job":"Aktuelle Arbeit","job":"Arbeit","work":"Arbeit","job_search":"Jobsuche","seeking_job":"Jobsuche","job_interview":"Vorstellungsgespräch","education":"Ausbildung","study":"Studium","university":"Universität",
+"mother":"Mutter","father":"Vater","son":"Sohn","daughter":"Tochter","children":"Kinder","family":"Familie","health":"Gesundheit","neck_pain":"Nackenschmerzen","back_pain":"Rückenschmerzen",
+"attaches_quickly":"Bindet sich schnell","does_not_want_to_develop_false_hopes":"Möchte keine falschen Hoffnungen wecken","responds_well_to_warmth_and_heart_emojis":"Reagiert positiv auf Wärme und Herz-Emojis","seeks_life_partner":"Sucht eine langfristige Partnerschaft",
+"sexual_tension":"Sexuelle Spannung","sexual_openness":"Erotische Offenheit","kissing":"Küssen","oral_intimacy":"Orale Intimität","physical_touch":"Körperliche Nähe","extended_foreplay":"Längeres Vorspiel","values_passion":"Leidenschaft ist wichtig","wants_more_than_one_night":"Möchte mehr als nur eine Nacht","explicitly_confirmed_desire":"Sexuelles Verlangen ausdrücklich bestätigt",
+"communication":"Kommunikation","personality":"Persönlichkeit","relationship":"Beziehung & Gefühle","sexuality_intimacy":"Nähe & Intimität","work_education":"Arbeit & Bildung","family_children":"Familie & Kinder","goals_dreams":"Ziele & Pläne","shared_history":"Gemeinsame Geschichte","preferences":"Vorlieben","religion_values":"Werte & Überzeugungen","living_situation":"Wohnen & Lebenssituation","open_threads":"Offene Themen","plans":"Pläne","current_context":"Aktueller Kontext","profile_summary":"Kurzprofil","interests":"Interessen & Alltag","importance":"Wichtigkeit","confirmed":"Bestätigt","review_open":"Prüfung offen",
+"current_country":"Aktuelles Land","current_city":"Aktuelle Stadt","relocation_target_country":"Zielland des Umzugs","relocation_target_city":"Zielstadt des Umzugs","relocation_eta":"Geplanter Umzug","relocation_stage":"Umzugsstatus","as_of":"Stand","themes":"Themen","details":"Details","does_not_intend_to_stay":"Möchte dort nicht dauerhaft bleiben","strong_need_for_frequent_physical_touch_in_relationships":"Braucht in Beziehungen viel körperliche Nähe","likes_extended_foreplay":"Mag längeres Vorspiel","quit_job_for_partner":"Hat für eine Partnerin den Job aufgegeben"
 };
 const DASH_DE_PHRASES={
- "details unknown":"","age unknown":"","unknown":"",
- "yes":"Ja","no":"Nein","true":"Ja","false":"Nein",
- "attaches quickly":"Bindet sich schnell",
- "does not want to develop false hopes":"Möchte keine falschen Hoffnungen wecken",
- "responds well to warmth and heart emojis":"Reagiert positiv auf Wärme und Herz-Emojis",
- "she is afraid of losing marcel":"Sie hat Angst, Marcel zu verlieren",
- "afraid of losing marcel":"Hat Angst, Marcel zu verlieren",
- "seeks life partner":"Sucht eine langfristige Partnerschaft"
+"details unknown":"","age unknown":"","unknown":"","yes":"Ja","no":"Nein","true":"Ja","false":"Nein",
+"attaches quickly":"Bindet sich schnell","does not want to develop false hopes":"Möchte keine falschen Hoffnungen wecken","responds well to warmth and heart emojis":"Reagiert positiv auf Wärme und Herz-Emojis","she is afraid of losing marcel":"Sie hat Angst, Marcel zu verlieren","afraid of losing marcel":"Hat Angst, Marcel zu verlieren","seeks life partner":"Sucht eine langfristige Partnerschaft",
+"does not intend to stay":"Möchte dort nicht dauerhaft bleiben","wants more than one night":"Möchte mehr als nur eine Nacht","values passion":"Leidenschaft ist wichtig","likes extended foreplay":"Mag längeres Vorspiel","strong need for frequent physical touch in relationships":"Braucht in Beziehungen viel körperliche Nähe","quit job for partner":"Hat für eine Partnerin den Job aufgegeben","explicitly confirmed desire":"Sexuelles Verlangen ausdrücklich bestätigt",
+"current country":"Aktuelles Land","current city":"Aktuelle Stadt","relocation target country":"Zielland des Umzugs","relocation target city":"Zielstadt des Umzugs","relocation stage":"Umzugsstatus","shared history":"Gemeinsame Geschichte","job interview":"Vorstellungsgespräch","job search":"Jobsuche","current job":"Aktuelle Arbeit"
 };
-function humanDeLabel(value){
- const raw=String(value??"").trim();
- if(!raw)return "";
- const key=raw.toLowerCase().replace(/[^a-z0-9äöüß]+/g,"_").replace(/^_+|_+$/g,"");
- if(DASH_DE_LABELS[key])return DASH_DE_LABELS[key];
- return raw.replace(/[_-]+/g," ").replace(/\b\w/g,c=>c.toUpperCase())
-   .replace(/\bYes\b/g,"Ja").replace(/\bNo\b/g,"Nein").replace(/\bTrue\b/g,"Ja").replace(/\bFalse\b/g,"Nein")
-   .replace(/\bUnknown\b/g,"Unbekannt").replace(/\bDetails\b/g,"Details").replace(/\bCentimeters\b/g,"cm")
-   .replace(/\bDay\b/g,"Tag").replace(/\bMonth\b/g,"Monat").replace(/\bYear\b/g,"Jahr")
-   .replace(/\bCurrent\b/g,"Aktuell").replace(/\bJob\b/g,"Arbeit").replace(/\bWork\b/g,"Arbeit")
-   .replace(/\bMother\b/g,"Mutter").replace(/\bFather\b/g,"Vater").replace(/\bSon\b/g,"Sohn").replace(/\bDaughter\b/g,"Tochter");
-}
-function humanDeValue(value){
- if(value===true)return "Ja";
- if(value===false)return "Nein";
- if(value==null)return "";
- if(Array.isArray(value))return value.map(humanDeValue).filter(Boolean).join(" · ");
- if(typeof value==="object"){
-   const parts=Object.entries(value).map(([k,v])=>{
-     const hv=humanDeValue(v); if(!hv||/^(Unbekannt|Details Unbekannt)$/i.test(hv))return "";
-     return `${humanDeLabel(k)}: ${hv}`;
-   }).filter(Boolean);
-   return parts.join(" · ");
- }
- let s=String(value).trim();
- const direct=DASH_DE_PHRASES[s.toLowerCase()];
- if(direct!==undefined)return direct;
- if(!s||/^(unknown|details unknown|age unknown|null|undefined)$/i.test(s))return "";
- s=s.replace(/\bDetails Unknown\b/gi,"").replace(/\bAge Unknown\b/gi,"").replace(/\bUnknown\b/gi,"")
-    .replace(/\bYes\b/gi,"Ja").replace(/\bNo\b/gi,"Nein").replace(/\bTrue\b/gi,"Ja").replace(/\bFalse\b/gi,"Nein")
-    .replace(/\bCentimeters\b/gi,"cm").replace(/\bDay\b/gi,"Tag").replace(/\bMonth\b/gi,"Monat")
-    .replace(/\bMother\b/gi,"Mutter").replace(/\bFather\b/gi,"Vater").replace(/\bSon\b/gi,"Sohn").replace(/\bDaughter\b/gi,"Tochter")
-    .replace(/\bJob Interview\b/gi,"Vorstellungsgespräch").replace(/\bJob Search\b/gi,"Jobsuche")
-    .replace(/\bCurrent Job\b/gi,"Aktuelle Arbeit").replace(/\bShared History\b/gi,"Gemeinsame Geschichte");
- return s.replace(/\s{2,}/g," ").trim();
-}
-function memoryLabelDe(x){
- const raw=(x&&((x.label)||(x.memoryKey)||(x.memory_key)||(x.key)))||"";
- return humanDeLabel(raw);
-}
-function memoryValueDe(v){ return humanDeValue(v); }
-
+const DASH_DE_WORDS=[
+[/\\bAs Of\\b/gi,"Stand"],[/\\bCurrent Country\\b/gi,"Aktuelles Land"],[/\\bCurrent City\\b/gi,"Aktuelle Stadt"],[/\\bCurrent Job\\b/gi,"Aktuelle Arbeit"],[/\\bDoes Not Intend To Stay\\b/gi,"Möchte dort nicht dauerhaft bleiben"],[/\\bExplicitly Confirmed Desire\\b/gi,"Sexuelles Verlangen ausdrücklich bestätigt"],[/\\bAttaches Quickly\\b/gi,"Bindet sich schnell"],[/\\bThemes\\b/gi,"Themen"],[/\\bTheme\\b/gi,"Thema"],[/\\bDetails Unknown\\b/gi,""],[/\\bAge Unknown\\b/gi,""],[/\\bUnknown\\b/gi,""],
+[/\\bRelationship\\b/gi,"Beziehung"],[/\\bRelationships\\b/gi,"Beziehungen"],[/\\bPartner\\b/gi,"Partner"],[/\\bLove\\b/gi,"Liebe"],[/\\bAffection\\b/gi,"Zuneigung"],[/\\bDesire\\b/gi,"Verlangen"],[/\\bPassion\\b/gi,"Leidenschaft"],[/\\bSexual\\b/gi,"Sexuell"],[/\\bIntimacy\\b/gi,"Intimität"],[/\\bPhysical Touch\\b/gi,"Körperliche Nähe"],[/\\bTouch\\b/gi,"Berührung"],[/\\bKissing\\b/gi,"Küssen"],[/\\bKiss\\b/gi,"Kuss"],[/\\bOral\\b/gi,"Oral"],[/\\bForeplay\\b/gi,"Vorspiel"],[/\\bFlirt\\b/gi,"Flirt"],[/\\bFlirting\\b/gi,"Flirten"],
+[/\\bCommunication\\b/gi,"Kommunikation"],[/\\bMessages\\b/gi,"Nachrichten"],[/\\bMessage\\b/gi,"Nachricht"],[/\\bReply\\b/gi,"Antwort"],[/\\bWarmth\\b/gi,"Wärme"],[/\\bReassurance\\b/gi,"Bestätigung"],[/\\bSensitive\\b/gi,"Sensibel"],[/\\bFear\\b/gi,"Angst"],[/\\bSafety\\b/gi,"Sicherheit"],[/\\bBoundary\\b/gi,"Grenze"],[/\\bBoundaries\\b/gi,"Grenzen"],[/\\bRespect\\b/gi,"Respekt"],
+[/\\bWork\\b/gi,"Arbeit"],[/\\bJob Search\\b/gi,"Jobsuche"],[/\\bJob Interview\\b/gi,"Vorstellungsgespräch"],[/\\bJob\\b/gi,"Arbeit"],[/\\bEducation\\b/gi,"Ausbildung"],[/\\bStudy\\b/gi,"Studium"],[/\\bHealth\\b/gi,"Gesundheit"],[/\\bFamily\\b/gi,"Familie"],[/\\bMother\\b/gi,"Mutter"],[/\\bFather\\b/gi,"Vater"],[/\\bSon\\b/gi,"Sohn"],[/\\bDaughter\\b/gi,"Tochter"],[/\\bChildren\\b/gi,"Kinder"],[/\\bChild\\b/gi,"Kind"],
+[/\\bBirthday\\b/gi,"Geburtstag"],[/\\bHeight\\b/gi,"Größe"],[/\\bCentimeters\\b/gi,"cm"],[/\\bDay\\b/gi,"Tag"],[/\\bMonth\\b/gi,"Monat"],[/\\bYear\\b/gi,"Jahr"],[/\\bCurrent\\b/gi,"Aktuell"],[/\\bCountry\\b/gi,"Land"],[/\\bCity\\b/gi,"Stadt"],[/\\bLanguage\\b/gi,"Sprache"],[/\\bGoals\\b/gi,"Ziele"],[/\\bGoal\\b/gi,"Ziel"],[/\\bPlans\\b/gi,"Pläne"],[/\\bPlan\\b/gi,"Plan"],[/\\bFuture\\b/gi,"Zukunft"],[/\\bHistory\\b/gi,"Geschichte"],[/\\bShared\\b/gi,"Gemeinsam"],[/\\bInterests\\b/gi,"Interessen"],[/\\bPreferences\\b/gi,"Vorlieben"],[/\\bValues\\b/gi,"Werte"],[/\\bReligion\\b/gi,"Religion"],[/\\bYes\\b/gi,"Ja"],[/\\bNo\\b/gi,"Nein"],[/\\bTrue\\b/gi,"Ja"],[/\\bFalse\\b/gi,"Nein"]
+];
+function normKey(value){return String(value??"").trim().toLowerCase().replace(/[^a-z0-9äöüß]+/g,"_").replace(/^_+|_+$/g,"")}
+function humanDeLabel(value){const raw=String(value??"").trim();if(!raw)return "";const key=normKey(raw);if(DASH_DE_LABELS[key])return DASH_DE_LABELS[key];const direct=DASH_DE_PHRASES[raw.toLowerCase()];if(direct!==undefined)return direct;let s=raw.replace(/[_-]+/g," ");for(const [r,v] of DASH_DE_WORDS)s=s.replace(r,v);return s.replace(/\\s{2,}/g," ").trim().replace(/^./,c=>c.toUpperCase())}
+function humanDeValue(value){if(value===true)return "Ja";if(value===false)return "Nein";if(value==null)return "";if(Array.isArray(value))return value.map(humanDeValue).filter(Boolean).join(" · ");if(typeof value==="object"){return Object.entries(value).map(([k,v])=>{const hv=humanDeValue(v);if(!hv)return "";const hk=humanDeLabel(k);return hk?`${hk}: ${hv}`:hv}).filter(Boolean).join(" · ")}let s=String(value).trim();const direct=DASH_DE_PHRASES[s.toLowerCase()];if(direct!==undefined)return direct;if(!s||/^(unknown|details unknown|age unknown|null|undefined)$/i.test(s))return "";for(const [r,v] of DASH_DE_WORDS)s=s.replace(r,v);return s.replace(/[_]+/g," ").replace(/\\s{2,}/g," ").replace(/\\s+([,.;:])/g,"$1").trim()}
+function memoryLabelDe(x){const raw=(x&&((x.label)||(x.memoryKey)||(x.memory_key)||(x.key)))||"";return humanDeLabel(raw)}
+function memoryValueDe(v){return humanDeValue(v)}
+function categoryDe(v){return humanDeLabel(v)||"Allgemein"}
 (()=>{"use strict";let C=[],id=null,D=null,fileText="",senderChoices=[],importPreview=null,brainData=null,translationBusy=false;
 const detectedWhatsAppSenders=text=>{const lines=String(text||"").replace(/^\uFEFF/,"").replace(/\r\n?/g,"\n").split("\n"),patterns=[/^\[(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\]\s*([^:]+):\s?(.*)$/i,/^(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*([^:]+):\s?(.*)$/i],found=[];for(const line of lines){for(const p of patterns){const m=line.match(p);if(m){const s=String(m[3]||"").trim();if(s&&!found.includes(s))found.push(s);break}}}return found};
 const $=x=>document.getElementById(x),clean=x=>String(x??"").trim(),esc=x=>String(x??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"),name=c=>clean(c?.displayName)||clean(c?.name)||clean(c?.whatsappDisplayName)||"Unbekannter Kontakt",ld=c=>c?.lastMessage?.createdAt||c?.lastMessageAt||null,lt=c=>clean(c?.lastMessage?.text)||"",ts=v=>{const d=new Date(v);return isNaN(d)?0:d.getTime()},sort=a=>[...a].sort((x,y)=>ts(ld(y))-ts(ld(x))||name(x).localeCompare(name(y),"de")),sel=()=>C.find(c=>String(c.id)===String(id));
@@ -116,8 +75,8 @@ function memoryValue(v){if(v==null)return "—";if(typeof v==="string")return v;
 function memoryLabel(item){return clean(item?.key)||clean(item?.category)||"Fakt"}
 const profileLabels={age:"Alter",birthday:"Geburtstag",height:"Größe",profession:"Beruf",occupation:"Beruf",job:"Beruf",city:"Stadt",country:"Land",language:"Sprache",languages:"Sprachen",children:"Kinder",family:"Familie",work:"Arbeit",education:"Ausbildung",religion:"Religion",values:"Werte",interests:"Interessen",hobbies:"Hobbys",food:"Essen",music:"Musik",travel:"Reisen",goals:"Ziele",plans:"Pläne"};
 function titleCaseKey(k){return clean(k).replace(/_/g," ").replace(/\b\w/g,m=>m.toUpperCase())}
-function deKey(k){const x=clean(k).toLowerCase();if(profileLabels[x])return profileLabels[x];const rules=[[/(seeking|looking).*job/,"Jobsuche"],[/interview/,"Vorstellungsgespräch"],[/son/,"Sohn"],[/daughter/,"Tochter"],[/child|kid/,"Kinder"],[/warmth|heart.*emoji/,"Wärme & Zuneigung"],[/reply|communication|message/,"Kommunikation"],[/sensitive|anxious|anxiety/,"Sensibilität"],[/kiss/,"Küsse"],[/hair.*pull/,"Haare ziehen"],[/intimacy|sexual/,"Intimität"],[/oral/,"Orale Intimität"],[/touch|physical/,"Körperliche Nähe"],[/flirt/,"Flirt"],[/photo|video/,"Fotos / Videos"],[/move.*love|moved.*city/,"Für Liebe umgezogen"],[/work|job/,"Arbeit"],[/birthday/,"Geburtstag"],[/height/,"Größe"],[/religion|faith/,"Glaube"],[/family/,"Familie"]];for(const [r,v] of rules)if(r.test(x))return v;return titleCaseKey(k)}
-function deScalar(v){if(v===true||String(v).toLowerCase()==="true")return "Ja";if(v===false||String(v).toLowerCase()==="false")return "Nein";return clean(v)}
+function deKey(k){const translated=humanDeLabel(k);if(translated&&translated!==clean(k))return translated;const x=clean(k).toLowerCase();if(profileLabels[x])return profileLabels[x];const rules=[[/(seeking|looking).*job/,"Jobsuche"],[/interview/,"Vorstellungsgespräch"],[/son/,"Sohn"],[/daughter/,"Tochter"],[/child|kid/,"Kinder"],[/warmth|heart.*emoji/,"Wärme & Zuneigung"],[/reply|communication|message/,"Kommunikation"],[/sensitive|anxious|anxiety/,"Sensibilität"],[/kiss/,"Küsse"],[/hair.*pull/,"Haare ziehen"],[/intimacy|sexual/,"Intimität"],[/oral/,"Orale Intimität"],[/touch|physical/,"Körperliche Nähe"],[/flirt/,"Flirt"],[/photo|video/,"Fotos / Videos"],[/move.*love|moved.*city/,"Für Liebe umgezogen"],[/work|job/,"Arbeit"],[/birthday/,"Geburtstag"],[/height/,"Größe"],[/religion|faith/,"Glaube"],[/family/,"Familie"]];for(const [r,v] of rules)if(r.test(x))return v;return titleCaseKey(k)}
+function deScalar(v){return humanDeValue(v)}
 function flattenFacts(v,out=[],prefix=""){if(v==null)return out;if(Array.isArray(v)){v.forEach(x=>flattenFacts(x,out,prefix));return out}if(typeof v==="object"){Object.entries(v).forEach(([k,x])=>flattenFacts(x,out,k));return out}const val=deScalar(v);if(val&&val!=="Nein")out.push({key:prefix||"Info",label:deKey(prefix||"Info"),value:val});return out}
 function itemFacts(items=[]){const out=[];items.forEach(i=>flattenFacts(i?.value,out,i?.key||i?.category||"Info"));return out}
 function dedupeFacts(a){const seen=new Set;return a.filter(x=>{const k=(x.label+"|"+x.value).toLowerCase();if(seen.has(k))return false;seen.add(k);return true})}
@@ -152,7 +111,7 @@ document.addEventListener("change",e=>{if(e.target?.id==="marcelSenderSelect"||e
 
 $("profileBtn").onclick=()=>{renderFullProfile(D?.contact||sel()||{},(D?.profile&&typeof D.profile==="object")?D.profile:{});$("fullProfileModal").classList.add("open")};
 $("womanBrainBtn").onclick=()=>{renderWomanBrain();$("womanBrainModal").classList.add("open")};
-async function loadMarcelBrain(open=false){try{brainData=await api("/api/dashboard/marcel-brain");const n=+brainData.reviewRequired||0;$("brainBadge").textContent=n>99?"99+":n;$("brainBadge").classList.toggle("show",n>0);$("brainModalBadge").textContent=`${n} offen`;const ls=brainData.liveState||{},items=brainData.items||[];const live=`<div class="liveBox"><b>Aktueller Stand</b><br>Ort: ${esc([ls.current_city,ls.current_country].filter(Boolean).join(", ")||"—")}<br>Umzug: ${esc([ls.relocation_target_city,ls.relocation_target_country].filter(Boolean).join(", ")||"—")}${ls.relocation_eta?` · ${esc(ls.relocation_eta)}`:""}<br>Status: ${esc(ls.relocation_stage||"—")}</div>`;const cards=items.map(x=>`<div class="memoryCard ${x.humanVerified?"":"review"}"><h4>${x.humanVerified?"✅":"⚠️"} ${esc(memoryLabelDe(x))}</h4><div class="value">${esc(memoryValueDe(x.value))}</div><div class="sub">${esc(x.category||"Allgemein")} · Wichtigkeit ${+x.importance||0}${x.humanVerified?" · bestätigt":" · Prüfung offen"}</div></div>`).join("");$("marcelBrainContent").innerHTML=live+(cards?`<div class="brainGrid">${cards}</div>`:'<div class="emptyDark">Noch keine Informationen über Marcel gespeichert.</div>');if(open)$("marcelBrainModal").classList.add("open")}catch(e){if(open){$("marcelBrainContent").innerHTML=`<div class="result error">${esc(e.message)}</div>`;$("marcelBrainModal").classList.add("open")}}}
+async function loadMarcelBrain(open=false){try{brainData=await api("/api/dashboard/marcel-brain");const n=+brainData.reviewRequired||0;$("brainBadge").textContent=n>99?"99+":n;$("brainBadge").classList.toggle("show",n>0);$("brainModalBadge").textContent=`${n} offen`;const ls=brainData.liveState||{},items=brainData.items||[];const live=`<div class="liveBox"><b>Aktueller Stand</b><br>Ort: ${esc([ls.current_city,ls.current_country].filter(Boolean).join(", ")||"—")}<br>Umzug: ${esc([ls.relocation_target_city,ls.relocation_target_country].filter(Boolean).join(", ")||"—")}${ls.relocation_eta?` · ${esc(ls.relocation_eta)}`:""}<br>Status: ${esc(humanDeValue(ls.relocation_stage)||"—")}</div>`;const cards=items.map(x=>`<div class="memoryCard ${x.humanVerified?"":"review"}"><h4>${x.humanVerified?"✅":"⚠️"} ${esc(memoryLabelDe(x))}</h4><div class="value">${esc(memoryValueDe(x.value))}</div><div class="sub">${esc(categoryDe(x.category))} · Wichtigkeit ${+x.importance||0}${x.humanVerified?" · bestätigt":" · Prüfung offen"}</div></div>`).join("");$("marcelBrainContent").innerHTML=live+(cards?`<div class="brainGrid">${cards}</div>`:'<div class="emptyDark">Noch keine Informationen über Marcel gespeichert.</div>');if(open)$("marcelBrainModal").classList.add("open")}catch(e){if(open){$("marcelBrainContent").innerHTML=`<div class="result error">${esc(e.message)}</div>`;$("marcelBrainModal").classList.add("open")}}}
 $("marcelBrainBtn").onclick=()=>loadMarcelBrain(true);$("marcelBrainBtn").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();loadMarcelBrain(true)}};
 loadMarcelBrain(false);load().catch(e=>$("messages").innerHTML=`<div class="empty">${esc(e.message)}</div>`);})();
 </script></body></html>

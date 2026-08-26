@@ -8515,6 +8515,131 @@ try {
  
  
 /* ==================================================
+ DASHBOARD KONTAKT ANLEGEN V1
+================================================== */
+app.post("/dashboard-api/contacts", async (req, res) => {
+ try {
+   if (!dashboardApiReady(res)) return;
+ 
+   if (!dashboardApiAuthorized(req)) {
+     return res.status(401).json({
+       ok: false,
+       error: "Nicht autorisiert."
+     });
+   }
+ 
+   const name = normalizeText(req.body?.name);
+   const phone =
+     String(req.body?.phoneNumber || "").replace(/\D/g, "") || null;
+   const country = normalizeText(req.body?.country) || null;
+   const city = normalizeText(req.body?.city) || null;
+   const language = normalizeText(req.body?.language) || null;
+ 
+   if (!name) {
+     return res.status(400).json({
+       ok: false,
+       error: "Bitte einen Namen eingeben."
+     });
+   }
+ 
+   if (phone) {
+     const existingByPhone =
+       await findContactByIdentifier("phone", phone);
+ 
+     if (existingByPhone) {
+       return res.status(409).json({
+         ok: false,
+         error: "Diese WhatsApp-Nummer ist bereits einem Kontakt zugeordnet.",
+         contactId: existingByPhone.id
+       });
+     }
+   }
+ 
+   const manualJid =
+     `manual-${Date.now()}-${crypto.randomBytes(3).toString("hex")}@memory.local`;
+ 
+   const result = await pool.query(
+     `INSERT INTO contacts (
+       whatsapp_jid,
+       display_name,
+       canonical_name,
+       phone_number,
+       country,
+       city,
+       primary_language,
+       source_platform,
+       current_platform,
+       platform_status,
+       contact_status,
+       relationship_stage,
+       auto_reply_enabled,
+       date_lock_enabled,
+       first_contact_at,
+       updated_at
+     ) VALUES (
+       $1,$2,$2,$3,$4,$5,$6,
+       'dashboard',
+       CASE WHEN $3::text IS NULL THEN NULL ELSE 'whatsapp' END,
+       CASE WHEN $3::text IS NULL THEN NULL ELSE 'WHATSAPP_PENDING' END,
+       'active','new',TRUE,FALSE,NOW(),NOW()
+     )
+     RETURNING *`,
+     [manualJid, name, phone, country, city, language]
+   );
+ 
+   const contact = result.rows[0];
+ 
+   await pool.query(
+     `INSERT INTO contact_memory_profiles (contact_id)
+      VALUES ($1)
+      ON CONFLICT (contact_id) DO NOTHING`,
+     [contact.id]
+   );
+ 
+   await addContactIdentifier({
+     contactId: contact.id,
+     type: "canonical_name",
+     value: name,
+     isPrimary: true
+   });
+ 
+   if (phone) {
+     await addContactIdentifier({
+       contactId: contact.id,
+       type: "phone",
+       value: phone,
+       sourcePlatform: "whatsapp",
+       isPrimary: true
+     });
+   }
+ 
+   return res.status(201).json({
+     ok: true,
+     contact: {
+       id: contact.id,
+       jid: contact.whatsapp_jid,
+       name: contact.display_name || contact.canonical_name,
+       displayName: contact.display_name,
+       phoneNumber: contact.phone_number,
+       country: contact.country,
+       city: contact.city,
+       language: contact.primary_language,
+       profileOnly: true,
+       lastMessageAt: contact.last_message_at || null
+     }
+   });
+ } catch (error) {
+   console.error("Dashboard Kontakt anlegen Fehler:", error);
+ 
+   return res.status(500).json({
+     ok: false,
+     error: error?.message || "Kontakt konnte nicht angelegt werden."
+   });
+ }
+});
+ 
+ 
+/* ==================================================
  MEMORY ITEMS
 ================================================== */
  

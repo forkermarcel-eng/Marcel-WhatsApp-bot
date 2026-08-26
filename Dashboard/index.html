@@ -6,7 +6,7 @@
 </style></head><body>
 <div class="app"><aside class="side"><div class="logo">👑 Marcel <b>AI</b></div><button class="primary" id="add">＋ Kontakt hinzufügen</button><div class="nav"><div>⌂ Übersicht</div><div>💬 Chats</div><div>📅 Dates</div><div>👤 Kontakte</div><div>🖼 Medien</div><div>📊 Analyse</div><div>⚙ Einstellungen</div></div></aside>
 <section class="list"><div class="head"><div class="headrow"><h3>Alle Chats</h3><small id="count">Lädt …</small></div><input id="search" class="search" placeholder="🔍 Suchen"></div><div id="contacts"></div></section>
-<main class="main"><div class="top"><div><div class="topname" id="topname">—</div><div class="status" id="status">● Kein Kontakt</div><small id="msgcount" style="color:#c9d0d5"></small></div><div class="actions"><button id="profileBtn">Profil</button><button id="importBtn" class="import">WhatsApp importieren</button><button>Auto</button></div></div><div class="messages" id="messages"><div class="empty">Kontakte werden geladen …</div></div></main>
+<main class="main"><div class="top"><div><div class="topname" id="topname">—</div><div class="status" id="status">● Kein Kontakt</div><small id="msgcount" style="color:#c9d0d5"></small></div><div class="actions"><button id="profileBtn">Profil</button><button id="importBtn" class="import">WhatsApp importieren</button><button id="cleanupBtn">🧹 Duplikate prüfen</button><button>Auto</button></div></div><div class="messages" id="messages"><div class="empty">Kontakte werden geladen …</div></div></main>
 <aside class="profile" id="profile">
 <div class="section"><h2 id="pname">—</h2><p id="pdata">Kein Kontakt</p></div>
 <div class="section"><h3>👤 Über sie</h3><p id="about">—</p></div>
@@ -18,8 +18,19 @@
 </aside></div>
 <div class="modalbg" id="addModal"><div class="modal"><h2>Kontakt hinzufügen</h2><p>WhatsApp-Nummer ist optional. Danach kannst du direkt den Chat importieren.</p><div class="field"><label>Name *</label><input id="n"></div><div class="field"><label>WhatsApp-Nummer</label><input id="phone"></div><div class="field"><label>Stadt</label><input id="city"></div><div class="field"><label>Land</label><input id="country"></div><div class="field"><label>Sprache</label><input id="language"></div><div id="addResult"></div><div class="buttons"><button class="cancel" data-close="addModal">Abbrechen</button><button class="ok" id="save">Kontakt anlegen</button></div></div></div>
 <div class="modalbg" id="importModal"><div class="modal"><h2>WhatsApp-Chat importieren</h2><p id="importInfo"></p><div class="field"><label>WhatsApp-Export (.txt, ohne Medien)</label><input id="file" type="file" accept=".txt,text/plain"></div><div id="preview"></div><div id="senderConfirm" style="display:none;margin-top:10px"></div><div id="importResult"></div><div class="buttons"><button class="cancel" data-close="importModal">Abbrechen</button><button class="ok" id="doImport" disabled>Import bestätigen</button></div></div></div>
+ 
+<div class="modalbg" id="cleanupModal"><div class="modal">
+<h2>🧹 WhatsApp-Dubletten prüfen</h2>
+<p id="cleanupInfo"></p>
+<div class="field"><label>WhatsApp-Export (.txt, ohne Medien)</label><input id="cleanupFile" type="file" accept=".txt,text/plain"></div>
+<div id="cleanupFileResult"></div>
+<div id="cleanupSenderConfirm" style="display:none;margin-top:10px"></div>
+<div id="cleanupResult"></div>
+<div class="buttons"><button class="cancel" data-close="cleanupModal">Abbrechen</button><button class="ok" id="doCleanup" disabled>Nur prüfen</button></div>
+</div></div>
+ 
 <script>
-(()=>{"use strict";let C=[],id=null,D=null,fileText="",senderChoices=[],importPreview=null;
+(()=>{"use strict";let C=[],id=null,D=null,fileText="",senderChoices=[],importPreview=null,cleanupText="",cleanupSenders=[],cleanupPreview=null;
 const detectedWhatsAppSenders=text=>{const lines=String(text||"").replace(/^\uFEFF/,"").replace(/\r\n?/g,"\n").split("\n"),patterns=[/^\[(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\]\s*([^:]+):\s?(.*)$/i,/^(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*([^:]+):\s?(.*)$/i],found=[];for(const line of lines){for(const p of patterns){const m=line.match(p);if(m){const s=String(m[3]||"").trim();if(s&&!found.includes(s))found.push(s);break}}}return found};
 const $=x=>document.getElementById(x),clean=x=>String(x??"").trim(),esc=x=>String(x??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"),name=c=>clean(c?.displayName)||clean(c?.name)||clean(c?.whatsappDisplayName)||"Unbekannter Kontakt",ld=c=>c?.lastMessage?.createdAt||c?.lastMessageAt||null,lt=c=>clean(c?.lastMessage?.text)||"",ts=v=>{const d=new Date(v);return isNaN(d)?0:d.getTime()},sort=a=>[...a].sort((x,y)=>ts(ld(y))-ts(ld(x))||name(x).localeCompare(name(y),"de")),sel=()=>C.find(c=>String(c.id)===String(id));
 async function api(u,o={}){const r=await fetch(u,{credentials:"same-origin",cache:"no-store",headers:{"Accept":"application/json",...(o.body?{"Content-Type":"application/json"}:{})},...o});if(r.status===401){location.href="/login.html";throw Error("Sitzung abgelaufen.")}const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch{throw Error("Ungültige API-Antwort.")}if(!r.ok)throw Error(d.error||`API-Fehler ${r.status}`);return d}
@@ -56,5 +67,71 @@ async function watchMemoryJob(jobId,contactId,importSummary){
 $("doImport").onclick=async()=>{try{const c=sel(),ms=$("marcelSenderSelect")?.value||"",cs=$("contactSenderSelect")?.value||"";if(!ms||!cs||ms===cs){$("importResult").innerHTML='<div class="result error">Bitte Marcel und den Kontakt eindeutig als zwei verschiedene Absender auswählen.</div>';return}const payload={contactId:Number(c.id),chatText:fileText,marcelSenderNames:["Marcel","Marcel Marlow"],senderMapping:{marcelSender:ms,contactSender:cs}};if(!importPreview||importPreview.ms!==ms||importPreview.cs!==cs){$("doImport").disabled=true;$("doImport").textContent="Prüfung läuft …";$("importResult").innerHTML='<div class="progressbox"><span class="spin"></span><b>Nur Prüfung – es wird noch NICHTS gespeichert …</b></div>';const d=await api("/api/dashboard/import-whatsapp",{method:"POST",body:JSON.stringify({...payload,action:"preview"})});const n=+d.newMessages||0,du=+d.duplicates||0,pa=+d.parsed||0;importPreview={ms,cs,newMessages:n,duplicates:du,parsed:pa};$("importResult").innerHTML=`<div class="result"><b>🔍 Import-Prüfung abgeschlossen</b><br><br>${pa} Nachrichten erkannt<br>♻️ <b>${du}</b> bereits vorhanden<br>🆕 <b>${n}</b> würden neu importiert<br><br><b>Bis jetzt wurde NICHTS gespeichert.</b><br><br>⚠️ Möchtest du wirklich ${n} neue Nachrichten importieren und danach das Memory aktualisieren?</div>`;$("doImport").disabled=false;$("doImport").textContent=n?`${n} Nachrichten jetzt importieren`:"Keine neuen Nachrichten";if(!n)$("doImport").disabled=true;return}$("doImport").disabled=true;$("doImport").textContent="Jetzt wird importiert …";$("importResult").innerHTML='<div class="progressbox"><span class="spin"></span><b>Bestätigt – neue Nachrichten werden jetzt gespeichert …</b></div>';const d=await api("/api/dashboard/import-whatsapp",{method:"POST",body:JSON.stringify({...payload,action:"import"})});const summary=`${+d.parsed||0} erkannt · ${+d.duplicates||0} bereits vorhanden · ${+d.imported||0} neu importiert`;importPreview=null;await load(c.id);if(d.memoryBackfill?.jobId){$("importResult").innerHTML=`<div class="result"><b>✓ Nachrichtenimport abgeschlossen</b><br>${summary}</div><div class="progressbox"><span class="spin"></span><b>Memory-Analyse startet …</b></div>`;await watchMemoryJob(d.memoryBackfill.jobId,c.id,summary)}else{$("importResult").innerHTML=`<div class="result"><b>✓ Fertig</b><br>${summary}<br><br>Kein Memory-Backfill notwendig.</div>`;$("doImport").disabled=false;$("doImport").textContent="Fertig"}}catch(e){$("importResult").innerHTML=`<div class="result error">${esc(e.message)}</div>`;$("doImport").disabled=false;$("doImport").textContent="Erneut prüfen";importPreview=null}};
  
 document.addEventListener("change",e=>{if(e.target?.id==="marcelSenderSelect"||e.target?.id==="contactSenderSelect"){importPreview=null;$("doImport").textContent="Zuordnung prüfen";$("importResult").innerHTML=""}});
+ 
+function openCleanup(){
+const c=sel();if(!c)return;
+$("cleanupInfo").innerHTML=`Ausgewählter Kontakt: <b>${esc(name(c))}</b><br>Der Export wird ausschließlich benutzt, um sichere Dubletten in den bereits gespeicherten Nachrichten zu finden. <b>Die Prüfung löscht nichts.</b>`;
+$("cleanupFile").value="";cleanupText="";cleanupSenders=[];cleanupPreview=null;
+$("cleanupFileResult").innerHTML="";$("cleanupSenderConfirm").innerHTML="";$("cleanupSenderConfirm").style.display="none";
+$("cleanupResult").innerHTML="";$("doCleanup").disabled=true;$("doCleanup").textContent="Nur prüfen";
+$("cleanupModal").classList.add("open");
+}
+$("cleanupBtn").onclick=openCleanup;
+ 
+$("cleanupFile").onchange=async e=>{
+const f=e.target.files?.[0];if(!f)return;
+if(!/\.txt$/i.test(f.name)){$("cleanupFileResult").innerHTML='<div class="result error">Bitte eine .txt-Datei auswählen.</div>';return}
+cleanupText=await f.text();cleanupSenders=detectedWhatsAppSenders(cleanupText);cleanupPreview=null;
+$("cleanupFileResult").innerHTML=`<div class="result"><b>${esc(f.name)}</b> geladen.<br>Bis zu deiner ausdrücklichen Bestätigung wird <b>NICHTS gelöscht.</b></div>`;
+if(cleanupSenders.length===2){
+  const opts=cleanupSenders.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  $("cleanupSenderConfirm").innerHTML=`<div class="result"><b>Absender-Zuordnung bestätigen</b><br><br><label><b>Wer ist Marcel?</b></label><br><select id="cleanupMarcelSender" style="width:100%;margin:6px 0 12px;padding:9px">${opts}</select><label><b>Wer ist ${esc(name(sel()))}?</b></label><br><select id="cleanupContactSender" style="width:100%;margin:6px 0 12px;padding:9px">${opts}</select><div style="font-size:12px;opacity:.8">Die Namen werden nur aus den Absenderfeldern des WhatsApp-Exports gelesen, nicht aus Emojis oder Text innerhalb einer Nachricht.</div></div>`;
+  $("cleanupSenderConfirm").style.display="block";
+  $("cleanupMarcelSender").value=cleanupSenders[1];$("cleanupContactSender").value=cleanupSenders[0];
+  $("doCleanup").disabled=false;$("doCleanup").textContent="Nur prüfen";
+}else{
+  $("cleanupSenderConfirm").style.display="none";
+  $("cleanupResult").innerHTML=`<div class="result error">${cleanupSenders.length<2?"Es wurden nicht zwei eindeutige Absender erkannt.":"Mehr als zwei Absender erkannt. Bitte Cleanup nicht starten."}</div>`;
+  $("doCleanup").disabled=true;
+}
+};
+ 
+document.addEventListener("change",e=>{
+if(e.target?.id==="cleanupMarcelSender"||e.target?.id==="cleanupContactSender"){
+  cleanupPreview=null;$("doCleanup").textContent="Nur prüfen";$("cleanupResult").innerHTML="";
+}
+});
+ 
+$("doCleanup").onclick=async()=>{
+try{
+  const c=sel(),ms=$("cleanupMarcelSender")?.value||"",cs=$("cleanupContactSender")?.value||"";
+  if(!ms||!cs||ms===cs){$("cleanupResult").innerHTML='<div class="result error">Bitte Marcel und den Kontakt eindeutig als zwei verschiedene Absender auswählen.</div>';return}
+  const payload={contactId:Number(c.id),chatText:cleanupText,senderMapping:{marcelSender:ms,contactSender:cs}};
+  if(!cleanupPreview||cleanupPreview.ms!==ms||cleanupPreview.cs!==cs){
+    $("doCleanup").disabled=true;$("doCleanup").textContent="Prüfung läuft …";
+    $("cleanupResult").innerHTML='<div class="progressbox"><span class="spin"></span><b>Nur Prüfung – es wird NICHTS gelöscht …</b></div>';
+    const d=await api("/api/dashboard/cleanup-whatsapp-duplicates",{method:"POST",body:JSON.stringify({...payload,action:"preview"})});
+    cleanupPreview={ms,cs,token:d.confirmationToken,wouldDelete:+d.wouldDelete||0,wouldKeep:+d.wouldKeep||0,databaseMessages:+d.databaseMessages||0,duplicateGroups:+d.duplicateGroups||0};
+    $("cleanupResult").innerHTML=`<div class="result"><b>🔍 Dubletten-Prüfung abgeschlossen</b><br><br>Gespeicherte Nachrichten: <b>${cleanupPreview.databaseMessages}</b><br>Sichere Dubletten-Gruppen: <b>${cleanupPreview.duplicateGroups}</b><br>🗑️ Würden gelöscht: <b>${cleanupPreview.wouldDelete}</b><br>✅ Würden bleiben: <b>${cleanupPreview.wouldKeep}</b><br><br><b>Bis jetzt wurde NICHTS gelöscht.</b>${cleanupPreview.wouldDelete?`<br><br>⚠️ Möchtest du wirklich ausschließlich diese ${cleanupPreview.wouldDelete} sicheren Dubletten löschen?<br><small>Kontakte und Memories werden dabei nicht verändert.</small>`:"<br><br>Keine sicheren Dubletten gefunden."}</div>`;
+    $("doCleanup").disabled=!cleanupPreview.wouldDelete;
+    $("doCleanup").textContent=cleanupPreview.wouldDelete?`${cleanupPreview.wouldDelete} Dubletten wirklich löschen`:"Keine Dubletten";
+    return;
+  }
+  if(!cleanupPreview.token)throw Error("Sicherheitsbestätigung fehlt. Bitte erneut prüfen.");
+  const sure=window.confirm(`SICHERHEITSFRAGE\n\nWirklich ${cleanupPreview.wouldDelete} sichere Dubletten bei ${name(c)} löschen?\n\nEine kanonische Kopie bleibt erhalten. Memories und Kontakt werden NICHT gelöscht.`);
+  if(!sure)return;
+  $("doCleanup").disabled=true;$("doCleanup").textContent="Löschen läuft …";
+  $("cleanupResult").innerHTML='<div class="progressbox"><span class="spin"></span><b>Bestätigt – nur die zuvor geprüften sicheren Dubletten werden gelöscht …</b></div>';
+  const d=await api("/api/dashboard/cleanup-whatsapp-duplicates",{method:"POST",body:JSON.stringify({...payload,action:"execute",confirmationToken:cleanupPreview.token})});
+  cleanupPreview=null;
+  $("cleanupResult").innerHTML=`<div class="result"><b>✓ Cleanup fertig</b><br><br>Gelöscht: <b>${+d.deleted||0}</b> sichere Dubletten<br>Memories verändert: <b>${d.memoryTouched===false?"Nein":"Unbekannt"}</b><br><br>${esc(d.message||"Fertig.")}</div>`;
+  $("doCleanup").textContent="Fertig";$("doCleanup").disabled=false;$("doCleanup").onclick=()=>$("cleanupModal").classList.remove("open");
+  await load(c.id);
+}catch(e){
+  $("cleanupResult").innerHTML=`<div class="result error">${esc(e.message)}</div>`;
+  $("doCleanup").disabled=false;$("doCleanup").textContent="Erneut prüfen";cleanupPreview=null;
+}
+};
+ 
 $("profileBtn").onclick=()=>$("profile").style.display="block";load().catch(e=>$("messages").innerHTML=`<div class="empty">${esc(e.message)}</div>`);})();
 </script></body></html>

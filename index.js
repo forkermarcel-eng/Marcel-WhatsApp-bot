@@ -357,7 +357,7 @@ Bei Block akzeptieren.
 Keine Zustimmung erfinden.
 
 
-================================================== 
+==================================================
 GELD
 ==================================================
 
@@ -477,7 +477,7 @@ Paola Maza
 
 Karla Tinder
 !=
-Karla Instagram
+Karla Instagram 
 
 
 ==================================================
@@ -637,7 +637,7 @@ if (
   firstBrace !== -1
   &&
   lastBrace > firstBrace
-) {
+) { 
 
   try {
 
@@ -717,7 +717,7 @@ return (
   &&
   jid.endsWith(
     "@persona.test"
-  ) 
+  )
 );
 
 }
@@ -797,7 +797,7 @@ maxLength = 100
 ) {
 
 if (
-  !Array.isArray(
+  !Array.isArray( 
     values
   )
 ) {
@@ -897,6 +897,7 @@ const incoming =
   isPlainObject(
     incomingValue
   )
+
     ? incomingValue
 
     : {};
@@ -1116,7 +1117,7 @@ let germanScore = 0;
 let englishScore = 0;
 
 
-if (/[¿¡]/.test(text)) {
+if (/[¿¡]/.test(text)) { 
   spanishScore += 4;
 }
 
@@ -1436,7 +1437,7 @@ while (stack.length) {
 
 
   if (
-    Array.isArray( 
+    Array.isArray(
       current
     )
   ) {
@@ -1756,7 +1757,7 @@ return "en";
 
 const WOMEN_SEED = [
 
-{
+{ 
   identityKey:
     "zay_20_medellin",
 
@@ -1796,6 +1797,7 @@ const WOMEN_SEED = [
       ]
 
     },
+
     family: {
 
       lives_with_brother_in_medellin:
@@ -1975,6 +1977,7 @@ const WOMEN_SEED = [
         "Kino",
 
         "gutes Essen",
+
         "gute Gespräche",
 
         "Filme",
@@ -2154,6 +2157,7 @@ const WOMEN_SEED = [
 
       likes_motorcycles:
         true,
+
       loves_animals:
         true,
 
@@ -2233,7 +2237,7 @@ const WOMEN_SEED = [
       extroverted:
         true,
 
-      serious_side:
+      serious_side: 
         true,
 
       sin_prisa:
@@ -2393,7 +2397,6 @@ const WOMEN_SEED = [
 
       sent_kiss_photo:
         true,
-
       whatsapp_for_photos:
         true
 
@@ -2513,7 +2516,7 @@ const WOMEN_SEED = [
         false
 
     },
- 
+
     financial_context: {
 
       gifts_money_strong_theme:
@@ -3193,7 +3196,6 @@ const WOMEN_SEED = [
 
 },
 
-
 {
   identityKey:
     "stephanie_peace",
@@ -3352,7 +3354,7 @@ const WOMEN_SEED = [
 
       wants_to_feel_again:
         true,
-
+ 
       misses_affection:
         true,
 
@@ -3592,7 +3594,7 @@ const WOMEN_SEED = [
     }
 
   }
- 
+
 },
 
 
@@ -3672,7 +3674,6 @@ const WOMEN_SEED = [
 {
   identityKey:
     "niuber_save_pool",
-
   canonicalName:
     "Niuber",
 
@@ -3832,7 +3833,6 @@ const WOMEN_SEED = [
 
       asked_how_marcel_is:
         true
-
     },
 
     running_gags: {
@@ -3952,7 +3952,7 @@ const WOMEN_SEED = [
 
   }
 
-}, 
+},
 
 
 {
@@ -4132,7 +4132,7 @@ const WOMEN_SEED = [
 
       time_and_interest_show_direction:
         true
- 
+
     },
 
     stress_support_style: {
@@ -4152,7 +4152,7 @@ const WOMEN_SEED = [
 
     },
 
-    running_gags: {
+    running_gags: { 
 
       hugs_looks_kisses_common_language:
         true
@@ -4312,7 +4312,7 @@ const WOMEN_SEED = [
       medellin_about_years:
         8
 
-    },
+    }, 
 
     family: {
 
@@ -4472,7 +4472,7 @@ const WOMEN_SEED = [
       ]
 
     },
-
+ 
     meaningful_details: {
 
       birthday_day_of_first_chat:
@@ -4492,7 +4492,7 @@ const WOMEN_SEED = [
 
   }
 
-}, 
+},
 
 
 {
@@ -4672,7 +4672,7 @@ const WOMEN_SEED = [
 
       active_only_after_actual_message:
         true
- 
+
     }
 
   }
@@ -4792,7 +4792,7 @@ const WOMEN_SEED = [
 
 async function initDatabase() {
 
-await pool.query(`
+await pool.query(` 
   CREATE TABLE IF NOT EXISTS contacts (
     id SERIAL PRIMARY KEY,
     whatsapp_jid TEXT UNIQUE NOT NULL,
@@ -5032,7 +5032,7 @@ await pool.query(`
       .map(
         column =>
           `${column} JSONB DEFAULT '{}'::jsonb`
-      ) 
+      )
       .join(",")},
 
     profile_version INTEGER
@@ -5112,7 +5112,7 @@ await pool.query(`
       DEFAULT NOW(),
 
     updated_at TIMESTAMPTZ
-      DEFAULT NOW()
+      DEFAULT NOW() 
 
   )
 `);
@@ -5272,7 +5272,7 @@ await pool.query(`
       DEFAULT NOW()
 
   )
-`);
+`); 
 
 
 await pool.query(`
@@ -5392,7 +5392,7 @@ await pool.query(`
     relocation_stage,
 
     relocation_eta,
- 
+
     housing_stage,
 
     manual_location_lock,
@@ -5432,7 +5432,7 @@ await pool.query(`
   ON CONFLICT (
     id
   )
-
+ 
   DO NOTHING
 `);
 
@@ -5932,6 +5932,7 @@ if (
 
 }
 
+
 const normalized =
   normalizeIdentityValue(
     clean
@@ -6071,7 +6072,6 @@ if (
         is_primary,
 
         human_verified
-
       )
 
       VALUES (
@@ -6111,6 +6111,7 @@ async function findContactByIdentifier(
 type,
 value
 ) {
+
 const normalized =
   normalizeIdentityValue(
     value
@@ -6390,7 +6391,7 @@ if (!contact) {
 
           source_platform =
             COALESCE(
-              source_platform,
+              source_platform, 
               $7
             ),
 
@@ -6470,7 +6471,7 @@ await pool.query(
     contact.id
   ]
 );
- 
+
 
 await addContactIdentifier({
 
@@ -6549,7 +6550,6 @@ if (phone) {
   });
 
 }
-
 
 if (
   woman.whatsappDisplayName
@@ -6650,7 +6650,7 @@ if (
         human_reviewed_at =
           NOW(),
 
-        importance = 
+        importance =
           $3,
 
         use_in_reply =
@@ -6710,7 +6710,6 @@ if (
         $1,
 
         $2,
-
         $3,
 
         $4::jsonb,
@@ -6869,7 +6868,6 @@ const values =
         );
 
       }
-
 
       return JSON.stringify(
         incoming
@@ -7190,7 +7188,7 @@ if (contact) {
             $1
 
           RETURNING *
-        `, 
+        `,
         [
           contact.id,
           jid,
@@ -7510,7 +7508,7 @@ const result =
       LIMIT 1
     `,
     [
-      contactId
+      contactId 
     ]
   );
 
@@ -7550,7 +7548,7 @@ if (!cleanName) {
 }
 
 
-const jid = 
+const jid =
   `test-${createTestSlug(cleanName)}@persona.test`;
 
 
@@ -7669,7 +7667,6 @@ await pool.query(
     result.rows[0].id
   ]
 );
-
 
 return result.rows[0];
 
@@ -8090,7 +8087,7 @@ if (beforeMessageId) {
 
           AND message_text
             IS NOT NULL
- 
+
           AND id <
             $2
 
@@ -8342,14 +8339,81 @@ const rows =
   result.rows.reverse();
 
 
+const emojiOnlyRows =
+  rows.filter(
+    row =>
+      !/[\p{L}\p{N}]/u.test(
+        normalizeText(
+          row.message_text
+        )
+      )
+  );
+
+
+for (
+  const row
+  of emojiOnlyRows
+) {
+
+  if (
+    normalizeText(
+      row.translation_de
+    )
+  ) {
+
+    await pool.query(
+      `
+      UPDATE messages
+      SET
+        translation_de = NULL,
+        translated_at = NULL,
+        translation_model = NULL,
+        translation_source_hash = NULL
+      WHERE id = $1
+      `,
+      [
+        row.id
+      ]
+    );
+
+
+    row.translation_de = null;
+    row.translation_source_hash = null;
+
+  }
+
+}
+
+
+const hasTranslatableText =
+  text =>
+    /[\p{L}\p{N}]/u.test(
+      normalizeText(
+        text
+      )
+    );
+
+
 const pending =
   rows.filter(
     row => {
+
+      if (
+        !hasTranslatableText(
+          row.message_text
+        )
+      ) {
+
+        return false;
+
+      }
+
 
       const sourceHash =
         dashboardTranslationSourceHash(
           row.message_text
         );
+
 
       return (
         !normalizeText(
@@ -8450,7 +8514,7 @@ KONTEXT LETZTE NACHRICHTEN:
 ${contextRows
  .map(
    row =>
-     `[${row.id}] ${row.direction === "incoming" ? "Sie" : "Marcel"}: ${row.message_text}` 
+     `[${row.id}] ${row.direction === "incoming" ? "Sie" : "Marcel"}: ${row.message_text}`
  )
  .join("\\n")}
 
@@ -8562,7 +8626,6 @@ ${batch
   }
 
 }
-
 
 return {
   translated:
@@ -8810,6 +8873,7 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
          [contact.id, prepared[0].createdAt, prepared[prepared.length - 1].createdAt]
        );
      }
+
      await client.query("COMMIT");
      return {
        batchId, parsed: prepared.length, imported: prepared.length, duplicates: 0,
@@ -9522,7 +9586,6 @@ const result =
           valid_until IS NULL
           OR valid_until > NOW()
         )
-
       ORDER BY
         importance DESC,
         updated_at DESC
@@ -9682,7 +9745,6 @@ id:
 
 memory_identity_key:
   contact?.memory_identity_key,
-
 canonical_name:
   contact?.canonical_name,
 
@@ -9709,6 +9771,7 @@ current_platform:
 
 platform_status:
   contact?.platform_status,
+
 relationship_stage:
   contact?.relationship_stage
 
@@ -9841,7 +9904,6 @@ let resolvedLanguage = null;
 
 
 if (jid) {
-
   const contact =
     (
       await getContactByJid(
@@ -9888,6 +9950,7 @@ if (jid) {
       getMarcelLiveState()
 
     ]);
+
 
   conversation =
     history
@@ -10067,7 +10130,7 @@ return (
 
 }
 
- 
+
 /* ==================================================
  MEMORY SUCHEN
 ================================================== */
@@ -10160,7 +10223,7 @@ await pool.query(
       $1
 
       AND id =
-        ANY(
+        ANY( 
           $2::bigint[]
         )
 
@@ -10248,6 +10311,7 @@ if (
 
 }
 
+
 if (
   memoryKey.includes(
     "has_son"
@@ -10319,7 +10383,6 @@ const newSignal =
     item?.category,
 
     item?.memory_key,
-
     item?.memory_value
 
   );
@@ -10426,7 +10489,7 @@ proposedItem,
 incomingMessageDbId,
 incomingText
 }) {
- 
+
 await pool.query(
   `
     INSERT INTO memory_events (
@@ -10639,7 +10702,6 @@ for (
       existing.human_review_status
     )
   ) {
-
     continue;
 
   }
@@ -10786,7 +10848,7 @@ for (
       ]
     );
 
-  } 
+  }
 
 
   const validUntilHours =
@@ -10798,7 +10860,6 @@ for (
       : Number(
           item.valid_until_hours
         );
-
 
   await pool.query(
     `
@@ -10959,14 +11020,13 @@ for (
         event_subtype,
 
         title,
-
         event_data,
 
         event_status,
 
         importance,
 
-        sensitivity, 
+        sensitivity,
 
         source_message_ids,
 
@@ -11119,7 +11179,6 @@ const [
     getContactMemoryProfile(
       contactId
     ),
-
     getRelevantMemoryItems(
       contactId,
       100
@@ -11146,7 +11205,7 @@ const memoryText =
         `|review=${item.human_review_status}`
         +
         `|${renderJson(
-          item.human_review_status 
+          item.human_review_status
           ===
           "corrected"
           &&
@@ -11506,6 +11565,7 @@ return {
 
 }
 
+
 /* ==================================================
  DASHBOARD API AUTH
  READ ONLY V0.2
@@ -11758,7 +11818,6 @@ async (req, res) => {
               SELECT COUNT(*)
 
               FROM memory_items mi
-
               WHERE mi.contact_id =
                 c.id
 
@@ -11865,7 +11924,7 @@ async (req, res) => {
 
 
           return {
- 
+
             id:
               contact.id,
 
@@ -12045,6 +12104,7 @@ async (req, res) => {
       error
     );
 
+
     return res
       .status(500)
       .json({
@@ -12077,7 +12137,7 @@ async (req, res) => {
     if (
       !dashboardApiReady(
         res
-      )
+      ) 
     ) {
 
       return;
@@ -12236,7 +12296,6 @@ async (req, res) => {
 
 }
 );
-
 
 /* ==================================================
  DASHBOARD KI-UEBERSETZUNG
@@ -12397,13 +12456,13 @@ async (req, res) => {
         req
       )
     ) {
-
       return res
         .status(401)
         .json({
 
           ok:
             false,
+
           error:
             "Nicht autorisiert."
 
@@ -12556,7 +12615,6 @@ async (req, res) => {
       typeof cleanProfile.profile_summary
       ===
       "object"
-
         ? cleanProfile.profile_summary
 
         : {};
@@ -12716,7 +12774,6 @@ async (req, res) => {
 
           humanNote:
             item.human_note,
-
           importance:
             Number(
               item.importance
@@ -12876,7 +12933,6 @@ async (req, res) => {
 
         language:
           contact.primary_language,
-
         sourcePlatform:
           contact.source_platform,
 
@@ -12943,7 +12999,7 @@ async (req, res) => {
           contact.created_at,
 
         updatedAt:
-          contact.updated_at, 
+          contact.updated_at,
 
         age:
           profileSummary.age
@@ -13123,7 +13179,7 @@ async (req, res) => {
               FROM contacts
               WHERE memory_identity_key
                 IS NOT NULL
-            ) 
+            )
             AS women_registry_contacts
         `
       );
@@ -13196,7 +13252,6 @@ app.get(
   res.send(
     "Noch kein Pairing-Code verfügbar."
   );
-
 }
 );
 
@@ -13303,6 +13358,7 @@ opacity:.5;
 #chat{
 margin-top:12px;
 }
+
 .msg{
 padding:11px 12px;
 margin:7px 0;
@@ -13515,7 +13571,6 @@ const messageInput =
     "messageInput"
   );
 
-
 const sendMessageButton =
   document.getElementById(
     "sendMessageButton"
@@ -13663,6 +13718,7 @@ async function apiRequest(
 
   }
 
+
   if(
     !response.ok
   ){
@@ -13674,7 +13730,6 @@ async function apiRequest(
     );
 
   }
-
 
   return data;
 
@@ -13834,14 +13889,14 @@ async function loadContacts(
     "loading"
   );
 
-
+ 
   loadContactsButton.disabled =
     true;
 
 
   try{
 
-    const data = 
+    const data =
       await apiRequest(
         "/persona-test/contacts",
         {
@@ -14314,7 +14369,6 @@ async function sendTestMessage(){
                 getPassword(),
 
               jid,
-
               message
 
             })
@@ -14381,7 +14435,7 @@ async function sendTestMessage(){
 
 loadContactsButton
   .addEventListener(
-    "click", 
+    "click",
     () => {
 
       loadContacts();
@@ -14634,7 +14688,6 @@ async (req, res) => {
 /* ==================================================
  TEST SNAPSHOT
 ================================================== */
-
 app.post(
 "/persona-test/snapshot",
 async (req, res) => {
@@ -14921,7 +14974,7 @@ async (req, res) => {
 
 
     const reply =
-      await generateAIReply( 
+      await generateAIReply(
         jid,
         text,
         incoming.id
@@ -14954,7 +15007,6 @@ async (req, res) => {
     await extractMemoryUpdates({
 
       jid,
-
       contactId:
         contact.id,
 
@@ -15100,6 +15152,7 @@ if (duplicate) {
         jid,
         text
       );
+
 
     await sock.sendMessage(
       jid,
@@ -15273,7 +15326,6 @@ try {
 
 
   if (updated) {
-
     console.log(
       "WhatsApp-Nachricht bearbeitet:",
       whatsappMessageId,
@@ -15460,7 +15512,7 @@ sock.ev.on(
         "connecting";
 
     }
- 
+
 
     if (
       qr
@@ -15590,4 +15642,3 @@ async () => {
 
 }
 );
- 

@@ -27,58 +27,69 @@ function validDashboardSession(req) {
 }
  
 export default async function handler(req, res) {
- if (!["GET", "POST"].includes(req.method)) {
-   res.setHeader("Allow", "GET, POST");
+ if (req.method !== "POST") {
+   res.setHeader("Allow", "POST");
    return res.status(405).json({ ok: false, error: "Methode nicht erlaubt." });
  }
- if (!validDashboardSession(req)) return res.status(401).json({ ok: false, error: "Nicht angemeldet." });
+ 
+ if (!validDashboardSession(req)) {
+   return res.status(401).json({ ok: false, error: "Nicht angemeldet." });
+ }
  
  const railwayBackendUrl = String(process.env.RAILWAY_BACKEND_URL || "").trim().replace(/\/+$/, "");
  const dashboardApiSecret = String(process.env.DASHBOARD_API_SECRET || "").trim();
- if (!railwayBackendUrl || !dashboardApiSecret) return res.status(500).json({ ok: false, error: "Dashboard-Verbindung ist nicht konfiguriert." });
+ 
+ if (!railwayBackendUrl || !dashboardApiSecret) {
+   return res.status(500).json({ ok: false, error: "Dashboard-Verbindung ist nicht konfiguriert." });
+ }
  
  try {
-   if (req.method === "GET") {
-     const jobId = String(req.query?.jobId || "").trim();
-     if (!jobId) return res.status(400).json({ ok: false, error: "jobId fehlt." });
-     const railwayResponse = await fetch(`${railwayBackendUrl}/dashboard-api/import-whatsapp-status?jobId=${encodeURIComponent(jobId)}`, {
-       method: "GET",
-       headers: { Authorization: `Bearer ${dashboardApiSecret}`, Accept: "application/json" },
-       cache: "no-store"
-     });
-     const rawText = await railwayResponse.text();
-     let data = {};
-     try { data = rawText ? JSON.parse(rawText) : {}; } catch { return res.status(502).json({ ok: false, error: "Ungültige Antwort vom Backend." }); }
-     res.setHeader("Cache-Control", "no-store, max-age=0");
-     return res.status(railwayResponse.status).json(data);
-   }
- 
    const body = req.body && typeof req.body === "object" ? req.body : {};
    const contactId = Number(body.contactId);
    const chatText = String(body.chatText || "");
-   const action = String(body.action || "preview").trim().toLowerCase() === "import" ? "import" : "preview";
+   const action = String(body.action || "preview").trim().toLowerCase() === "execute" ? "execute" : "preview";
+   const confirmationToken = String(body.confirmationToken || "").trim();
    const senderMapping = body.senderMapping && typeof body.senderMapping === "object" ? {
      marcelSender: String(body.senderMapping.marcelSender || "").trim(),
      contactSender: String(body.senderMapping.contactSender || "").trim()
    } : null;
-   if (!Number.isInteger(contactId) || contactId <= 0) return res.status(400).json({ ok: false, error: "Ungültige Kontakt-ID." });
-   if (!chatText.trim()) return res.status(400).json({ ok: false, error: "Der WhatsApp-Export ist leer." });
-   if (!senderMapping?.marcelSender || !senderMapping?.contactSender) return res.status(400).json({ ok: false, error: "Bitte Marcel und den Kontakt eindeutig zuordnen." });
-   if (senderMapping.marcelSender === senderMapping.contactSender) return res.status(400).json({ ok: false, error: "Marcel und Kontakt müssen verschiedene Absender sein." });
  
-   const railwayResponse = await fetch(`${railwayBackendUrl}/dashboard-api/import-whatsapp`, {
+   if (!Number.isInteger(contactId) || contactId <= 0) {
+     return res.status(400).json({ ok: false, error: "Ungültige Kontakt-ID." });
+   }
+   if (!chatText.trim()) {
+     return res.status(400).json({ ok: false, error: "Der WhatsApp-Export ist leer." });
+   }
+   if (!senderMapping?.marcelSender || !senderMapping?.contactSender || senderMapping.marcelSender === senderMapping.contactSender) {
+     return res.status(400).json({ ok: false, error: "Bitte Marcel und den Kontakt eindeutig als zwei verschiedene Absender zuordnen." });
+   }
+   if (action === "execute" && !confirmationToken) {
+     return res.status(409).json({ ok: false, error: "Sicherheitsbestätigung fehlt. Bitte Cleanup erneut prüfen." });
+   }
+ 
+   const railwayResponse = await fetch(`${railwayBackendUrl}/dashboard-api/cleanup-whatsapp-duplicates`, {
      method: "POST",
-     headers: { Authorization: `Bearer ${dashboardApiSecret}`, Accept: "application/json", "Content-Type": "application/json" },
+     headers: {
+       Authorization: `Bearer ${dashboardApiSecret}`,
+       Accept: "application/json",
+       "Content-Type": "application/json"
+     },
      cache: "no-store",
-     body: JSON.stringify({ contactId, chatText, action, marcelSenderNames: Array.isArray(body.marcelSenderNames) ? body.marcelSenderNames : [], senderMapping })
+     body: JSON.stringify({ contactId, chatText, action, confirmationToken, senderMapping })
    });
+ 
    const rawText = await railwayResponse.text();
    let data = {};
-   try { data = rawText ? JSON.parse(rawText) : {}; } catch { return res.status(502).json({ ok: false, error: "Ungültige Antwort vom Backend." }); }
+   try {
+     data = rawText ? JSON.parse(rawText) : {};
+   } catch {
+     return res.status(502).json({ ok: false, error: "Ungültige Antwort vom Backend." });
+   }
+ 
    res.setHeader("Cache-Control", "no-store, max-age=0");
    return res.status(railwayResponse.status).json(data);
  } catch (error) {
-   console.error("WhatsApp-Import Verbindung zu Railway fehlgeschlagen:", error);
+   console.error("Dubletten-Cleanup Verbindung zu Railway fehlgeschlagen:", error);
    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
  }
 }

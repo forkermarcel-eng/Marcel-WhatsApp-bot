@@ -56,6 +56,7 @@ export default async function handler(req, res) {
    const body = req.body && typeof req.body === "object" ? req.body : {};
    const contactId = Number(body.contactId);
    const chatText = String(body.chatText || "");
+   const action = String(body.action || "preview").trim().toLowerCase() === "import" ? "import" : "preview";
    const senderMapping = body.senderMapping && typeof body.senderMapping === "object" ? {
      marcelSender: String(body.senderMapping.marcelSender || "").trim(),
      contactSender: String(body.senderMapping.contactSender || "").trim()
@@ -69,7 +70,7 @@ export default async function handler(req, res) {
      method: "POST",
      headers: { Authorization: `Bearer ${dashboardApiSecret}`, Accept: "application/json", "Content-Type": "application/json" },
      cache: "no-store",
-     body: JSON.stringify({ contactId, chatText, marcelSenderNames: Array.isArray(body.marcelSenderNames) ? body.marcelSenderNames : [], senderMapping })
+     body: JSON.stringify({ contactId, chatText, action, marcelSenderNames: Array.isArray(body.marcelSenderNames) ? body.marcelSenderNames : [], senderMapping })
    });
    const rawText = await railwayResponse.text();
    let data = {};

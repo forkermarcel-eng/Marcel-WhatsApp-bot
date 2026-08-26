@@ -18,7 +18,7 @@
 </aside></div>
 <div class="modalbg" id="addModal"><div class="modal"><h2>Kontakt hinzufügen</h2><p>WhatsApp-Nummer ist optional. Danach kannst du direkt den Chat importieren.</p><div class="field"><label>Name *</label><input id="n"></div><div class="field"><label>WhatsApp-Nummer</label><input id="phone"></div><div class="field"><label>Stadt</label><input id="city"></div><div class="field"><label>Land</label><input id="country"></div><div class="field"><label>Sprache</label><input id="language"></div><div id="addResult"></div><div class="buttons"><button class="cancel" data-close="addModal">Abbrechen</button><button class="ok" id="save">Kontakt anlegen</button></div></div></div>
 <div class="modalbg" id="importModal"><div class="modal"><h2>WhatsApp-Chat importieren</h2><p id="importInfo"></p><div class="field"><label>WhatsApp-Export (.txt, ohne Medien)</label><input id="file" type="file" accept=".txt,text/plain"></div><div id="preview"></div><div id="senderConfirm" style="display:none;margin-top:10px"></div><div id="importResult"></div><div class="buttons"><button class="cancel" data-close="importModal">Abbrechen</button><button class="ok" id="doImport" disabled>Import bestätigen</button></div></div></div>
- 
+
 <div class="modalbg" id="cleanupModal"><div class="modal">
 <h2>🧹 WhatsApp-Dubletten prüfen</h2>
 <p id="cleanupInfo"></p>
@@ -28,12 +28,18 @@
 <div id="cleanupResult"></div>
 <div class="buttons"><button class="cancel" data-close="cleanupModal">Abbrechen</button><button class="ok" id="doCleanup" disabled>Nur prüfen</button></div>
 </div></div>
- 
+
 <script>
 (()=>{"use strict";let C=[],id=null,D=null,fileText="",senderChoices=[],importPreview=null,cleanupText="",cleanupSenders=[],cleanupPreview=null;
 const detectedWhatsAppSenders=text=>{const lines=String(text||"").replace(/^\uFEFF/,"").replace(/\r\n?/g,"\n").split("\n"),patterns=[/^\[(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\]\s*([^:]+):\s?(.*)$/i,/^(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*([^:]+):\s?(.*)$/i],found=[];for(const line of lines){for(const p of patterns){const m=line.match(p);if(m){const s=String(m[3]||"").trim();if(s&&!found.includes(s))found.push(s);break}}}return found};
 const $=x=>document.getElementById(x),clean=x=>String(x??"").trim(),esc=x=>String(x??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"),name=c=>clean(c?.displayName)||clean(c?.name)||clean(c?.whatsappDisplayName)||"Unbekannter Kontakt",ld=c=>c?.lastMessage?.createdAt||c?.lastMessageAt||null,lt=c=>clean(c?.lastMessage?.text)||"",ts=v=>{const d=new Date(v);return isNaN(d)?0:d.getTime()},sort=a=>[...a].sort((x,y)=>ts(ld(y))-ts(ld(x))||name(x).localeCompare(name(y),"de")),sel=()=>C.find(c=>String(c.id)===String(id));
-async function api(u,o={}){const r=await fetch(u,{credentials:"same-origin",cache:"no-store",headers:{"Accept":"application/json",...(o.body?{"Content-Type":"application/json"}:{})},...o});if(r.status===401){location.href="/login.html";throw Error("Sitzung abgelaufen.")}const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch{throw Error("Ungültige API-Antwort.")}if(!r.ok)throw Error(d.error||`API-Fehler ${r.status}`);return d}
+async function api(u,o={}){const r=await fetch(u,{credentials:"same-origin",cache:"no-store",headers:{"Accept":"application/json",...(o.body?{"Content-Type":"application/json"}:{})},...o});if(r.status===401){location.href="/login.html";throw Error("Sitzung abgelaufen.")}const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch{throw Error("Ungültige API-Antwort.")}if(!r.ok){
+const raw=d?.error??d?.message??d;
+let detail="";
+if(typeof raw==="string")detail=raw;
+else{try{detail=JSON.stringify(raw,null,2)}catch{detail=String(raw)}}
+throw Error(`HTTP ${r.status}${detail?": "+detail:""}`);
+}return d}
 function renderList(){const q=clean($("search").value).toLowerCase(),a=sort(C).filter(c=>[name(c),c.city,c.country,c.phoneNumber].filter(Boolean).join(" ").toLowerCase().includes(q));$("count").textContent=C.length+" Kontakte";$("contacts").innerHTML=a.map(c=>`<button class="contact ${String(c.id)===String(id)?"active":""}" data-id="${esc(c.id)}"><div class="ctop"><span class="name">${esc(name(c))}</span><span class="time">${ld(c)?new Date(ld(c)).toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"}):""}</span></div><div class="preview">${esc(lt(c)||"Noch keine Nachricht gespeichert")}</div></button>`).join("");document.querySelectorAll("[data-id]").forEach(b=>b.onclick=()=>loadDetail(b.dataset.id))}
 async function load(prefer){const d=await api("/api/dashboard/contacts");C=sort(d.contacts||[]);id=prefer||id||C[0]?.id||null;renderList();if(id)await loadDetail(id)}
 async function loadDetail(x){id=x;renderList();D=await api(`/api/dashboard/contacts?id=${encodeURIComponent(x)}`);const c=D.contact||sel(),m=D.messages||[];$("topname").textContent=name(c);$("status").textContent="● "+(m.length?"Chat aus PostgreSQL":"Kontakt gespeichert");$("msgcount").textContent=(D.totalMessages??m.length)+" gesamt · "+m.length+" geladen";$("messages").innerHTML=m.length?m.map(z=>`<div class="row ${z.direction==="outgoing"?"mine":""}"><div class="bubble">${esc(z.text)}</div></div>`).join(""):`<div class="empty"><b>${esc(name(c))}</b><br>Noch keine Nachrichten gespeichert.</div>`;$("messages").scrollTop=$("messages").scrollHeight;$("pname").textContent=name(c);$("pdata").innerHTML=`Stadt: <b>${esc(c.city||"—")}</b><br>Land: <b>${esc(c.country||"—")}</b><br>Sprache: <b>${esc(c.language||"—")}</b><br>Telefon: <b>${esc(c.phoneNumber||"—")}</b>`;const pr=(D.profile&&typeof D.profile==="object")?D.profile:{};
@@ -65,9 +71,9 @@ async function watchMemoryJob(jobId,contactId,importSummary){
  }
 }
 $("doImport").onclick=async()=>{try{const c=sel(),ms=$("marcelSenderSelect")?.value||"",cs=$("contactSenderSelect")?.value||"";if(!ms||!cs||ms===cs){$("importResult").innerHTML='<div class="result error">Bitte Marcel und den Kontakt eindeutig als zwei verschiedene Absender auswählen.</div>';return}const payload={contactId:Number(c.id),chatText:fileText,marcelSenderNames:["Marcel","Marcel Marlow"],senderMapping:{marcelSender:ms,contactSender:cs}};if(!importPreview||importPreview.ms!==ms||importPreview.cs!==cs){$("doImport").disabled=true;$("doImport").textContent="Prüfung läuft …";$("importResult").innerHTML='<div class="progressbox"><span class="spin"></span><b>Nur Prüfung – es wird noch NICHTS gespeichert …</b></div>';const d=await api("/api/dashboard/import-whatsapp",{method:"POST",body:JSON.stringify({...payload,action:"preview"})});const n=+d.newMessages||0,du=+d.duplicates||0,pa=+d.parsed||0;importPreview={ms,cs,newMessages:n,duplicates:du,parsed:pa};$("importResult").innerHTML=`<div class="result"><b>🔍 Import-Prüfung abgeschlossen</b><br><br>${pa} Nachrichten erkannt<br>♻️ <b>${du}</b> bereits vorhanden<br>🆕 <b>${n}</b> würden neu importiert<br><br><b>Bis jetzt wurde NICHTS gespeichert.</b><br><br>⚠️ Möchtest du wirklich ${n} neue Nachrichten importieren und danach das Memory aktualisieren?</div>`;$("doImport").disabled=false;$("doImport").textContent=n?`${n} Nachrichten jetzt importieren`:"Keine neuen Nachrichten";if(!n)$("doImport").disabled=true;return}$("doImport").disabled=true;$("doImport").textContent="Jetzt wird importiert …";$("importResult").innerHTML='<div class="progressbox"><span class="spin"></span><b>Bestätigt – neue Nachrichten werden jetzt gespeichert …</b></div>';const d=await api("/api/dashboard/import-whatsapp",{method:"POST",body:JSON.stringify({...payload,action:"import"})});const summary=`${+d.parsed||0} erkannt · ${+d.duplicates||0} bereits vorhanden · ${+d.imported||0} neu importiert`;importPreview=null;await load(c.id);if(d.memoryBackfill?.jobId){$("importResult").innerHTML=`<div class="result"><b>✓ Nachrichtenimport abgeschlossen</b><br>${summary}</div><div class="progressbox"><span class="spin"></span><b>Memory-Analyse startet …</b></div>`;await watchMemoryJob(d.memoryBackfill.jobId,c.id,summary)}else{$("importResult").innerHTML=`<div class="result"><b>✓ Fertig</b><br>${summary}<br><br>Kein Memory-Backfill notwendig.</div>`;$("doImport").disabled=false;$("doImport").textContent="Fertig"}}catch(e){$("importResult").innerHTML=`<div class="result error">${esc(e.message)}</div>`;$("doImport").disabled=false;$("doImport").textContent="Erneut prüfen";importPreview=null}};
- 
+
 document.addEventListener("change",e=>{if(e.target?.id==="marcelSenderSelect"||e.target?.id==="contactSenderSelect"){importPreview=null;$("doImport").textContent="Zuordnung prüfen";$("importResult").innerHTML=""}});
- 
+
 function openCleanup(){
 const c=sel();if(!c)return;
 $("cleanupInfo").innerHTML=`Ausgewählter Kontakt: <b>${esc(name(c))}</b><br>Der Export wird ausschließlich benutzt, um sichere Dubletten in den bereits gespeicherten Nachrichten zu finden. <b>Die Prüfung löscht nichts.</b>`;
@@ -77,7 +83,7 @@ $("cleanupResult").innerHTML="";$("doCleanup").disabled=true;$("doCleanup").text
 $("cleanupModal").classList.add("open");
 }
 $("cleanupBtn").onclick=openCleanup;
- 
+
 $("cleanupFile").onchange=async e=>{
 const f=e.target.files?.[0];if(!f)return;
 if(!/\.txt$/i.test(f.name)){$("cleanupFileResult").innerHTML='<div class="result error">Bitte eine .txt-Datei auswählen.</div>';return}
@@ -95,13 +101,13 @@ if(cleanupSenders.length===2){
   $("doCleanup").disabled=true;
 }
 };
- 
+
 document.addEventListener("change",e=>{
 if(e.target?.id==="cleanupMarcelSender"||e.target?.id==="cleanupContactSender"){
   cleanupPreview=null;$("doCleanup").textContent="Nur prüfen";$("cleanupResult").innerHTML="";
 }
 });
- 
+
 $("doCleanup").onclick=async()=>{
 try{
   const c=sel(),ms=$("cleanupMarcelSender")?.value||"",cs=$("cleanupContactSender")?.value||"";
@@ -132,6 +138,6 @@ try{
   $("doCleanup").disabled=false;$("doCleanup").textContent="Erneut prüfen";cleanupPreview=null;
 }
 };
- 
+
 $("profileBtn").onclick=()=>$("profile").style.display="block";load().catch(e=>$("messages").innerHTML=`<div class="empty">${esc(e.message)}</div>`);})();
 </script></body></html>

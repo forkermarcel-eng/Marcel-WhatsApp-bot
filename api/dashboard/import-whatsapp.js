@@ -1,655 +1,97 @@
 import crypto from "crypto";
 
-
-/* ==================================================
-   COOKIE
-================================================== */
-
-function getCookie(
-  req,
-  name
-) {
-
-  const cookieHeader =
-    req.headers.cookie
-    ||
-    "";
-
-
-  const cookies =
-    cookieHeader
-      .split(";")
-      .map(
-        cookie =>
-          cookie.trim()
-      );
-
-
-  for (
-    const cookie
-    of cookies
-  ) {
-
-    const separatorIndex =
-      cookie.indexOf("=");
-
-
-    if (
-      separatorIndex
-      ===
-      -1
-    ) {
-
-      continue;
-
-    }
-
-
-    const key =
-      cookie.slice(
-        0,
-        separatorIndex
-      );
-
-
-    const value =
-      cookie.slice(
-        separatorIndex + 1
-      );
-
-
-    if (
-      key === name
-    ) {
-
-      return value;
-
-    }
-
-  }
-
-
-  return null;
-
+function getCookie(req, name) {
+ const cookieHeader = req.headers.cookie || "";
+ for (const cookie of cookieHeader.split(";").map(v => v.trim())) {
+   const i = cookie.indexOf("=");
+   if (i === -1) continue;
+   if (cookie.slice(0, i) === name) return cookie.slice(i + 1);
+ }
+ return null;
 }
 
-
-/* ==================================================
-   DASHBOARD SESSION
-================================================== */
-
-function validDashboardSession(
-  req
-) {
-
-  const password =
-    process.env
-      .DASHBOARD_PASSWORD;
-
-
-  if (
-    !password
-  ) {
-
-    return false;
-
-  }
-
-
-  const session =
-    getCookie(
-      req,
-      "marcel_dashboard_session"
-    );
-
-
-  if (
-    !session
-  ) {
-
-    return false;
-
-  }
-
-
-  const parts =
-    session.split(".");
-
-
-  if (
-    parts.length !== 2
-  ) {
-
-    return false;
-
-  }
-
-
-  const [
-    token,
-    receivedSignature
-  ] =
-    parts;
-
-
-  if (
-    !token
-    ||
-    !receivedSignature
-  ) {
-
-    return false;
-
-  }
-
-
-  const expectedSignature =
-    crypto
-      .createHmac(
-        "sha256",
-        password
-      )
-      .update(
-        token
-      )
-      .digest(
-        "hex"
-      );
-
-
-  const expectedBuffer =
-    Buffer.from(
-      expectedSignature,
-      "utf8"
-    );
-
-
-  const receivedBuffer =
-    Buffer.from(
-      receivedSignature,
-      "utf8"
-    );
-
-
-  if (
-    expectedBuffer.length
-    !==
-    receivedBuffer.length
-  ) {
-
-    return false;
-
-  }
-
-
-  return crypto.timingSafeEqual(
-    expectedBuffer,
-    receivedBuffer
-  );
-
+function validDashboardSession(req) {
+ const password = process.env.DASHBOARD_PASSWORD;
+ if (!password) return false;
+ const session = getCookie(req, "marcel_dashboard_session");
+ if (!session) return false;
+ const parts = session.split(".");
+ if (parts.length !== 2) return false;
+ const [token, receivedSignature] = parts;
+ if (!token || !receivedSignature) return false;
+ const expectedSignature = crypto.createHmac("sha256", password).update(token).digest("hex");
+ const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+ const receivedBuffer = Buffer.from(receivedSignature, "utf8");
+ if (expectedBuffer.length !== receivedBuffer.length) return false;
+ return crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
 }
 
-
-/* ==================================================
-   HANDLER
-================================================== */
-
-export default async function handler(
-  req,
-  res
-) {
-
-  /* ==================================================
-     METHOD
-  ================================================== */
-
-  if (
-    req.method !== "POST"
-  ) {
-
-    res.setHeader(
-      "Allow",
-      "POST"
-    );
-
-
-    return res
-      .status(405)
-      .json({
-
-        ok:
-          false,
-
-        error:
-          "Methode nicht erlaubt."
-
-      });
-
-  }
-
-
-  /* ==================================================
-     LOGIN SESSION
-  ================================================== */
-
-  if (
-    !validDashboardSession(
-      req
-    )
-  ) {
-
-    return res
-      .status(401)
-      .json({
-
-        ok:
-          false,
-
-        error:
-          "Nicht angemeldet."
-
-      });
-
-  }
-
-
-  /* ==================================================
-     ENVIRONMENT
-  ================================================== */
-
-  const railwayBackendUrl =
-    String(
-      process.env
-        .RAILWAY_BACKEND_URL
-      ||
-      ""
-    )
-      .trim()
-      .replace(
-        /\/+$/,
-        ""
-      );
-
-
-  const dashboardApiSecret =
-    String(
-      process.env
-        .DASHBOARD_API_SECRET
-      ||
-      ""
-    )
-      .trim();
-
-
-  if (
-    !railwayBackendUrl
-    ||
-    !dashboardApiSecret
-  ) {
-
-    console.error(
-      "Dashboard Import API Konfiguration fehlt.",
-      {
-
-        hasRailwayBackendUrl:
-          Boolean(
-            railwayBackendUrl
-          ),
-
-        hasDashboardApiSecret:
-          Boolean(
-            dashboardApiSecret
-          )
-
-      }
-    );
-
-
-    return res
-      .status(500)
-      .json({
-
-        ok:
-          false,
-
-        error:
-          "Dashboard-Verbindung ist nicht konfiguriert."
-
-      });
-
-  }
-
-
-  /* ==================================================
-     INPUT
-  ================================================== */
-
-  const contactId =
-    Number(
-      req.body?.contactId
-    );
-
-
-  const chatText =
-    typeof req.body?.chatText
-    ===
-    "string"
-
-      ? req.body.chatText
-
-      : "";
-
-
-  const marcelSenderNames =
-    Array.isArray(
-      req.body?.marcelSenderNames
-    )
-
-      ? req.body.marcelSenderNames
-
-      : [];
-
-
-  if (
-    !Number.isInteger(
-      contactId
-    )
-    ||
-    contactId <= 0
-  ) {
-
-    return res
-      .status(400)
-      .json({
-
-        ok:
-          false,
-
-        error:
-          "Ungültige Kontakt-ID."
-
-      });
-
-  }
-
-
-  if (
-    !chatText.trim()
-  ) {
-
-    return res
-      .status(400)
-      .json({
-
-        ok:
-          false,
-
-        error:
-          "Der WhatsApp-Export ist leer."
-
-      });
-
-  }
-
-
-  /* ==================================================
-     RAILWAY TARGET
-  ================================================== */
-
-  const railwayPath =
-    "/dashboard-api/import-whatsapp";
-
-
-  const railwayUrl =
-    railwayBackendUrl
-    +
-    railwayPath;
-
-
-  /* ==================================================
-     RAILWAY REQUEST
-  ================================================== */
-
-  try {
-
-    const railwayResponse =
-      await fetch(
-        railwayUrl,
-        {
-
-          method:
-            "POST",
-
-          headers: {
-
-            Authorization:
-              `Bearer ${dashboardApiSecret}`,
-
-            Accept:
-              "application/json",
-
-            "Content-Type":
-              "application/json"
-
-          },
-
-          body:
-            JSON.stringify({
-
-              contactId,
-
-              chatText,
-
-              marcelSenderNames
-
-            }),
-
-          cache:
-            "no-store"
-
-        }
-      );
-
-
-    const rawText =
-      await railwayResponse.text();
-
-
-    let data;
-
-
-    try {
-
-      data =
-        rawText
-
-          ? JSON.parse(
-              rawText
-            )
-
-          : {};
-
-    } catch {
-
-      console.error(
-        "Railway Import API lieferte keine gültige JSON-Antwort.",
-        {
-
-          status:
-            railwayResponse.status,
-
-          path:
-            railwayPath
-
-        }
-      );
-
-
-      return res
-        .status(502)
-        .json({
-
-          ok:
-            false,
-
-          error:
-            "Ungültige Antwort vom Import-Backend."
-
-        });
-
-    }
-
-
-    /* ==================================================
-       RAILWAY ERRORS
-    ================================================== */
-
-    if (
-      !railwayResponse.ok
-    ) {
-
-      console.error(
-        "Railway WhatsApp Import Fehler:",
-        {
-
-          status:
-            railwayResponse.status,
-
-          path:
-            railwayPath,
-
-          error:
-            data?.error
-            ||
-            "Unbekannter Fehler"
-
-        }
-      );
-
-
-      if (
-        railwayResponse.status
-        ===
-        400
-      ) {
-
-        return res
-          .status(400)
-          .json({
-
-            ok:
-              false,
-
-            error:
-              data?.error
-              ||
-              "Ungültiger WhatsApp-Import."
-
-          });
-
-      }
-
-
-      if (
-        railwayResponse.status
-        ===
-        404
-      ) {
-
-        return res
-          .status(404)
-          .json({
-
-            ok:
-              false,
-
-            error:
-              data?.error
-              ||
-              "Kontakt nicht gefunden."
-
-          });
-
-      }
-
-
-      if (
-        railwayResponse.status
-        ===
-        401
-      ) {
-
-        return res
-          .status(502)
-          .json({
-
-            ok:
-              false,
-
-            error:
-              "Import-Backend konnte nicht autorisiert werden."
-
-          });
-
-      }
-
-
-      return res
-        .status(502)
-        .json({
-
-          ok:
-            false,
-
-          error:
-            data?.error
-            ||
-            "WhatsApp-Import konnte vom Backend nicht verarbeitet werden."
-
-        });
-
-    }
-
-
-    /* ==================================================
-       RESPONSE
-  ================================================== */
-
-    res.setHeader(
-      "Cache-Control",
-      "no-store, max-age=0"
-    );
-
-
-    return res
-      .status(200)
-      .json(
-        data
-      );
-
-
-  } catch (
-    error
-  ) {
-
-    console.error(
-      "Verbindung zum Railway Import fehlgeschlagen:",
-      error
-    );
-
-
-    return res
-      .status(502)
-      .json({
-
-        ok:
-          false,
-
-        error:
-          "Import-Backend ist momentan nicht erreichbar."
-
-      });
-
-  }
-
+export default async function handler(req, res) {
+ if (req.method !== "POST") {
+   res.setHeader("Allow", "POST");
+   return res.status(405).json({ ok: false, error: "Methode nicht erlaubt." });
+ }
+
+ if (!validDashboardSession(req)) {
+   return res.status(401).json({ ok: false, error: "Nicht angemeldet." });
+ }
+
+ const railwayBackendUrl = String(process.env.RAILWAY_BACKEND_URL || "").trim().replace(/\/+$/, "");
+ const dashboardApiSecret = String(process.env.DASHBOARD_API_SECRET || "").trim();
+ if (!railwayBackendUrl || !dashboardApiSecret) {
+   return res.status(500).json({ ok: false, error: "Dashboard-Verbindung ist nicht konfiguriert." });
+ }
+
+ const body = req.body && typeof req.body === "object" ? req.body : {};
+ const contactId = Number(body.contactId);
+ const chatText = String(body.chatText || "");
+ const senderMapping = body.senderMapping && typeof body.senderMapping === "object"
+   ? {
+       marcelSender: String(body.senderMapping.marcelSender || "").trim(),
+       contactSender: String(body.senderMapping.contactSender || "").trim()
+     }
+   : null;
+
+ if (!Number.isInteger(contactId) || contactId <= 0) {
+   return res.status(400).json({ ok: false, error: "Ungültige Kontakt-ID." });
+ }
+ if (!chatText.trim()) {
+   return res.status(400).json({ ok: false, error: "Der WhatsApp-Export ist leer." });
+ }
+ if (!senderMapping?.marcelSender || !senderMapping?.contactSender) {
+   return res.status(400).json({ ok: false, error: "Bitte Marcel und den Kontakt eindeutig zuordnen." });
+ }
+ if (senderMapping.marcelSender === senderMapping.contactSender) {
+   return res.status(400).json({ ok: false, error: "Marcel und Kontakt müssen verschiedene Absender sein." });
+ }
+
+ try {
+   const railwayResponse = await fetch(`${railwayBackendUrl}/dashboard-api/import-whatsapp`, {
+     method: "POST",
+     headers: {
+       Authorization: `Bearer ${dashboardApiSecret}`,
+       Accept: "application/json",
+       "Content-Type": "application/json"
+     },
+     cache: "no-store",
+     body: JSON.stringify({
+       contactId,
+       chatText,
+       marcelSenderNames: Array.isArray(body.marcelSenderNames) ? body.marcelSenderNames : [],
+       // WICHTIG: Die vom Nutzer bestaetigte Zuordnung unveraendert an Railway weitergeben.
+       senderMapping
+     })
+   });
+
+   const rawText = await railwayResponse.text();
+   let data = {};
+   try { data = rawText ? JSON.parse(rawText) : {}; }
+   catch { return res.status(502).json({ ok: false, error: "Ungültige Antwort vom Backend." }); }
+
+   res.setHeader("Cache-Control", "no-store, max-age=0");
+   return res.status(railwayResponse.status).json(data);
+ } catch (error) {
+   console.error("WhatsApp-Import Verbindung zu Railway fehlgeschlagen:", error);
+   return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+ }
 }

@@ -28,6 +28,76 @@
 <div class="modalbg" id="marcelBrainModal"><div class="modal wideModal"><div class="brainHead"><div><h2 style="margin:0">👑🧠 Marcel Brain</h2><p class="muted" style="margin:6px 0 0">Was der Bot über Marcel gespeichert hat.</p></div><div><span class="brainCount" id="brainModalBadge">0 offen</span> <button class="closeX" data-close="marcelBrainModal">Schließen</button></div></div><div id="marcelBrainContent"><div class="emptyDark">Marcel Brain wird geladen …</div></div></div></div>
 <div class="modalbg" id="womanBrainModal"><div class="modal wideModal"><div class="brainHead"><div><h2 style="margin:0" id="womanBrainTitle">🧠 Frauengehirn</h2><p class="muted" style="margin:6px 0 0">Aktive Fakten, Historie und Ereignisse dieses Kontakts.</p></div><button class="closeX" data-close="womanBrainModal">Schließen</button></div><div id="womanBrainContent"><div class="emptyDark">Kein Kontakt geladen.</div></div></div></div>
 <script>
+
+const DASH_DE_LABELS={
+ "age":"Alter","profession":"Beruf","birthday":"Geburtstag","birth_day":"Geburtstag","birth_month":"Geburtsmonat",
+ "height":"Größe","height_centimeters":"Größe","centimeters":"Zentimeter","city":"Stadt","country":"Land",
+ "language":"Sprache","current_job":"Aktuelle Arbeit","job":"Arbeit","work":"Arbeit","job_search":"Jobsuche",
+ "job_interview":"Vorstellungsgespräch","mother":"Mutter","father":"Vater","son":"Sohn","daughter":"Tochter",
+ "children":"Kinder","family":"Familie","health":"Gesundheit","neck_pain":"Nackenschmerzen",
+ "attaches_quickly":"Bindet sich schnell","does_not_want_to_develop_false_hopes":"Möchte keine falschen Hoffnungen wecken",
+ "responds_well_to_warmth_and_heart_emojis":"Reagiert positiv auf Wärme und Herz-Emojis",
+ "seeks_life_partner":"Sucht eine langfristige Partnerschaft","sexual_tension":"Sexuelle Spannung",
+ "sexual_openness":"Erotische Offenheit","kissing":"Küssen","oral_intimacy":"Orale Intimität",
+ "communication":"Kommunikation","personality":"Persönlichkeit","relationship":"Beziehung & Gefühle",
+ "sexuality_intimacy":"Nähe & Intimität","work_education":"Arbeit & Bildung","family_children":"Familie & Kinder",
+ "goals_dreams":"Ziele & Pläne","shared_history":"Gemeinsame Geschichte","preferences":"Vorlieben",
+ "religion_values":"Werte & Überzeugungen","living_situation":"Wohnen & Lebenssituation","open_threads":"Offene Themen",
+ "plans":"Pläne","current_context":"Aktueller Kontext","profile_summary":"Kurzprofil","interests":"Interessen & Alltag",
+ "importance":"Wichtigkeit","confirmed":"Bestätigt","review_open":"Prüfung offen"
+};
+const DASH_DE_PHRASES={
+ "details unknown":"","age unknown":"","unknown":"",
+ "yes":"Ja","no":"Nein","true":"Ja","false":"Nein",
+ "attaches quickly":"Bindet sich schnell",
+ "does not want to develop false hopes":"Möchte keine falschen Hoffnungen wecken",
+ "responds well to warmth and heart emojis":"Reagiert positiv auf Wärme und Herz-Emojis",
+ "she is afraid of losing marcel":"Sie hat Angst, Marcel zu verlieren",
+ "afraid of losing marcel":"Hat Angst, Marcel zu verlieren",
+ "seeks life partner":"Sucht eine langfristige Partnerschaft"
+};
+function humanDeLabel(value){
+ const raw=String(value??"").trim();
+ if(!raw)return "";
+ const key=raw.toLowerCase().replace(/[^a-z0-9äöüß]+/g,"_").replace(/^_+|_+$/g,"");
+ if(DASH_DE_LABELS[key])return DASH_DE_LABELS[key];
+ return raw.replace(/[_-]+/g," ").replace(/\b\w/g,c=>c.toUpperCase())
+   .replace(/\bYes\b/g,"Ja").replace(/\bNo\b/g,"Nein").replace(/\bTrue\b/g,"Ja").replace(/\bFalse\b/g,"Nein")
+   .replace(/\bUnknown\b/g,"Unbekannt").replace(/\bDetails\b/g,"Details").replace(/\bCentimeters\b/g,"cm")
+   .replace(/\bDay\b/g,"Tag").replace(/\bMonth\b/g,"Monat").replace(/\bYear\b/g,"Jahr")
+   .replace(/\bCurrent\b/g,"Aktuell").replace(/\bJob\b/g,"Arbeit").replace(/\bWork\b/g,"Arbeit")
+   .replace(/\bMother\b/g,"Mutter").replace(/\bFather\b/g,"Vater").replace(/\bSon\b/g,"Sohn").replace(/\bDaughter\b/g,"Tochter");
+}
+function humanDeValue(value){
+ if(value===true)return "Ja";
+ if(value===false)return "Nein";
+ if(value==null)return "";
+ if(Array.isArray(value))return value.map(humanDeValue).filter(Boolean).join(" · ");
+ if(typeof value==="object"){
+   const parts=Object.entries(value).map(([k,v])=>{
+     const hv=humanDeValue(v); if(!hv||/^(Unbekannt|Details Unbekannt)$/i.test(hv))return "";
+     return `${humanDeLabel(k)}: ${hv}`;
+   }).filter(Boolean);
+   return parts.join(" · ");
+ }
+ let s=String(value).trim();
+ const direct=DASH_DE_PHRASES[s.toLowerCase()];
+ if(direct!==undefined)return direct;
+ if(!s||/^(unknown|details unknown|age unknown|null|undefined)$/i.test(s))return "";
+ s=s.replace(/\bDetails Unknown\b/gi,"").replace(/\bAge Unknown\b/gi,"").replace(/\bUnknown\b/gi,"")
+    .replace(/\bYes\b/gi,"Ja").replace(/\bNo\b/gi,"Nein").replace(/\bTrue\b/gi,"Ja").replace(/\bFalse\b/gi,"Nein")
+    .replace(/\bCentimeters\b/gi,"cm").replace(/\bDay\b/gi,"Tag").replace(/\bMonth\b/gi,"Monat")
+    .replace(/\bMother\b/gi,"Mutter").replace(/\bFather\b/gi,"Vater").replace(/\bSon\b/gi,"Sohn").replace(/\bDaughter\b/gi,"Tochter")
+    .replace(/\bJob Interview\b/gi,"Vorstellungsgespräch").replace(/\bJob Search\b/gi,"Jobsuche")
+    .replace(/\bCurrent Job\b/gi,"Aktuelle Arbeit").replace(/\bShared History\b/gi,"Gemeinsame Geschichte");
+ return s.replace(/\s{2,}/g," ").trim();
+}
+function memoryLabelDe(x){
+ const raw=(x&&((x.label)||(x.memoryKey)||(x.memory_key)||(x.key)))||"";
+ return humanDeLabel(raw);
+}
+function memoryValueDe(v){ return humanDeValue(v); }
+
 (()=>{"use strict";let C=[],id=null,D=null,fileText="",senderChoices=[],importPreview=null,brainData=null,translationBusy=false;
 const detectedWhatsAppSenders=text=>{const lines=String(text||"").replace(/^\uFEFF/,"").replace(/\r\n?/g,"\n").split("\n"),patterns=[/^\[(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\]\s*([^:]+):\s?(.*)$/i,/^(\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?)\s*[-–]\s*([^:]+):\s?(.*)$/i],found=[];for(const line of lines){for(const p of patterns){const m=line.match(p);if(m){const s=String(m[3]||"").trim();if(s&&!found.includes(s))found.push(s);break}}}return found};
 const $=x=>document.getElementById(x),clean=x=>String(x??"").trim(),esc=x=>String(x??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"),name=c=>clean(c?.displayName)||clean(c?.name)||clean(c?.whatsappDisplayName)||"Unbekannter Kontakt",ld=c=>c?.lastMessage?.createdAt||c?.lastMessageAt||null,lt=c=>clean(c?.lastMessage?.text)||"",ts=v=>{const d=new Date(v);return isNaN(d)?0:d.getTime()},sort=a=>[...a].sort((x,y)=>ts(ld(y))-ts(ld(x))||name(x).localeCompare(name(y),"de")),sel=()=>C.find(c=>String(c.id)===String(id));
@@ -82,7 +152,7 @@ document.addEventListener("change",e=>{if(e.target?.id==="marcelSenderSelect"||e
 
 $("profileBtn").onclick=()=>{renderFullProfile(D?.contact||sel()||{},(D?.profile&&typeof D.profile==="object")?D.profile:{});$("fullProfileModal").classList.add("open")};
 $("womanBrainBtn").onclick=()=>{renderWomanBrain();$("womanBrainModal").classList.add("open")};
-async function loadMarcelBrain(open=false){try{brainData=await api("/api/dashboard/marcel-brain");const n=+brainData.reviewRequired||0;$("brainBadge").textContent=n>99?"99+":n;$("brainBadge").classList.toggle("show",n>0);$("brainModalBadge").textContent=`${n} offen`;const ls=brainData.liveState||{},items=brainData.items||[];const live=`<div class="liveBox"><b>Aktueller Live-Stand</b><br>Ort: ${esc([ls.current_city,ls.current_country].filter(Boolean).join(", ")||"—")}<br>Umzug: ${esc([ls.relocation_target_city,ls.relocation_target_country].filter(Boolean).join(", ")||"—")}${ls.relocation_eta?` · ${esc(ls.relocation_eta)}`:""}<br>Status: ${esc(ls.relocation_stage||"—")}</div>`;const cards=items.map(x=>`<div class="memoryCard ${x.humanVerified?"":"review"}"><h4>${x.humanVerified?"✅":"⚠️"} ${esc(memoryLabel(x))}</h4><div class="value">${esc(memoryValue(x.value))}</div><div class="sub">${esc(x.category||"Allgemein")} · Wichtigkeit ${+x.importance||0}${x.humanVerified?" · bestätigt":" · Prüfung offen"}</div></div>`).join("");$("marcelBrainContent").innerHTML=live+(cards?`<div class="brainGrid">${cards}</div>`:'<div class="emptyDark">Noch keine Marcel-Memories gespeichert.</div>');if(open)$("marcelBrainModal").classList.add("open")}catch(e){if(open){$("marcelBrainContent").innerHTML=`<div class="result error">${esc(e.message)}</div>`;$("marcelBrainModal").classList.add("open")}}}
+async function loadMarcelBrain(open=false){try{brainData=await api("/api/dashboard/marcel-brain");const n=+brainData.reviewRequired||0;$("brainBadge").textContent=n>99?"99+":n;$("brainBadge").classList.toggle("show",n>0);$("brainModalBadge").textContent=`${n} offen`;const ls=brainData.liveState||{},items=brainData.items||[];const live=`<div class="liveBox"><b>Aktueller Stand</b><br>Ort: ${esc([ls.current_city,ls.current_country].filter(Boolean).join(", ")||"—")}<br>Umzug: ${esc([ls.relocation_target_city,ls.relocation_target_country].filter(Boolean).join(", ")||"—")}${ls.relocation_eta?` · ${esc(ls.relocation_eta)}`:""}<br>Status: ${esc(ls.relocation_stage||"—")}</div>`;const cards=items.map(x=>`<div class="memoryCard ${x.humanVerified?"":"review"}"><h4>${x.humanVerified?"✅":"⚠️"} ${esc(memoryLabelDe(x))}</h4><div class="value">${esc(memoryValueDe(x.value))}</div><div class="sub">${esc(x.category||"Allgemein")} · Wichtigkeit ${+x.importance||0}${x.humanVerified?" · bestätigt":" · Prüfung offen"}</div></div>`).join("");$("marcelBrainContent").innerHTML=live+(cards?`<div class="brainGrid">${cards}</div>`:'<div class="emptyDark">Noch keine Informationen über Marcel gespeichert.</div>');if(open)$("marcelBrainModal").classList.add("open")}catch(e){if(open){$("marcelBrainContent").innerHTML=`<div class="result error">${esc(e.message)}</div>`;$("marcelBrainModal").classList.add("open")}}}
 $("marcelBrainBtn").onclick=()=>loadMarcelBrain(true);$("marcelBrainBtn").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();loadMarcelBrain(true)}};
 loadMarcelBrain(false);load().catch(e=>$("messages").innerHTML=`<div class="empty">${esc(e.message)}</div>`);})();
 </script></body></html>

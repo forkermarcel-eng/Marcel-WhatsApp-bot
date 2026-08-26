@@ -8677,61 +8677,85 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
            whatsapp_message_id, processing_status
       FROM messages
      WHERE whatsapp_jid = $1
-     ORDER BY created_at ASC, id ASC`,
+     ORDER BY id ASC`,
    [contact.whatsapp_jid]
  );
  const dbRows = rowsResult.rows;
  
  /*
-  * CLEANUP V2
+  * CLEANUP V3
   *
-  * Hintergrund:
-  * - Alte Nachrichten koennen aus dem frueheren Railway-Import stammen.
-  * - Neue Nachrichten aus dem Dashboard-Import tragen import_source_hash /
-  *   import_batch_id bzw. processing_status = historical_imported.
-  * - Beide Importwege koennen fuer dieselbe echte WhatsApp-Nachricht
-  *   unterschiedliche DB-Zeitpunkte erzeugt haben.
+  * Der Fehler bei V2 war die Einteilung "Legacy" gegen "Historical".
+  * Auch der alte Railway-Import kann bereits Historical-Merkmale besitzen.
+  * Deshalb trennen wir jetzt nach dem tatsaechlichen Import-Batch.
   *
-  * Sicherheitsprinzip:
-  * Fuer jede einzelne Zeile des hochgeladenen WhatsApp-Exports suchen wir
-  * getrennt genau EINEN alten/Legacy-Treffer und genau EINEN neuen
-  * Historical-Import-Treffer. Nur wenn BEIDE fuer dieselbe Exportzeile
-  * existieren, wird der Historical-Import-Treffer als Dublette markiert.
+  * Der zuletzt eingefuegte Import-Batch ist die Quelle der versehentlich
+  * erneut importierten Nachrichten. Nur Zeilen aus genau diesem Batch
+  * duerfen geloescht werden. Alle aelteren Zeilen bleiben unangetastet.
   *
-  * Dadurch werden gleiche Texte wie "Hola", Herzen usw. nicht global
-  * zusammengeworfen. Jede DB-Zeile darf nur einmal verwendet werden.
+  * Fuer jede Nachricht des hochgeladenen WhatsApp-Exports wird hoechstens
+  * eine alte DB-Zeile und hoechstens eine Zeile des neuesten Import-Batches
+  * verwendet. Stimmen Richtung + normalisierter Text + WhatsApp-Zeitpunkt
+  * zusammen, ist die neue Batch-Zeile eine sichere Dublette.
   */
- const usedLegacyIds = new Set();
- const usedHistoricalIds = new Set();
- const candidateDeleteIds = new Set();
+ 
+ const batchStats = new Map();
+ for (const row of dbRows) {
+   const batchId = String(row.import_batch_id || "").trim();
+   if (!batchId) continue;
+ 
+   const id = Number(row.id);
+   const current = batchStats.get(batchId) || {
+     batchId,
+     count: 0,
+     maxId: 0
+   };
+ 
+   current.count += 1;
+   current.maxId = Math.max(current.maxId, id);
+   batchStats.set(batchId, current);
+ }
+ 
+ const newestBatch = [...batchStats.values()]
+   .sort((a, b) => b.maxId - a.maxId)[0] || null;
+ 
+ if (!newestBatch) {
+   throw new Error("Kein Import-Batch fuer einen sicheren Cleanup gefunden.");
+ }
+ 
+ const newestBatchId = newestBatch.batchId;
+ const oldRows = dbRows.filter(
+   row => String(row.import_batch_id || "").trim() !== newestBatchId
+ );
+ const newestRows = dbRows.filter(
+   row => String(row.import_batch_id || "").trim() === newestBatchId
+ );
+ 
+ const usedOldIds = new Set();
+ const usedNewestIds = new Set();
+ const deleteIds = [];
  const groups = [];
  
- const isHistoricalRow = row =>
-   Boolean(
-     row.import_source_hash ||
-     row.import_batch_id ||
-     String(row.processing_status || "").toLowerCase().includes("historical") ||
-     String(row.whatsapp_message_id || "").startsWith("historical-")
-   );
- 
- const nearestUnusedMatch = ({ item, direction, historical }) => {
+ const findNearestUnused = ({ rows, usedIds, item, direction }) => {
    const normalizedText = normalizeForDuplicate(item.text);
    if (!normalizedText) return null;
  
    const exportMs = item.createdAt.getTime();
-   const usedIds = historical ? usedHistoricalIds : usedLegacyIds;
  
-   const candidates = dbRows
+   const candidates = rows
      .filter(row => {
        const id = Number(row.id);
        if (usedIds.has(id)) return false;
        if (row.direction !== direction) return false;
-       if (isHistoricalRow(row) !== historical) return false;
        if (normalizeForDuplicate(row.message_text) !== normalizedText) return false;
  
        const rowMs = new Date(row.created_at).getTime();
-       return Number.isFinite(rowMs) &&
-         Math.abs(rowMs - exportMs) <= 18 * 60 * 60 * 1000;
+       if (!Number.isFinite(rowMs)) return false;
+ 
+       // Die beiden echten Exporte zeigen 0-1 Sekunde Differenz.
+       // 90 Sekunden bleiben als konservatives Sicherheitsfenster fuer
+       // unterschiedliche Export-/Importdarstellungen bestehen.
+       return Math.abs(rowMs - exportMs) <= 90 * 1000;
      })
      .sort((a, b) => {
        const da = Math.abs(new Date(a.created_at).getTime() - exportMs);
@@ -8746,6 +8770,7 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
  for (let exportIndex = 0; exportIndex < parsed.length; exportIndex += 1) {
    const item = parsed[exportIndex];
    const senderKey = normalizeImportSender(item.sender);
+ 
    const direction =
      senderKey === marcelSender
        ? "outgoing"
@@ -8755,55 +8780,49 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
  
    if (!direction) continue;
  
-   const legacy = nearestUnusedMatch({
+   const oldMatch = findNearestUnused({
+     rows: oldRows,
+     usedIds: usedOldIds,
      item,
-     direction,
-     historical: false
+     direction
    });
  
-   const historical = nearestUnusedMatch({
+   const newestMatch = findNearestUnused({
+     rows: newestRows,
+     usedIds: usedNewestIds,
      item,
-     direction,
-     historical: true
+     direction
    });
  
-   /*
-    * Treffer werden auch dann reserviert, wenn nur eine Seite existiert.
-    * So kann dieselbe DB-Zeile nicht spaeter einer wiederholten Nachricht
-    * mit identischem Text zugeordnet werden.
-    */
-   if (legacy) usedLegacyIds.add(Number(legacy.id));
-   if (historical) usedHistoricalIds.add(Number(historical.id));
+   if (oldMatch) usedOldIds.add(Number(oldMatch.id));
+   if (newestMatch) usedNewestIds.add(Number(newestMatch.id));
  
-   /*
-    * Nur der klare Cross-Source-Fall wird geloescht:
-    * dieselbe Exportzeile hat sowohl einen Legacy- als auch einen
-    * Historical-Treffer. Der alte Datensatz bleibt, der spaeter durch
-    * den Dashboard-Import entstandene Historical-Datensatz wird entfernt.
-    */
-   if (!legacy || !historical) continue;
+   if (!oldMatch || !newestMatch) continue;
  
-   const deleteId = Number(historical.id);
-   candidateDeleteIds.add(deleteId);
+   const deleteId = Number(newestMatch.id);
+   deleteIds.push(deleteId);
  
    groups.push({
      exportIndex,
      direction,
      textPreview: normalizeText(item.text).slice(0, 140),
      exportCreatedAt: item.createdAt.toISOString(),
-     keepId: Number(legacy.id),
-     keepCreatedAt: new Date(legacy.created_at).toISOString(),
+     keepId: Number(oldMatch.id),
+     keepCreatedAt: new Date(oldMatch.created_at).toISOString(),
      deleteIds: [deleteId],
-     deleteCreatedAt: [new Date(historical.created_at).toISOString()]
+     deleteCreatedAt: [new Date(newestMatch.created_at).toISOString()]
    });
  }
  
- const deleteIds = [...candidateDeleteIds].sort((a, b) => a - b);
+ deleteIds.sort((a, b) => a - b);
+ 
  const payload = {
    contactId: Number(contact.id),
    jid: contact.whatsapp_jid,
    parsed: parsed.length,
    databaseMessages: dbRows.length,
+   cleanupBatchId: newestBatchId,
+   cleanupBatchMessages: newestRows.length,
    deleteIds
  };
  

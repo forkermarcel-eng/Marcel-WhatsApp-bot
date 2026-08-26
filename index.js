@@ -8390,7 +8390,7 @@ return nearby.rows.find(row =>
 ) || null;
 }
  
-async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [], senderMapping = null }) {
+async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [], senderMapping = null, dryRun = false }) {
  const parsed = parseWhatsAppExport(rawText);
  if (!parsed.length) throw new Error("Keine WhatsApp-Nachrichten im unterstuetzten Exportformat erkannt.");
  
@@ -8494,6 +8494,12 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
      continue;
    }
  
+   if (dryRun) {
+     imported += 1;
+     direction === "incoming" ? incoming += 1 : outgoing += 1;
+     continue;
+   }
+ 
    const inserted = await pool.query(
      `INSERT INTO messages (
        whatsapp_jid, direction, message_text, whatsapp_message_id,
@@ -8522,7 +8528,7 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
    newMessageIds.push(inserted.rows[0].id);
  }
  
- if (imported > 0) {
+ if (!dryRun && imported > 0) {
    await pool.query(
      `UPDATE contacts
       SET first_contact_at = COALESCE(LEAST(first_contact_at,$2::timestamptz),$2::timestamptz),
@@ -8546,7 +8552,8 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
      contactSender: explicitContactSender,
      confirmed: true
    } : null,
-   newMessageIds
+   newMessageIds,
+   dryRun: Boolean(dryRun)
  };
 }
  
@@ -8666,10 +8673,30 @@ contactSender: normalizeText(req.body.senderMapping.contactSender)
   const contact = contactResult.rows[0];
   if (!contact) return res.status(404).json({ ok: false, error: "Kontakt nicht gefunden." });
  
-  const result = await importWhatsAppHistory({ contact, rawText: chatText, marcelSenderNames, senderMapping });
-  console.log("WhatsApp Historical Import:", contact.display_name || contact.canonical_name || contact.whatsapp_jid, result);
+  const action = normalizeText(req.body?.action).toLowerCase() === "import" ? "import" : "preview";
+  const result = await importWhatsAppHistory({ contact, rawText: chatText, marcelSenderNames, senderMapping, dryRun: action !== "import" });
+  console.log("WhatsApp Historical Import:", action, contact.display_name || contact.canonical_name || contact.whatsapp_jid, result);
  
-  const backfillJob = await scheduleHistoricalMemoryBackfill({ contact, rawText: chatText, senderMapping });
+  // Echte Sicherheitsstufe: Vorschau bedeutet NULL Datenbankschreibvorgaenge und NULL Memory-Backfill.
+  if (action !== "import") {
+    return res.json({
+      ok: true,
+      preview: true,
+      contact: { id: contact.id, name: contact.display_name || contact.canonical_name || null, jid: contact.whatsapp_jid },
+      parsed: result.parsed,
+      duplicates: result.duplicates,
+      newMessages: result.imported,
+      incoming: result.incoming,
+      outgoing: result.outgoing,
+      senders: result.senders,
+      senderMapping: result.senderMapping,
+      message: "Vorschau fertig. Es wurde noch nichts gespeichert."
+    });
+  }
+ 
+  const backfillJob = result.imported > 0
+    ? await scheduleHistoricalMemoryBackfill({ contact, rawText: chatText, senderMapping })
+    : null;
  
   return res.json({
     ok: true,
@@ -8679,11 +8706,14 @@ contactSender: normalizeText(req.body.senderMapping.contactSender)
       jid: contact.whatsapp_jid
     },
     ...result,
-    memoryBackfill: {
+    memoryBackfill: backfillJob ? {
       status: "started",
       jobId: backfillJob.jobId,
       totalChunks: backfillJob.totalChunks,
       message: "Import und Deduplizierung fertig. Semantischer Memory-Backfill fuer Kontakt und Marcel wurde gestartet."
+    } : {
+      status: "skipped",
+      reason: "Keine neuen Nachrichten. Kein Memory-Backfill notwendig."
     }
   });
 } catch (error) {

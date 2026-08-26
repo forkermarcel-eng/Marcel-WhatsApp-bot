@@ -8384,16 +8384,42 @@ return nearby.rows.find(row =>
 ) || null;
 }
  
-async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [] }) {
+async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [], senderMapping = null }) {
 const parsed = parseWhatsAppExport(rawText);
 if (!parsed.length) throw new Error("Keine WhatsApp-Nachrichten im unterstuetzten Exportformat erkannt.");
  
-const marcelNames = new Set(["Marcel", "Marcel Marlow", ...marcelSenderNames]
-  .map(normalizeImportSender).filter(Boolean));
 const senders = [...new Set(parsed.map(item => item.sender))];
+const explicitMarcelSender = normalizeText(senderMapping?.marcelSender);
+const explicitContactSender = normalizeText(senderMapping?.contactSender);
+ 
+if (explicitMarcelSender && explicitContactSender) {
+const senderSet = new Set(senders.map(normalizeImportSender));
+if (normalizeImportSender(explicitMarcelSender) === normalizeImportSender(explicitContactSender)) {
+throw new Error("Marcel und Kontakt duerfen nicht derselbe WhatsApp-Absender sein.");
+}
+if (!senderSet.has(normalizeImportSender(explicitMarcelSender))) {
+throw new Error(`Bestaetigter Marcel-Absender wurde im Export nicht gefunden: ${explicitMarcelSender}`);
+}
+if (!senderSet.has(normalizeImportSender(explicitContactSender))) {
+throw new Error(`Bestaetigter Kontakt-Absender wurde im Export nicht gefunden: ${explicitContactSender}`);
+}
+}
+ 
+const marcelNames = new Set(["Marcel", "Marcel Marlow", ...marcelSenderNames, ...(explicitMarcelSender ? [explicitMarcelSender] : [])]
+.map(normalizeImportSender).filter(Boolean));
 const nonMarcelSenders = senders.filter(sender => !marcelNames.has(normalizeImportSender(sender)));
-if (nonMarcelSenders.length > 1) {
-  throw new Error(`Mehrere nicht eindeutig zuordenbare Absender erkannt: ${nonMarcelSenders.join(", ")}.`);
+ 
+if (!explicitContactSender && nonMarcelSenders.length > 1) {
+const error = new Error(`Mehrere nicht eindeutig zuordenbare Absender erkannt: ${nonMarcelSenders.join(", ")}.`);
+error.code = "SENDER_CONFIRMATION_REQUIRED";
+error.senders = senders;
+throw error;
+}
+ 
+if (explicitContactSender && nonMarcelSenders.some(sender =>
+normalizeImportSender(sender) !== normalizeImportSender(explicitContactSender)
+)) {
+throw new Error(`Weitere nicht bestaetigte Absender erkannt: ${nonMarcelSenders.join(", ")}`);
 }
  
 const batchId = `wa-import-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
@@ -8404,7 +8430,9 @@ let outgoing = 0;
 const newMessageIds = [];
  
 for (const item of parsed) {
-  const direction = marcelNames.has(normalizeImportSender(item.sender)) ? "outgoing" : "incoming";
+  const direction = explicitMarcelSender
+? (normalizeImportSender(item.sender) === normalizeImportSender(explicitMarcelSender) ? "outgoing" : "incoming")
+: (marcelNames.has(normalizeImportSender(item.sender)) ? "outgoing" : "incoming");
   const sourceHash = historicalImportHash({
     jid: contact.whatsapp_jid,
     direction,
@@ -8464,6 +8492,72 @@ return { batchId, parsed: parsed.length, imported, duplicates, incoming, outgoin
 }
  
 /* ==================================================
+ HISTORICAL MEMORY BACKFILL V2
+ Kontakt + Marcel getrennt; semantische Konsolidierung
+================================================== */
+async function ensureHistoricalMemoryReviewTable() {
+ await pool.query(`CREATE TABLE IF NOT EXISTS memory_import_review (
+   id BIGSERIAL PRIMARY KEY, subject_type TEXT NOT NULL, contact_id BIGINT,
+   decision TEXT NOT NULL, category TEXT, memory_key TEXT, existing_memory_key TEXT,
+   proposed_value JSONB NOT NULL DEFAULT '{}'::jsonb, evidence TEXT, reason TEXT,
+   source_type TEXT DEFAULT 'whatsapp_historical_import', status TEXT DEFAULT 'pending',
+   created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+ )`);
+}
+function historicalConversationRows(rawText, senderMapping) {
+ const parsed=parseWhatsAppExport(rawText), m=normalizeImportSender(senderMapping?.marcelSender), c=normalizeImportSender(senderMapping?.contactSender);
+ return parsed.filter(x=>[m,c].includes(normalizeImportSender(x.sender))).map(x=>({role:normalizeImportSender(x.sender)===m?'Marcel':'Kontakt',createdAt:x.createdAt,text:normalizeText(x.text)})).filter(x=>x.text);
+}
+function compactMemoryValue(value) { return value&&typeof value==='object'&&!Array.isArray(value)?value:{value:value??null}; }
+async function createHistoricalReview({subjectType,contactId,decision,item}) {
+ await ensureHistoricalMemoryReviewTable();
+ await pool.query(`INSERT INTO memory_import_review (subject_type,contact_id,decision,category,memory_key,existing_memory_key,proposed_value,evidence,reason) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`,[
+   subjectType,contactId||null,decision,normalizeText(item?.category)||null,normalizeText(item?.memory_key)||null,normalizeText(item?.existing_memory_key)||null,JSON.stringify(compactMemoryValue(item?.memory_value)),normalizeText(item?.evidence)||null,normalizeText(item?.reason)||null
+ ]);
+}
+async function applyHistoricalMarcelDecisions(items,contactId) {
+ const stats={same:0,updated:0,created:0,review:0}; if(!Array.isArray(items))return stats;
+ for(const item of items.slice(0,30)) {
+   const d=normalizeText(item?.decision).toUpperCase(),cat=normalizeText(item?.category)||'general',key=normalizeText(item?.memory_key),oldKey=normalizeText(item?.existing_memory_key),val=compactMemoryValue(item?.memory_value),imp=clampImportance(item?.importance);
+   if(d==='SAME'){stats.same++;continue;}
+   if(d==='CONTRADICTION'||d==='UNCERTAIN'){await createHistoricalReview({subjectType:'marcel',contactId,decision:d,item});stats.review++;continue;}
+   if(d==='UPDATE'&&oldKey){
+     const row=(await pool.query(`SELECT * FROM marcel_memory WHERE memory_key=$1 LIMIT 1`,[oldKey])).rows[0];
+     if(row?.human_verified===true){await createHistoricalReview({subjectType:'marcel',contactId,decision:'UNCERTAIN',item:{...item,reason:`UPDATE betrifft verifiziertes Marcel-Memory: ${oldKey}`}});stats.review++;continue;}
+     if(row){await pool.query(`UPDATE marcel_memory SET category=$2,memory_value=$3::jsonb,importance=GREATEST(importance,$4),source_type='whatsapp_historical_import',human_verified=FALSE,allowed_for_bot=TRUE,status='active',updated_at=NOW() WHERE id=$1`,[row.id,cat,JSON.stringify(val),imp]);stats.updated++;continue;}
+   }
+   if((d==='NEW'||d==='UPDATE')&&key){const r=await pool.query(`INSERT INTO marcel_memory (category,memory_key,memory_value,status,importance,sensitivity,source_type,human_verified,allowed_for_bot,usage_notes) VALUES ($1,$2,$3::jsonb,'active',$4,$5,'whatsapp_historical_import',FALSE,TRUE,$6) ON CONFLICT (memory_key) DO NOTHING RETURNING id`,[cat,key,JSON.stringify(val),imp,['normal','personal','intimate'].includes(item?.sensitivity)?item.sensitivity:'normal',normalizeText(item?.reason)||'Semantisch aus historischem WhatsApp-Verlauf extrahiert.']);if(r.rows[0])stats.created++;else stats.same++;}
+ } return stats;
+}
+async function applyHistoricalContactDecisions(items,contactId) {
+ const stats={same:0,updated:0,created:0,review:0}; if(!Array.isArray(items))return stats;
+ for(const item of items.slice(0,30)){
+   const d=normalizeText(item?.decision).toUpperCase();
+   if(d==='SAME'){stats.same++;continue;}
+   if(d==='CONTRADICTION'||d==='UNCERTAIN'){await createHistoricalReview({subjectType:'contact',contactId,decision:d,item});stats.review++;continue;}
+   const oldId=Number(item?.existing_memory_id); if(d==='UPDATE'&&Number.isInteger(oldId)&&oldId>0){await retireMemoryItems(contactId,[oldId]);stats.updated++;}
+   if(d==='NEW'||d==='UPDATE'){const before=Number((await pool.query(`SELECT COUNT(*)::int count FROM memory_items WHERE contact_id=$1`,[contactId])).rows[0]?.count||0);await applyMemoryItems(contactId,[{category:item?.category,memory_key:item?.memory_key,memory_value:item?.memory_value,memory_type:item?.memory_type||'self_reported',confidence:item?.confidence??0.9,importance:item?.importance??3,source_quote:item?.evidence||null,use_in_reply:item?.use_in_reply!==false}],null,normalizeText(item?.evidence));const after=Number((await pool.query(`SELECT COUNT(*)::int count FROM memory_items WHERE contact_id=$1`,[contactId])).rows[0]?.count||0);if(after>before)stats.created++;}
+ } return stats;
+}
+async function runHistoricalMemoryBackfill({contact,rawText,senderMapping}) {
+ const rows=historicalConversationRows(rawText,senderMapping); if(!rows.length)return {status:'empty',chunks:0}; await ensureHistoricalMemoryReviewTable();
+ const SIZE=45,OVERLAP=8,totals={chunks:0,contact:{same:0,updated:0,created:0,review:0},marcel:{same:0,updated:0,created:0,review:0}};
+ for(let start=0;start<rows.length;start+=SIZE-OVERLAP){
+   const chunk=rows.slice(start,start+SIZE); if(!chunk.length)break;
+   const [contactItems,marcelItems]=await Promise.all([getRelevantMemoryItems(contact.id,180),pool.query(`SELECT id,category,memory_key,memory_value,importance,human_verified,source_type FROM marcel_memory WHERE status='active' AND (valid_until IS NULL OR valid_until>NOW()) ORDER BY importance DESC,updated_at DESC LIMIT 250`).then(r=>r.rows)]);
+   const cm=contactItems.map(x=>`ID=${x.id}|${x.category}.${x.memory_key}|human=${x.human_review_status}|${renderJson(x.human_corrected_value||x.memory_value)}`).join('\n');
+   const mm=marcelItems.map(x=>`KEY=${x.memory_key}|${x.category}|verified=${x.human_verified===true}|${renderJson(x.memory_value)}`).join('\n');
+   const convo=chunk.map(x=>`[${new Date(x.createdAt).toISOString()}] ${x.role}: ${x.text}`).join('\n');
+   const response=await openai.responses.create({model:MODEL,instructions:`Du bist der semantische Memory-Konsolidierer fuer Marcels WhatsApp-System. Antworte ausschliesslich mit gueltigem JSON. Verstehe den Dialog als Zusammenhang: Pronomen, kurze Antworten, Rueckbezuege, Korrekturen, Ironie und unterschiedliche Formulierungen desselben Sachverhalts. ZWEI GEHIRNE STRENG TRENNEN: contact_items sind Fakten ueber den Kontakt; marcel_items sind Fakten ueber Marcel. Entscheide semantisch: SAME = gleicher Sachverhalt trotz anderer Formulierung, nichts neu anlegen. UPDATE = gleicher Sachverhalt mit neuer/praeziser/zeitlich aktualisierter Information. CONTRADICTION = echter Widerspruch. NEW = wirklich neuer langfristig/relevant nutzbarer Sachverhalt. UNCERTAIN = Bedeutung, Person, Zeitbezug oder Faktstatus nicht sicher. Keine banalen Flirtphrasen, Emojis, Begruessungen oder Vermutungen speichern. Human/verifiziertes Wissen nie automatisch ersetzen. Bei UPDATE Kontakt existing_memory_id setzen; bei SAME/UPDATE Marcel existing_memory_key setzen. memory_key kurz, stabil, snake_case; bei SAME/UPDATE bestehenden Key verwenden. Bei Unsicherheit UNCERTAIN. JSON exakt: {"contact_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_id":null,"category":"","memory_key":"","memory_value":{},"memory_type":"self_reported|explicit_fact|observed_pattern|interpretation|temporary_state","confidence":0.9,"importance":3,"use_in_reply":true,"evidence":"","reason":""}],"marcel_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_key":null,"category":"","memory_key":"","memory_value":{},"importance":3,"sensitivity":"normal|personal|intimate","evidence":"","reason":""}]}`,
+     input:`KONTAKT: ${contact.display_name||contact.canonical_name||contact.whatsapp_jid}\n\nBESTEHENDES KONTAKT-MEMORY:\n${cm||'[keine]'}\n\nBESTEHENDES MARCEL-MEMORY:\n${mm||'[keine]'}\n\nDIALOG-AUSSCHNITT CHRONOLOGISCH:\n${convo}\n\nKonsolidiere nur Memory-wuerdige Informationen.`});
+   const parsed=safeJsonParse(response.output_text,{contact_items:[],marcel_items:[]})||{}; const cs=await applyHistoricalContactDecisions(parsed.contact_items||[],contact.id),ms=await applyHistoricalMarcelDecisions(parsed.marcel_items||[],contact.id);
+   for(const k of Object.keys(totals.contact))totals.contact[k]+=cs[k]||0; for(const k of Object.keys(totals.marcel))totals.marcel[k]+=ms[k]||0; totals.chunks++; if(start+SIZE>=rows.length)break;
+ }
+ console.log('Historical Memory Backfill fertig:',{contact:contact.display_name||contact.canonical_name||contact.whatsapp_jid,...totals}); return {status:'completed',...totals};
+}
+function scheduleHistoricalMemoryBackfill(payload){setTimeout(()=>{runHistoricalMemoryBackfill(payload).catch(error=>console.error('Historical Memory Backfill fehlgeschlagen:',error));},300);}
+ 
+/* ==================================================
  DASHBOARD WHATSAPP-EXPORT IMPORT V1
 ================================================== */
  
@@ -8477,6 +8571,12 @@ try {
   const contactId = Number(req.body?.contactId);
   const chatText = String(req.body?.chatText || "");
   const marcelSenderNames = Array.isArray(req.body?.marcelSenderNames) ? req.body.marcelSenderNames : [];
+const senderMapping = req.body?.senderMapping && typeof req.body.senderMapping === "object"
+? {
+marcelSender: normalizeText(req.body.senderMapping.marcelSender),
+contactSender: normalizeText(req.body.senderMapping.contactSender)
+}
+: null;
   if (!Number.isInteger(contactId) || contactId <= 0) {
     return res.status(400).json({ ok: false, error: "Ungueltige Kontakt-ID." });
   }
@@ -8488,8 +8588,10 @@ try {
   const contact = contactResult.rows[0];
   if (!contact) return res.status(404).json({ ok: false, error: "Kontakt nicht gefunden." });
  
-  const result = await importWhatsAppHistory({ contact, rawText: chatText, marcelSenderNames });
+  const result = await importWhatsAppHistory({ contact, rawText: chatText, marcelSenderNames, senderMapping });
   console.log("WhatsApp Historical Import:", contact.display_name || contact.canonical_name || contact.whatsapp_jid, result);
+ 
+  scheduleHistoricalMemoryBackfill({ contact, rawText: chatText, senderMapping });
  
   return res.json({
     ok: true,
@@ -8500,142 +8602,25 @@ try {
     },
     ...result,
     memoryBackfill: {
-      status: "pending",
-      message: "Import und Deduplizierung fertig. Memory-Backfill folgt im naechsten Block."
+      status: "started",
+      message: "Import und Deduplizierung fertig. Semantischer Memory-Backfill fuer Kontakt und Marcel wurde gestartet."
     }
   });
 } catch (error) {
-  console.error("WhatsApp Historical Import Fehler:", error);
-  return res.status(500).json({
-    ok: false,
-    error: error?.message || "WhatsApp-Export konnte nicht importiert werden."
-  });
-}
+console.error("WhatsApp Historical Import Fehler:", error);
+if (error?.code === "SENDER_CONFIRMATION_REQUIRED") {
+return res.status(409).json({
+ok: false,
+code: "SENDER_CONFIRMATION_REQUIRED",
+error: error?.message || "Absender muessen bestaetigt werden.",
+senders: Array.isArray(error?.senders) ? error.senders : []
 });
- 
- 
-/* ==================================================
- DASHBOARD KONTAKT ANLEGEN V1
-================================================== */
-app.post("/dashboard-api/contacts", async (req, res) => {
- try {
-   if (!dashboardApiReady(res)) return;
- 
-   if (!dashboardApiAuthorized(req)) {
-     return res.status(401).json({
-       ok: false,
-       error: "Nicht autorisiert."
-     });
-   }
- 
-   const name = normalizeText(req.body?.name);
-   const phone =
-     String(req.body?.phoneNumber || "").replace(/\D/g, "") || null;
-   const country = normalizeText(req.body?.country) || null;
-   const city = normalizeText(req.body?.city) || null;
-   const language = normalizeText(req.body?.language) || null;
- 
-   if (!name) {
-     return res.status(400).json({
-       ok: false,
-       error: "Bitte einen Namen eingeben."
-     });
-   }
- 
-   if (phone) {
-     const existingByPhone =
-       await findContactByIdentifier("phone", phone);
- 
-     if (existingByPhone) {
-       return res.status(409).json({
-         ok: false,
-         error: "Diese WhatsApp-Nummer ist bereits einem Kontakt zugeordnet.",
-         contactId: existingByPhone.id
-       });
-     }
-   }
- 
-   const manualJid =
-     `manual-${Date.now()}-${crypto.randomBytes(3).toString("hex")}@memory.local`;
- 
-   const result = await pool.query(
-     `INSERT INTO contacts (
-       whatsapp_jid,
-       display_name,
-       canonical_name,
-       phone_number,
-       country,
-       city,
-       primary_language,
-       source_platform,
-       current_platform,
-       platform_status,
-       contact_status,
-       relationship_stage,
-       auto_reply_enabled,
-       date_lock_enabled,
-       first_contact_at,
-       updated_at
-     ) VALUES (
-       $1,$2,$2,$3,$4,$5,$6,
-       'dashboard',
-       CASE WHEN $3::text IS NULL THEN NULL ELSE 'whatsapp' END,
-       CASE WHEN $3::text IS NULL THEN NULL ELSE 'WHATSAPP_PENDING' END,
-       'active','new',TRUE,FALSE,NOW(),NOW()
-     )
-     RETURNING *`,
-     [manualJid, name, phone, country, city, language]
-   );
- 
-   const contact = result.rows[0];
- 
-   await pool.query(
-     `INSERT INTO contact_memory_profiles (contact_id)
-      VALUES ($1)
-      ON CONFLICT (contact_id) DO NOTHING`,
-     [contact.id]
-   );
- 
-   await addContactIdentifier({
-     contactId: contact.id,
-     type: "canonical_name",
-     value: name,
-     isPrimary: true
-   });
- 
-   if (phone) {
-     await addContactIdentifier({
-       contactId: contact.id,
-       type: "phone",
-       value: phone,
-       sourcePlatform: "whatsapp",
-       isPrimary: true
-     });
-   }
- 
-   return res.status(201).json({
-     ok: true,
-     contact: {
-       id: contact.id,
-       jid: contact.whatsapp_jid,
-       name: contact.display_name || contact.canonical_name,
-       displayName: contact.display_name,
-       phoneNumber: contact.phone_number,
-       country: contact.country,
-       city: contact.city,
-       language: contact.primary_language,
-       profileOnly: true,
-       lastMessageAt: contact.last_message_at || null
-     }
-   });
- } catch (error) {
-   console.error("Dashboard Kontakt anlegen Fehler:", error);
- 
-   return res.status(500).json({
-     ok: false,
-     error: error?.message || "Kontakt konnte nicht angelegt werden."
-   });
- }
+}
+return res.status(500).json({
+ok: false,
+error: error?.message || "WhatsApp-Export konnte nicht importiert werden."
+});
+}
 });
  
  

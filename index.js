@@ -8643,6 +8643,221 @@ async function runHistoricalMemoryBackfill({contact,rawText,senderMapping,jobId=
 async function scheduleHistoricalMemoryBackfill(payload){await ensureHistoricalBackfillJobsTable();const jobId=`memory-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;const rows=historicalConversationRows(payload.rawText,payload.senderMapping);const totalChunks=historicalChunkCount(rows.length);await pool.query(`INSERT INTO historical_memory_backfill_jobs (job_id,contact_id,status,total_chunks,completed_chunks) VALUES ($1,$2,'queued',$3,0)`,[jobId,payload.contact.id,totalChunks]);setTimeout(()=>{runHistoricalMemoryBackfill({...payload,jobId}).catch(async error=>{console.error('Historical Memory Backfill fehlgeschlagen:',error);try{await updateHistoricalBackfillJob(jobId,{status:'failed',error_text:String(error?.message||error)});}catch{}});},300);return {jobId,totalChunks};}
  
 /* ==================================================
+ WHATSAPP DUPLICATE CLEANUP V1
+ Sicherheitsprinzip:
+ 1) preview = nur pruefen, niemals loeschen
+ 2) execute = nur mit exakt passendem confirmationToken
+ 3) es werden ausschliesslich Nachrichten geloescht
+ 4) Memories / Kontakte werden niemals angefasst
+ 5) Cleanup ist an den hochgeladenen WhatsApp-Export gebunden
+================================================== */
+ 
+function duplicateCleanupToken(payload) {
+ return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+ 
+async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMapping }) {
+ const parsed = parseWhatsAppExport(rawText);
+ if (!parsed.length) throw new Error("Keine WhatsApp-Nachrichten im unterstuetzten Exportformat erkannt.");
+ 
+ const marcelSender = normalizeImportSender(senderMapping?.marcelSender);
+ const contactSender = normalizeImportSender(senderMapping?.contactSender);
+ if (!marcelSender || !contactSender || marcelSender === contactSender) {
+   throw new Error("Fuer den Cleanup muss die Absender-Zuordnung eindeutig bestaetigt sein.");
+ }
+ 
+ const senders = [...new Set(parsed.map(item => item.sender))];
+ const senderSet = new Set(senders.map(normalizeImportSender));
+ if (!senderSet.has(marcelSender) || !senderSet.has(contactSender)) {
+   throw new Error("Die bestaetigten Absender passen nicht zum WhatsApp-Export.");
+ }
+ 
+ const rowsResult = await pool.query(
+   `SELECT id, direction, message_text, created_at, import_source_hash, import_batch_id,
+           whatsapp_message_id, processing_status
+      FROM messages
+     WHERE whatsapp_jid = $1
+     ORDER BY created_at ASC, id ASC`,
+   [contact.whatsapp_jid]
+ );
+ const dbRows = rowsResult.rows;
+ 
+ // Jede DB-Zeile darf hoechstens einer Exportzeile zugeordnet werden.
+ // Pro Exportzeile bleibt genau der zeitlich naechste Treffer erhalten.
+ const reservedKeepIds = new Set();
+ const candidateDeleteIds = new Set();
+ const groups = [];
+ 
+ for (let exportIndex = 0; exportIndex < parsed.length; exportIndex += 1) {
+   const item = parsed[exportIndex];
+   const senderKey = normalizeImportSender(item.sender);
+   const direction = senderKey === marcelSender ? "outgoing" : senderKey === contactSender ? "incoming" : null;
+   if (!direction) continue;
+ 
+   const normalizedText = normalizeForDuplicate(item.text);
+   if (!normalizedText) continue;
+   const exportMs = item.createdAt.getTime();
+ 
+   const matches = dbRows
+     .filter(row => {
+       if (reservedKeepIds.has(Number(row.id))) return false;
+       if (row.direction !== direction) return false;
+       if (normalizeForDuplicate(row.message_text) !== normalizedText) return false;
+       const rowMs = new Date(row.created_at).getTime();
+       return Number.isFinite(rowMs) && Math.abs(rowMs - exportMs) <= 18 * 60 * 60 * 1000;
+     })
+     .sort((a, b) => {
+       const da = Math.abs(new Date(a.created_at).getTime() - exportMs);
+       const db = Math.abs(new Date(b.created_at).getTime() - exportMs);
+       if (da !== db) return da - db;
+       // Bei Gleichstand bevorzugen wir eine Zeile mit Import-Hash als kanonische Zeile.
+       if (Boolean(a.import_source_hash) !== Boolean(b.import_source_hash)) return a.import_source_hash ? -1 : 1;
+       return Number(a.id) - Number(b.id);
+     });
+ 
+   if (!matches.length) continue;
+ 
+   const keep = matches[0];
+   reservedKeepIds.add(Number(keep.id));
+ 
+   // Nur sehr konservativ loeschen: Ein zusaetzlicher Treffer muss entweder
+   // denselben Import-Hash haben ODER zeitlich fast identisch mit dem Keep sein.
+   // Dadurch werden absichtlich wiederholte kurze Nachrichten (z.B. Herzen)
+   // nicht einfach global entfernt.
+   const extras = matches.slice(1).filter(row => {
+     const sameHash = Boolean(keep.import_source_hash && row.import_source_hash && keep.import_source_hash === row.import_source_hash);
+     const deltaToKeep = Math.abs(new Date(row.created_at).getTime() - new Date(keep.created_at).getTime());
+     const nearSameMoment = deltaToKeep <= 3 * 60 * 1000;
+     const oneLooksImported = Boolean(row.import_source_hash || keep.import_source_hash || String(row.processing_status || "").includes("historical"));
+     return sameHash || (nearSameMoment && oneLooksImported);
+   });
+ 
+   if (!extras.length) continue;
+   for (const extra of extras) candidateDeleteIds.add(Number(extra.id));
+ 
+   groups.push({
+     exportIndex,
+     direction,
+     textPreview: normalizeText(item.text).slice(0, 140),
+     exportCreatedAt: item.createdAt.toISOString(),
+     keepId: Number(keep.id),
+     keepCreatedAt: new Date(keep.created_at).toISOString(),
+     deleteIds: extras.map(row => Number(row.id)),
+     deleteCreatedAt: extras.map(row => new Date(row.created_at).toISOString())
+   });
+ }
+ 
+ const deleteIds = [...candidateDeleteIds].sort((a, b) => a - b);
+ const payload = {
+   contactId: Number(contact.id),
+   jid: contact.whatsapp_jid,
+   parsed: parsed.length,
+   databaseMessages: dbRows.length,
+   deleteIds
+ };
+ 
+ return {
+   ...payload,
+   duplicateGroups: groups.length,
+   wouldDelete: deleteIds.length,
+   wouldKeep: Math.max(0, dbRows.length - deleteIds.length),
+   groups: groups.slice(0, 200),
+   confirmationToken: duplicateCleanupToken(payload)
+ };
+}
+ 
+app.post("/dashboard-api/cleanup-whatsapp-duplicates", async (req, res) => {
+ try {
+   if (!dashboardApiReady(res)) return;
+   if (!dashboardApiAuthorized(req)) {
+     return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+   }
+ 
+   const contactId = Number(req.body?.contactId);
+   const chatText = String(req.body?.chatText || "");
+   const action = normalizeText(req.body?.action).toLowerCase() === "execute" ? "execute" : "preview";
+   const suppliedToken = normalizeText(req.body?.confirmationToken);
+   const senderMapping = req.body?.senderMapping && typeof req.body.senderMapping === "object"
+     ? {
+         marcelSender: normalizeText(req.body.senderMapping.marcelSender),
+         contactSender: normalizeText(req.body.senderMapping.contactSender)
+       }
+     : null;
+ 
+   if (!Number.isInteger(contactId) || contactId <= 0) {
+     return res.status(400).json({ ok: false, error: "Ungueltige Kontakt-ID." });
+   }
+   if (!chatText.trim()) {
+     return res.status(400).json({ ok: false, error: "Der WhatsApp-Export ist leer." });
+   }
+ 
+   const contactResult = await pool.query(`SELECT * FROM contacts WHERE id = $1 LIMIT 1`, [contactId]);
+   const contact = contactResult.rows[0];
+   if (!contact) return res.status(404).json({ ok: false, error: "Kontakt nicht gefunden." });
+ 
+   const plan = await buildWhatsAppDuplicateCleanupPlan({ contact, rawText: chatText, senderMapping });
+ 
+   if (action !== "execute") {
+     return res.json({
+       ok: true,
+       preview: true,
+       contact: { id: contact.id, name: contact.display_name || contact.canonical_name || null, jid: contact.whatsapp_jid },
+       parsed: plan.parsed,
+       databaseMessages: plan.databaseMessages,
+       duplicateGroups: plan.duplicateGroups,
+       wouldDelete: plan.wouldDelete,
+       wouldKeep: plan.wouldKeep,
+       groups: plan.groups,
+       confirmationToken: plan.confirmationToken,
+       message: plan.wouldDelete > 0
+         ? `Pruefung fertig. ${plan.wouldDelete} sichere Dubletten wuerden geloescht. Bis jetzt wurde NICHTS geloescht.`
+         : "Pruefung fertig. Keine sicheren Dubletten gefunden. Bis jetzt wurde NICHTS geloescht."
+     });
+   }
+ 
+   if (!suppliedToken || suppliedToken !== plan.confirmationToken) {
+     return res.status(409).json({
+       ok: false,
+       code: "CLEANUP_CONFIRMATION_REQUIRED",
+       error: "Sicherheitsbestaetigung fehlt oder die Daten haben sich seit der Vorschau geaendert. Bitte Cleanup erneut pruefen.",
+       wouldDelete: plan.wouldDelete,
+       confirmationToken: plan.confirmationToken
+     });
+   }
+ 
+   if (!plan.deleteIds.length) {
+     return res.json({ ok: true, deleted: 0, message: "Keine sicheren Dubletten vorhanden. Nichts geloescht." });
+   }
+ 
+   // Noch einmal hart auf denselben Kontakt begrenzen. Es werden NUR messages geloescht.
+   const deleted = await pool.query(
+     `DELETE FROM messages
+       WHERE whatsapp_jid = $1
+         AND id = ANY($2::bigint[])
+       RETURNING id`,
+     [contact.whatsapp_jid, plan.deleteIds]
+   );
+ 
+   console.log("WhatsApp Duplicate Cleanup fertig:", {
+     contact: contact.display_name || contact.canonical_name || contact.whatsapp_jid,
+     deleted: deleted.rowCount,
+     requested: plan.deleteIds.length
+   });
+ 
+   return res.json({
+     ok: true,
+     deleted: deleted.rowCount,
+     remainingEstimate: Math.max(0, plan.databaseMessages - deleted.rowCount),
+     memoryTouched: false,
+     message: `${deleted.rowCount} sichere Dubletten geloescht. Memories wurden nicht veraendert.`
+   });
+ } catch (error) {
+   console.error("WhatsApp Duplicate Cleanup Fehler:", error);
+   return res.status(500).json({ ok: false, error: error?.message || "Dubletten-Cleanup fehlgeschlagen." });
+ }
+});
+ 
+/* ==================================================
  DASHBOARD WHATSAPP-EXPORT IMPORT V1
 ================================================== */
  

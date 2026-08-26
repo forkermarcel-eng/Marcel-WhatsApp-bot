@@ -8800,33 +8800,31 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
  
  
  /*
-  * CLEANUP V2.1 – zweiter, konservativer Durchlauf
+  * CLEANUP V2.2 – Nachlauf fuer die von V2 verpassten Paare
   *
-  * V2 hat 374 sichere Cross-Source-Dubletten gefunden. Die beiden echten
-  * Sandry-Exporte zeigen aber, dass fast der komplette alte Export im
-  * grossen Export erneut enthalten ist. Ein Teil der alten Railway-Zeilen
-  * traegt ebenfalls Historical-Metadaten und faellt deshalb in V2 durch.
+  * WICHTIGER FIX:
+  * V2 reserviert auch einen Historical-Treffer, wenn fuer dieselbe
+  * Exportzeile KEIN Legacy-Treffer existiert. Genau dadurch konnte der
+  * vorige Nachlauf keine zweite Historical-Zeile mehr finden.
   *
-  * Deshalb pruefen wir NUR die Exportzeilen nach, fuer die V2 noch keine
-  * Dublette gefunden hat. Wenn fuer genau diese Exportzeile zwei noch
-  * unbenutzte DB-Zeilen derselben Richtung und desselben normalisierten
-  * Textes im bewaehrten 18h-Fenster existieren, bleibt die aeltere ID und
-  * nur die spaetere ID wird als Dublette vorgeschlagen.
-  *
-  * Bereits von V2 verwendete Keep-/Delete-Zeilen werden nie erneut benutzt.
+  * Im Nachlauf schuetzen wir deshalb nur DB-Zeilen aus den 374 bereits
+  * vollstaendig bestaetigten V2-Gruppen. Einseitig reservierte Treffer
+  * werden wieder freigegeben und duerfen hier gepaart werden.
   */
- const alreadyUsedIds = new Set([
-   ...usedLegacyIds,
-   ...usedHistoricalIds,
-   ...candidateDeleteIds
- ]);
- 
- const alreadyMatchedExportIndexes = new Set(
+ const matchedExportIndexes = new Set(
    groups.map(group => Number(group.exportIndex))
  );
  
+ const protectedIds = new Set();
+ for (const group of groups) {
+   protectedIds.add(Number(group.keepId));
+   for (const id of group.deleteIds || []) protectedIds.add(Number(id));
+ }
+ 
+ const fallbackUsedIds = new Set();
+ 
  for (let exportIndex = 0; exportIndex < parsed.length; exportIndex += 1) {
-   if (alreadyMatchedExportIndexes.has(exportIndex)) continue;
+   if (matchedExportIndexes.has(exportIndex)) continue;
  
    const item = parsed[exportIndex];
    const senderKey = normalizeImportSender(item.sender);
@@ -8847,7 +8845,9 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
    const candidates = dbRows
      .filter(row => {
        const id = Number(row.id);
-       if (alreadyUsedIds.has(id)) return false;
+ 
+       // Bereits sicher von V2 zugeordnete Zeilen bleiben unangetastet.
+       if (protectedIds.has(id) || fallbackUsedIds.has(id)) return false;
        if (row.direction !== direction) return false;
        if (normalizeForDuplicate(row.message_text) !== normalizedText) return false;
  
@@ -8864,23 +8864,27 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
  
    if (candidates.length < 2) {
      if (candidates.length === 1) {
-       alreadyUsedIds.add(Number(candidates[0].id));
+       fallbackUsedIds.add(Number(candidates[0].id));
      }
      continue;
    }
  
+   /*
+    * Wir nehmen nur die zwei zeitlich naechsten DB-Zeilen zu genau dieser
+    * Exportnachricht. Die aeltere DB-ID bleibt, die spaetere wird geloescht.
+    */
    const pair = candidates.slice(0, 2).sort((a, b) => Number(a.id) - Number(b.id));
    const keep = pair[0];
    const duplicate = pair[1];
  
-   alreadyUsedIds.add(Number(keep.id));
-   alreadyUsedIds.add(Number(duplicate.id));
+   fallbackUsedIds.add(Number(keep.id));
+   fallbackUsedIds.add(Number(duplicate.id));
    candidateDeleteIds.add(Number(duplicate.id));
  
    groups.push({
      exportIndex,
      direction,
-     fallback: "same-source-pair",
+     fallback: "released-one-sided-v2-match",
      textPreview: normalizeText(item.text).slice(0, 140),
      exportCreatedAt: item.createdAt.toISOString(),
      keepId: Number(keep.id),

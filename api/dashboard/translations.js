@@ -248,6 +248,73 @@ function normalizeContactId(
  
  
 /* ==================================================
+/* ==================================================
+  SKIP EMOJI-ONLY MESSAGES
+================================================== */
+
+function hasTranslatableText(
+ value
+) {
+
+ if (
+   typeof value !== "string"
+ ) {
+
+   return false;
+
+ }
+
+
+ return /[\p{L}\p{N}]/u.test(
+   value
+ );
+
+}
+
+
+function getTranslationText(
+ body
+) {
+
+ if (
+   !body
+   ||
+   typeof body !== "object"
+ ) {
+
+   return null;
+
+ }
+
+
+ const candidates = [
+   body.text,
+   body.message,
+   body.content,
+   body.originalText,
+   body.original_text
+ ];
+
+
+ for (
+   const candidate
+   of candidates
+ ) {
+
+   if (
+     typeof candidate === "string"
+   ) {
+
+     return candidate;
+
+   }
+
+ }
+
+
+ return null;
+
+}
   HANDLER
 ================================================== */
  
@@ -311,6 +378,49 @@ export default async function handler(
  
  
  /* ==================================================
+/* ==================================================
+    EMOJI-ONLY GUARD
+ ================================================== */
+
+ const translationText =
+   getTranslationText(
+     req.body
+   );
+
+
+ if (
+   translationText !== null
+   &&
+   !hasTranslatableText(
+     translationText
+   )
+ ) {
+
+   res.setHeader(
+     "Cache-Control",
+     "no-store, max-age=0"
+   );
+
+
+   return res
+     .status(200)
+     .json({
+
+       ok:
+         true,
+
+       skipped:
+         true,
+
+       reason:
+         "emoji_only",
+
+       translation:
+         null
+
+     });
+
+ }
     ENVIRONMENT
  ================================================== */
  

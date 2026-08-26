@@ -8682,68 +8682,119 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
  );
  const dbRows = rowsResult.rows;
  
- // Jede DB-Zeile darf hoechstens einer Exportzeile zugeordnet werden.
- // Pro Exportzeile bleibt genau der zeitlich naechste Treffer erhalten.
- const reservedKeepIds = new Set();
+ /*
+  * CLEANUP V2
+  *
+  * Hintergrund:
+  * - Alte Nachrichten koennen aus dem frueheren Railway-Import stammen.
+  * - Neue Nachrichten aus dem Dashboard-Import tragen import_source_hash /
+  *   import_batch_id bzw. processing_status = historical_imported.
+  * - Beide Importwege koennen fuer dieselbe echte WhatsApp-Nachricht
+  *   unterschiedliche DB-Zeitpunkte erzeugt haben.
+  *
+  * Sicherheitsprinzip:
+  * Fuer jede einzelne Zeile des hochgeladenen WhatsApp-Exports suchen wir
+  * getrennt genau EINEN alten/Legacy-Treffer und genau EINEN neuen
+  * Historical-Import-Treffer. Nur wenn BEIDE fuer dieselbe Exportzeile
+  * existieren, wird der Historical-Import-Treffer als Dublette markiert.
+  *
+  * Dadurch werden gleiche Texte wie "Hola", Herzen usw. nicht global
+  * zusammengeworfen. Jede DB-Zeile darf nur einmal verwendet werden.
+  */
+ const usedLegacyIds = new Set();
+ const usedHistoricalIds = new Set();
  const candidateDeleteIds = new Set();
  const groups = [];
  
- for (let exportIndex = 0; exportIndex < parsed.length; exportIndex += 1) {
-   const item = parsed[exportIndex];
-   const senderKey = normalizeImportSender(item.sender);
-   const direction = senderKey === marcelSender ? "outgoing" : senderKey === contactSender ? "incoming" : null;
-   if (!direction) continue;
+ const isHistoricalRow = row =>
+   Boolean(
+     row.import_source_hash ||
+     row.import_batch_id ||
+     String(row.processing_status || "").toLowerCase().includes("historical") ||
+     String(row.whatsapp_message_id || "").startsWith("historical-")
+   );
  
+ const nearestUnusedMatch = ({ item, direction, historical }) => {
    const normalizedText = normalizeForDuplicate(item.text);
-   if (!normalizedText) continue;
-   const exportMs = item.createdAt.getTime();
+   if (!normalizedText) return null;
  
-   const matches = dbRows
+   const exportMs = item.createdAt.getTime();
+   const usedIds = historical ? usedHistoricalIds : usedLegacyIds;
+ 
+   const candidates = dbRows
      .filter(row => {
-       if (reservedKeepIds.has(Number(row.id))) return false;
+       const id = Number(row.id);
+       if (usedIds.has(id)) return false;
        if (row.direction !== direction) return false;
+       if (isHistoricalRow(row) !== historical) return false;
        if (normalizeForDuplicate(row.message_text) !== normalizedText) return false;
+ 
        const rowMs = new Date(row.created_at).getTime();
-       return Number.isFinite(rowMs) && Math.abs(rowMs - exportMs) <= 18 * 60 * 60 * 1000;
+       return Number.isFinite(rowMs) &&
+         Math.abs(rowMs - exportMs) <= 18 * 60 * 60 * 1000;
      })
      .sort((a, b) => {
        const da = Math.abs(new Date(a.created_at).getTime() - exportMs);
        const db = Math.abs(new Date(b.created_at).getTime() - exportMs);
        if (da !== db) return da - db;
-       // Bei Gleichstand bevorzugen wir eine Zeile mit Import-Hash als kanonische Zeile.
-       if (Boolean(a.import_source_hash) !== Boolean(b.import_source_hash)) return a.import_source_hash ? -1 : 1;
        return Number(a.id) - Number(b.id);
      });
  
-   if (!matches.length) continue;
+   return candidates[0] || null;
+ };
  
-   const keep = matches[0];
-   reservedKeepIds.add(Number(keep.id));
+ for (let exportIndex = 0; exportIndex < parsed.length; exportIndex += 1) {
+   const item = parsed[exportIndex];
+   const senderKey = normalizeImportSender(item.sender);
+   const direction =
+     senderKey === marcelSender
+       ? "outgoing"
+       : senderKey === contactSender
+         ? "incoming"
+         : null;
  
-   // Nur sehr konservativ loeschen: Ein zusaetzlicher Treffer muss entweder
-   // denselben Import-Hash haben ODER zeitlich fast identisch mit dem Keep sein.
-   // Dadurch werden absichtlich wiederholte kurze Nachrichten (z.B. Herzen)
-   // nicht einfach global entfernt.
-   const extras = matches.slice(1).filter(row => {
-     const sameHash = Boolean(keep.import_source_hash && row.import_source_hash && keep.import_source_hash === row.import_source_hash);
-     const deltaToKeep = Math.abs(new Date(row.created_at).getTime() - new Date(keep.created_at).getTime());
-     const nearSameMoment = deltaToKeep <= 3 * 60 * 1000;
-     const oneLooksImported = Boolean(row.import_source_hash || keep.import_source_hash || String(row.processing_status || "").includes("historical"));
-     return sameHash || (nearSameMoment && oneLooksImported);
+   if (!direction) continue;
+ 
+   const legacy = nearestUnusedMatch({
+     item,
+     direction,
+     historical: false
    });
  
-   if (!extras.length) continue;
-   for (const extra of extras) candidateDeleteIds.add(Number(extra.id));
+   const historical = nearestUnusedMatch({
+     item,
+     direction,
+     historical: true
+   });
+ 
+   /*
+    * Treffer werden auch dann reserviert, wenn nur eine Seite existiert.
+    * So kann dieselbe DB-Zeile nicht spaeter einer wiederholten Nachricht
+    * mit identischem Text zugeordnet werden.
+    */
+   if (legacy) usedLegacyIds.add(Number(legacy.id));
+   if (historical) usedHistoricalIds.add(Number(historical.id));
+ 
+   /*
+    * Nur der klare Cross-Source-Fall wird geloescht:
+    * dieselbe Exportzeile hat sowohl einen Legacy- als auch einen
+    * Historical-Treffer. Der alte Datensatz bleibt, der spaeter durch
+    * den Dashboard-Import entstandene Historical-Datensatz wird entfernt.
+    */
+   if (!legacy || !historical) continue;
+ 
+   const deleteId = Number(historical.id);
+   candidateDeleteIds.add(deleteId);
  
    groups.push({
      exportIndex,
      direction,
      textPreview: normalizeText(item.text).slice(0, 140),
      exportCreatedAt: item.createdAt.toISOString(),
-     keepId: Number(keep.id),
-     keepCreatedAt: new Date(keep.created_at).toISOString(),
-     deleteIds: extras.map(row => Number(row.id)),
-     deleteCreatedAt: extras.map(row => new Date(row.created_at).toISOString())
+     keepId: Number(legacy.id),
+     keepCreatedAt: new Date(legacy.created_at).toISOString(),
+     deleteIds: [deleteId],
+     deleteCreatedAt: [new Date(historical.created_at).toISOString()]
    });
  }
  

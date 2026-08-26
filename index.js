@@ -8390,16 +8390,12 @@ return nearby.rows.find(row =>
 ) || null;
 }
  
-async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [], senderMapping = null, dryRun = false }) {
+async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [], senderMapping = null, dryRun = false, replaceExisting = false }) {
  const parsed = parseWhatsAppExport(rawText);
  if (!parsed.length) throw new Error("Keine WhatsApp-Nachrichten im unterstuetzten Exportformat erkannt.");
  
- // WICHTIG: parseWhatsAppExport liest den Absender AUSSCHLIESSLICH aus dem
- // strukturellen Absenderfeld vor dem Doppelpunkt. Namen/Emojis im Nachrichtentext
- // werden niemals zur Identitaets- oder Richtungsbestimmung benutzt.
  const senders = [...new Set(parsed.map(item => item.sender))];
  const senderSet = new Set(senders.map(normalizeImportSender));
- 
  const explicitMarcelSender = normalizeText(senderMapping?.marcelSender);
  const explicitContactSender = normalizeText(senderMapping?.contactSender);
  const hasExplicitMapping = Boolean(explicitMarcelSender && explicitContactSender);
@@ -8407,24 +8403,13 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
  if (hasExplicitMapping) {
    const marcelKey = normalizeImportSender(explicitMarcelSender);
    const contactKey = normalizeImportSender(explicitContactSender);
- 
-   if (marcelKey === contactKey) {
-     throw new Error("Marcel und Kontakt duerfen nicht derselbe WhatsApp-Absender sein.");
-   }
-   if (!senderSet.has(marcelKey)) {
-     throw new Error(`Bestaetigter Marcel-Absender wurde im Export nicht gefunden: ${explicitMarcelSender}`);
-   }
-   if (!senderSet.has(contactKey)) {
-     throw new Error(`Bestaetigter Kontakt-Absender wurde im Export nicht gefunden: ${explicitContactSender}`);
-   }
- 
-   // Die manuelle Bestaetigung ist die hoechste Instanz. Ab hier wird NICHT mehr
-   // anhand von Marcel-Namen, Kontakt-Namen oder Nachrichtentext geraten.
+   if (marcelKey === contactKey) throw new Error("Marcel und Kontakt duerfen nicht derselbe WhatsApp-Absender sein.");
+   if (!senderSet.has(marcelKey)) throw new Error(`Bestaetigter Marcel-Absender wurde im Export nicht gefunden: ${explicitMarcelSender}`);
+   if (!senderSet.has(contactKey)) throw new Error(`Bestaetigter Kontakt-Absender wurde im Export nicht gefunden: ${explicitContactSender}`);
    const unexpected = senders.filter(sender => {
      const key = normalizeImportSender(sender);
      return key !== marcelKey && key !== contactKey;
    });
- 
    if (unexpected.length) {
      const error = new Error(`Weitere Absender im Export erkannt: ${unexpected.join(", ")}. Bitte Zuordnung pruefen.`);
      error.code = "SENDER_CONFIRMATION_REQUIRED";
@@ -8433,12 +8418,7 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
    }
  }
  
- const marcelNames = new Set([
-   "Marcel",
-   "Marcel Marlow",
-   ...marcelSenderNames
- ].map(normalizeImportSender).filter(Boolean));
- 
+ const marcelNames = new Set(["Marcel", "Marcel Marlow", ...marcelSenderNames].map(normalizeImportSender).filter(Boolean));
  if (!hasExplicitMapping) {
    const nonMarcelSenders = senders.filter(sender => !marcelNames.has(normalizeImportSender(sender)));
    if (nonMarcelSenders.length !== 1 || senders.length !== 2) {
@@ -8449,117 +8429,129 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
    }
  }
  
- const batchId = `wa-import-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
- let imported = 0;
- let duplicates = 0;
- let incoming = 0;
- let outgoing = 0;
- const newMessageIds = [];
- const usedExistingIds = new Set();
- 
  const explicitMarcelKey = normalizeImportSender(explicitMarcelSender);
  const explicitContactKey = normalizeImportSender(explicitContactSender);
- 
- for (const item of parsed) {
+ const prepared = parsed.map(item => {
    const senderKey = normalizeImportSender(item.sender);
    let direction;
- 
    if (hasExplicitMapping) {
      if (senderKey === explicitMarcelKey) direction = "outgoing";
      else if (senderKey === explicitContactKey) direction = "incoming";
-     else continue; // Sicherheitsnetz; sollte wegen obiger Validierung nie eintreten.
+     else return null;
    } else {
      direction = marcelNames.has(senderKey) ? "outgoing" : "incoming";
    }
+   const sourceHash = historicalImportHash({ jid: contact.whatsapp_jid, direction, createdAt: item.createdAt, text: item.text });
+   return { ...item, direction, sourceHash };
+ }).filter(Boolean);
  
-   const sourceHash = historicalImportHash({
-     jid: contact.whatsapp_jid,
-     direction,
-     createdAt: item.createdAt,
-     text: item.text
-   });
+ const existingCountResult = await pool.query(
+   `SELECT COUNT(*)::int AS count FROM messages WHERE whatsapp_jid = $1`,
+   [contact.whatsapp_jid]
+ );
+ const existingMessages = Number(existingCountResult.rows[0]?.count || 0);
+ const incoming = prepared.filter(item => item.direction === "incoming").length;
+ const outgoing = prepared.filter(item => item.direction === "outgoing").length;
  
-   const existing = await historicalMessageAlreadyExists({
-     jid: contact.whatsapp_jid,
-     direction,
-     createdAt: item.createdAt,
-     text: item.text,
-     sourceHash,
-     usedExistingIds
-   });
- 
-   if (existing) {
-     usedExistingIds.add(Number(existing.id));
-     duplicates += 1;
-     continue;
+ if (replaceExisting) {
+   if (dryRun) {
+     return {
+       batchId: null, parsed: prepared.length, imported: prepared.length, duplicates: 0,
+       incoming, outgoing, senders,
+       senderMapping: hasExplicitMapping ? { marcelSender: explicitMarcelSender, contactSender: explicitContactSender, confirmed: true } : null,
+       newMessageIds: [], dryRun: true, replaceExisting: true,
+       existingMessages, wouldDelete: existingMessages, wouldImport: prepared.length, wouldRemain: prepared.length
+     };
    }
  
+   const client = await pool.connect();
+   const batchId = `wa-replace-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+   const newMessageIds = [];
+   try {
+     await client.query("BEGIN");
+     await client.query(`DELETE FROM messages WHERE whatsapp_jid = $1`, [contact.whatsapp_jid]);
+ 
+     for (const item of prepared) {
+       const inserted = await client.query(
+         `INSERT INTO messages (
+            whatsapp_jid, direction, message_text, whatsapp_message_id,
+            processing_status, created_at, import_source_hash, import_batch_id
+          ) VALUES ($1,$2,$3,$4,'historical_imported',$5,$6,$7)
+          RETURNING id`,
+         [contact.whatsapp_jid, item.direction, item.text, `historical-${item.sourceHash.slice(0,24)}`, item.createdAt, item.sourceHash, batchId]
+       );
+       newMessageIds.push(inserted.rows[0].id);
+     }
+ 
+     if (prepared.length) {
+       await client.query(
+         `UPDATE contacts SET first_contact_at=$2::timestamptz,last_message_at=$3::timestamptz,updated_at=NOW() WHERE id=$1`,
+         [contact.id, prepared[0].createdAt, prepared[prepared.length - 1].createdAt]
+       );
+     }
+ 
+     await client.query("COMMIT");
+     return {
+       batchId, parsed: prepared.length, imported: prepared.length, duplicates: 0,
+       incoming, outgoing, senders,
+       senderMapping: hasExplicitMapping ? { marcelSender: explicitMarcelSender, contactSender: explicitContactSender, confirmed: true } : null,
+       newMessageIds, dryRun: false, replaceExisting: true,
+       deletedPreviousMessages: existingMessages, remainingMessages: prepared.length
+     };
+   } catch (error) {
+     try { await client.query("ROLLBACK"); } catch {}
+     throw error;
+   } finally {
+     client.release();
+   }
+ }
+ 
+ const batchId = `wa-import-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+ let imported = 0, duplicates = 0, importedIncoming = 0, importedOutgoing = 0;
+ const newMessageIds = [], usedExistingIds = new Set();
+ 
+ for (const item of prepared) {
+   const existing = await historicalMessageAlreadyExists({
+     jid: contact.whatsapp_jid, direction: item.direction, createdAt: item.createdAt,
+     text: item.text, sourceHash: item.sourceHash, usedExistingIds
+   });
+   if (existing) { usedExistingIds.add(Number(existing.id)); duplicates += 1; continue; }
    if (dryRun) {
      imported += 1;
-     direction === "incoming" ? incoming += 1 : outgoing += 1;
+     item.direction === "incoming" ? importedIncoming += 1 : importedOutgoing += 1;
      continue;
    }
- 
    const inserted = await pool.query(
-     `INSERT INTO messages (
-       whatsapp_jid, direction, message_text, whatsapp_message_id,
-       processing_status, created_at, import_source_hash, import_batch_id
-     ) VALUES ($1,$2,$3,$4,'historical_imported',$5,$6,$7)
-     ON CONFLICT (import_source_hash) WHERE import_source_hash IS NOT NULL DO NOTHING
-     RETURNING id`,
-     [
-       contact.whatsapp_jid,
-       direction,
-       item.text,
-       `historical-${sourceHash.slice(0, 24)}`,
-       item.createdAt,
-       sourceHash,
-       batchId
-     ]
+     `INSERT INTO messages (whatsapp_jid,direction,message_text,whatsapp_message_id,processing_status,created_at,import_source_hash,import_batch_id)
+      VALUES ($1,$2,$3,$4,'historical_imported',$5,$6,$7)
+      ON CONFLICT (import_source_hash) WHERE import_source_hash IS NOT NULL DO NOTHING RETURNING id`,
+     [contact.whatsapp_jid,item.direction,item.text,`historical-${item.sourceHash.slice(0,24)}`,item.createdAt,item.sourceHash,batchId]
    );
- 
-   if (!inserted.rows[0]) {
-     duplicates += 1;
-     continue;
-   }
- 
+   if (!inserted.rows[0]) { duplicates += 1; continue; }
    imported += 1;
-   direction === "incoming" ? incoming += 1 : outgoing += 1;
+   item.direction === "incoming" ? importedIncoming += 1 : importedOutgoing += 1;
    newMessageIds.push(inserted.rows[0].id);
  }
  
  if (!dryRun && imported > 0) {
    await pool.query(
-     `UPDATE contacts
-      SET first_contact_at = COALESCE(LEAST(first_contact_at,$2::timestamptz),$2::timestamptz),
-          last_message_at = GREATEST(COALESCE(last_message_at,$3::timestamptz),$3::timestamptz),
-          updated_at = NOW()
-      WHERE id = $1`,
+     `UPDATE contacts SET first_contact_at=COALESCE(LEAST(first_contact_at,$2::timestamptz),$2::timestamptz),
+      last_message_at=GREATEST(COALESCE(last_message_at,$3::timestamptz),$3::timestamptz),updated_at=NOW() WHERE id=$1`,
      [contact.id, parsed[0].createdAt, parsed[parsed.length - 1].createdAt]
    );
  }
  
  return {
-   batchId,
-   parsed: parsed.length,
-   imported,
-   duplicates,
-   incoming,
-   outgoing,
-   senders,
-   senderMapping: hasExplicitMapping ? {
-     marcelSender: explicitMarcelSender,
-     contactSender: explicitContactSender,
-     confirmed: true
-   } : null,
-   newMessageIds,
-   dryRun: Boolean(dryRun)
+   batchId, parsed: parsed.length, imported, duplicates,
+   incoming: importedIncoming, outgoing: importedOutgoing, senders,
+   senderMapping: hasExplicitMapping ? { marcelSender: explicitMarcelSender, contactSender: explicitContactSender, confirmed: true } : null,
+   newMessageIds, dryRun: Boolean(dryRun), replaceExisting: false
  };
 }
  
 /* ==================================================
- HISTORICAL MEMORY BACKFILL V2
- Kontakt + Marcel getrennt; semantische Konsolidierung
+HISTORICAL MEMORY BACKFILL V2
+Kontakt + Marcel getrennt; semantische Konsolidierung
 ================================================== */
 async function ensureHistoricalMemoryReviewTable() {
  await pool.query(`CREATE TABLE IF NOT EXISTS memory_import_review (
@@ -8798,102 +8790,6 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
    });
  }
  
- 
- /*
-  * CLEANUP V2.2 – Nachlauf fuer die von V2 verpassten Paare
-  *
-  * WICHTIGER FIX:
-  * V2 reserviert auch einen Historical-Treffer, wenn fuer dieselbe
-  * Exportzeile KEIN Legacy-Treffer existiert. Genau dadurch konnte der
-  * vorige Nachlauf keine zweite Historical-Zeile mehr finden.
-  *
-  * Im Nachlauf schuetzen wir deshalb nur DB-Zeilen aus den 374 bereits
-  * vollstaendig bestaetigten V2-Gruppen. Einseitig reservierte Treffer
-  * werden wieder freigegeben und duerfen hier gepaart werden.
-  */
- const matchedExportIndexes = new Set(
-   groups.map(group => Number(group.exportIndex))
- );
- 
- const protectedIds = new Set();
- for (const group of groups) {
-   protectedIds.add(Number(group.keepId));
-   for (const id of group.deleteIds || []) protectedIds.add(Number(id));
- }
- 
- const fallbackUsedIds = new Set();
- 
- for (let exportIndex = 0; exportIndex < parsed.length; exportIndex += 1) {
-   if (matchedExportIndexes.has(exportIndex)) continue;
- 
-   const item = parsed[exportIndex];
-   const senderKey = normalizeImportSender(item.sender);
-   const direction =
-     senderKey === marcelSender
-       ? "outgoing"
-       : senderKey === contactSender
-         ? "incoming"
-         : null;
- 
-   if (!direction) continue;
- 
-   const normalizedText = normalizeForDuplicate(item.text);
-   if (!normalizedText) continue;
- 
-   const exportMs = item.createdAt.getTime();
- 
-   const candidates = dbRows
-     .filter(row => {
-       const id = Number(row.id);
- 
-       // Bereits sicher von V2 zugeordnete Zeilen bleiben unangetastet.
-       if (protectedIds.has(id) || fallbackUsedIds.has(id)) return false;
-       if (row.direction !== direction) return false;
-       if (normalizeForDuplicate(row.message_text) !== normalizedText) return false;
- 
-       const rowMs = new Date(row.created_at).getTime();
-       return Number.isFinite(rowMs) &&
-         Math.abs(rowMs - exportMs) <= 18 * 60 * 60 * 1000;
-     })
-     .sort((a, b) => {
-       const da = Math.abs(new Date(a.created_at).getTime() - exportMs);
-       const db = Math.abs(new Date(b.created_at).getTime() - exportMs);
-       if (da !== db) return da - db;
-       return Number(a.id) - Number(b.id);
-     });
- 
-   if (candidates.length < 2) {
-     if (candidates.length === 1) {
-       fallbackUsedIds.add(Number(candidates[0].id));
-     }
-     continue;
-   }
- 
-   /*
-    * Wir nehmen nur die zwei zeitlich naechsten DB-Zeilen zu genau dieser
-    * Exportnachricht. Die aeltere DB-ID bleibt, die spaetere wird geloescht.
-    */
-   const pair = candidates.slice(0, 2).sort((a, b) => Number(a.id) - Number(b.id));
-   const keep = pair[0];
-   const duplicate = pair[1];
- 
-   fallbackUsedIds.add(Number(keep.id));
-   fallbackUsedIds.add(Number(duplicate.id));
-   candidateDeleteIds.add(Number(duplicate.id));
- 
-   groups.push({
-     exportIndex,
-     direction,
-     fallback: "released-one-sided-v2-match",
-     textPreview: normalizeText(item.text).slice(0, 140),
-     exportCreatedAt: item.createdAt.toISOString(),
-     keepId: Number(keep.id),
-     keepCreatedAt: new Date(keep.created_at).toISOString(),
-     deleteIds: [Number(duplicate.id)],
-     deleteCreatedAt: [new Date(duplicate.created_at).toISOString()]
-   });
- }
- 
  const deleteIds = [...candidateDeleteIds].sort((a, b) => a - b);
  const payload = {
    contactId: Number(contact.id),
@@ -9009,93 +8905,66 @@ app.post("/dashboard-api/cleanup-whatsapp-duplicates", async (req, res) => {
 ================================================== */
  
 app.post("/dashboard-api/import-whatsapp", async (req, res) => {
-try {
-  if (!dashboardApiReady(res)) return;
-  if (!dashboardApiAuthorized(req)) {
-    return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
-  }
+ try {
+   if (!dashboardApiReady(res)) return;
+   if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok:false, error:"Nicht autorisiert." });
  
-  const contactId = Number(req.body?.contactId);
-  const chatText = String(req.body?.chatText || "");
-  const marcelSenderNames = Array.isArray(req.body?.marcelSenderNames) ? req.body.marcelSenderNames : [];
-const senderMapping = req.body?.senderMapping && typeof req.body.senderMapping === "object"
-? {
-marcelSender: normalizeText(req.body.senderMapping.marcelSender),
-contactSender: normalizeText(req.body.senderMapping.contactSender)
-}
-: null;
-  if (!Number.isInteger(contactId) || contactId <= 0) {
-    return res.status(400).json({ ok: false, error: "Ungueltige Kontakt-ID." });
-  }
-  if (!chatText.trim()) {
-    return res.status(400).json({ ok: false, error: "Der WhatsApp-Export ist leer." });
-  }
+   const contactId = Number(req.body?.contactId);
+   const chatText = String(req.body?.chatText || "");
+   const marcelSenderNames = Array.isArray(req.body?.marcelSenderNames) ? req.body.marcelSenderNames : [];
+   const senderMapping = req.body?.senderMapping && typeof req.body.senderMapping === "object"
+     ? { marcelSender: normalizeText(req.body.senderMapping.marcelSender), contactSender: normalizeText(req.body.senderMapping.contactSender) }
+     : null;
  
-  const contactResult = await pool.query(`SELECT * FROM contacts WHERE id = $1 LIMIT 1`, [contactId]);
-  const contact = contactResult.rows[0];
-  if (!contact) return res.status(404).json({ ok: false, error: "Kontakt nicht gefunden." });
+   if (!Number.isInteger(contactId) || contactId <= 0) return res.status(400).json({ok:false,error:"Ungueltige Kontakt-ID."});
+   if (!chatText.trim()) return res.status(400).json({ok:false,error:"Der WhatsApp-Export ist leer."});
  
-  const action = normalizeText(req.body?.action).toLowerCase() === "import" ? "import" : "preview";
-  const result = await importWhatsAppHistory({ contact, rawText: chatText, marcelSenderNames, senderMapping, dryRun: action !== "import" });
-  console.log("WhatsApp Historical Import:", action, contact.display_name || contact.canonical_name || contact.whatsapp_jid, result);
+   const contact = (await pool.query(`SELECT * FROM contacts WHERE id=$1 LIMIT 1`,[contactId])).rows[0];
+   if (!contact) return res.status(404).json({ok:false,error:"Kontakt nicht gefunden."});
  
-  // Echte Sicherheitsstufe: Vorschau bedeutet NULL Datenbankschreibvorgaenge und NULL Memory-Backfill.
-  if (action !== "import") {
-    return res.json({
-      ok: true,
-      preview: true,
-      contact: { id: contact.id, name: contact.display_name || contact.canonical_name || null, jid: contact.whatsapp_jid },
-      parsed: result.parsed,
-      duplicates: result.duplicates,
-      newMessages: result.imported,
-      incoming: result.incoming,
-      outgoing: result.outgoing,
-      senders: result.senders,
-      senderMapping: result.senderMapping,
-      message: "Vorschau fertig. Es wurde noch nichts gespeichert."
-    });
-  }
+   const action = normalizeText(req.body?.action).toLowerCase() === "import" ? "import" : "preview";
+   const result = await importWhatsAppHistory({
+     contact, rawText:chatText, marcelSenderNames, senderMapping,
+     dryRun: action !== "import", replaceExisting:true
+   });
  
-  const backfillJob = result.imported > 0
-    ? await scheduleHistoricalMemoryBackfill({ contact, rawText: chatText, senderMapping })
-    : null;
+   if (action !== "import") {
+     return res.json({
+       ok:true, preview:true, replaceExisting:true,
+       contact:{id:contact.id,name:contact.display_name||contact.canonical_name||null,jid:contact.whatsapp_jid},
+       parsed:result.parsed,
+       duplicates:result.existingMessages,
+       newMessages:result.wouldImport,
+       incoming:result.incoming,outgoing:result.outgoing,
+       senders:result.senders,senderMapping:result.senderMapping,
+       existingMessages:result.existingMessages,
+       wouldDelete:result.wouldDelete,
+       wouldImport:result.wouldImport,
+       wouldRemain:result.wouldRemain,
+       message:`Vorschau fertig. ${result.existingMessages} bisherige Nachrichten werden ersetzt und ${result.wouldImport} Nachrichten aus der TXT neu aufgebaut. Bis jetzt wurde NICHTS veraendert.`
+     });
+   }
  
-  return res.json({
-    ok: true,
-    contact: {
-      id: contact.id,
-      name: contact.display_name || contact.canonical_name || null,
-      jid: contact.whatsapp_jid
-    },
-    ...result,
-    memoryBackfill: backfillJob ? {
-      status: "started",
-      jobId: backfillJob.jobId,
-      totalChunks: backfillJob.totalChunks,
-      message: "Import und Deduplizierung fertig. Semantischer Memory-Backfill fuer Kontakt und Marcel wurde gestartet."
-    } : {
-      status: "skipped",
-      reason: "Keine neuen Nachrichten. Kein Memory-Backfill notwendig."
-    }
-  });
-} catch (error) {
-console.error("WhatsApp Historical Import Fehler:", error);
-if (error?.code === "SENDER_CONFIRMATION_REQUIRED") {
-return res.status(409).json({
-ok: false,
-code: "SENDER_CONFIRMATION_REQUIRED",
-error: error?.message || "Absender muessen bestaetigt werden.",
-senders: Array.isArray(error?.senders) ? error.senders : []
+   const backfillJob = result.imported > 0
+     ? await scheduleHistoricalMemoryBackfill({contact,rawText:chatText,senderMapping})
+     : null;
+ 
+   return res.json({
+     ok:true,replaceExisting:true,
+     contact:{id:contact.id,name:contact.display_name||contact.canonical_name||null,jid:contact.whatsapp_jid},
+     ...result,
+     memoryBackfill:backfillJob
+       ? {status:"started",jobId:backfillJob.jobId,totalChunks:backfillJob.totalChunks,message:"WhatsApp-Verlauf ersetzt. Memory-Backfill wurde gestartet."}
+       : {status:"skipped",reason:"Keine Nachrichten fuer Memory-Backfill."}
+   });
+ } catch(error) {
+   console.error("WhatsApp Authoritative Replace Fehler:",error);
+   if(error?.code==="SENDER_CONFIRMATION_REQUIRED") {
+     return res.status(409).json({ok:false,code:"SENDER_CONFIRMATION_REQUIRED",error:error?.message||"Absender muessen bestaetigt werden.",senders:Array.isArray(error?.senders)?error.senders:[]});
+   }
+   return res.status(500).json({ok:false,error:error?.message||"WhatsApp-Export konnte nicht ersetzt werden."});
+ }
 });
-}
-return res.status(500).json({
-ok: false,
-error: error?.message || "WhatsApp-Export konnte nicht importiert werden."
-});
-}
-});
- 
- 
 app.get("/dashboard-api/import-whatsapp-status", async (req,res)=>{
  try{
    if(!dashboardApiReady(res))return; if(!dashboardApiAuthorized(req))return res.status(401).json({ok:false,error:"Nicht autorisiert."});

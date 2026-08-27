@@ -16902,14 +16902,14 @@ for (const identifier of beforeIdentifiers) {
 }
 
 if (beforeProfile) {
-  const assignments = PROFILE_COLUMNS.map((column, index) => `${column}=$${index + 2}::jsonb`);
+  const assignments = PROFILE_COLUMNS.map((column, index) => `${column}=$${index + 1}::jsonb`);
   const values = PROFILE_COLUMNS.map(column => JSON.stringify(beforeProfile[column] || {}));
   values.push(beforeProfile.profile_version || 1, beforeProfile.last_memory_update_at || null, contactId);
   await pool.query(
     `UPDATE contact_memory_profiles SET ${assignments.join(',')},
-       profile_version=$${PROFILE_COLUMNS.length + 2},
-       last_memory_update_at=$${PROFILE_COLUMNS.length + 3},updated_at=NOW()
-     WHERE contact_id=$${PROFILE_COLUMNS.length + 4}`,
+       profile_version=$${PROFILE_COLUMNS.length + 1},
+       last_memory_update_at=$${PROFILE_COLUMNS.length + 2},updated_at=NOW()
+     WHERE contact_id=$${PROFILE_COLUMNS.length + 3}`,
     values
   );
 } else {

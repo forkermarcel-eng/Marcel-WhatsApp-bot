@@ -179,7 +179,6 @@ wirklich nötig sind
 Nicht automatisch
 den kompletten bekannten Datensatz nennen.
 
-
 BEISPIEL KINDER:
 
 Sie fragt:
@@ -357,8 +356,7 @@ Bei Block akzeptieren.
 Keine Zustimmung erfinden.
 
 
-================================================== 
-GELD
+==================================================GELD
 ==================================================
 
 Finanzproblem ist nicht automatisch
@@ -538,7 +536,6 @@ return normalizeText(value)
 
 
 function normalizeIdentityValue(value) {
-
 return normalizeText(value)
   .toLowerCase()
   .normalize("NFD")
@@ -717,8 +714,7 @@ return (
   &&
   jid.endsWith(
     "@persona.test"
-  ) 
-);
+  ) );
 
 }
 
@@ -897,7 +893,7 @@ const incoming =
   isPlainObject(
     incomingValue
   )
-    ? incomingValue
+     ? incomingValue
 
     : {};
 
@@ -1076,8 +1072,7 @@ if (
 
 
 if (
-  language.includes("english")
-  ||
+  language.includes("english")   ||
   language.includes("englisch")
   ||
   language === "en"
@@ -1258,7 +1253,6 @@ for (const word of words) {
     spanishScore += 1;
   }
 
-
   if (germanWords.includes(word)) {
     germanScore += 1;
   }
@@ -1436,8 +1430,7 @@ while (stack.length) {
 
 
   if (
-    Array.isArray( 
-      current
+    Array.isArray(       current
     )
   ) {
 
@@ -1616,8 +1609,7 @@ if (
       const keyText =
         (
           normalizeText(
-            item.category
-          )
+            item.category           )
           +
           " "
           +
@@ -1796,7 +1788,7 @@ const WOMEN_SEED = [
       ]
 
     },
-    family: {
+     family: {
 
       lives_with_brother_in_medellin:
         true,
@@ -1975,7 +1967,7 @@ const WOMEN_SEED = [
         "Kino",
 
         "gutes Essen",
-        "gute Gespräche",
+         "gute Gespräche",
 
         "Filme",
 
@@ -2154,7 +2146,7 @@ const WOMEN_SEED = [
 
       likes_motorcycles:
         true,
-      loves_animals:
+       loves_animals:
         true,
 
       interests: [
@@ -2167,6 +2159,7 @@ const WOMEN_SEED = [
 
     personal_boundaries: {
 
+ 
       note:
         "Nicht als reine Beziehungssuche speichern."
 
@@ -2334,7 +2327,6 @@ const WOMEN_SEED = [
         true
 
     },
-
     open_threads: {
 
       early_getting_to_know:
@@ -2513,8 +2505,7 @@ const WOMEN_SEED = [
         false
 
     },
- 
-    financial_context: {
+     financial_context: {
 
       gifts_money_strong_theme:
         true,
@@ -2693,8 +2684,7 @@ const WOMEN_SEED = [
       likes_calm_plans:
         true,
 
-      likes_cinema:
-        true,
+      likes_cinema:         true,
 
       likes_food:
         true
@@ -2873,7 +2863,7 @@ const WOMEN_SEED = [
 
       works_in_store:
         true
-    },
+     },
 
     shared_history: {
 
@@ -3052,8 +3042,7 @@ const WOMEN_SEED = [
 
     shared_history: {
 
-      later_message:
-        "Bien amor"
+      later_message:         "Bien amor"
 
     }
 
@@ -3232,8 +3221,7 @@ const WOMEN_SEED = [
     "Kathe alt"
   ],
 
-  sourcePlatform:
-    "contact",
+  sourcePlatform:     "contact",
 
   platformStatus:
     "CONTACT_KNOWN",
@@ -3413,7 +3401,6 @@ const WOMEN_SEED = [
     "WHATSAPP_ACTIVE",
 
   profile: {
-
     personality: {
 
       romantic:
@@ -3592,8 +3579,7 @@ const WOMEN_SEED = [
     }
 
   }
- 
-},
+ },
 
 
 {
@@ -3773,7 +3759,6 @@ const WOMEN_SEED = [
     }
 
   }
-
 },
 
 
@@ -3952,8 +3937,7 @@ const WOMEN_SEED = [
 
   }
 
-}, 
-
+},
 
 {
   identityKey:
@@ -4132,8 +4116,7 @@ const WOMEN_SEED = [
 
       time_and_interest_show_direction:
         true
- 
-    },
+     },
 
     stress_support_style: {
 
@@ -4313,7 +4296,6 @@ const WOMEN_SEED = [
         8
 
     },
-
     family: {
 
       mother_from_colombia:
@@ -4492,8 +4474,7 @@ const WOMEN_SEED = [
 
   }
 
-}, 
-
+},
 
 {
   identityKey:
@@ -4672,8 +4653,7 @@ const WOMEN_SEED = [
 
       active_only_after_actual_message:
         true
- 
-    }
+     }
 
   }
 
@@ -4853,13 +4833,26 @@ await pool.query(`
     ADD COLUMN IF NOT EXISTS canonical_name TEXT,
 
     ADD COLUMN IF NOT EXISTS whatsapp_display_name TEXT,
-
     ADD COLUMN IF NOT EXISTS current_platform TEXT,
 
     ADD COLUMN IF NOT EXISTS platform_status TEXT,
 
     ADD COLUMN IF NOT EXISTS identity_locked BOOLEAN
-      DEFAULT FALSE
+      DEFAULT FALSE,
+
+    ADD COLUMN IF NOT EXISTS birth_day SMALLINT,
+
+    ADD COLUMN IF NOT EXISTS birth_month SMALLINT,
+
+    ADD COLUMN IF NOT EXISTS birth_year SMALLINT,
+
+    ADD COLUMN IF NOT EXISTS birth_year_inferred BOOLEAN
+      DEFAULT FALSE,
+
+    ADD COLUMN IF NOT EXISTS manual_contact_fields JSONB
+      DEFAULT '{}'::jsonb,
+
+    ADD COLUMN IF NOT EXISTS manual_contact_updated_at TIMESTAMPTZ
 `);
 
 
@@ -5032,8 +5025,7 @@ await pool.query(`
       .map(
         column =>
           `${column} JSONB DEFAULT '{}'::jsonb`
-      ) 
-      .join(",")},
+      )       .join(",")},
 
     profile_version INTEGER
       DEFAULT 1,
@@ -5213,7 +5205,6 @@ await pool.query(`
 
 await pool.query(`
   CREATE TABLE IF NOT EXISTS media (
-
     id BIGSERIAL PRIMARY KEY,
 
     contact_id INTEGER NOT NULL
@@ -5392,8 +5383,7 @@ await pool.query(`
 
     current_timezone TEXT,
 
-    location_status TEXT 
-      DEFAULT 'living',
+    location_status TEXT       DEFAULT 'living',
 
     location_verified_at TIMESTAMPTZ
       DEFAULT NOW(),
@@ -5572,8 +5562,7 @@ const memories = [
       daughter: {
         name: "Charlotte",
         age: 14
-      }
-    },
+      }     },
     5,
     "Know a lot, reveal naturally. Bei einfacher Frage zunächst nur zwei Kinder, einen Jungen und ein Mädchen nennen. Namen und Alter erst bei Nachfrage oder wenn später natürlich relevant."
   ],
@@ -5752,8 +5741,7 @@ const memories = [
   [
     "family",
     "parents_long_marriage",
-    {
-      parents_still_married:
+    {       parents_still_married:
         true,
 
       years_over:
@@ -5933,7 +5921,6 @@ for (
 
         memory_value =
           EXCLUDED.memory_value,
-
         importance =
           EXCLUDED.importance,
 
@@ -6112,8 +6099,7 @@ if (
   );
 
 } else {
- 
-  await pool.query(
+   await pool.query(
     `
       INSERT INTO contact_identifiers (
 
@@ -6292,7 +6278,7 @@ if (
 
 }
 
-if (!contact) {
+ if (!contact) {
 
   const result =
     await pool.query(
@@ -6412,10 +6398,17 @@ if (!contact) {
 
         SET
           canonical_name =
-            COALESCE(
-              $2,
-              canonical_name
-            ),
+            CASE
+              WHEN COALESCE(
+                manual_contact_fields,
+                '{}'::jsonb
+              ) ? 'canonical_name'
+              THEN canonical_name
+              ELSE COALESCE(
+                $2,
+                canonical_name
+              )
+            END,
 
           display_name =
             COALESCE(
@@ -6424,28 +6417,56 @@ if (!contact) {
             ),
 
           phone_number =
-            COALESCE(
-              $3,
-              phone_number
-            ),
+            CASE
+              WHEN COALESCE(
+                manual_contact_fields,
+                '{}'::jsonb
+              ) ? 'phone_number'
+              THEN phone_number
+              ELSE COALESCE(
+                $3,
+                phone_number
+              )
+            END,
 
           country =
-            COALESCE(
-              $4,
-              country
-            ),
+            CASE
+              WHEN COALESCE(
+                manual_contact_fields,
+                '{}'::jsonb
+              ) ? 'country'
+              THEN country
+              ELSE COALESCE(
+                $4,
+                country
+              )
+            END,
 
           city =
-            COALESCE(
-              $5,
-              city
-            ),
+            CASE
+              WHEN COALESCE(
+                manual_contact_fields,
+                '{}'::jsonb
+              ) ? 'city'
+              THEN city
+              ELSE COALESCE(
+                $5,
+                city
+              )
+            END,
 
           primary_language =
-            COALESCE(
-              $6,
-              primary_language
-            ),
+            CASE
+              WHEN COALESCE(
+                manual_contact_fields,
+                '{}'::jsonb
+              ) ? 'primary_language'
+              THEN primary_language
+              ELSE COALESCE(
+                $6,
+                primary_language
+              )
+            END,
 
           source_platform =
             COALESCE(
@@ -6471,8 +6492,7 @@ if (!contact) {
               whatsapp_display_name
             ),
 
-          memory_identity_key =
-            COALESCE(
+          memory_identity_key =             COALESCE(
               memory_identity_key,
               $10
             ),
@@ -6651,8 +6671,7 @@ importance = 3
 }) {
 
 const existing =
-  await pool.query(
-    `
+  await pool.query(     `
       SELECT *
 
       FROM memory_items
@@ -6821,11 +6840,24 @@ contactId
 const result =
   await pool.query(
     `
-      SELECT *
+      SELECT
+        cmp.*,
+        c.birth_day
+          AS contact_birth_day,
+        c.birth_month
+          AS contact_birth_month,
+        c.birth_year
+          AS contact_birth_year,
+        c.birth_year_inferred
+          AS contact_birth_year_inferred
 
-      FROM contact_memory_profiles
+      FROM contact_memory_profiles cmp
 
-      WHERE contact_id =
+      JOIN contacts c
+        ON c.id =
+          cmp.contact_id
+
+      WHERE cmp.contact_id =
         $1
 
       LIMIT 1
@@ -6836,16 +6868,119 @@ const result =
   );
 
 
-return (
+const row =
   result.rows[0]
   ||
-  null
-);
+  null;
 
+
+if (!row) {
+  return null;
 }
 
 
-/* ==================================================
+const {
+  contact_birth_day: contactBirthDay,
+  contact_birth_month: contactBirthMonth,
+  contact_birth_year: contactBirthYear,
+  contact_birth_year_inferred: contactBirthYearInferred,
+  ...profileRow
+} = row;
+
+
+const profileSummary =
+  isPlainObject(
+    profileRow.profile_summary
+  )
+
+    ? {
+        ...profileRow.profile_summary
+      }
+
+    : {};
+
+
+const birthday =
+  resolveContactBirthdayData({
+    contact: {
+      birth_day:
+        contactBirthDay,
+      birth_month:
+        contactBirthMonth,
+      birth_year:
+        contactBirthYear,
+      birth_year_inferred:
+        contactBirthYearInferred
+    },
+    profile:
+      profileRow,
+    memoryItems:
+      []
+  });
+
+
+if (birthday.birthDay) {
+  profileSummary.birth_day =
+    birthday.birthDay;
+}
+
+
+if (birthday.birthMonth) {
+  profileSummary.birth_month =
+    birthday.birthMonth;
+}
+
+
+if (birthday.birthYear) {
+  profileSummary.birth_year =
+    birthday.birthYear;
+}
+
+
+if (
+  birthday.birthDay
+  &&
+  birthday.birthMonth
+) {
+  profileSummary.birthday = {
+    ...(isPlainObject(
+      profileSummary.birthday
+    )
+      ? profileSummary.birthday
+      : {}),
+    day:
+      birthday.birthDay,
+    month:
+      birthday.birthMonth,
+    ...(birthday.birthYear
+      ? {
+          year:
+            birthday.birthYear
+        }
+      : {}),
+    ...(birthday.birthYearInferred
+      ? {
+          year_inferred:
+            true
+        }
+      : {})
+  };
+}
+
+
+if (birthday.age != null) {
+  profileSummary.age =
+    birthday.age;
+}
+
+
+return {
+  ...profileRow,
+  profile_summary:
+    profileSummary
+};
+
+}/* ==================================================
  PROFILE SNAPSHOT
 ================================================== */
 
@@ -7011,7 +7146,7 @@ for (
         true
     }
   );
-
+ 
   for (
     const key
     of PROFILE_COLUMNS
@@ -7190,8 +7325,7 @@ if (contact) {
 
 
     if (
-      conflict.rows[0] 
-    ) {
+      conflict.rows[0]     ) {
 
       throw new Error(
         `WhatsApp-JID ${jid} ist bereits einem anderen Kontakt zugeordnet.`
@@ -7370,8 +7504,7 @@ if (contact) {
 
 
 const result =
-  await pool.query(
-    `
+  await pool.query(     `
       INSERT INTO contacts (
 
         whatsapp_jid,
@@ -8087,7 +8220,7 @@ const result =
 
         AND direction =
           'incoming'
-      RETURNING *
+       RETURNING *
     `,
     [
       jid,
@@ -8266,8 +8399,7 @@ const result =
       ORDER BY
         id DESC
 
-      LIMIT $2
-    `,
+      LIMIT $2     `,
     [
       jid,
       safeLimit
@@ -8446,8 +8578,7 @@ const hasTranslatableText =
   text =>
     /[\p{L}\p{N}]/u.test(
       normalizeText(
-        text
-      )
+        text       )
     );
 
 
@@ -8626,8 +8757,7 @@ ${batch
             &&
             id > 0
             &&
-            Boolean(text)
-        )
+            Boolean(text)         )
     );
 
 
@@ -8806,8 +8936,7 @@ return crypto.createHash("sha256").update([
 async function historicalMessageAlreadyExists({ jid, direction, createdAt, text, sourceHash, usedExistingIds = new Set() }) {
 const byHash = await pool.query(
   `SELECT id FROM messages WHERE import_source_hash = $1 LIMIT 1`,
-  [sourceHash]
-);
+  [sourceHash] );
 if (byHash.rows[0]) return byHash.rows[0];
 
 // Cross-Source-Fallback: Live-WhatsApp und TXT-Export koennen dieselbe Nachricht
@@ -8986,8 +9115,7 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
  return {
    batchId, parsed: parsed.length, imported, duplicates,
    incoming: importedIncoming, outgoing: importedOutgoing, senders,
-   senderMapping: hasExplicitMapping ? { marcelSender: explicitMarcelSender, contactSender: explicitContactSender, confirmed: true } : null,
-   newMessageIds, dryRun: Boolean(dryRun), replaceExisting: false
+   senderMapping: hasExplicitMapping ? { marcelSender: explicitMarcelSender, contactSender: explicitContactSender, confirmed: true } : null,    newMessageIds, dryRun: Boolean(dryRun), replaceExisting: false
  };
 }
 
@@ -9166,8 +9294,7 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
        const rowMs = new Date(row.created_at).getTime();
        return Number.isFinite(rowMs) &&
          Math.abs(rowMs - exportMs) <= 18 * 60 * 60 * 1000;
-     })
-     .sort((a, b) => {
+     })      .sort((a, b) => {
        const da = Math.abs(new Date(a.created_at).getTime() - exportMs);
        const db = Math.abs(new Date(b.created_at).getTime() - exportMs);
        if (da !== db) return da - db;
@@ -9346,8 +9473,7 @@ app.post("/dashboard-api/cleanup-whatsapp-duplicates", async (req, res) => {
  DASHBOARD WHATSAPP-EXPORT IMPORT V1
 ================================================== */
 
-app.post("/dashboard-api/import-whatsapp", async (req, res) => {
- try {
+app.post("/dashboard-api/import-whatsapp", async (req, res) => {  try {
    if (!dashboardApiReady(res)) return;
    if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok:false, error:"Nicht autorisiert." });
 
@@ -9527,7 +9653,6 @@ async function getRelevantMemoryEvents(
 contactId,
 limit = 30
 ) {
-
 const result =
   await pool.query(
     `
@@ -9706,8 +9831,7 @@ const profileData =
 
     ? Object.fromEntries(
         PROFILE_COLUMNS.map(
-          column => [ 
-            column,
+          column => [             column,
             profile[column] || {}
           ]
         )
@@ -9887,7 +10011,6 @@ REGELN
 hat Vorrang.
 
 - Frau und Marcel nie vermischen.
-
 - Gleichnamige Frauen nie
 nur anhand Namen zusammenführen.
 
@@ -9985,6 +10108,7 @@ if (jid) {
     memoryItems,
     memoryEvents,
     marcelMemory,
+ 
     liveState
   ] =
     await Promise.all([
@@ -10066,8 +10190,7 @@ const languageInstruction =
     : "";
 
 
-const response = 
-  await openai.responses.create({
+const response =   await openai.responses.create({
 
     model:
       MODEL,
@@ -10427,7 +10550,6 @@ return null;
 
 }
 
-
 /* ==================================================
  DETERMINISTISCHER WIDERSPRUCH
 ================================================== */
@@ -10605,8 +10727,7 @@ await pool.query(
 
     )
   `,
-  [ 
-    contactId,
+  [     contactId,
 
     JSON.stringify({
 
@@ -10785,8 +10906,7 @@ for (
       : "interpretation";
 
 
-  const value =
-    item?.memory_value
+  const value =     item?.memory_value
     &&
     typeof item.memory_value
     ===
@@ -10965,7 +11085,7 @@ for (
         $3,
 
         $4::jsonb,
-        $5,
+         $5,
 
         $6,
 
@@ -11144,8 +11264,7 @@ for (
 
         $12
 
-      )
-    `,
+      )     `,
     [
       contactId,
       eventType,
@@ -11324,8 +11443,7 @@ strikt trennen.
 marcel_knowledge_map
 nur für Wissen dieser Frau über Marcel.
 
-Wenn die Frau überwiegend
-in einer bestimmten Sprache schreibt
+Wenn die Frau überwiegendin einer bestimmten Sprache schreibt
 und das für zukünftige Antworten
 relevant ist,
 darf diese Information
@@ -11685,7 +11803,6 @@ const expectedBuffer =
     "utf8"
   );
 
-
 const receivedBuffer =
   Buffer.from(
     receivedSecret,
@@ -11744,6 +11861,2167 @@ if (
 
 
 return true;
+
+}
+
+
+/* ==================================================
+ DASHBOARD KONTAKT-STAMMDATEN
+ - manuelle Werte haben Vorrang vor Seeds
+ - Geburtsdatum -> Alter wird dynamisch berechnet
+ - intern weiterhin kanonische Bot-Werte
+================================================== */
+
+function dashboardContactError(
+message,
+statusCode = 400
+) {
+
+const error =
+  new Error(
+    message
+  );
+
+error.statusCode =
+  statusCode;
+
+return error;
+
+}
+
+
+function normalizeDashboardPhoneNumber(
+value
+) {
+
+const digits =
+  String(
+    value
+    ??
+    ""
+  )
+    .replace(
+      /\D/g,
+      ""
+    );
+
+
+if (!digits) {
+  return null;
+}
+
+
+if (
+  digits.length < 7
+  ||
+  digits.length > 16
+) {
+
+  throw dashboardContactError(
+    "Die Telefonnummer ist ungültig."
+  );
+
+}
+
+
+return digits;
+
+}
+
+
+function normalizeDashboardCountryValue(
+value
+) {
+
+const clean =
+  normalizeText(
+    value
+  );
+
+if (!clean) {
+  return null;
+}
+
+const normalized =
+  normalizeIdentityValue(
+    clean
+  );
+
+const map = {
+  "deutschland":
+    "Germany",
+  "germany":
+    "Germany",
+  "kolumbien":
+    "Colombia",
+  "colombia":
+    "Colombia",
+  "spanien":
+    "Spain",
+  "spain":
+    "Spain",
+  "kenia":
+    "Kenya",
+  "kenya":
+    "Kenya",
+  "tschechien":
+    "Czech Republic",
+  "czech republic":
+    "Czech Republic",
+  "philippinen":
+    "Philippines",
+  "philippines":
+    "Philippines",
+  "mexiko":
+    "Mexico",
+  "mexico":
+    "Mexico",
+  "osterreich":
+    "Austria",
+  "österreich":
+    "Austria",
+  "austria":
+    "Austria"
+};
+
+return map[normalized]
+  ||
+  clean;
+
+}
+
+
+function normalizeDashboardCityValue(
+value
+) {
+
+const clean =
+  normalizeText(
+    value
+  );
+
+if (!clean) {
+  return null;
+}
+
+const normalized =
+  normalizeIdentityValue(
+    clean
+  );
+
+if (
+  normalized === "munchen"
+  ||
+  normalized === "muenchen"
+  ||
+  normalized === "munich"
+) {
+  return "Munich";
+}
+
+return clean;
+
+}
+
+
+function normalizeDashboardLanguageValue(
+value
+) {
+
+const clean =
+  normalizeText(
+    value
+  );
+
+if (!clean) {
+  return null;
+}
+
+const normalized =
+  normalizeIdentityValue(
+    clean
+  );
+
+if (
+  [
+    "spanisch",
+    "spanish",
+    "espanol",
+    "español"
+  ].includes(
+    normalized
+  )
+) {
+  return "Spanish";
+}
+
+if (
+  [
+    "deutsch",
+    "german"
+  ].includes(
+    normalized
+  )
+) {
+  return "German";
+}
+
+if (
+  [
+    "englisch",
+    "english"
+  ].includes(
+    normalized
+  )
+) {
+  return "English";
+}
+
+return clean;
+
+}
+
+
+function dashboardIntegerOrNull(
+value,
+min,
+max
+) {
+
+if (
+  value === undefined
+  ||
+  value === null
+  ||
+  normalizeText(
+    value
+  ) === ""
+) {
+  return null;
+}
+
+const number =
+  Number(
+    value
+  );
+
+if (
+  !Number.isInteger(
+    number
+  )
+  ||
+  number < min
+  ||
+  number > max
+) {
+  return false;
+}
+
+return number;
+
+}
+
+
+function dashboardBirthMonthNumber(
+value
+) {
+
+const numeric =
+  dashboardIntegerOrNull(
+    value,
+    1,
+    12
+  );
+
+if (
+  numeric !== null
+  &&
+  numeric !== false
+) {
+  return numeric;
+}
+
+const normalized =
+  normalizeIdentityValue(
+    value
+  )
+    .replace(
+      /\./g,
+      ""
+    );
+
+const months = {
+  january: 1,
+  januar: 1,
+  enero: 1,
+  february: 2,
+  februar: 2,
+  febrero: 2,
+  march: 3,
+  marz: 3,
+  maerz: 3,
+  marzo: 3,
+  april: 4,
+  abril: 4,
+  may: 5,
+  mai: 5,
+  mayo: 5,
+  june: 6,
+  juni: 6,
+  junio: 6,
+  july: 7,
+  juli: 7,
+  julio: 7,
+  august: 8,
+  agosto: 8,
+  september: 9,
+  septiembre: 9,
+  october: 10,
+  oktober: 10,
+  octubre: 10,
+  november: 11,
+  noviembre: 11,
+  december: 12,
+  dezember: 12,
+  diciembre: 12
+};
+
+return months[normalized]
+  ||
+  null;
+
+}
+
+
+function dashboardBirthdayPartsValid(
+day,
+month,
+year = 2000
+) {
+
+if (
+  !Number.isInteger(
+    day
+  )
+  ||
+  !Number.isInteger(
+    month
+  )
+  ||
+  !Number.isInteger(
+    year
+  )
+) {
+  return false;
+}
+
+const date =
+  new Date(
+    Date.UTC(
+      year,
+      month - 1,
+      day
+    )
+  );
+
+return (
+  date.getUTCFullYear() === year
+  &&
+  date.getUTCMonth() === month - 1
+  &&
+  date.getUTCDate() === day
+);
+
+}
+
+
+function dashboardNormalizeBirthYear(
+value
+) {
+
+const year =
+  dashboardIntegerOrNull(
+    value,
+    1900,
+    2200
+  );
+
+return year;
+
+}
+
+
+function dashboardParseBirthdayText(
+value
+) {
+
+const text =
+  normalizeText(
+    value
+  );
+
+if (!text) {
+  return {};
+}
+
+let match =
+  text.match(
+    /^(\d{4})-(\d{1,2})-(\d{1,2})$/
+  );
+
+if (match) {
+  return {
+    year:
+      Number(
+        match[1]
+      ),
+    month:
+      Number(
+        match[2]
+      ),
+    day:
+      Number(
+        match[3]
+      )
+  };
+}
+
+match =
+  text.match(
+    /^(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{4}))?$/
+  );
+
+if (match) {
+  return {
+    day:
+      Number(
+        match[1]
+      ),
+    month:
+      Number(
+        match[2]
+      ),
+    ...(match[3]
+      ? {
+          year:
+            Number(
+              match[3]
+            )
+        }
+      : {})
+  };
+}
+
+match =
+  text.match(
+    /^(\d{1,2})\.?\s+(?:de\s+)?([\p{L}.]+)(?:\s+(?:de\s+)?(\d{4}))?$/iu
+  );
+
+if (match) {
+  const month =
+    dashboardBirthMonthNumber(
+      match[2]
+    );
+
+  if (month) {
+    return {
+      day:
+        Number(
+          match[1]
+        ),
+      month,
+      ...(match[3]
+        ? {
+            year:
+              Number(
+                match[3]
+              )
+          }
+        : {})
+    };
+  }
+}
+
+match =
+  text.match(
+    /^([\p{L}.]+)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/iu
+  );
+
+if (match) {
+  const month =
+    dashboardBirthMonthNumber(
+      match[1]
+    );
+
+  if (month) {
+    return {
+      day:
+        Number(
+          match[2]
+        ),
+      month,
+      ...(match[3]
+        ? {
+            year:
+              Number(
+                match[3]
+              )
+          }
+        : {})
+    };
+  }
+}
+
+return {};
+
+}
+
+
+function dashboardBirthdayKeyKind(
+value
+) {
+
+const key =
+  normalizeIdentityValue(
+    value
+  )
+    .replace(
+      /[^a-z0-9]+/g,
+      "_"
+    )
+    .replace(
+      /^_+|_+$/g,
+      ""
+    );
+
+if (
+  [
+    "birthday",
+    "birthdate",
+    "birthday_date",
+    "birth_date",
+    "date_birth",
+    "date_of_birth",
+    "dob",
+    "fecha_de_nacimiento",
+    "fecha_nacimiento"
+  ].includes(
+    key
+  )
+) {
+  return "birthday";
+}
+
+if (
+  [
+    "birth_day",
+    "birthday_day",
+    "day_of_birth"
+  ].includes(
+    key
+  )
+) {
+  return "day";
+}
+
+if (
+  [
+    "birth_month",
+    "birthday_month",
+    "month_of_birth"
+  ].includes(
+    key
+  )
+) {
+  return "month";
+}
+
+if (
+  [
+    "birth_year",
+    "birthday_year",
+    "year_of_birth"
+  ].includes(
+    key
+  )
+) {
+  return "year";
+}
+
+return null;
+
+}
+
+
+function collectDashboardBirthdayParts(
+value,
+output = {},
+keyHint = "",
+birthdayContext = false,
+depth = 0
+) {
+
+if (
+  value === undefined
+  ||
+  value === null
+  ||
+  depth > 7
+) {
+  return output;
+}
+
+const kind =
+  dashboardBirthdayKeyKind(
+    keyHint
+  );
+
+const inBirthday =
+  birthdayContext
+  ||
+  kind === "birthday";
+
+
+if (
+  typeof value !== "object"
+  ||
+  Array.isArray(
+    value
+  )
+) {
+
+  if (kind === "birthday") {
+    const parsed =
+      dashboardParseBirthdayText(
+        value
+      );
+
+    if (
+      output.day == null
+      &&
+      parsed.day
+    ) {
+      output.day =
+        parsed.day;
+    }
+
+    if (
+      output.month == null
+      &&
+      parsed.month
+    ) {
+      output.month =
+        parsed.month;
+    }
+
+    if (
+      output.year == null
+      &&
+      parsed.year
+    ) {
+      output.year =
+        parsed.year;
+    }
+  }
+
+  if (
+    kind === "day"
+    &&
+    output.day == null
+  ) {
+    const day =
+      dashboardIntegerOrNull(
+        value,
+        1,
+        31
+      );
+
+    if (
+      day !== false
+      &&
+      day !== null
+    ) {
+      output.day =
+        day;
+    }
+  }
+
+  if (
+    kind === "month"
+    &&
+    output.month == null
+  ) {
+    const month =
+      dashboardBirthMonthNumber(
+        value
+      );
+
+    if (month) {
+      output.month =
+        month;
+    }
+  }
+
+  if (
+    kind === "year"
+    &&
+    output.year == null
+  ) {
+    const year =
+      dashboardNormalizeBirthYear(
+        value
+      );
+
+    if (
+      year !== false
+      &&
+      year !== null
+    ) {
+      output.year =
+        year;
+    }
+  }
+
+  return output;
+}
+
+
+if (
+  isPlainObject(
+    value
+  )
+) {
+
+  for (
+    const [
+      childKey,
+      childValue
+    ]
+    of Object.entries(
+      value
+    )
+  ) {
+
+    const normalizedChild =
+      normalizeIdentityValue(
+        childKey
+      )
+        .replace(
+          /[^a-z0-9]+/g,
+          "_"
+        );
+
+    const childKind =
+      dashboardBirthdayKeyKind(
+        childKey
+      );
+
+    if (
+      inBirthday
+      &&
+      childKind == null
+      &&
+      [
+        "day",
+        "date"
+      ].includes(
+        normalizedChild
+      )
+    ) {
+      const day =
+        dashboardIntegerOrNull(
+          childValue,
+          1,
+          31
+        );
+
+      if (
+        output.day == null
+        &&
+        day !== false
+        &&
+        day !== null
+      ) {
+        output.day =
+          day;
+      }
+
+      continue;
+    }
+
+    if (
+      inBirthday
+      &&
+      childKind == null
+      &&
+      normalizedChild === "month"
+    ) {
+      const month =
+        dashboardBirthMonthNumber(
+          childValue
+        );
+
+      if (
+        output.month == null
+        &&
+        month
+      ) {
+        output.month =
+          month;
+      }
+
+      continue;
+    }
+
+    if (
+      inBirthday
+      &&
+      childKind == null
+      &&
+      normalizedChild === "year"
+    ) {
+      const year =
+        dashboardNormalizeBirthYear(
+          childValue
+        );
+
+      if (
+        output.year == null
+        &&
+        year !== false
+        &&
+        year !== null
+      ) {
+        output.year =
+          year;
+      }
+
+      continue;
+    }
+
+    collectDashboardBirthdayParts(
+      childValue,
+      output,
+      childKey,
+      inBirthday,
+      depth + 1
+    );
+  }
+}
+
+return output;
+
+}
+
+
+function dashboardAgeFromValue(
+value
+) {
+
+if (
+  value === undefined
+  ||
+  value === null
+) {
+  return null;
+}
+
+if (
+  typeof value === "number"
+  ||
+  typeof value === "string"
+) {
+  const match =
+    String(
+      value
+    )
+      .match(
+        /\b(1[89]|[2-9]\d|1[0-2]\d)\b/
+      );
+
+  return match
+    ? Number(
+        match[1]
+      )
+    : null;
+}
+
+if (
+  isPlainObject(
+    value
+  )
+) {
+  for (
+    const key
+    of [
+      "age",
+      "years",
+      "value"
+    ]
+  ) {
+    if (
+      Object.prototype.hasOwnProperty.call(
+        value,
+        key
+      )
+    ) {
+      const age =
+        dashboardAgeFromValue(
+          value[key]
+        );
+
+      if (age != null) {
+        return age;
+      }
+    }
+  }
+}
+
+return null;
+
+}
+
+
+function dashboardReportedAge(
+profile,
+memoryItems = []
+) {
+
+const items =
+  Array.isArray(
+    memoryItems
+  )
+
+    ? memoryItems
+
+    : [];
+
+
+const ageFromItems = (
+  requireHumanReview
+) => {
+
+  for (
+    const item
+    of items
+  ) {
+
+    const key =
+      normalizeIdentityValue(
+        item?.memory_key
+        ??
+        item?.key
+      )
+        .replace(
+          /[^a-z0-9]+/g,
+          "_"
+        );
+
+    if (
+      ![
+        "age",
+        "current_age"
+      ].includes(
+        key
+      )
+    ) {
+      continue;
+    }
+
+    const reviewStatus =
+      item?.human_review_status
+      ??
+      item?.reviewStatus
+      ??
+      null;
+
+    if (
+      requireHumanReview
+      &&
+      ![
+        "confirmed",
+        "corrected"
+      ].includes(
+        reviewStatus
+      )
+    ) {
+      continue;
+    }
+
+    const value =
+      reviewStatus === "corrected"
+      &&
+      (
+        item?.human_corrected_value
+        ??
+        item?.humanCorrectedValue
+      )
+
+        ? (
+            item?.human_corrected_value
+            ??
+            item?.humanCorrectedValue
+          )
+
+        : (
+            item?.memory_value
+            ??
+            item?.value
+          );
+
+    const age =
+      dashboardAgeFromValue(
+        value
+      );
+
+    if (age != null) {
+      return age;
+    }
+  }
+
+  return null;
+};
+
+
+const humanAge =
+  ageFromItems(
+    true
+  );
+
+if (humanAge != null) {
+  return humanAge;
+}
+
+
+const direct =
+  dashboardAgeFromValue(
+    profile?.profile_summary?.age
+  );
+
+if (direct != null) {
+  return direct;
+}
+
+
+return ageFromItems(
+  false
+);
+
+}
+
+function dashboardTodayParts() {
+
+const parts =
+  new Intl.DateTimeFormat(
+    "en-CA",
+    {
+      timeZone:
+        "Europe/Berlin",
+      year:
+        "numeric",
+      month:
+        "2-digit",
+      day:
+        "2-digit"
+    }
+  )
+    .formatToParts(
+      new Date()
+    );
+
+const values =
+  Object.fromEntries(
+    parts.map(
+      part => [
+        part.type,
+        part.value
+      ]
+    )
+  );
+
+return {
+  year:
+    Number(
+      values.year
+    ),
+  month:
+    Number(
+      values.month
+    ),
+  day:
+    Number(
+      values.day
+    )
+};
+
+}
+
+
+function calculateDashboardAge(
+day,
+month,
+year,
+today = dashboardTodayParts()
+) {
+
+if (
+  !dashboardBirthdayPartsValid(
+    day,
+    month,
+    year
+  )
+) {
+  return null;
+}
+
+let age =
+  today.year
+  -
+  year;
+
+const birthdayPassed =
+  today.month > month
+  ||
+  (
+    today.month === month
+    &&
+    today.day >= day
+  );
+
+if (!birthdayPassed) {
+  age -= 1;
+}
+
+return age >= 0
+  ? age
+  : null;
+
+}
+
+
+function inferDashboardBirthYear(
+day,
+month,
+age,
+today = dashboardTodayParts()
+) {
+
+if (
+  !Number.isInteger(
+    age
+  )
+  ||
+  age < 0
+  ||
+  !dashboardBirthdayPartsValid(
+    day,
+    month,
+    2000
+  )
+) {
+  return null;
+}
+
+const birthdayPassed =
+  today.month > month
+  ||
+  (
+    today.month === month
+    &&
+    today.day >= day
+  );
+
+return birthdayPassed
+  ? today.year - age
+  : today.year - age - 1;
+
+}
+
+
+function resolveContactBirthdayData({
+contact = {},
+profile = {},
+memoryItems = []
+} = {}) {
+
+const extracted = {};
+
+collectDashboardBirthdayParts(
+  profile,
+  extracted,
+  "profile"
+);
+
+for (
+  const item
+  of Array.isArray(
+    memoryItems
+  )
+    ? memoryItems
+    : []
+) {
+
+  const value =
+    item?.human_review_status === "corrected"
+    &&
+    item?.human_corrected_value
+
+      ? item.human_corrected_value
+
+      : (
+          item?.memory_value
+          ??
+          item?.value
+        );
+
+  collectDashboardBirthdayParts(
+    value,
+    extracted,
+    item?.memory_key
+    ??
+    item?.key
+    ??
+    ""
+  );
+}
+
+const contactDay =
+  dashboardIntegerOrNull(
+    contact?.birth_day
+    ??
+    contact?.birthDay,
+    1,
+    31
+  );
+
+const contactMonth =
+  dashboardIntegerOrNull(
+    contact?.birth_month
+    ??
+    contact?.birthMonth,
+    1,
+    12
+  );
+
+const contactYear =
+  dashboardNormalizeBirthYear(
+    contact?.birth_year
+    ??
+    contact?.birthYear
+  );
+
+const birthDay =
+  contactDay !== false
+  &&
+  contactDay !== null
+
+    ? contactDay
+
+    : (
+        extracted.day
+        ||
+        null
+      );
+
+const birthMonth =
+  contactMonth !== false
+  &&
+  contactMonth !== null
+
+    ? contactMonth
+
+    : (
+        extracted.month
+        ||
+        null
+      );
+
+const actualBirthYear =
+  contactYear !== false
+  &&
+  contactYear !== null
+
+    ? contactYear
+
+    : (
+        extracted.year
+        ||
+        null
+      );
+
+const reportedAge =
+  dashboardReportedAge(
+    profile,
+    memoryItems
+  );
+
+let suggestedBirthYear =
+  null;
+
+if (
+  !actualBirthYear
+  &&
+  birthDay
+  &&
+  birthMonth
+  &&
+  reportedAge != null
+) {
+  suggestedBirthYear =
+    inferDashboardBirthYear(
+      birthDay,
+      birthMonth,
+      reportedAge
+    );
+}
+
+const effectiveYear =
+  actualBirthYear
+  ||
+  suggestedBirthYear;
+
+const age =
+  effectiveYear
+  &&
+  birthDay
+  &&
+  birthMonth
+
+    ? calculateDashboardAge(
+        birthDay,
+        birthMonth,
+        effectiveYear
+      )
+
+    : reportedAge;
+
+const storedYearInferred =
+  Boolean(
+    contact?.birth_year_inferred
+    ??
+    contact?.birthYearInferred
+  );
+
+return {
+  birthDay,
+  birthMonth,
+  birthYear:
+    actualBirthYear,
+  suggestedBirthYear,
+  effectiveBirthYear:
+    effectiveYear,
+  birthYearInferred:
+    actualBirthYear
+      ? storedYearInferred
+      : Boolean(
+          suggestedBirthYear
+        ),
+  age:
+    age == null
+      ? null
+      : Number(
+          age
+        ),
+  reportedAge
+};
+
+}
+
+
+function dashboardBirthdayLabel(
+birthday,
+{
+  includeInferredYear = false
+} = {}
+) {
+
+const day =
+  birthday?.birthDay;
+
+const month =
+  birthday?.birthMonth;
+
+if (
+  !day
+  ||
+  !month
+) {
+  return null;
+}
+
+const months = [
+  "",
+  "Januar",
+  "Februar",
+  "März",
+  "April",
+  "Mai",
+  "Juni",
+  "Juli",
+  "August",
+  "September",
+  "Oktober",
+  "November",
+  "Dezember"
+];
+
+const showYear =
+  birthday.birthYear
+  &&
+  (
+    includeInferredYear
+    ||
+    birthday.birthYearInferred !== true
+  );
+
+return (
+  `${day}. ${months[month]}`
+  +
+  (
+    showYear
+      ? ` ${birthday.birthYear}`
+      : ""
+  )
+);
+
+}
+
+
+function createDashboardContactIdentityKey(
+name
+) {
+
+const base =
+  normalizeIdentityValue(
+    name
+  )
+    .replace(
+      /[^a-z0-9]+/g,
+      "_"
+    )
+    .replace(
+      /^_+|_+$/g,
+      ""
+    )
+    .slice(
+      0,
+      48
+    )
+  ||
+  "kontakt";
+
+return (
+  "dashboard_"
+  +
+  base
+  +
+  "_"
+  +
+  Date.now()
+  +
+  "_"
+  +
+  crypto
+    .randomBytes(
+      3
+    )
+    .toString(
+      "hex"
+    )
+);
+
+}
+
+
+async function upsertDashboardVerifiedContactMemory({
+contactId,
+category,
+memoryKey,
+memoryValue,
+importance = 5
+}) {
+
+const existing =
+  await pool.query(
+    `
+      SELECT *
+
+      FROM memory_items
+
+      WHERE contact_id =
+        $1
+
+        AND category =
+          $2
+
+        AND memory_key =
+          $3
+
+        AND status =
+          'active'
+
+      ORDER BY
+        id DESC
+
+      LIMIT 1
+    `,
+    [
+      contactId,
+      category,
+      memoryKey
+    ]
+  );
+
+const note =
+  "Von Marcel im Dashboard als Kontaktdatum bestätigt.";
+
+if (
+  existing.rows[0]
+) {
+  await pool.query(
+    `
+      UPDATE memory_items
+
+      SET
+        memory_value =
+          $2::jsonb,
+
+        memory_type =
+          'explicit_fact',
+
+        confidence =
+          1.0,
+
+        status =
+          'active',
+
+        valid_until =
+          NULL,
+
+        human_review_status =
+          'confirmed',
+
+        human_corrected_value =
+          NULL,
+
+        human_note =
+          $3,
+
+        human_reviewed_at =
+          NOW(),
+
+        importance =
+          GREATEST(
+            importance,
+            $4
+          ),
+
+        use_in_reply =
+          TRUE,
+
+        updated_at =
+          NOW()
+
+      WHERE id =
+        $1
+    `,
+    [
+      existing.rows[0].id,
+      JSON.stringify(
+        memoryValue
+      ),
+      note,
+      clampImportance(
+        importance
+      )
+    ]
+  );
+
+  return;
+}
+
+await pool.query(
+  `
+    INSERT INTO memory_items (
+      contact_id,
+      category,
+      memory_key,
+      memory_value,
+      memory_type,
+      confidence,
+      status,
+      human_review_status,
+      human_note,
+      human_reviewed_at,
+      importance,
+      use_in_reply
+    )
+    VALUES (
+      $1,
+      $2,
+      $3,
+      $4::jsonb,
+      'explicit_fact',
+      1.0,
+      'active',
+      'confirmed',
+      $5,
+      NOW(),
+      $6,
+      TRUE
+    )
+  `,
+  [
+    contactId,
+    category,
+    memoryKey,
+    JSON.stringify(
+      memoryValue
+    ),
+    note,
+    clampImportance(
+      importance
+    )
+  ]
+);
+
+}
+
+
+async function syncDashboardBirthdayProfile({
+contactId,
+birthDay,
+birthMonth,
+birthYear,
+birthYearInferred
+}) {
+
+if (
+  !birthDay
+  ||
+  !birthMonth
+) {
+  return;
+}
+
+await pool.query(
+  `
+    INSERT INTO contact_memory_profiles (
+      contact_id
+    )
+    VALUES (
+      $1
+    )
+    ON CONFLICT (
+      contact_id
+    )
+    DO NOTHING
+  `,
+  [
+    contactId
+  ]
+);
+
+const current =
+  await pool.query(
+    `
+      SELECT profile_summary
+
+      FROM contact_memory_profiles
+
+      WHERE contact_id =
+        $1
+
+      LIMIT 1
+    `,
+    [
+      contactId
+    ]
+  );
+
+const summary =
+  isPlainObject(
+    current.rows[0]?.profile_summary
+  )
+
+    ? {
+        ...current.rows[0].profile_summary
+      }
+
+    : {};
+
+summary.birth_day =
+  birthDay;
+
+summary.birth_month =
+  birthMonth;
+
+if (birthYear) {
+  summary.birth_year =
+    birthYear;
+}
+
+summary.birthday = {
+  ...(isPlainObject(
+    summary.birthday
+  )
+    ? summary.birthday
+    : {}),
+  day:
+    birthDay,
+  month:
+    birthMonth,
+  ...(birthYear
+    ? {
+        year:
+          birthYear
+      }
+    : {}),
+  ...(birthYearInferred
+    ? {
+        year_inferred:
+          true
+      }
+    : {})
+};
+
+await pool.query(
+  `
+    UPDATE contact_memory_profiles
+
+    SET
+      profile_summary =
+        $2::jsonb,
+
+      profile_version =
+        profile_version + 1,
+
+      updated_at =
+        NOW()
+
+    WHERE contact_id =
+      $1
+  `,
+  [
+    contactId,
+    JSON.stringify(
+      summary
+    )
+  ]
+);
+
+}
+
+
+function dashboardContactBirthInput(
+body = {},
+fallback = {}
+) {
+
+const day =
+  dashboardIntegerOrNull(
+    body.birthDay,
+    1,
+    31
+  );
+
+const month =
+  dashboardIntegerOrNull(
+    body.birthMonth,
+    1,
+    12
+  );
+
+const year =
+  dashboardNormalizeBirthYear(
+    body.birthYear
+  );
+
+const age =
+  dashboardIntegerOrNull(
+    body.age,
+    0,
+    130
+  );
+
+if (
+  day === false
+  ||
+  month === false
+  ||
+  year === false
+  ||
+  age === false
+) {
+  throw dashboardContactError(
+    "Geburtstag oder Alter ist ungültig."
+  );
+}
+
+const effectiveDay =
+  day
+  ??
+  fallback.birthDay
+  ??
+  null;
+
+const effectiveMonth =
+  month
+  ??
+  fallback.birthMonth
+  ??
+  null;
+
+let effectiveYear =
+  year
+  ??
+  fallback.birthYear
+  ??
+  null;
+
+let inferred =
+  Boolean(
+    body.birthYearInferred
+  );
+
+const ageForInference =
+  age
+  ??
+  fallback.age
+  ??
+  null;
+
+if (
+  effectiveDay
+  &&
+  effectiveMonth
+  &&
+  effectiveYear
+  &&
+  !dashboardBirthdayPartsValid(
+    effectiveDay,
+    effectiveMonth,
+    effectiveYear
+  )
+) {
+  throw dashboardContactError(
+    "Das Geburtsdatum ist ungültig."
+  );
+}
+
+if (
+  effectiveDay
+  &&
+  effectiveMonth
+  &&
+  !effectiveYear
+  &&
+  ageForInference != null
+) {
+  effectiveYear =
+    inferDashboardBirthYear(
+      effectiveDay,
+      effectiveMonth,
+      ageForInference
+    );
+
+  inferred =
+    true;
+}
+
+if (
+  effectiveDay
+  &&
+  effectiveMonth
+  &&
+  effectiveYear
+  &&
+  age != null
+) {
+  const calculated =
+    calculateDashboardAge(
+      effectiveDay,
+      effectiveMonth,
+      effectiveYear
+    );
+
+  if (
+    calculated != null
+    &&
+    calculated !== age
+  ) {
+    throw dashboardContactError(
+      `Alter und Geburtsdatum passen nicht zusammen. Aus dem Datum ergibt sich aktuell ${calculated}.`
+    );
+  }
+}
+
+return {
+  birthDay:
+    effectiveDay,
+  birthMonth:
+    effectiveMonth,
+  birthYear:
+    effectiveYear,
+  birthYearInferred:
+    Boolean(
+      effectiveYear
+      &&
+      inferred
+    ),
+  age:
+    effectiveDay
+    &&
+    effectiveMonth
+    &&
+    effectiveYear
+
+      ? calculateDashboardAge(
+          effectiveDay,
+          effectiveMonth,
+          effectiveYear
+        )
+
+      : ageForInference
+};
+
+}
+
+
+async function syncDashboardReportedAgeProfile({
+contactId,
+age
+}) {
+
+if (
+  age == null
+) {
+  return;
+}
+
+await pool.query(
+  `
+    INSERT INTO contact_memory_profiles (
+      contact_id
+    )
+    VALUES (
+      $1
+    )
+    ON CONFLICT (
+      contact_id
+    )
+    DO NOTHING
+  `,
+  [
+    contactId
+  ]
+);
+
+const current =
+  await pool.query(
+    `
+      SELECT profile_summary
+      FROM contact_memory_profiles
+      WHERE contact_id = $1
+      LIMIT 1
+    `,
+    [
+      contactId
+    ]
+  );
+
+const summary =
+  isPlainObject(
+    current.rows[0]?.profile_summary
+  )
+    ? {
+        ...current.rows[0].profile_summary
+      }
+    : {};
+
+summary.age =
+  age;
+
+await pool.query(
+  `
+    UPDATE contact_memory_profiles
+    SET
+      profile_summary = $2::jsonb,
+      profile_version = profile_version + 1,
+      updated_at = NOW()
+    WHERE contact_id = $1
+  `,
+  [
+    contactId,
+    JSON.stringify(
+      summary
+    )
+  ]
+);
+
+}
+
+
+async function retireDashboardReportedAgeMemory(
+contactId
+) {
+
+await pool.query(
+  `
+    UPDATE memory_items
+    SET
+      status = 'superseded',
+      valid_until = COALESCE(valid_until, NOW()),
+      updated_at = NOW()
+    WHERE contact_id = $1
+      AND category = 'profile_summary'
+      AND memory_key = 'age'
+      AND status = 'active'
+      AND human_note = 'Von Marcel im Dashboard als Kontaktdatum bestätigt.'
+  `,
+  [
+    contactId
+  ]
+);
+
+}
+
+
+async function applyDashboardContactHumanFacts({
+contactId,
+city,
+country,
+language,
+birthday,
+age
+}) {
+
+if (city) {
+  await upsertDashboardVerifiedContactMemory({
+    contactId,
+    category:
+      "profile_summary",
+    memoryKey:
+      "city",
+    memoryValue: {
+      city
+    },
+    importance:
+      4
+  });
+}
+
+if (country) {
+  await upsertDashboardVerifiedContactMemory({
+    contactId,
+    category:
+      "profile_summary",
+    memoryKey:
+      "country",
+    memoryValue: {
+      country
+    },
+    importance:
+      4
+  });
+}
+
+if (language) {
+  await upsertDashboardVerifiedContactMemory({
+    contactId,
+    category:
+      "communication",
+    memoryKey:
+      "primary_language",
+    memoryValue: {
+      language
+    },
+    importance:
+      5
+  });
+}
+
+if (
+  age != null
+  &&
+  !(
+    birthday?.birthDay
+    &&
+    birthday?.birthMonth
+    &&
+    birthday?.birthYear
+  )
+) {
+  await upsertDashboardVerifiedContactMemory({
+    contactId,
+    category:
+      "profile_summary",
+    memoryKey:
+      "age",
+    memoryValue: {
+      years:
+        age
+    },
+    importance:
+      5
+  });
+
+  await syncDashboardReportedAgeProfile({
+    contactId,
+    age
+  });
+}
+
+if (
+  birthday?.birthDay
+  &&
+  birthday?.birthMonth
+  &&
+  birthday?.birthYear
+) {
+  await retireDashboardReportedAgeMemory(
+    contactId
+  );
+}
+
+if (
+  birthday?.birthDay
+  &&
+  birthday?.birthMonth
+) {
+  await upsertDashboardVerifiedContactMemory({
+    contactId,
+    category:
+      "profile_summary",
+    memoryKey:
+      "birthday",
+    memoryValue: {
+      day:
+        birthday.birthDay,
+      month:
+        birthday.birthMonth,
+      ...(birthday.birthYear
+        ? {
+            year:
+              birthday.birthYear
+          }
+        : {}),
+      ...(birthday.birthYearInferred
+        ? {
+            birth_year_inferred:
+              true
+          }
+        : {})
+    },
+    importance:
+      5
+  });
+
+  await syncDashboardBirthdayProfile({
+    contactId,
+    ...birthday
+  });
+}
 
 }
 
@@ -11863,8 +14141,7 @@ if (Array.isArray(value)) {
     collectDashboardTranslationLeaves(
       item,
       `${contextHint}[]`,
-      target 
-    );
+      target     );
   }
 
   return;
@@ -12043,8 +14320,7 @@ await pool.query(
     ON CONFLICT (cache_key)
     DO UPDATE SET
       source_text = EXCLUDED.source_text,
-      context_hint = EXCLUDED.context_hint,
-      translation_de = EXCLUDED.translation_de,
+      context_hint = EXCLUDED.context_hint,       translation_de = EXCLUDED.translation_de,
       translation_model = EXCLUDED.translation_model,
       updated_at = NOW()
   `,
@@ -12223,8 +14499,7 @@ Fuer jede gelieferte ID genau einen Eintrag liefern.
                 )
               ]
             )
-            .filter(
-              ([id, german]) =>
+            .filter(               ([id, german]) =>
                 Number.isInteger(id)
                 &&
                 id > 0
@@ -12404,7 +14679,6 @@ try {
 
         const contextHint =
           `structured|${normalizeText(entry?.contextHint) || `dashboard.${index}`}`;
-
         const value =
           entry?.value;
 
@@ -12584,7 +14858,6 @@ Fuer jede gelieferte ID genau einen Eintrag liefern.
           Number(
             item?.id
           );
-
         if (
           !Number.isInteger(id)
           ||
@@ -12700,7 +14973,7 @@ Fuer jede gelieferte ID genau einen Eintrag liefern.
 
 /* ==================================================
  DASHBOARD KONTAKTLISTE
- READ ONLY
+ LESEN + SEPARATE WRITE-ROUTEN
 ================================================== */
 
 app.get(
@@ -12763,7 +15036,7 @@ async (req, res) => {
             c.country,
 
             c.city,
-            c.timezone,
+             c.timezone,
 
             c.primary_language,
 
@@ -12790,6 +15063,14 @@ async (req, res) => {
             c.memory_identity_key,
 
             c.identity_locked,
+
+            c.birth_day,
+
+            c.birth_month,
+
+            c.birth_year,
+
+            c.birth_year_inferred,
 
             c.created_at,
 
@@ -12936,6 +15217,12 @@ async (req, res) => {
             );
 
 
+          const birthday =
+            resolveContactBirthdayData({
+              contact
+            });
+
+
           return {
 
             id:
@@ -12943,7 +15230,6 @@ async (req, res) => {
 
             jid:
               contact.whatsapp_jid,
-
             phoneNumber:
               contact.phone_number,
 
@@ -13014,6 +15300,29 @@ async (req, res) => {
               contact.identity_locked
               ===
               true,
+
+            birthDay:
+              birthday.birthDay,
+
+            birthMonth:
+              birthday.birthMonth,
+
+            birthYear:
+              birthday.birthYear,
+
+            suggestedBirthYear:
+              birthday.suggestedBirthYear,
+
+            birthYearInferred:
+              birthday.birthYearInferred,
+
+            age:
+              birthday.age,
+
+            birthdayLabel:
+              dashboardBirthdayLabel(
+                birthday
+              ),
 
             profileOnly:
               isProfileOnly,
@@ -13122,8 +15431,7 @@ async (req, res) => {
       .status(500)
       .json({
 
-        ok: 
-          false,
+        ok:           false,
 
         error:
           "Dashboard-Kontakte konnten nicht geladen werden."
@@ -13132,6 +15440,855 @@ async (req, res) => {
 
   }
 
+}
+);
+
+
+/* ==================================================
+ DASHBOARD KONTAKT ANLEGEN
+ POST /dashboard-api/contacts
+================================================== */
+
+app.post(
+"/dashboard-api/contacts",
+async (req, res) => {
+
+  try {
+
+    if (
+      !dashboardApiReady(
+        res
+      )
+    ) {
+      return;
+    }
+
+    if (
+      !dashboardApiAuthorized(
+        req
+      )
+    ) {
+      return res
+        .status(401)
+        .json({
+          ok:
+            false,
+          error:
+            "Nicht autorisiert."
+        });
+    }
+
+    const name =
+      normalizeText(
+        req.body?.name
+      );
+
+    if (!name) {
+      throw dashboardContactError(
+        "Bitte einen Namen eingeben."
+      );
+    }
+
+    const phone =
+      normalizeDashboardPhoneNumber(
+        req.body?.phoneNumber
+      );
+
+    if (phone) {
+      const phoneOwner =
+        await findContactByIdentifier(
+          "phone",
+          phone
+        );
+
+      if (phoneOwner) {
+        throw dashboardContactError(
+          "Diese Telefonnummer ist bereits einem anderen Kontakt zugeordnet.",
+          409
+        );
+      }
+    }
+
+    const country =
+      normalizeDashboardCountryValue(
+        req.body?.country
+      );
+
+    const city =
+      normalizeDashboardCityValue(
+        req.body?.city
+      );
+
+    const language =
+      normalizeDashboardLanguageValue(
+        req.body?.language
+      );
+
+    const birthday =
+      dashboardContactBirthInput(
+        req.body || {},
+        {}
+      );
+
+    const identityKey =
+      createDashboardContactIdentityKey(
+        name
+      );
+
+    const manualFields = {
+      canonical_name:
+        true,
+      display_name:
+        true,
+      ...(Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "phoneNumber"
+      )
+        ? {
+            phone_number:
+              true
+          }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "city"
+      )
+        ? {
+            city:
+              true
+          }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "country"
+      )
+        ? {
+            country:
+              true
+          }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "language"
+      )
+        ? {
+            primary_language:
+              true
+          }
+        : {}),
+      ...(birthday.birthDay
+      ||
+      birthday.birthMonth
+      ||
+      birthday.birthYear
+        ? {
+            birthday:
+              true
+          }
+        : {})
+    };
+
+    const result =
+      await pool.query(
+        `
+          INSERT INTO contacts (
+            whatsapp_jid,
+            display_name,
+            canonical_name,
+            memory_identity_key,
+            identity_locked,
+            phone_number,
+            country,
+            city,
+            primary_language,
+            source_platform,
+            platform_status,
+            contact_status,
+            relationship_stage,
+            auto_reply_enabled,
+            date_lock_enabled,
+            birth_day,
+            birth_month,
+            birth_year,
+            birth_year_inferred,
+            manual_contact_fields,
+            manual_contact_updated_at,
+            first_contact_at,
+            updated_at
+          )
+          VALUES (
+            $1,
+            $2,
+            $2,
+            $3,
+            TRUE,
+            $4,
+            $5,
+            $6,
+            $7,
+            'dashboard',
+            'CONTACT_KNOWN',
+            'active',
+            'new',
+            TRUE,
+            FALSE,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12::jsonb,
+            NOW(),
+            NOW(),
+            NOW()
+          )
+          RETURNING *
+        `,
+        [
+          createProfileJid(
+            identityKey
+          ),
+          name,
+          identityKey,
+          phone,
+          country,
+          city,
+          language,
+          birthday.birthDay,
+          birthday.birthMonth,
+          birthday.birthYear,
+          birthday.birthYearInferred,
+          JSON.stringify(
+            manualFields
+          )
+        ]
+      );
+
+    const contact =
+      result.rows[0];
+
+    await pool.query(
+      `
+        INSERT INTO contact_memory_profiles (
+          contact_id
+        )
+        VALUES (
+          $1
+        )
+        ON CONFLICT (
+          contact_id
+        )
+        DO NOTHING
+      `,
+      [
+        contact.id
+      ]
+    );
+
+    await addContactIdentifier({
+      contactId:
+        contact.id,
+      type:
+        "identity_key",
+      value:
+        identityKey,
+      isPrimary:
+        true
+    });
+
+    await addContactIdentifier({
+      contactId:
+        contact.id,
+      type:
+        "canonical_name",
+      value:
+        name,
+      isPrimary:
+        true
+    });
+
+    if (phone) {
+      await addContactIdentifier({
+        contactId:
+          contact.id,
+        type:
+          "phone",
+        value:
+          phone,
+        sourcePlatform:
+          "whatsapp",
+        isPrimary:
+          true
+      });
+    }
+
+    await applyDashboardContactHumanFacts({
+      contactId:
+        contact.id,
+      city,
+      country,
+      language,
+      birthday,
+      age:
+        birthday.age
+    });
+
+    const birthdayDisplay =
+      resolveContactBirthdayData({
+        contact
+      });
+
+    return res
+      .status(201)
+      .json({
+        ok:
+          true,
+        contact: {
+          id:
+            contact.id,
+          jid:
+            contact.whatsapp_jid,
+          name,
+          displayName:
+            name,
+          phoneNumber:
+            phone,
+          city,
+          country,
+          language,
+          birthDay:
+            birthdayDisplay.birthDay,
+          birthMonth:
+            birthdayDisplay.birthMonth,
+          birthYear:
+            birthdayDisplay.birthYear,
+          birthYearInferred:
+            birthdayDisplay.birthYearInferred,
+          age:
+            birthdayDisplay.age,
+          birthdayLabel:
+            dashboardBirthdayLabel(
+              birthdayDisplay
+            )
+        }
+      });
+
+  } catch (error) {
+
+    console.error(
+      "Dashboard Kontakt anlegen Fehler:",
+      error
+    );
+
+    return res
+      .status(
+        Number(
+          error?.statusCode
+        )
+        ||
+        500
+      )
+      .json({
+        ok:
+          false,
+        error:
+          error?.message
+          ||
+          "Kontakt konnte nicht angelegt werden."
+      });
+  }
+}
+);
+
+
+/* ==================================================
+ DASHBOARD KONTAKT BEARBEITEN
+ PATCH /dashboard-api/contacts/:id
+================================================== */
+
+app.patch(
+"/dashboard-api/contacts/:id",
+async (req, res) => {
+
+  try {
+
+    if (
+      !dashboardApiReady(
+        res
+      )
+    ) {
+      return;
+    }
+
+    if (
+      !dashboardApiAuthorized(
+        req
+      )
+    ) {
+      return res
+        .status(401)
+        .json({
+          ok:
+            false,
+          error:
+            "Nicht autorisiert."
+        });
+    }
+
+    const contactId =
+      Number(
+        req.params.id
+      );
+
+    if (
+      !Number.isInteger(
+        contactId
+      )
+      ||
+      contactId <= 0
+    ) {
+      throw dashboardContactError(
+        "Ungültige Kontakt-ID."
+      );
+    }
+
+    const current =
+      await getContactById(
+        contactId
+      );
+
+    if (
+      !current
+      ||
+      isTestJid(
+        current.whatsapp_jid
+      )
+    ) {
+      throw dashboardContactError(
+        "Kontakt nicht gefunden.",
+        404
+      );
+    }
+
+    const currentProfile =
+      await getContactMemoryProfile(
+        contactId
+      );
+
+    const currentBirthday =
+      resolveContactBirthdayData({
+        contact:
+          current,
+        profile:
+          currentProfile || {},
+        memoryItems:
+          []
+      });
+
+    const body =
+      req.body
+      &&
+      typeof req.body === "object"
+
+        ? req.body
+
+        : {};
+
+    const nameProvided =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "name"
+      );
+
+    const phoneProvided =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "phoneNumber"
+      );
+
+    const cityProvided =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "city"
+      );
+
+    const countryProvided =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "country"
+      );
+
+    const languageProvided =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "language"
+      );
+
+    const birthdayProvided =
+      [
+        "birthDay",
+        "birthMonth",
+        "birthYear",
+        "age"
+      ].some(
+        key =>
+          Object.prototype.hasOwnProperty.call(
+            body,
+            key
+          )
+      );
+
+    const name =
+      nameProvided
+        ? normalizeText(
+            body.name
+          )
+        : (
+            current.canonical_name
+            ||
+            current.display_name
+            ||
+            current.whatsapp_display_name
+            ||
+            ""
+          );
+
+    if (!name) {
+      throw dashboardContactError(
+        "Der Kontakt braucht einen Namen."
+      );
+    }
+
+    const phone =
+      phoneProvided
+        ? normalizeDashboardPhoneNumber(
+            body.phoneNumber
+          )
+        : current.phone_number;
+
+    if (phoneProvided && phone) {
+      const conflict =
+        await pool.query(
+          `
+            SELECT c.id
+
+            FROM contact_identifiers i
+
+            JOIN contacts c
+              ON c.id =
+                i.contact_id
+
+            WHERE i.identifier_type =
+              'phone'
+
+              AND i.normalized_value =
+                $1
+
+              AND c.id <>
+                $2
+
+            LIMIT 1
+          `,
+          [
+            normalizeIdentityValue(
+              phone
+            ),
+            contactId
+          ]
+        );
+
+      if (conflict.rows[0]) {
+        throw dashboardContactError(
+          "Diese Telefonnummer ist bereits einem anderen Kontakt zugeordnet.",
+          409
+        );
+      }
+    }
+
+    const city =
+      cityProvided
+        ? normalizeDashboardCityValue(
+            body.city
+          )
+        : current.city;
+
+    const country =
+      countryProvided
+        ? normalizeDashboardCountryValue(
+            body.country
+          )
+        : current.country;
+
+    const language =
+      languageProvided
+        ? normalizeDashboardLanguageValue(
+            body.language
+          )
+        : current.primary_language;
+
+    const birthday =
+      birthdayProvided
+        ? dashboardContactBirthInput(
+            body,
+            currentBirthday
+          )
+        : currentBirthday;
+
+    const manualFields = {
+      ...(isPlainObject(
+        current.manual_contact_fields
+      )
+        ? current.manual_contact_fields
+        : {}),
+      ...(nameProvided
+        ? {
+            canonical_name:
+              true,
+            display_name:
+              true
+          }
+        : {}),
+      ...(phoneProvided
+        ? {
+            phone_number:
+              true
+          }
+        : {}),
+      ...(cityProvided
+        ? {
+            city:
+              true
+          }
+        : {}),
+      ...(countryProvided
+        ? {
+            country:
+              true
+          }
+        : {}),
+      ...(languageProvided
+        ? {
+            primary_language:
+              true
+          }
+        : {}),
+      ...(birthdayProvided
+        ? {
+            birthday:
+              true
+          }
+        : {})
+    };
+
+    const result =
+      await pool.query(
+        `
+          UPDATE contacts
+
+          SET
+            canonical_name =
+              $2,
+
+            display_name =
+              $2,
+
+            phone_number =
+              $3,
+
+            city =
+              $4,
+
+            country =
+              $5,
+
+            primary_language =
+              $6,
+
+            birth_day =
+              $7,
+
+            birth_month =
+              $8,
+
+            birth_year =
+              $9,
+
+            birth_year_inferred =
+              $10,
+
+            manual_contact_fields =
+              $11::jsonb,
+
+            manual_contact_updated_at =
+              NOW(),
+
+            updated_at =
+              NOW()
+
+          WHERE id =
+            $1
+
+          RETURNING *
+        `,
+        [
+          contactId,
+          name,
+          phone,
+          city,
+          country,
+          language,
+          birthday.birthDay,
+          birthday.birthMonth,
+          birthday.birthYear,
+          birthday.birthYearInferred,
+          JSON.stringify(
+            manualFields
+          )
+        ]
+      );
+
+    const updated =
+      result.rows[0];
+
+    if (nameProvided) {
+      await addContactIdentifier({
+        contactId,
+        type:
+          "canonical_name",
+        value:
+          name,
+        isPrimary:
+          true
+      });
+    }
+
+    if (phoneProvided) {
+      await pool.query(
+        `
+          DELETE FROM contact_identifiers
+
+          WHERE contact_id =
+            $1
+
+            AND identifier_type =
+              'phone'
+        `,
+        [
+          contactId
+        ]
+      );
+
+      if (phone) {
+        await addContactIdentifier({
+          contactId,
+          type:
+            "phone",
+          value:
+            phone,
+          sourcePlatform:
+            "whatsapp",
+          isPrimary:
+            true
+        });
+      }
+    }
+
+    await applyDashboardContactHumanFacts({
+      contactId,
+      city:
+        cityProvided
+          ? city
+          : null,
+      country:
+        countryProvided
+          ? country
+          : null,
+      language:
+        languageProvided
+          ? language
+          : null,
+      birthday:
+        birthdayProvided
+          ? birthday
+          : null,
+      age:
+        birthdayProvided
+          ? birthday.age
+          : null
+    });
+
+    const displayBirthday =
+      resolveContactBirthdayData({
+        contact:
+          updated
+      });
+
+    return res.json({
+      ok:
+        true,
+      message:
+        "Kontaktdaten gespeichert.",
+      contact: {
+        id:
+          updated.id,
+        jid:
+          updated.whatsapp_jid,
+        name:
+          updated.canonical_name
+          ||
+          updated.display_name,
+        displayName:
+          updated.display_name,
+        whatsappDisplayName:
+          updated.whatsapp_display_name,
+        phoneNumber:
+          updated.phone_number,
+        city:
+          updated.city,
+        country:
+          updated.country,
+        language:
+          updated.primary_language,
+        birthDay:
+          displayBirthday.birthDay,
+        birthMonth:
+          displayBirthday.birthMonth,
+        birthYear:
+          displayBirthday.birthYear,
+        birthYearInferred:
+          displayBirthday.birthYearInferred,
+        age:
+          displayBirthday.age,
+        birthdayLabel:
+          dashboardBirthdayLabel(
+            displayBirthday
+          )
+      }
+    });
+
+  } catch (error) {
+
+    console.error(
+      "Dashboard Kontakt bearbeiten Fehler:",
+      error
+    );
+
+    return res
+      .status(
+        Number(
+          error?.statusCode
+        )
+        ||
+        500
+      )
+      .json({
+        ok:
+          false,
+        error:
+          error?.message
+          ||
+          "Kontaktdaten konnten nicht gespeichert werden."
+      });
+  }
 }
 );
 
@@ -13302,8 +16459,7 @@ async (req, res) => {
           {
             contextHint:
               "marcel_live_state",
-            value:
-              liveStateDisplaySource
+            value:               liveStateDisplaySource
           }
         ])
       )[0]
@@ -13482,8 +16638,7 @@ if (
     nextValue
   )
 ) {
-  throw new Error(
-    "Die Korrektur hat eine unerwartete Datenstruktur erzeugt und wurde deshalb nicht gespeichert."
+  throw new Error(     "Die Korrektur hat eine unerwartete Datenstruktur erzeugt und wurde deshalb nicht gespeichert."
   );
 }
 
@@ -13663,7 +16818,6 @@ async (req, res) => {
       await client.query(
         "BEGIN"
       );
-
       const lockedResult =
         await client.query(
           `
@@ -13842,8 +16996,7 @@ async (req, res) => {
             $3,
             $4::jsonb,
             $5::jsonb,
-            $6,
-            $7,
+            $6,             $7,
             $8,
             'marcel_dashboard'
           )
@@ -14201,8 +17354,7 @@ async (req, res) => {
           250
         ),
 
-        getHistoricalMemoryItems(
-          contact.id,
+        getHistoricalMemoryItems(           contact.id,
           250
         ),
 
@@ -14246,6 +17398,16 @@ async (req, res) => {
         ? cleanProfile.profile_summary
 
         : {};
+
+
+    const birthday =
+      resolveContactBirthdayData({
+        contact,
+        profile:
+          cleanProfile,
+        memoryItems:
+          activeItems
+      });
 
 
     const memoryStatus = {
@@ -14381,8 +17543,7 @@ async (req, res) => {
           originalValue:
             item.memory_value,
 
-          memoryType:
-            item.memory_type,
+          memoryType:             item.memory_type,
 
           confidence:
             item.confidence == null
@@ -14561,8 +17722,7 @@ async (req, res) => {
           }
         ])
       )[0]
-      ||
-      fixedDisplaySource;
+      ||       fixedDisplaySource;
 
 
     const translatedContactDisplay =
@@ -14739,9 +17899,15 @@ async (req, res) => {
           ??
           contact.city,
 
+        originalCity:
+          contact.city,
+
         country:
           translatedContactDisplay.country
           ??
+          contact.country,
+
+        originalCountry:
           contact.country,
 
         timezone:
@@ -14750,6 +17916,9 @@ async (req, res) => {
         language:
           translatedContactDisplay.language
           ??
+          contact.primary_language,
+
+        originalLanguage:
           contact.primary_language,
 
         sourcePlatform:
@@ -14824,7 +17993,29 @@ async (req, res) => {
         updatedAt:
           contact.updated_at,
 
+        birthDay:
+          birthday.birthDay,
+
+        birthMonth:
+          birthday.birthMonth,
+
+        birthYear:
+          birthday.birthYear,
+
+        suggestedBirthYear:
+          birthday.suggestedBirthYear,
+
+        birthYearInferred:
+          birthday.birthYearInferred,
+
+        birthdayLabel:
+          dashboardBirthdayLabel(
+            birthday
+          ),
+
         age:
+          birthday.age
+          ??
           profileSummary.age
           ??
           null,
@@ -14921,8 +18112,7 @@ async (req, res) => {
         true,
 
       serverTime:
-        result.rows[0]
-          .server_time
+        result.rows[0]           .server_time
 
     });
 
@@ -15101,8 +18291,7 @@ app.get(
 
 <meta
 name="viewport"
-content="width=device-width,initial-scale=1,viewport-fit=cover"
->
+content="width=device-width,initial-scale=1,viewport-fit=cover">
 
 <title>
 Marcel Memory Test V1.7.2
@@ -15281,8 +18470,7 @@ Testkontakte laden
 
 <div
 id="globalStatus"
-class="status"
-></div>
+class="status"></div>
 
 
 <select id="contactsSelect">
@@ -15461,8 +18649,7 @@ function setStatus(
 
 function escapeHtml(value){
 
-  return String(
-    value ?? ""
+  return String(     value ?? ""
   )
     .replaceAll(
       "&",
@@ -15641,7 +18828,7 @@ function renderSnapshot(
   data,
   extra = {}
 ){
-  renderChat(
+   renderChat(
     data?.history || []
   );
 
@@ -15820,7 +19007,7 @@ async function loadContacts(
             keepJid
         );
 
-      if(
+       if(
         exists
       ){
 
@@ -15999,7 +19186,7 @@ async function createNewTestContact(){
       error
     );
 
-    setStatus(
+     setStatus(
       createStatus,
       error.message,
       "error"
@@ -16178,7 +19365,7 @@ async function sendTestMessage(){
       await apiRequest(
         "/persona-test/message",
         {
-          method:
+           method:
             "POST",
 
           headers:{
@@ -16358,7 +19545,6 @@ async (req, res) => {
 
           error:
             "Falsches Passwort."
-
         });
 
     }
@@ -16537,8 +19723,7 @@ async (req, res) => {
 
     }
 
- 
-    const jid =
+     const jid =
       normalizeText(
         req.body.jid
       );
@@ -16717,8 +19902,7 @@ async (req, res) => {
         jid,
         "incoming",
         text,
-        `test-in-${Date.now()}`,
-        {
+        `test-in-${Date.now()}`,         {
 
           processingStatus:
             "duplicate",
@@ -16897,8 +20081,7 @@ async (req, res) => {
 );
 
 
-/* ==================================================
- WHATSAPP INCOMING HANDLER
+/* ==================================================  WHATSAPP INCOMING HANDLER
 ================================================== */
 
 async function handleIncomingTextMessage(
@@ -17077,7 +20260,7 @@ scheduleMemoryUpdate({
 
   incomingMessageDbId:
     incoming.id,
-  outgoingText:
+   outgoingText:
     reply,
 
   outgoingMessageDbId:
@@ -17256,8 +20439,7 @@ sock.ev.on(
 
     for (
       const message
-      of event.messages
-    ) {
+      of event.messages     ) {
 
       try {
 
@@ -17437,7 +20619,6 @@ sock.ev.on(
 /* ==================================================
  SERVER START
 ================================================== */
-
 app.listen(
 port,
 async () => {
@@ -17469,4 +20650,3 @@ async () => {
 
 }
 );
- 

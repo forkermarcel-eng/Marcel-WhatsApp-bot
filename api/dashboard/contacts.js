@@ -2,674 +2,743 @@ import crypto from "crypto";
 
 
 /* ==================================================
-   COOKIE
+  COOKIE
 ================================================== */
 
 function getCookie(
-  req,
-  name
+ req,
+ name
 ) {
 
-  const cookieHeader =
-    req.headers.cookie
-    ||
-    "";
+ const cookieHeader =
+   req.headers.cookie
+   ||
+   "";
 
 
-  const cookies =
-    cookieHeader
-      .split(";")
-      .map(
-        cookie =>
-          cookie.trim()
-      );
+ const cookies =
+   cookieHeader
+     .split(";")
+     .map(
+       cookie =>
+         cookie.trim()
+     );
 
 
-  for (
-    const cookie
-    of cookies
-  ) {
+ for (
+   const cookie
+   of cookies
+ ) {
 
-    const separatorIndex =
-      cookie.indexOf("=");
-
-
-    if (
-      separatorIndex
-      ===
-      -1
-    ) {
-
-      continue;
-
-    }
+   const separatorIndex =
+     cookie.indexOf("=");
 
 
-    const key =
-      cookie.slice(
-        0,
-        separatorIndex
-      );
+   if (
+     separatorIndex
+     ===
+     -1
+   ) {
+
+     continue;
+
+   }
 
 
-    const value =
-      cookie.slice(
-        separatorIndex + 1
-      );
+   const key =
+     cookie.slice(
+       0,
+       separatorIndex
+     );
 
 
-    if (
-      key === name
-    ) {
-
-      return value;
-
-    }
-
-  }
+   const value =
+     cookie.slice(
+       separatorIndex + 1
+     );
 
 
-  return null;
+   if (
+     key === name
+   ) {
+
+     return value;
+
+   }
+
+ }
+
+
+ return null;
 
 }
 
 
 /* ==================================================
-   DASHBOARD SESSION
+  DASHBOARD SESSION
 ================================================== */
 
 function validDashboardSession(
-  req
+ req
 ) {
 
-  const password =
-    process.env
-      .DASHBOARD_PASSWORD;
+ const password =
+   process.env
+     .DASHBOARD_PASSWORD;
 
 
-  if (
-    !password
-  ) {
+ if (
+   !password
+ ) {
 
-    return false;
+   return false;
 
-  }
-
-
-  const session =
-    getCookie(
-      req,
-      "marcel_dashboard_session"
-    );
+ }
 
 
-  if (
-    !session
-  ) {
-
-    return false;
-
-  }
+ const session =
+   getCookie(
+     req,
+     "marcel_dashboard_session"
+   );
 
 
-  const parts =
-    session.split(".");
+ if (
+   !session
+ ) {
+
+   return false;
+
+ }
 
 
-  if (
-    parts.length !== 2
-  ) {
-
-    return false;
-
-  }
+ const parts =
+   session.split(".");
 
 
-  const [
-    token,
-    receivedSignature
-  ] =
-    parts;
+ if (
+   parts.length !== 2
+ ) {
+
+   return false;
+
+ }
 
 
-  if (
-    !token
-    ||
-    !receivedSignature
-  ) {
-
-    return false;
-
-  }
+ const [
+   token,
+   receivedSignature
+ ] =
+   parts;
 
 
-  const expectedSignature =
-    crypto
-      .createHmac(
-        "sha256",
-        password
-      )
-      .update(
-        token
-      )
-      .digest(
-        "hex"
-      );
+ if (
+   !token
+   ||
+   !receivedSignature
+ ) {
+
+   return false;
+
+ }
 
 
-  const expectedBuffer =
-    Buffer.from(
-      expectedSignature,
-      "utf8"
-    );
+ const expectedSignature =
+   crypto
+     .createHmac(
+       "sha256",
+       password
+     )
+     .update(
+       token
+     )
+     .digest(
+       "hex"
+     );
 
 
-  const receivedBuffer =
-    Buffer.from(
-      receivedSignature,
-      "utf8"
-    );
+ const expectedBuffer =
+   Buffer.from(
+     expectedSignature,
+     "utf8"
+   );
 
 
-  if (
-    expectedBuffer.length
-    !==
-    receivedBuffer.length
-  ) {
-
-    return false;
-
-  }
+ const receivedBuffer =
+   Buffer.from(
+     receivedSignature,
+     "utf8"
+   );
 
 
-  return crypto.timingSafeEqual(
-    expectedBuffer,
-    receivedBuffer
-  );
+ if (
+   expectedBuffer.length
+   !==
+   receivedBuffer.length
+ ) {
+
+   return false;
+
+ }
+
+
+ return crypto.timingSafeEqual(
+   expectedBuffer,
+   receivedBuffer
+ );
 
 }
 
 
 /* ==================================================
-   NORMALIZE CONTACT ID
+  NORMALIZE CONTACT ID
 ================================================== */
 
 function normalizeContactId(
-  value
+ value
 ) {
 
-  if (
-    Array.isArray(
-      value
-    )
-  ) {
+ if (
+   Array.isArray(
+     value
+   )
+ ) {
 
-    value =
-      value[0];
+   value =
+     value[0];
 
-  }
-
-
-  if (
-    value === undefined
-    ||
-    value === null
-    ||
-    value === ""
-  ) {
-
-    return null;
-
-  }
+ }
 
 
-  const contactId =
-    Number(
-      value
-    );
+ if (
+   value === undefined
+   ||
+   value === null
+   ||
+   value === ""
+ ) {
+
+   return null;
+
+ }
 
 
-  if (
-    !Number.isInteger(
-      contactId
-    )
-    ||
-    contactId <= 0
-  ) {
-
-    return false;
-
-  }
+ const contactId =
+   Number(
+     value
+   );
 
 
-  return contactId;
+ if (
+   !Number.isInteger(
+     contactId
+   )
+   ||
+   contactId <= 0
+ ) {
+
+   return false;
+
+ }
+
+
+ return contactId;
 
 }
 
 
 /* ==================================================
-   HANDLER
+  HANDLER
 ================================================== */
 
 export default async function handler(
-  req,
-  res
+ req,
+ res
 ) {
 
-  /* ==================================================
-     METHOD
-  ================================================== */
+ /* ==================================================
+    METHOD
+ ================================================== */
 
-  if (
-    req.method !== "GET"
-  ) {
+ if (
+   ![
+     "GET",
+     "POST",
+     "PATCH"
+   ].includes(
+     req.method
+   )
+ ) {
 
-    res.setHeader(
-      "Allow",
-      "GET"
-    );
+   res.setHeader(
+     "Allow",
+     "GET, POST, PATCH"
+   );
 
 
-    return res
-      .status(405)
-      .json({
+   return res
+     .status(405)
+     .json({
 
-        ok:
-          false,
+       ok:
+         false,
 
-        error:
-          "Methode nicht erlaubt."
+       error:
+         "Methode nicht erlaubt."
 
-      });
+     });
 
-  }
+ }
 
 
-  /* ==================================================
-     LOGIN SESSION
-  ================================================== */
+ /* ==================================================
+    LOGIN SESSION
+ ================================================== */
 
-  if (
-    !validDashboardSession(
-      req
-    )
-  ) {
+ if (
+   !validDashboardSession(
+     req
+   )
+ ) {
 
-    return res
-      .status(401)
-      .json({
+   return res
+     .status(401)
+     .json({
 
-        ok:
-          false,
+       ok:
+         false,
 
-        error:
-          "Nicht angemeldet."
+       error:
+         "Nicht angemeldet."
 
-      });
+     });
 
-  }
+ }
 
 
-  /* ==================================================
-     ENVIRONMENT
-  ================================================== */
+ /* ==================================================
+    ENVIRONMENT
+ ================================================== */
 
-  const railwayBackendUrl =
-    String(
-      process.env
-        .RAILWAY_BACKEND_URL
-      ||
-      ""
-    )
-      .trim()
-      .replace(
-        /\/+$/,
-        ""
-      );
+ const railwayBackendUrl =
+   String(
+     process.env
+       .RAILWAY_BACKEND_URL
+     ||
+     ""
+   )
+     .trim()
+     .replace(
+       /\/+$/,
+       ""
+     );
 
 
-  const dashboardApiSecret =
-    String(
-      process.env
-        .DASHBOARD_API_SECRET
-      ||
-      ""
-    )
-      .trim();
+ const dashboardApiSecret =
+   String(
+     process.env
+       .DASHBOARD_API_SECRET
+     ||
+     ""
+   )
+     .trim();
 
 
-  if (
-    !railwayBackendUrl
-    ||
-    !dashboardApiSecret
-  ) {
+ if (
+   !railwayBackendUrl
+   ||
+   !dashboardApiSecret
+ ) {
 
-    console.error(
-      "Dashboard API Konfiguration fehlt.",
-      {
+   console.error(
+     "Dashboard API Konfiguration fehlt.",
+     {
 
-        hasRailwayBackendUrl:
-          Boolean(
-            railwayBackendUrl
-          ),
+       hasRailwayBackendUrl:
+         Boolean(
+           railwayBackendUrl
+         ),
 
-        hasDashboardApiSecret:
-          Boolean(
-            dashboardApiSecret
-          )
+       hasDashboardApiSecret:
+         Boolean(
+           dashboardApiSecret
+         )
 
-      }
-    );
+     }
+   );
 
 
-    return res
-      .status(500)
-      .json({
+   return res
+     .status(500)
+     .json({
 
-        ok:
-          false,
+       ok:
+         false,
 
-        error:
-          "Dashboard-Verbindung ist nicht konfiguriert."
+       error:
+         "Dashboard-Verbindung ist nicht konfiguriert."
 
-      });
+     });
 
-  }
+ }
 
 
-  /* ==================================================
-     OPTIONAL CONTACT ID
+ /* ==================================================
+    OPTIONAL CONTACT ID
 
-     Ohne ID:
-     /api/dashboard/contacts
+    GET ohne ID:
+    /api/dashboard/contacts
 
-     Mit ID:
-     /api/dashboard/contacts?id=91
-  ================================================== */
+    GET/PATCH mit ID:
+    /api/dashboard/contacts?id=91
 
-  const contactId =
-    normalizeContactId(
-      req.query?.id
-    );
+    POST ohne ID:
+    neuen Kontakt anlegen
+ ================================================== */
 
+ const contactId =
+   normalizeContactId(
+     req.query?.id
+   );
 
-  if (
-    contactId === false
-  ) {
 
-    return res
-      .status(400)
-      .json({
+ if (
+   contactId === false
+ ) {
 
-        ok:
-          false,
+   return res
+     .status(400)
+     .json({
 
-        error:
-          "Ungültige Kontakt-ID."
+       ok:
+         false,
 
-      });
+       error:
+         "Ungültige Kontakt-ID."
 
-  }
+     });
 
+ }
 
-  /* ==================================================
-     RAILWAY TARGET
-  ================================================== */
 
-  const railwayPath =
-    contactId
+ if (
+   req.method === "POST"
+   &&
+   contactId
+ ) {
 
-      ? (
-          "/dashboard-api/contacts/"
-          +
-          encodeURIComponent(
-            String(
-              contactId
-            )
-          )
-        )
+   return res
+     .status(400)
+     .json({
 
-      : "/dashboard-api/contacts";
+       ok:
+         false,
 
+       error:
+         "Zum Anlegen darf keine Kontakt-ID gesetzt sein."
 
-  const railwayUrl =
-    railwayBackendUrl
-    +
-    railwayPath;
+     });
 
+ }
 
-  /* ==================================================
-     RAILWAY REQUEST
-  ================================================== */
 
-  try {
+ if (
+   req.method === "PATCH"
+   &&
+   !contactId
+ ) {
 
-    const railwayResponse =
-      await fetch(
-        railwayUrl,
-        {
+   return res
+     .status(400)
+     .json({
 
-          method:
-            "GET",
+       ok:
+         false,
 
-          headers: {
+       error:
+         "Zum Bearbeiten fehlt die Kontakt-ID."
 
-            Authorization:
-              `Bearer ${dashboardApiSecret}`,
+     });
 
-            Accept:
-              "application/json"
+ }
 
-          },
 
-          cache:
-            "no-store"
+ /* ==================================================
+    RAILWAY TARGET
+ ================================================== */
 
-        }
-      );
+ const railwayPath =
+   contactId
 
+     ? (
+         "/dashboard-api/contacts/"
+         +
+         encodeURIComponent(
+           String(
+             contactId
+           )
+         )
+       )
 
-    const rawText =
-      await railwayResponse.text();
+     : "/dashboard-api/contacts";
 
 
-    let data;
+ const railwayUrl =
+   railwayBackendUrl
+   +
+   railwayPath;
 
 
-    try {
+ /* ==================================================
+    RAILWAY REQUEST
+ ================================================== */
 
-      data =
-        rawText
+ try {
 
-          ? JSON.parse(
-              rawText
-            )
+   const hasBody =
+     req.method === "POST"
+     ||
+     req.method === "PATCH";
 
-          : {};
 
-    } catch {
+   const railwayResponse =
+     await fetch(
+       railwayUrl,
+       {
 
-      console.error(
-        "Railway lieferte keine gültige JSON-Antwort.",
-        {
-          status:
-            railwayResponse.status,
+         method:
+           req.method,
 
-          path:
-            railwayPath
-        }
-      );
+         headers: {
 
+           Authorization:
+             `Bearer ${dashboardApiSecret}`,
 
-      return res
-        .status(502)
-        .json({
+           Accept:
+             "application/json",
 
-          ok:
-            false,
+           ...(hasBody
+             ? {
+                 "Content-Type":
+                   "application/json"
+               }
+             : {})
 
-          error:
-            "Ungültige Antwort vom Backend."
+         },
 
-        });
+         ...(hasBody
+           ? {
+               body:
+                 JSON.stringify(
+                   req.body
+                   &&
+                   typeof req.body === "object"
 
-    }
+                     ? req.body
 
+                     : {}
+                 )
+             }
+           : {}),
 
-    /* ==================================================
-       RAILWAY ERRORS
-    ================================================== */
+         cache:
+           "no-store"
 
-    if (
-      !railwayResponse.ok
-    ) {
+       }
+     );
 
-      console.error(
-        "Railway Dashboard API Fehler:",
-        {
-          status:
-            railwayResponse.status,
 
-          path:
-            railwayPath,
+   const rawText =
+     await railwayResponse.text();
 
-          error:
-            data?.error
-            ||
-            "Unbekannter Fehler"
-        }
-      );
 
+   let data;
 
-      if (
-        railwayResponse.status
-        ===
-        400
-      ) {
 
-        return res
-          .status(400)
-          .json({
+   try {
 
-            ok:
-              false,
+     data =
+       rawText
 
-            error:
-              data?.error
-              ||
-              "Ungültige Anfrage."
+         ? JSON.parse(
+             rawText
+           )
 
-          });
+         : {};
 
-      }
+   } catch {
 
+     console.error(
+       "Railway lieferte keine gültige JSON-Antwort.",
+       {
+         status:
+           railwayResponse.status,
 
-      if (
-        railwayResponse.status
-        ===
-        404
-      ) {
+         path:
+           railwayPath,
 
-        return res
-          .status(404)
-          .json({
+         method:
+           req.method
+       }
+     );
 
-            ok:
-              false,
 
-            error:
-              data?.error
-              ||
-              "Kontakt nicht gefunden."
+     return res
+       .status(502)
+       .json({
 
-          });
+         ok:
+           false,
 
-      }
+         error:
+           "Ungültige Antwort vom Backend."
 
+       });
 
-      if (
-        railwayResponse.status
-        ===
-        401
-      ) {
+   }
 
-        return res
-          .status(502)
-          .json({
 
-            ok:
-              false,
+   /* ==================================================
+      RAILWAY ERRORS
+   ================================================== */
 
-            error:
-              "Dashboard-Backend konnte nicht autorisiert werden."
+   if (
+     !railwayResponse.ok
+   ) {
 
-          });
+     console.error(
+       "Railway Dashboard API Fehler:",
+       {
+         status:
+           railwayResponse.status,
 
-      }
+         path:
+           railwayPath,
 
+         method:
+           req.method,
 
-      return res
-        .status(502)
-        .json({
+         error:
+           data?.error
+           ||
+           "Unbekannter Fehler"
+       }
+     );
 
-          ok:
-            false,
 
-          error:
-            contactId
+     if (
+       railwayResponse.status
+       ===
+       401
+     ) {
 
-              ? "Backend konnte den Kontakt nicht liefern."
+       return res
+         .status(502)
+         .json({
 
-              : "Backend konnte die Kontakte nicht liefern."
+           ok:
+             false,
 
-        });
+           error:
+             "Dashboard-Backend konnte nicht autorisiert werden."
 
-    }
+         });
 
+     }
 
-    /* ==================================================
-       RESPONSE HEADERS
-    ================================================== */
 
-    res.setHeader(
-      "Cache-Control",
-      "no-store, max-age=0"
-    );
+     const passthroughStatus =
+       [
+         400,
+         404,
+         409
+       ].includes(
+         railwayResponse.status
+       )
 
+         ? railwayResponse.status
 
-    /* ==================================================
-       SUCCESS
-    ================================================== */
+         : 502;
 
-    return res
-      .status(200)
-      .json(
-        data
-      );
 
+     return res
+       .status(
+         passthroughStatus
+       )
+       .json({
 
-  } catch (
-    error
-  ) {
+         ok:
+           false,
 
-    console.error(
-      "Verbindung zu Railway fehlgeschlagen:",
-      error
-    );
+         error:
+           data?.error
+           ||
+           (
+             req.method === "PATCH"
 
+               ? "Kontakt konnte nicht gespeichert werden."
 
-    return res
-      .status(502)
-      .json({
+               : req.method === "POST"
 
-        ok:
-          false,
+                 ? "Kontakt konnte nicht angelegt werden."
 
-        error:
-          "Backend ist momentan nicht erreichbar."
+                 : contactId
 
-      });
+                   ? "Backend konnte den Kontakt nicht liefern."
 
-  }
+                   : "Backend konnte die Kontakte nicht liefern."
+           )
+
+       });
+
+   }
+
+
+   /* ==================================================
+      RESPONSE HEADERS
+   ================================================== */
+
+   res.setHeader(
+     "Cache-Control",
+     "no-store, max-age=0"
+   );
+
+
+   /* ==================================================
+      SUCCESS
+   ================================================== */
+
+   return res
+     .status(
+       railwayResponse.status
+     )
+     .json(
+       data
+     );
+
+
+ } catch (
+   error
+ ) {
+
+   console.error(
+     "Verbindung zu Railway fehlgeschlagen:",
+     error
+   );
+
+
+   return res
+     .status(502)
+     .json({
+
+       ok:
+         false,
+
+       error:
+         "Backend ist momentan nicht erreichbar."
+
+     });
+
+ }
 
 }

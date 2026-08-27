@@ -16710,13 +16710,62 @@ const facts = rawFacts.map((item, index) => {
     throw dashboardContactError(`Fakt ${index + 1} ist ungültig.`);
   }
 
-  const category = normalizeText(item.category);
-  const key = normalizeText(item.key);
+  const rawCategory = normalizeText(item.category);
+  const normalizedCategory = normalizeIdentityValue(rawCategory)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 
-  if (!PROFILE_COLUMNS.includes(category) || !key) {
-    throw dashboardContactError(`Fakt ${index + 1} hat eine ungültige Kategorie oder einen ungültigen Schlüssel.`);
+  const categoryAliases = {
+    relationships: "relationship",
+    relationship_status: "relationship",
+    dating: "relationship",
+    dating_intention: "relationship",
+    dating_intentions: "relationship",
+    family_children: "family",
+    work: "work_education",
+    education: "work_education",
+    job: "work_education",
+    work_and_education: "work_education",
+    religion: "religion_values",
+    values: "religion_values",
+    sexuality: "sexuality_intimacy",
+    intimacy: "sexuality_intimacy",
+    lifestyle: "lifestyle_routines",
+    routines: "lifestyle_routines",
+    goals: "goals_dreams",
+    dreams: "goals_dreams",
+    travel: "travel_future_location",
+    future_location: "travel_future_location",
+    boundaries: "personal_boundaries",
+    stress_support: "stress_support_style",
+    social: "social_circle",
+    social_network: "social_circle",
+    socialmedia: "social_media",
+    meaningful_detail: "meaningful_details",
+    history: "shared_history",
+    context: "current_context"
+  };
+
+  const category = PROFILE_COLUMNS.includes(normalizedCategory)
+    ? normalizedCategory
+    : (categoryAliases[normalizedCategory] || normalizedCategory);
+
+  const rawKey = normalizeText(item.key);
+  const key = normalizeIdentityValue(rawKey)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!PROFILE_COLUMNS.includes(category)) {
+    throw dashboardContactError(
+      `Fakt ${index + 1}: Kategorie „${rawCategory || "(leer)"}“ ist ungültig. Erlaubt sind: ${PROFILE_COLUMNS.join(", ")}.`
+    );
   }
 
+  if (!key) {
+    throw dashboardContactError(
+      `Fakt ${index + 1}: Schlüssel „${rawKey || "(leer)"}“ ist ungültig.`
+    );
+  }
   const rawValue = item.value;
   const value = isPlainObject(rawValue)
     ? rawValue

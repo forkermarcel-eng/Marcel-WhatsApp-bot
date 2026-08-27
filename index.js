@@ -11686,6 +11686,956 @@ return true;
 
 
 /* ==================================================
+ DASHBOARD INHALTS-UEBERSETZUNG DEUTSCH
+ - nur Praesentationsschicht
+ - Bot-/Memory-Originale bleiben unveraendert
+ - persistenter Cache nach Inhalt + Kontext
+================================================== */
+
+let dashboardContentTranslationTableReady = false;
+
+async function ensureDashboardContentTranslationTable() {
+
+if (dashboardContentTranslationTableReady) {
+  return;
+}
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS dashboard_content_translations (
+    cache_key TEXT PRIMARY KEY,
+    source_text TEXT NOT NULL,
+    context_hint TEXT,
+    translation_de TEXT NOT NULL,
+    translation_model TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )
+`);
+
+dashboardContentTranslationTableReady = true;
+}
+
+function dashboardContentTranslationKey(
+text,
+contextHint = "dashboard"
+) {
+
+return crypto
+  .createHash("sha256")
+  .update(
+    `${normalizeText(contextHint)}\n${normalizeText(text)}`,
+    "utf8"
+  )
+  .digest("hex");
+}
+
+function dashboardTextNeedsTranslation(
+value
+) {
+
+const text =
+  normalizeText(value);
+
+if (
+  !text
+  ||
+  !/[\p{L}]/u.test(text)
+) {
+  return false;
+}
+
+if (
+  /^(https?:\/\/|www\.)/i.test(text)
+  ||
+  /^@\S+$/.test(text)
+  ||
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)
+) {
+  return false;
+}
+
+return true;
+}
+
+function collectDashboardTranslationLeaves(
+value,
+contextHint,
+target
+) {
+
+if (typeof value === "string") {
+
+  if (
+    !dashboardTextNeedsTranslation(value)
+  ) {
+    return;
+  }
+
+  const sourceText =
+    normalizeText(value);
+
+  const cacheKey =
+    dashboardContentTranslationKey(
+      sourceText,
+      contextHint
+    );
+
+  if (!target.has(cacheKey)) {
+    target.set(
+      cacheKey,
+      {
+        cacheKey,
+        sourceText,
+        contextHint
+      }
+    );
+  }
+
+  return;
+}
+
+if (Array.isArray(value)) {
+
+  for (const item of value) {
+    collectDashboardTranslationLeaves(
+      item,
+      `${contextHint}[]`,
+      target
+    );
+  }
+
+  return;
+}
+
+if (
+  value
+  &&
+  typeof value === "object"
+) {
+
+  for (
+    const [key, item]
+    of Object.entries(value)
+  ) {
+
+    collectDashboardTranslationLeaves(
+      item,
+      `${contextHint}.${key}`,
+      target
+    );
+  }
+}
+}
+
+function applyDashboardTranslationLeaves(
+value,
+contextHint,
+translations
+) {
+
+if (typeof value === "string") {
+
+  if (
+    !dashboardTextNeedsTranslation(value)
+  ) {
+    return value;
+  }
+
+  const sourceText =
+    normalizeText(value);
+
+  const cacheKey =
+    dashboardContentTranslationKey(
+      sourceText,
+      contextHint
+    );
+
+  return (
+    translations.get(cacheKey)
+    ||
+    value
+  );
+}
+
+if (Array.isArray(value)) {
+
+  return value.map(
+    item =>
+      applyDashboardTranslationLeaves(
+        item,
+        `${contextHint}[]`,
+        translations
+      )
+  );
+}
+
+if (
+  value
+  &&
+  typeof value === "object"
+) {
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(
+        ([key, item]) => [
+          key,
+          applyDashboardTranslationLeaves(
+            item,
+            `${contextHint}.${key}`,
+            translations
+          )
+        ]
+      )
+  );
+}
+
+return value;
+}
+
+function dashboardTranslationBatches(
+entries,
+maxItems = 35,
+maxCharacters = 12000
+) {
+
+const batches = [];
+let current = [];
+let characters = 0;
+
+for (const entry of entries) {
+
+  const size =
+    entry.sourceText.length
+    +
+    entry.contextHint.length;
+
+  if (
+    current.length
+    &&
+    (
+      current.length >= maxItems
+      ||
+      characters + size > maxCharacters
+    )
+  ) {
+
+    batches.push(current);
+    current = [];
+    characters = 0;
+  }
+
+  current.push(entry);
+  characters += size;
+}
+
+if (current.length) {
+  batches.push(current);
+}
+
+return batches;
+}
+
+async function saveDashboardTranslationCacheRows(
+rows
+) {
+
+if (!rows.length) {
+  return;
+}
+
+const values = [];
+const placeholders = [];
+
+rows.forEach(
+  (row, index) => {
+
+    const base =
+      index * 5;
+
+    placeholders.push(
+      `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5})`
+    );
+
+    values.push(
+      row.cacheKey,
+      row.sourceText,
+      row.contextHint,
+      row.translationDe,
+      MODEL
+    );
+  }
+);
+
+await pool.query(
+  `
+    INSERT INTO dashboard_content_translations (
+      cache_key,
+      source_text,
+      context_hint,
+      translation_de,
+      translation_model
+    )
+    VALUES ${placeholders.join(",")}
+    ON CONFLICT (cache_key)
+    DO UPDATE SET
+      source_text = EXCLUDED.source_text,
+      context_hint = EXCLUDED.context_hint,
+      translation_de = EXCLUDED.translation_de,
+      translation_model = EXCLUDED.translation_model,
+      updated_at = NOW()
+  `,
+  values
+);
+}
+
+async function translateDashboardValueListToGerman(
+entries = []
+) {
+
+const originals =
+  entries.map(
+    entry => entry?.value
+  );
+
+if (!entries.length) {
+  return originals;
+}
+
+try {
+
+  await ensureDashboardContentTranslationTable();
+
+  const leaves =
+    new Map();
+
+  entries.forEach(
+    (entry, index) => {
+
+      collectDashboardTranslationLeaves(
+        entry?.value,
+        normalizeText(
+          entry?.contextHint
+        )
+        ||
+        `dashboard.${index}`,
+        leaves
+      );
+    }
+  );
+
+  const uniqueEntries =
+    [...leaves.values()];
+
+  if (!uniqueEntries.length) {
+    return originals;
+  }
+
+  const translations =
+    new Map();
+
+  const cacheKeys =
+    uniqueEntries.map(
+      entry => entry.cacheKey
+    );
+
+  const cachedResult =
+    await pool.query(
+      `
+        SELECT
+          cache_key,
+          translation_de
+        FROM dashboard_content_translations
+        WHERE cache_key = ANY($1::text[])
+      `,
+      [cacheKeys]
+    );
+
+  for (
+    const row
+    of cachedResult.rows
+  ) {
+
+    if (
+      normalizeText(
+        row.translation_de
+      )
+    ) {
+
+      translations.set(
+        row.cache_key,
+        row.translation_de
+      );
+    }
+  }
+
+  const missing =
+    uniqueEntries.filter(
+      entry =>
+        !translations.has(
+          entry.cacheKey
+        )
+    );
+
+  const batches =
+    dashboardTranslationBatches(
+      missing
+    );
+
+  for (const batch of batches) {
+
+    try {
+
+      const numbered =
+        batch.map(
+          (entry, index) => ({
+            id:
+              index + 1,
+            context:
+              entry.contextHint,
+            text:
+              entry.sourceText
+          })
+        );
+
+      const response =
+        await openai.responses.create({
+          model:
+            MODEL,
+          instructions: `
+Du bist die reine Deutsch-Praesentationsschicht fuer Marcels privates WhatsApp-Dashboard.
+Die gelieferten Texte stammen aus internem Bot-Memory, Profilen, Events oder Live-State.
+Uebersetze jeden gelieferten TEXT natuerlich und vollstaendig ins Deutsche.
+Die internen Bot-Daten bleiben Englisch; du erzeugst ausschliesslich die deutsche Anzeige.
+
+REGELN:
+- Englisch, Spanisch und gemischte Texte ins Deutsche uebersetzen.
+- Bereits korrektes Deutsch unveraendert lassen.
+- Keine Fakten erfinden, ergaenzen, bewerten oder abschwaechen.
+- Ganze Aussagen sinngemaess uebersetzen, niemals einzelne Woerter zu Mischsaetzen zusammenbauen.
+- Namen, WhatsApp-Namen, Handles, Emojis, URLs, Telefonnummern und erkennbare Eigennamen erhalten.
+- Orts- und Laendernamen in der im Deutschen ueblichen Form anzeigen, wenn es eine etablierte deutsche Form gibt, z.B. Munich -> Muenchen, Germany -> Deutschland, Colombia -> Kolumbien. Medellin/Medellín bleibt Medellín.
+- Sprachbezeichnungen deutsch anzeigen, z.B. Spanish -> Spanisch, English -> Englisch.
+- Status- und Zeitangaben natuerlich deutsch anzeigen, z.B. planned -> geplant, approximately 6 to 8 weeks -> ungefaehr 6 bis 8 Wochen.
+- Sexuelle, romantische oder derbe Inhalte in ihrer Bedeutung erhalten; weder entschaerfen noch verschaerfen.
+- CONTEXT dient nur zum Verstehen. CONTEXT selbst nicht uebersetzen oder ausgeben.
+
+Antworte ausschliesslich mit gueltigem JSON:
+{"translations":[{"id":1,"de":"Deutsche Anzeige"}]}
+Fuer jede gelieferte ID genau einen Eintrag liefern.
+`,
+          input:
+            JSON.stringify({
+              items:
+                numbered
+            })
+        });
+
+      const parsed =
+        safeJsonParse(
+          response.output_text,
+          {
+            translations:
+              []
+          }
+        );
+
+      const returned =
+        Array.isArray(
+          parsed?.translations
+        )
+        ? parsed.translations
+        : [];
+
+      const byId =
+        new Map(
+          returned
+            .map(
+              item => [
+                Number(
+                  item?.id
+                ),
+                normalizeText(
+                  item?.de
+                )
+              ]
+            )
+            .filter(
+              ([id, german]) =>
+                Number.isInteger(id)
+                &&
+                id > 0
+                &&
+                Boolean(german)
+            )
+        );
+
+      const rowsToCache = [];
+
+      batch.forEach(
+        (entry, index) => {
+
+          const german =
+            byId.get(
+              index + 1
+            );
+
+          if (!german) {
+            return;
+          }
+
+          translations.set(
+            entry.cacheKey,
+            german
+          );
+
+          rowsToCache.push({
+            cacheKey:
+              entry.cacheKey,
+            sourceText:
+              entry.sourceText,
+            contextHint:
+              entry.contextHint,
+            translationDe:
+              german
+          });
+        }
+      );
+
+      await saveDashboardTranslationCacheRows(
+        rowsToCache
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Dashboard-Inhaltsübersetzung Batch-Fehler:",
+        error
+      );
+    }
+  }
+
+  return entries.map(
+    (entry, index) =>
+      applyDashboardTranslationLeaves(
+        entry?.value,
+        normalizeText(
+          entry?.contextHint
+        )
+        ||
+        `dashboard.${index}`,
+        translations
+      )
+  );
+
+} catch (error) {
+
+  console.error(
+    "Dashboard-Inhaltsübersetzung Fehler:",
+    error
+  );
+
+  return originals;
+}
+}
+
+/* ==================================================
+ DASHBOARD STRUKTUR-PRAESENTATION DEUTSCH
+ - fuer Memory-/Event-JSON
+ - uebersetzt auch semantische Objekt-Schluessel
+ - Originalwerte bleiben nur im Bot-/Memory-System
+================================================== */
+
+function dashboardStructuredValueNeedsTranslation(
+value
+) {
+
+if (value == null) {
+  return false;
+}
+
+if (typeof value === "string") {
+  return dashboardTextNeedsTranslation(value);
+}
+
+if (
+  typeof value === "number"
+  ||
+  typeof value === "boolean"
+) {
+  return false;
+}
+
+if (Array.isArray(value)) {
+  return value.length > 0;
+}
+
+if (typeof value === "object") {
+  return Object.keys(value).length > 0;
+}
+
+return false;
+}
+
+function dashboardJsonTypeMatches(
+sourceValue,
+translatedValue
+) {
+
+if (sourceValue === null) {
+  return translatedValue === null;
+}
+
+if (Array.isArray(sourceValue)) {
+  return Array.isArray(translatedValue);
+}
+
+if (typeof sourceValue === "object") {
+  return (
+    translatedValue
+    &&
+    typeof translatedValue === "object"
+    &&
+    !Array.isArray(translatedValue)
+  );
+}
+
+return (
+  typeof sourceValue
+  ===
+  typeof translatedValue
+);
+}
+
+function dashboardStructuredSourceText(
+value
+) {
+
+try {
+  return JSON.stringify(value);
+} catch {
+  return renderJson(value);
+}
+}
+
+async function translateDashboardStructuredValueListToGerman(
+entries = []
+) {
+
+const originals =
+  entries.map(
+    entry => entry?.value
+  );
+
+if (!entries.length) {
+  return originals;
+}
+
+try {
+
+  await ensureDashboardContentTranslationTable();
+
+  const prepared =
+    entries.map(
+      (entry, index) => {
+
+        const contextHint =
+          `structured|${normalizeText(entry?.contextHint) || `dashboard.${index}`}`;
+
+        const value =
+          entry?.value;
+
+        const sourceText =
+          dashboardStructuredSourceText(
+            value
+          );
+
+        return {
+          value,
+          contextHint,
+          sourceText,
+          cacheKey:
+            dashboardContentTranslationKey(
+              sourceText,
+              contextHint
+            ),
+          needsTranslation:
+            dashboardStructuredValueNeedsTranslation(
+              value
+            )
+        };
+      }
+    );
+
+  const translatable =
+    prepared.filter(
+      entry =>
+        entry.needsTranslation
+    );
+
+  if (!translatable.length) {
+    return originals;
+  }
+
+  const translations =
+    new Map();
+
+  const uniqueByKey =
+    new Map();
+
+  for (const entry of translatable) {
+    if (!uniqueByKey.has(entry.cacheKey)) {
+      uniqueByKey.set(
+        entry.cacheKey,
+        entry
+      );
+    }
+  }
+
+  const uniqueEntries =
+    [...uniqueByKey.values()];
+
+  const cacheKeys =
+    uniqueEntries.map(
+      entry => entry.cacheKey
+    );
+
+  const cachedResult =
+    await pool.query(
+      `
+        SELECT
+          cache_key,
+          translation_de
+        FROM dashboard_content_translations
+        WHERE cache_key = ANY($1::text[])
+      `,
+      [cacheKeys]
+    );
+
+  for (const row of cachedResult.rows) {
+
+    try {
+
+      translations.set(
+        row.cache_key,
+        JSON.parse(
+          row.translation_de
+        )
+      );
+
+    } catch {
+      // Ungueltigen Cache ignorieren und neu uebersetzen.
+    }
+  }
+
+  const missing =
+    uniqueEntries.filter(
+      entry =>
+        !translations.has(
+          entry.cacheKey
+        )
+    );
+
+  const batches =
+    dashboardTranslationBatches(
+      missing
+    );
+
+  for (const batch of batches) {
+
+    try {
+
+      const numbered =
+        batch.map(
+          (entry, index) => ({
+            id:
+              index + 1,
+            context:
+              entry.contextHint,
+            value:
+              entry.value
+          })
+        );
+
+      const response =
+        await openai.responses.create({
+          model:
+            MODEL,
+          instructions: `
+Du erzeugst ausschliesslich die deutsche PRAESENTATIONSFORM fuer strukturierte Daten in Marcels privatem WhatsApp-Dashboard.
+Die Originaldaten im Bot und in PostgreSQL duerfen nicht veraendert werden.
+
+Du bekommst pro ID einen JSON-WERT. Dieser Wert kann Objekt, Array, String, Zahl, Boolean oder null sein.
+
+REGELN FUER DIE DEUTSCHE ANZEIGE:
+- Bei OBJEKTEN jeden semantischen Objekt-Schluessel in eine kurze, natuerliche deutsche Anzeige-Bezeichnung uebersetzen.
+ Beispiel: "interview_was_brief": true -> "Vorstellungsgespraech war kurz": true.
+ Beispiel: "wants_to_continue_seeing_her": true -> "Moechte sie weitersehen": true.
+- String-Werte natuerlich und vollstaendig ins Deutsche uebersetzen.
+- Zahlen, Booleans und null als Datentyp unveraendert lassen.
+- Arrays und Objektstruktur erhalten.
+- Keine Eintraege hinzufuegen, entfernen, zusammenfassen oder interpretieren.
+- Wenn zwei Schluessel auf dieselbe deutsche Form kaemen, unterschiedlich formulieren, damit kein Eintrag verloren geht.
+- Bereits korrektes Deutsch unveraendert lassen.
+- Namen, WhatsApp-Namen, Handles, Emojis, URLs, Telefonnummern, Datumswerte und erkennbare Eigennamen erhalten.
+- Orts- und Laendernamen in der im Deutschen ueblichen Form anzeigen, wenn etabliert: Munich -> Muenchen, Germany -> Deutschland, Colombia -> Kolumbien; Medellín bleibt Medellín.
+- Sprachbezeichnungen deutsch anzeigen: Spanish -> Spanisch, English -> Englisch.
+- Ganze englische oder spanische Aussagen sinngemaess uebersetzen, keine Deutsch-Englisch-Mischsaetze.
+- Sexuelle, romantische oder derbe Inhalte bedeutungstreu erhalten; weder entschaerfen noch verschaerfen.
+- CONTEXT dient nur zum Verstehen und wird nicht ausgegeben.
+
+Antworte ausschliesslich mit gueltigem JSON:
+{"translations":[{"id":1,"de_value":{}}]}
+DE_VALUE muss denselben JSON-Datentyp und dieselbe Grundstruktur wie VALUE haben.
+Fuer jede gelieferte ID genau einen Eintrag liefern.
+`,
+          input:
+            JSON.stringify({
+              items:
+                numbered
+            })
+        });
+
+      const parsed =
+        safeJsonParse(
+          response.output_text,
+          {
+            translations:
+              []
+          }
+        );
+
+      const returned =
+        Array.isArray(
+          parsed?.translations
+        )
+        ? parsed.translations
+        : [];
+
+      const byId =
+        new Map();
+
+      for (const item of returned) {
+
+        const id =
+          Number(
+            item?.id
+          );
+
+        if (
+          !Number.isInteger(id)
+          ||
+          id <= 0
+        ) {
+          continue;
+        }
+
+        if (
+          Object.prototype.hasOwnProperty.call(
+            item,
+            "de_value"
+          )
+        ) {
+
+          byId.set(
+            id,
+            item.de_value
+          );
+
+        } else if (
+          Object.prototype.hasOwnProperty.call(
+            item,
+            "deValue"
+          )
+        ) {
+
+          byId.set(
+            id,
+            item.deValue
+          );
+        }
+      }
+
+      const rowsToCache = [];
+
+      batch.forEach(
+        (entry, index) => {
+
+          const id =
+            index + 1;
+
+          if (!byId.has(id)) {
+            return;
+          }
+
+          const germanValue =
+            byId.get(id);
+
+          if (
+            !dashboardJsonTypeMatches(
+              entry.value,
+              germanValue
+            )
+          ) {
+            return;
+          }
+
+          translations.set(
+            entry.cacheKey,
+            germanValue
+          );
+
+          rowsToCache.push({
+            cacheKey:
+              entry.cacheKey,
+            sourceText:
+              entry.sourceText,
+            contextHint:
+              entry.contextHint,
+            translationDe:
+              JSON.stringify(
+                germanValue
+              )
+          });
+        }
+      );
+
+      await saveDashboardTranslationCacheRows(
+        rowsToCache
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Dashboard-Strukturübersetzung Batch-Fehler:",
+        error
+      );
+    }
+  }
+
+  return prepared.map(
+    entry =>
+      translations.has(
+        entry.cacheKey
+      )
+      ? translations.get(
+          entry.cacheKey
+        )
+      : entry.value
+  );
+
+} catch (error) {
+
+  console.error(
+    "Dashboard-Strukturübersetzung Fehler:",
+    error
+  );
+
+  return originals;
+}
+}
+
+/* ==================================================
  DASHBOARD KONTAKTLISTE
  READ ONLY
 ================================================== */
@@ -11818,6 +12768,7 @@ async (req, res) => {
               SELECT COUNT(*)
 
               FROM memory_items mi
+
               WHERE mi.contact_id =
                 c.id
 
@@ -11987,7 +12938,7 @@ async (req, res) => {
             dateLock:
               contact.date_lock_enabled
               ===
-              true,
+              true, 
 
             manualReviewRequired:
               contact.manual_review_required
@@ -12125,7 +13076,7 @@ async (req, res) => {
 
 /* ==================================================
  DASHBOARD MARCEL BRAIN
- READ ONLY V0.1
+ READ ONLY V0.2 + DEUTSCHE PRAESENTATION
 ================================================== */
 
 app.get(
@@ -12137,7 +13088,7 @@ async (req, res) => {
     if (
       !dashboardApiReady(
         res
-      ) 
+      )
     ) {
 
       return;
@@ -12147,7 +13098,7 @@ async (req, res) => {
 
     if (
       !dashboardApiAuthorized(
-        req
+        req 
       )
     ) {
 
@@ -12250,8 +13201,79 @@ async (req, res) => {
       );
 
 
+    const liveStateDisplaySource = {
+      current_country:
+        liveState?.current_country,
+      current_city:
+        liveState?.current_city,
+      location_status:
+        liveState?.location_status,
+      relocation_target_country:
+        liveState?.relocation_target_country,
+      relocation_target_city:
+        liveState?.relocation_target_city,
+      relocation_stage:
+        liveState?.relocation_stage,
+      relocation_eta:
+        liveState?.relocation_eta,
+      temporary_travel_country:
+        liveState?.temporary_travel_country,
+      temporary_travel_city:
+        liveState?.temporary_travel_city,
+      housing_stage:
+        liveState?.housing_stage
+    };
+
+
+    const translatedLiveStateFields =
+      (
+        await translateDashboardValueListToGerman([
+          {
+            contextHint:
+              "marcel_live_state",
+            value:
+              liveStateDisplaySource
+          }
+        ])
+      )[0]
+      ||
+      liveStateDisplaySource;
+
+
+    const translatedMemoryValues =
+      await translateDashboardStructuredValueListToGerman(
+        items.map(
+          item => ({
+            contextHint:
+              `marcel_memory.${item.category || "general"}.${item.key || "value"}`,
+            value:
+              item.value
+          })
+        )
+      );
+
+
+    const translatedLiveState = {
+      ...(liveState || {}),
+      ...translatedLiveStateFields
+    };
+
+    const translatedItems =
+      items.map(
+        (item, index) => ({
+          ...item,
+          originalValue:
+            item.value,
+          value:
+            translatedMemoryValues[index]
+            ??
+            item.value
+        })
+      );
+
+
     const reviewRequired =
-      items.filter(
+      translatedItems.filter(
         item =>
           item.humanVerified
           !==
@@ -12264,14 +13286,15 @@ async (req, res) => {
         true,
       readOnly:
         true,
+      presentationLanguage:
+        "de",
       reviewRequired,
       count:
-        items.length,
+        translatedItems.length,
       liveState:
-        liveState
-        ||
-        {},
-      items
+        translatedLiveState,
+      items:
+        translatedItems
     });
 
 
@@ -12296,6 +13319,7 @@ async (req, res) => {
 
 }
 );
+
 
 /* ==================================================
  DASHBOARD KI-UEBERSETZUNG
@@ -12456,6 +13480,7 @@ async (req, res) => {
         req
       )
     ) {
+
       return res
         .status(401)
         .json({
@@ -12615,6 +13640,7 @@ async (req, res) => {
       typeof cleanProfile.profile_summary
       ===
       "object"
+
         ? cleanProfile.profile_summary
 
         : {};
@@ -12774,6 +13800,7 @@ async (req, res) => {
 
           humanNote:
             item.human_note,
+
           importance:
             Number(
               item.importance
@@ -12882,6 +13909,186 @@ async (req, res) => {
       );
 
 
+    const contactDisplaySource = {
+      city:
+        contact.city,
+      country:
+        contact.country,
+      language:
+        contact.primary_language,
+      profession:
+        profileSummary.profession
+        ??
+        null,
+      locationContext:
+        contact.location_context
+        ||
+        {},
+      relocationContext:
+        contact.relocation_context
+        ||
+        {}
+    };
+
+
+    const fixedDisplaySource = {
+      contact:
+        contactDisplaySource,
+      events:
+        normalizedEvents.map(
+          event => ({
+            title:
+              event.title,
+            evidenceSummary:
+              event.evidenceSummary,
+            botAction:
+              event.botAction
+          })
+        )
+    };
+
+
+    const translatedFixedDisplay =
+      (
+        await translateDashboardValueListToGerman([
+          {
+            contextHint:
+              "contact_dashboard",
+            value:
+              fixedDisplaySource
+          }
+        ])
+      )[0]
+      ||
+      fixedDisplaySource;
+
+
+    const translatedContactDisplay =
+      translatedFixedDisplay.contact
+      ||
+      contactDisplaySource;
+
+
+    const translatedEventTexts =
+      Array.isArray(
+        translatedFixedDisplay.events
+      )
+      ? translatedFixedDisplay.events
+      : fixedDisplaySource.events;
+
+
+    const structuredDisplayRequests = [
+      ...normalizedActiveItems.map(
+        item => ({
+          contextHint:
+            `contact_memory.${item.category || "general"}.${item.key || "value"}`,
+          value:
+            item.value
+        })
+      ),
+      ...normalizedHistoricalItems.map(
+        item => ({
+          contextHint:
+            `contact_memory.${item.category || "general"}.${item.key || "value"}`,
+          value:
+            item.value
+        })
+      ),
+      ...normalizedEvents.map(
+        event => ({
+          contextHint:
+            `contact_event.${event.type || "event"}.${event.subtype || "general"}.data`,
+          value:
+            event.data
+        })
+      )
+    ];
+
+
+    const structuredDisplayValues =
+      await translateDashboardStructuredValueListToGerman(
+        structuredDisplayRequests
+      );
+
+
+    const translatedProfile =
+      cleanProfile;
+
+
+    let dashboardDisplayOffset =
+      0;
+
+
+    const translatedActiveItems =
+      normalizedActiveItems.map(
+        (item, index) => ({
+          ...item,
+          value:
+            structuredDisplayValues[
+              dashboardDisplayOffset + index
+            ]
+            ??
+            item.value
+        })
+      );
+
+
+    dashboardDisplayOffset +=
+      normalizedActiveItems.length;
+
+
+    const translatedHistoricalItems =
+      normalizedHistoricalItems.map(
+        (item, index) => ({
+          ...item,
+          value:
+            structuredDisplayValues[
+              dashboardDisplayOffset + index
+            ]
+            ??
+            item.value
+        })
+      );
+
+
+    dashboardDisplayOffset +=
+      normalizedHistoricalItems.length;
+
+
+    const translatedEvents =
+      normalizedEvents.map(
+        (event, index) => { 
+
+          const translatedText =
+            translatedEventTexts[index]
+            ||
+            {};
+
+          return {
+            ...event,
+            title:
+              translatedText.title
+              ??
+              event.title,
+            data:
+              structuredDisplayValues[
+                dashboardDisplayOffset + index
+              ]
+              ??
+              event.data,
+            evidenceSummary:
+              translatedText.evidenceSummary
+              ??
+              event.evidenceSummary,
+            botAction:
+              translatedText.botAction
+              ??
+              event.botAction
+          };
+        }
+      );
+
+
     return res.json({
 
       ok:
@@ -12889,6 +14096,9 @@ async (req, res) => {
 
       readOnly:
         true,
+
+      presentationLanguage:
+        "de",
 
       totalMessages:
         totalMessages,
@@ -12923,16 +14133,23 @@ async (req, res) => {
           contact.nickname,
 
         city:
+          translatedContactDisplay.city
+          ??
           contact.city,
 
         country:
+          translatedContactDisplay.country
+          ??
           contact.country,
 
         timezone:
           contact.timezone,
 
         language:
+          translatedContactDisplay.language
+          ??
           contact.primary_language,
+
         sourcePlatform:
           contact.source_platform,
 
@@ -12967,13 +14184,17 @@ async (req, res) => {
           true,
 
         locationContext:
+          translatedContactDisplay.locationContext
+          ??
           contact.location_context
-          ||
+          ??
           {},
 
         relocationContext:
+          translatedContactDisplay.relocationContext
+          ??
           contact.relocation_context
-          ||
+          ??
           {},
 
         identityKey:
@@ -13007,6 +14228,8 @@ async (req, res) => {
           null,
 
         profession:
+          translatedContactDisplay.profession
+          ??
           profileSummary.profession
           ??
           null
@@ -13016,16 +14239,16 @@ async (req, res) => {
       messages,
 
       profile:
-        cleanProfile,
+        translatedProfile,
 
       activeItems:
-        normalizedActiveItems,
+        translatedActiveItems,
 
       historicalItems:
-        normalizedHistoricalItems,
+        translatedHistoricalItems,
 
       events:
-        normalizedEvents,
+        translatedEvents,
 
       memoryStatus
 
@@ -13154,7 +14377,7 @@ async (req, res) => {
               FROM messages
             )
             AS messages,
-
+ 
             (
               SELECT COUNT(*)
               FROM memory_items
@@ -13252,6 +14475,7 @@ app.get(
   res.send(
     "Noch kein Pairing-Code verfügbar."
   );
+
 }
 );
 
@@ -13473,7 +14697,7 @@ id="newContactNameInput"
 type="text"
 placeholder="Neue Testfrau"
 autocomplete="off"
->
+> 
 
 
 <button
@@ -13571,6 +14795,7 @@ const messageInput =
     "messageInput"
   );
 
+
 const sendMessageButton =
   document.getElementById(
     "sendMessageButton"
@@ -13632,7 +14857,7 @@ function setStatus(
 }
 
 
-function escapeHtml(value){
+function escapeHtml(value){ 
 
   return String(
     value ?? ""
@@ -13731,6 +14956,7 @@ async function apiRequest(
 
   }
 
+
   return data;
 
 }
@@ -13791,7 +15017,7 @@ function renderChat(
               item.is_edited
                 ? " · bearbeitet"
                 : ""
-            )
+            ) 
             +
             '</div>'
             +
@@ -13889,7 +15115,7 @@ async function loadContacts(
     "loading"
   );
 
- 
+
   loadContactsButton.disabled =
     true;
 
@@ -14271,7 +15497,7 @@ async function loadSnapshot(){
 
 async function sendTestMessage(){
 
-  const jid =
+  const jid = 
     String(
       contactsSelect.value
       ||
@@ -14369,6 +15595,7 @@ async function sendTestMessage(){
                 getPassword(),
 
               jid,
+
               message
 
             })
@@ -14590,7 +15817,7 @@ async (req, res) => {
 
     if (
       !personaPasswordCorrect(
-        req.body.password
+        req.body.password 
       )
     ) {
 
@@ -14688,6 +15915,7 @@ async (req, res) => {
 /* ==================================================
  TEST SNAPSHOT
 ================================================== */
+
 app.post(
 "/persona-test/snapshot",
 async (req, res) => {
@@ -14909,7 +16137,7 @@ async (req, res) => {
           contact,
           jid,
           text
-        );
+        ); 
 
 
       const reply =
@@ -15007,6 +16235,7 @@ async (req, res) => {
     await extractMemoryUpdates({
 
       jid,
+
       contactId:
         contact.id,
 
@@ -15068,7 +16297,7 @@ async (req, res) => {
 
 }
 );
-
+ 
 
 /* ==================================================
  WHATSAPP INCOMING HANDLER
@@ -15228,7 +16457,7 @@ await sock.sendMessage(
       reply
   }
 );
-
+ 
 
 const outgoing =
   await saveMessage(
@@ -15326,6 +16555,7 @@ try {
 
 
   if (updated) {
+
     console.log(
       "WhatsApp-Nachricht bearbeitet:",
       whatsappMessageId,
@@ -15387,7 +16617,7 @@ const {
 const {
   version
 } =
-  await fetchLatestBaileysVersion();
+  await fetchLatestBaileysVersion(); 
 
 
 sock =
@@ -15547,7 +16777,7 @@ sock.ev.on(
 
 
         } catch (error) {
-
+ 
           console.error(
             "Pairing-Code Fehler:",
             error

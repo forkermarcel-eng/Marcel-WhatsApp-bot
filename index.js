@@ -162,6 +162,7 @@ dass er bei einer passenden Frage
 sofort alle diese Details herausgibt.
 
 Wissen und Preisgeben
+
 sind zwei verschiedene Dinge.
 
 Marcel beantwortet zuerst
@@ -246,7 +247,6 @@ RÜCKFRAGEN:
 Bevor Marcel eine Rückfrage stellt,
 muss er prüfen,
 was er über die Frau bereits weiß.
-
 Wenn bereits bekannt ist,
 dass sie ein Kind hat:
 
@@ -348,6 +348,7 @@ Marcel flirtet:
 - warm
 
 Bei Gegenseitigkeit steigern.
+
 
 Bei Ausweichen reduzieren.
 
@@ -546,6 +547,7 @@ return normalizeText(value)
   .replace(
     /\s+/g,
     " "
+
   )
   .trim();
 
@@ -858,6 +860,7 @@ return extractTextFromMessageContent(
 
 
 function isPlainObject(
+
 value
 ) {
 
@@ -993,7 +996,6 @@ const PROFILE_COLUMNS = [
 "stress_support_style",
 
 "decision_style",
-
 "social_media",
 
 "cultural_interest",
@@ -1142,6 +1144,7 @@ const spanishWords = [
   "tienes",
   "tiene",
   "hijo",
+
   "hija",
   "años",
   "anos",
@@ -1422,6 +1425,7 @@ while (stack.length) {
     !current
     ||
     typeof current !== "object"
+
   ) {
 
     continue;
@@ -1667,6 +1671,7 @@ if (
 const currentLanguage =
   detectLanguageFromText(
     currentText
+
   );
 
 
@@ -1740,7 +1745,6 @@ if (countryLanguage) {
 return "en";
 
 }
-
 
 /* ==================================================
  FRAUEN MEMORY SEED
@@ -1885,6 +1889,7 @@ const WOMEN_SEED = [
 
         "familienverbunden",
 
+
         "warum Bruder",
 
         "Studium",
@@ -1989,7 +1994,7 @@ const WOMEN_SEED = [
 
     },
 
-    open_threads: {
+    open_threads: { 
 
       no_immediate_whatsapp:
         true
@@ -2159,7 +2164,7 @@ const WOMEN_SEED = [
 
     personal_boundaries: {
 
- 
+
       note:
         "Nicht als reine Beziehungssuche speichern."
 
@@ -2239,7 +2244,7 @@ const WOMEN_SEED = [
       seeks_humble_calm_man:
         true
 
-    },
+    }, 
 
     preferences: {
 
@@ -2418,6 +2423,7 @@ const WOMEN_SEED = [
     "tinder",
 
   platformStatus:
+
     "TINDER_ACTIVE",
 
   profile: {
@@ -2488,7 +2494,7 @@ const WOMEN_SEED = [
         true,
 
       independent:
-        true
+        true 
 
     },
 
@@ -2693,6 +2699,7 @@ const WOMEN_SEED = [
 
   }
 
+
 },
 
 
@@ -2737,7 +2744,7 @@ const WOMEN_SEED = [
     "Paola",
 
   aliases: [
-    "Paola alt"
+    "Paola alt" 
   ],
 
   sourcePlatform:
@@ -2986,6 +2993,7 @@ const WOMEN_SEED = [
 
 
 {
+
   identityKey:
     "chantall_late_sleep",
 
@@ -3236,7 +3244,6 @@ const WOMEN_SEED = [
     },
 
     current_context: {
-
       do_not_merge_with_kate_castillo:
         true
 
@@ -3265,6 +3272,7 @@ const WOMEN_SEED = [
     current_context: {
 
       last_known:
+
         "working"
 
     }
@@ -3530,6 +3538,7 @@ const WOMEN_SEED = [
 
 
 {
+
   identityKey:
     "eri_buenos_dias",
 
@@ -3734,7 +3743,7 @@ const WOMEN_SEED = [
   }
 
 },
-
+ 
 
 {
   identityKey:
@@ -3814,6 +3823,7 @@ const WOMEN_SEED = [
 
       used_carino:
         true,
+
 
       asked_how_marcel_is:
         true
@@ -3983,7 +3993,7 @@ const WOMEN_SEED = [
     preferences: {
 
       likes: [
-
+ 
         "Reisen",
 
         "Natur",
@@ -4090,6 +4100,7 @@ const WOMEN_SEED = [
         true,
 
       friendly:
+
         true,
 
       strong_temper:
@@ -4340,6 +4351,7 @@ const WOMEN_SEED = [
       marcel_must_find_out_in_person:
         true,
 
+
       translator_then_without_words:
         true,
 
@@ -4481,7 +4493,7 @@ const WOMEN_SEED = [
     "luisa_23_medellin",
 
   canonicalName:
-    "Luisa",
+    "Luisa", 
 
   country:
     "Colombia",
@@ -4591,6 +4603,7 @@ const WOMEN_SEED = [
 
   sourcePlatform:
     "tinder",
+
 
   platformStatus:
     "WHATSAPP_INVITED",
@@ -4730,7 +4743,7 @@ const WOMEN_SEED = [
 
       some_english:
         true
-
+ 
     },
 
     shared_history: {
@@ -4807,6 +4820,7 @@ await pool.query(`
       DEFAULT 'active',
 
     ADD COLUMN IF NOT EXISTS relationship_stage TEXT
+
       DEFAULT 'new',
 
     ADD COLUMN IF NOT EXISTS auto_reply_enabled BOOLEAN
@@ -4833,6 +4847,8 @@ await pool.query(`
     ADD COLUMN IF NOT EXISTS canonical_name TEXT,
 
     ADD COLUMN IF NOT EXISTS whatsapp_display_name TEXT,
+
+    ADD COLUMN IF NOT EXISTS whatsapp_username TEXT,
     ADD COLUMN IF NOT EXISTS current_platform TEXT,
 
     ADD COLUMN IF NOT EXISTS platform_status TEXT,
@@ -4960,6 +4976,7 @@ await pool.query(`
 
     ADD COLUMN IF NOT EXISTS processing_status TEXT
       DEFAULT 'processed',
+
 
     ADD COLUMN IF NOT EXISTS duplicate_of_message_id BIGINT
       REFERENCES messages(id)
@@ -5126,6 +5143,7 @@ await pool.query(`
 await pool.query(`
   CREATE TABLE IF NOT EXISTS memory_events (
 
+
     id BIGSERIAL PRIMARY KEY,
 
     contact_id INTEGER NOT NULL
@@ -5225,7 +5243,7 @@ await pool.query(`
 
     thumbnail_path TEXT,
 
-    is_view_once BOOLEAN
+    is_view_once BOOLEAN 
       DEFAULT FALSE,
 
     view_once_status TEXT
@@ -5311,6 +5329,7 @@ await pool.query(`
 
   )
 `);
+
 
 
 await pool.query(`
@@ -5526,6 +5545,7 @@ const memories = [
 
   [
     "languages",
+
     "spoken_languages",
     {
       german: true,
@@ -5673,6 +5693,7 @@ const memories = [
     4,
     "Nie behaupten Marcel trinkt."
   ],
+
 
   [
     "food_drinks",
@@ -5866,6 +5887,7 @@ for (
     category,
     key,
     value,
+
     importance,
     usage
   ]
@@ -5988,7 +6010,8 @@ if (
   [
     "identity_key",
     "phone",
-    "whatsapp_jid"
+    "whatsapp_jid",
+    "whatsapp_username"
   ].includes(
     type
   )
@@ -6105,6 +6128,7 @@ if (
 
         contact_id,
 
+
         identifier_type,
 
         identifier_value,
@@ -6219,7 +6243,7 @@ const result =
       FROM contacts
 
       WHERE memory_identity_key =
-        $1
+        $1 
 
       LIMIT 1
     `,
@@ -6372,6 +6396,7 @@ if (
       [
         createProfileJid(
           woman.identityKey
+
         ),
         woman.canonicalName,
         woman.identityKey,
@@ -6468,7 +6493,7 @@ if (
               )
             END,
 
-          source_platform =
+          source_platform = 
             COALESCE(
               source_platform,
               $7
@@ -6513,6 +6538,7 @@ if (
         woman.canonicalName,
         phone,
         woman.country || null,
+
         woman.city || null,
         woman.language || null,
         woman.sourcePlatform || null,
@@ -6763,6 +6789,7 @@ if (
 
         memory_key,
 
+
         memory_value,
 
         memory_type,
@@ -6966,12 +6993,13 @@ if (
       : {})
   };
 }
-
+ 
 
 if (birthday.age != null) {
   profileSummary.age =
     birthday.age;
 }
+
 
 
 return {
@@ -7185,6 +7213,7 @@ for (
           value,
 
         importance:
+
           [
             "current_context",
             "open_threads",
@@ -7406,6 +7435,7 @@ if (contact) {
               COALESCE(
                 phone_number,
                 $2
+
               ),
 
             last_message_at =
@@ -7683,6 +7713,7 @@ return (
 
 }
 
+
 async function getContactById(
 contactId
 ) {
@@ -7712,7 +7743,7 @@ return (
 );
 
 }
-
+ 
 
 /* ==================================================
  TESTKONTAKT
@@ -7940,6 +7971,7 @@ const result =
 
         processing_status,
 
+
         duplicate_of_message_id
 
       )
@@ -7961,7 +7993,7 @@ const result =
       )
 
       RETURNING *
-    `,
+    `, 
     [
       jid,
       direction,
@@ -8197,6 +8229,7 @@ const result =
       UPDATE messages
 
       SET
+
         original_message_text =
           COALESCE(
             original_message_text,
@@ -8429,6 +8462,7 @@ return result.rows
         ===
         true,
 
+
       editedAt:
         message.edited_at,
 
@@ -8459,7 +8493,7 @@ return result.rows
 }
 
 
-/* ==================================================
+/* ================================================== 
  DASHBOARD KI-UEBERSETZUNG DEUTSCH
  - nur letzte 24 Stunden
  - OpenAI statt Wort-fuer-Wort-Uebersetzer
@@ -8642,6 +8676,7 @@ for (
   start += 40
 ) {
 
+
   const batch =
     pending.slice(
       start,
@@ -8791,6 +8826,7 @@ ${batch
 
     await pool.query(
       `
+
         UPDATE messages
         SET
           translation_de = $2,
@@ -8921,6 +8957,7 @@ return messages;
 }
 
 function normalizeImportSender(value) {
+
 return normalizeText(value).toLocaleLowerCase("de-DE").replace(/\s+/g, " ");
 }
 
@@ -8982,6 +9019,7 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
      return key !== marcelKey && key !== contactKey;
    });
    if (unexpected.length) {
+
      const error = new Error(`Weitere Absender im Export erkannt: ${unexpected.join(", ")}. Bitte Zuordnung pruefen.`);
      error.code = "SENDER_CONFIRMATION_REQUIRED";
      error.senders = senders;
@@ -9048,6 +9086,7 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
             whatsapp_jid, direction, message_text, whatsapp_message_id,
             processing_status, created_at, import_source_hash, import_batch_id
           ) VALUES ($1,$2,$3,$4,'historical_imported',$5,$6,$7)
+
           RETURNING id`,
          [contact.whatsapp_jid, item.direction, item.text, `historical-${item.sourceHash.slice(0,24)}`, item.createdAt, item.sourceHash, batchId]
        );
@@ -9115,6 +9154,7 @@ async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [],
  return {
    batchId, parsed: parsed.length, imported, duplicates,
    incoming: importedIncoming, outgoing: importedOutgoing, senders,
+
    senderMapping: hasExplicitMapping ? { marcelSender: explicitMarcelSender, contactSender: explicitContactSender, confirmed: true } : null,    newMessageIds, dryRun: Boolean(dryRun), replaceExisting: false
  };
 }
@@ -9151,6 +9191,7 @@ async function applyHistoricalMarcelDecisions(items,contactId) {
    if(d==='CONTRADICTION'||d==='UNCERTAIN'){await createHistoricalReview({subjectType:'marcel',contactId,decision:d,item});stats.review++;continue;}
    if(d==='UPDATE'&&oldKey){
      const row=(await pool.query(`SELECT * FROM marcel_memory WHERE memory_key=$1 LIMIT 1`,[oldKey])).rows[0];
+
      if(row?.human_verified===true){await createHistoricalReview({subjectType:'marcel',contactId,decision:'UNCERTAIN',item:{...item,reason:`UPDATE betrifft verifiziertes Marcel-Memory: ${oldKey}`}});stats.review++;continue;}
      if(row){await pool.query(`UPDATE marcel_memory SET category=$2,memory_value=$3::jsonb,importance=GREATEST(importance,$4),source_type='whatsapp_historical_import',human_verified=FALSE,allowed_for_bot=TRUE,status='active',updated_at=NOW() WHERE id=$1`,[row.id,cat,JSON.stringify(val),imp]);stats.updated++;continue;}
    }
@@ -9175,6 +9216,7 @@ async function ensureHistoricalBackfillJobsTable() {
    error_text TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW(), completed_at TIMESTAMPTZ
  )`);
 }
+
 function historicalChunkCount(rowCount,size=45,overlap=8){if(rowCount<=0)return 0;if(rowCount<=size)return 1;return 1+Math.ceil((rowCount-size)/(size-overlap));}
 async function updateHistoricalBackfillJob(jobId,patch={}) {
  if(!jobId)return; await ensureHistoricalBackfillJobsTable();
@@ -9195,6 +9237,7 @@ async function runHistoricalMemoryBackfill({contact,rawText,senderMapping,jobId=
    const cm=contactItems.map(x=>`ID=${x.id}|${x.category}.${x.memory_key}|human=${x.human_review_status}|${renderJson(x.human_corrected_value||x.memory_value)}`).join('\n');
    const mm=marcelItems.map(x=>`KEY=${x.memory_key}|${x.category}|verified=${x.human_verified===true}|${renderJson(x.memory_value)}`).join('\n');
    const convo=chunk.map(x=>`[${new Date(x.createdAt).toISOString()}] ${x.role}: ${x.text}`).join('\n');
+
    const response=await openai.responses.create({model:MODEL,instructions:`Du bist der semantische Memory-Konsolidierer fuer Marcels WhatsApp-System. Antworte ausschliesslich mit gueltigem JSON. Verstehe den Dialog als Zusammenhang: Pronomen, kurze Antworten, Rueckbezuege, Korrekturen, Ironie und unterschiedliche Formulierungen desselben Sachverhalts. ZWEI GEHIRNE STRENG TRENNEN: contact_items sind Fakten ueber den Kontakt; marcel_items sind Fakten ueber Marcel. Entscheide semantisch: SAME = gleicher Sachverhalt trotz anderer Formulierung, nichts neu anlegen. UPDATE = gleicher Sachverhalt mit neuer/praeziser/zeitlich aktualisierter Information. CONTRADICTION = echter Widerspruch. NEW = wirklich neuer langfristig/relevant nutzbarer Sachverhalt. UNCERTAIN = Bedeutung, Person, Zeitbezug oder Faktstatus nicht sicher. Keine banalen Flirtphrasen, Emojis, Begruessungen oder Vermutungen speichern. Human/verifiziertes Wissen nie automatisch ersetzen. Bei UPDATE Kontakt existing_memory_id setzen; bei SAME/UPDATE Marcel existing_memory_key setzen. memory_key kurz, stabil, snake_case; bei SAME/UPDATE bestehenden Key verwenden. Bei Unsicherheit UNCERTAIN. JSON exakt: {"contact_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_id":null,"category":"","memory_key":"","memory_value":{},"memory_type":"self_reported|explicit_fact|observed_pattern|interpretation|temporary_state","confidence":0.9,"importance":3,"use_in_reply":true,"evidence":"","reason":""}],"marcel_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_key":null,"category":"","memory_key":"","memory_value":{},"importance":3,"sensitivity":"normal|personal|intimate","evidence":"","reason":""}]}`,
      input:`KONTAKT: ${contact.display_name||contact.canonical_name||contact.whatsapp_jid}\n\nBESTEHENDES KONTAKT-MEMORY:\n${cm||'[keine]'}\n\nBESTEHENDES MARCEL-MEMORY:\n${mm||'[keine]'}\n\nDIALOG-AUSSCHNITT CHRONOLOGISCH:\n${convo}\n\nKonsolidiere nur Memory-wuerdige Informationen.`});
    const parsed=safeJsonParse(response.output_text,{contact_items:[],marcel_items:[]})||{}; const cs=await applyHistoricalContactDecisions(parsed.contact_items||[],contact.id),ms=await applyHistoricalMarcelDecisions(parsed.marcel_items||[],contact.id);
@@ -9202,6 +9245,7 @@ async function runHistoricalMemoryBackfill({contact,rawText,senderMapping,jobId=
  }
  await updateHistoricalBackfillJob(jobId,{status:'completed',total_chunks:totalChunks,completed_chunks:totals.chunks,contact_stats:totals.contact,marcel_stats:totals.marcel,completed_at:new Date()}); console.log('Historical Memory Backfill fertig:',{contact:contact.display_name||contact.canonical_name||contact.whatsapp_jid,...totals}); return {status:'completed',...totals};
 }
+
 async function scheduleHistoricalMemoryBackfill(payload){await ensureHistoricalBackfillJobsTable();const jobId=`memory-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;const rows=historicalConversationRows(payload.rawText,payload.senderMapping);const totalChunks=historicalChunkCount(rows.length);await pool.query(`INSERT INTO historical_memory_backfill_jobs (job_id,contact_id,status,total_chunks,completed_chunks) VALUES ($1,$2,'queued',$3,0)`,[jobId,payload.contact.id,totalChunks]);setTimeout(()=>{runHistoricalMemoryBackfill({...payload,jobId}).catch(async error=>{console.error('Historical Memory Backfill fehlgeschlagen:',error);try{await updateHistoricalBackfillJob(jobId,{status:'failed',error_text:String(error?.message||error)});}catch{}});},300);return {jobId,totalChunks};}
 
 /* ==================================================
@@ -9256,6 +9300,7 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
   *
   * Sicherheitsprinzip:
   * Fuer jede einzelne Zeile des hochgeladenen WhatsApp-Exports suchen wir
+
   * getrennt genau EINEN alten/Legacy-Treffer und genau EINEN neuen
   * Historical-Import-Treffer. Nur wenn BEIDE fuer dieselbe Exportzeile
   * existieren, wird der Historical-Import-Treffer als Dublette markiert.
@@ -9342,6 +9387,7 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
     * Historical-Treffer. Der alte Datensatz bleibt, der spaeter durch
     * den Dashboard-Import entstandene Historical-Datensatz wird entfernt.
     */
+
    if (!legacy || !historical) continue;
 
    const deleteId = Number(historical.id);
@@ -9422,6 +9468,7 @@ app.post("/dashboard-api/cleanup-whatsapp-duplicates", async (req, res) => {
        groups: plan.groups,
        confirmationToken: plan.confirmationToken,
        message: plan.wouldDelete > 0
+
          ? `Pruefung fertig. ${plan.wouldDelete} sichere Dubletten wuerden geloescht. Bis jetzt wurde NICHTS geloescht.`
          : "Pruefung fertig. Keine sicheren Dubletten gefunden. Bis jetzt wurde NICHTS geloescht."
      });
@@ -9488,6 +9535,7 @@ app.post("/dashboard-api/import-whatsapp", async (req, res) => {  try {
    if (!chatText.trim()) return res.status(400).json({ok:false,error:"Der WhatsApp-Export ist leer."});
 
    const contact = (await pool.query(`SELECT * FROM contacts WHERE id=$1 LIMIT 1`,[contactId])).rows[0];
+
    if (!contact) return res.status(404).json({ok:false,error:"Kontakt nicht gefunden."});
 
    const action = normalizeText(req.body?.action).toLowerCase() === "import" ? "import" : "preview";
@@ -9540,6 +9588,7 @@ app.get("/dashboard-api/import-whatsapp-status", async (req,res)=>{
    await ensureHistoricalBackfillJobsTable();
    const row=(await pool.query(`SELECT job_id,contact_id,status,total_chunks,completed_chunks,contact_stats,marcel_stats,error_text,created_at,updated_at,completed_at FROM historical_memory_backfill_jobs WHERE job_id=$1 LIMIT 1`,[jobId])).rows[0];
    if(!row)return res.status(404).json({ok:false,error:"Memory-Job nicht gefunden."});
+
    return res.json({ok:true,job:{jobId:row.job_id,contactId:row.contact_id,status:row.status,totalChunks:row.total_chunks,completedChunks:row.completed_chunks,contact:row.contact_stats||{},marcel:row.marcel_stats||{},error:row.error_text||null,completedAt:row.completed_at||null}});
  }catch(error){console.error('Memory-Status Fehler:',error);return res.status(500).json({ok:false,error:"Memory-Status konnte nicht geladen werden."});}
 });
@@ -9738,6 +9787,7 @@ return result.rows;
  MARCEL MEMORY LADEN
 ================================================== */
 
+
 async function getMarcelMemory(
 limit = 60
 ) {
@@ -9932,14 +9982,18 @@ memory_identity_key:
 canonical_name:
   contact?.canonical_name,
 
+
 display_name:
   contact?.display_name,
 
 whatsapp_display_name:
   contact?.whatsapp_display_name,
 
+whatsapp_username:
+  contact?.whatsapp_username,
+
 country:
-  contact?.country,
+  contact?.country, 
 
 city:
   contact?.city,
@@ -10108,7 +10162,7 @@ if (jid) {
     memoryItems,
     memoryEvents,
     marcelMemory,
- 
+
     liveState
   ] =
     await Promise.all([
@@ -10189,7 +10243,7 @@ const languageInstruction =
 
     : "";
 
-
+ 
 const response =   await openai.responses.create({
 
     model:
@@ -10298,6 +10352,7 @@ was wirklich gefragt wurde.
 
 Nutze Memory,
 aber schütte es nicht aus.
+
 
 Prüfe vor Rückfragen,
 was über die Frau bereits bekannt ist.
@@ -10552,6 +10607,7 @@ return null;
 
 /* ==================================================
  DETERMINISTISCHER WIDERSPRUCH
+
 ================================================== */
 
 async function detectDeterministicContradiction(
@@ -10782,6 +10838,7 @@ await pool.query(
 
 
 /* ==================================================
+
  MEMORY ITEMS ANWENDEN
 ================================================== */
 
@@ -10936,7 +10993,7 @@ for (
     clampImportance(
       item?.importance
     );
-
+ 
 
   const quote =
     normalizeText(
@@ -11010,6 +11067,7 @@ for (
 
     await pool.query(
       `
+
         UPDATE memory_items
 
         SET
@@ -11185,7 +11243,7 @@ for (
       event?.event_type
     );
 
-
+ 
   if (!eventType) {
     continue;
   }
@@ -11269,6 +11327,7 @@ for (
       contactId,
       eventType,
       normalizeText(
+
         event?.event_subtype
       )
       ||
@@ -11434,7 +11493,6 @@ Kate Castillo != alte Kathe.
 Paola Maza != ältere Paola.
 
 Karla Tinder != Karla Instagram.
-
 Frau,
 Marcel
 und Dritte
@@ -11459,6 +11517,7 @@ wie vollständig Memory
 intern gespeichert werden darf.
 
 Der Extractor darf also
+
 weiterhin genaue Fakten speichern.
 
 Nur der Reply-Bot
@@ -11663,6 +11722,7 @@ const expected =
 return (
   !!expected
   &&
+
   password === expected
 );
 
@@ -11681,7 +11741,6 @@ const contact =
   await getContactByJid(
     jid
   );
-
 
 if (!contact) {
   return null;
@@ -11926,6 +11985,42 @@ if (
 
 return digits;
 
+}
+
+
+
+function normalizeDashboardWhatsAppUsername(
+value
+) {
+
+const clean =
+  normalizeText(
+    value
+  );
+
+if (!clean) {
+  return null;
+}
+
+const username =
+  clean
+    .replace(/^https?:\/\/(?:www\.)?wa\.me\//i, "")
+    .replace(/^@+/, "")
+    .trim();
+
+if (
+  !username
+  ||
+  username.length > 100
+  ||
+  /\s/.test(username)
+) {
+  throw dashboardContactError(
+    "Der WhatsApp-Username ist ungültig."
+  );
+}
+
+return `@${username}`;
 }
 
 
@@ -12204,6 +12299,7 @@ if (
     day
   )
   ||
+
   !Number.isInteger(
     month
   )
@@ -12456,6 +12552,7 @@ return null;
 function collectDashboardBirthdayParts(
 value,
 output = {},
+
 keyHint = "",
 birthdayContext = false,
 depth = 0
@@ -12682,6 +12779,7 @@ if (
     ) {
       const year =
         dashboardNormalizeBirthYear(
+
           childValue
         );
 
@@ -12921,6 +13019,7 @@ const parts =
         "numeric",
       month:
         "2-digit",
+
       day:
         "2-digit"
     }
@@ -13142,7 +13241,6 @@ const actualBirthYear =
   contactYear !== null
 
     ? contactYear
-
     : (
         extracted.year
         ||
@@ -13169,6 +13267,7 @@ if (
 ) {
   suggestedBirthYear =
     inferDashboardBirthYear(
+
       birthDay,
       birthMonth,
       reportedAge
@@ -13338,7 +13437,8 @@ contactId,
 category,
 memoryKey,
 memoryValue,
-importance = 5
+importance = 5,
+note = "Von Marcel im Dashboard als Kontaktdatum bestätigt."
 }) {
 
 const existing =
@@ -13371,9 +13471,6 @@ const existing =
       memoryKey
     ]
   );
-
-const note =
-  "Von Marcel im Dashboard als Kontaktdatum bestätigt.";
 
 if (
   existing.rows[0]
@@ -13412,6 +13509,7 @@ if (
 
         importance =
           GREATEST(
+
             importance,
             $4
           ),
@@ -13653,6 +13751,7 @@ if (
   ||
   age === false
 ) {
+
   throw dashboardContactError(
     "Geburtstag oder Alter ist ungültig."
   );
@@ -13874,6 +13973,7 @@ await pool.query(
       valid_until = COALESCE(valid_until, NOW()),
       updated_at = NOW()
     WHERE contact_id = $1
+
       AND category = 'profile_summary'
       AND memory_key = 'age'
       AND status = 'active'
@@ -14052,6 +14152,7 @@ await pool.query(`
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )
 `);
+
 
 dashboardContentTranslationTableReady = true;
 }
@@ -14270,6 +14371,7 @@ for (const entry of entries) {
 }
 
 if (current.length) {
+
   batches.push(current);
 }
 
@@ -14443,6 +14545,7 @@ try {
             MODEL,
           instructions: `
 Du bist die reine Deutsch-Praesentationsschicht fuer Marcels privates WhatsApp-Dashboard.
+
 Die gelieferten Texte stammen aus internem Bot-Memory, Profilen, Events oder Live-State.
 Uebersetze jeden gelieferten TEXT natuerlich und vollstaendig ins Deutsche.
 Die internen Bot-Daten bleiben Englisch; du erzeugst ausschliesslich die deutsche Anzeige.
@@ -14545,6 +14648,7 @@ Fuer jede gelieferte ID genau einen Eintrag liefern.
       );
 
     } catch (error) {
+
 
       console.error(
         "Dashboard-Inhaltsübersetzung Batch-Fehler:",
@@ -14721,6 +14825,7 @@ try {
     new Map();
 
   for (const entry of translatable) {
+
     if (!uniqueByKey.has(entry.cacheKey)) {
       uniqueByKey.set(
         entry.cacheKey,
@@ -14819,6 +14924,7 @@ REGELN FUER DIE DEUTSCHE ANZEIGE:
 - Sprachbezeichnungen deutsch anzeigen: Spanish -> Spanisch, English -> Englisch.
 - Ganze englische oder spanische Aussagen sinngemaess uebersetzen, keine Deutsch-Englisch-Mischsaetze.
 - Sexuelle, romantische oder derbe Inhalte bedeutungstreu erhalten; weder entschaerfen noch verschaerfen.
+
 - CONTEXT dient nur zum Verstehen und wird nicht ausgegeben.
 
 Antworte ausschliesslich mit gueltigem JSON:
@@ -14884,7 +14990,6 @@ Fuer jede gelieferte ID genau einen Eintrag liefern.
             "deValue"
           )
         ) {
-
           byId.set(
             id,
             item.deValue
@@ -14982,6 +15087,7 @@ async (req, res) => {
 
   try {
 
+
     if (
       !dashboardApiReady(
         res
@@ -15024,6 +15130,8 @@ async (req, res) => {
             c.whatsapp_jid,
 
             c.phone_number,
+
+            c.whatsapp_username,
 
             c.display_name,
 
@@ -15157,6 +15265,7 @@ async (req, res) => {
 
               m.id,
 
+
               m.direction,
 
               m.message_text,
@@ -15233,6 +15342,9 @@ async (req, res) => {
             phoneNumber:
               contact.phone_number,
 
+            whatsappUsername:
+              contact.whatsapp_username,
+
             name:
               contact.canonical_name
               ||
@@ -15308,6 +15420,7 @@ async (req, res) => {
               birthday.birthMonth,
 
             birthYear:
+
               birthday.birthYear,
 
             suggestedBirthYear:
@@ -15376,7 +15489,7 @@ async (req, res) => {
 
               historical:
                 Number(
-                  contact.historical_memory_count
+                  contact.historical_memory_count 
                   ||
                   0
                 ),
@@ -15475,6 +15588,7 @@ async (req, res) => {
             false,
           error:
             "Nicht autorisiert."
+
         });
     }
 
@@ -15504,6 +15618,26 @@ async (req, res) => {
       if (phoneOwner) {
         throw dashboardContactError(
           "Diese Telefonnummer ist bereits einem anderen Kontakt zugeordnet.",
+          409
+        );
+      }
+    }
+
+    const whatsappUsername =
+      normalizeDashboardWhatsAppUsername(
+        req.body?.whatsappUsername
+      );
+
+    if (whatsappUsername) {
+      const usernameOwner =
+        await findContactByIdentifier(
+          "whatsapp_username",
+          whatsappUsername
+        );
+
+      if (usernameOwner) {
+        throw dashboardContactError(
+          "Dieser WhatsApp-Username ist bereits einem anderen Kontakt zugeordnet.",
           409
         );
       }
@@ -15546,6 +15680,15 @@ async (req, res) => {
       )
         ? {
             phone_number:
+              true
+          }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "whatsappUsername"
+      )
+        ? {
+            whatsapp_username:
               true
           }
         : {}),
@@ -15598,6 +15741,7 @@ async (req, res) => {
             memory_identity_key,
             identity_locked,
             phone_number,
+            whatsapp_username,
             country,
             city,
             primary_language,
@@ -15626,17 +15770,19 @@ async (req, res) => {
             $5,
             $6,
             $7,
+
+            $8,
             'dashboard',
             'CONTACT_KNOWN',
             'active',
             'new',
             TRUE,
             FALSE,
-            $8,
             $9,
             $10,
             $11,
-            $12::jsonb,
+            $12,
+            $13::jsonb,
             NOW(),
             NOW(),
             NOW()
@@ -15650,6 +15796,7 @@ async (req, res) => {
           name,
           identityKey,
           phone,
+          whatsappUsername,
           country,
           city,
           language,
@@ -15721,6 +15868,21 @@ async (req, res) => {
       });
     }
 
+    if (whatsappUsername) {
+      await addContactIdentifier({
+        contactId:
+          contact.id,
+        type:
+          "whatsapp_username",
+        value:
+          whatsappUsername,
+        sourcePlatform:
+          "whatsapp",
+        isPrimary:
+          true
+      });
+    }
+
     await applyDashboardContactHumanFacts({
       contactId:
         contact.id,
@@ -15752,9 +15914,14 @@ async (req, res) => {
             name,
           phoneNumber:
             phone,
-          city,
-          country,
-          language,
+          whatsappUsername:
+            whatsappUsername,
+          city:
+            city,
+          country:
+            country,
+          language:
+            language,
           birthDay:
             birthdayDisplay.birthDay,
           birthMonth:
@@ -15789,6 +15956,7 @@ async (req, res) => {
       )
       .json({
         ok:
+
           false,
         error:
           error?.message
@@ -15905,6 +16073,12 @@ async (req, res) => {
         "phoneNumber"
       );
 
+    const usernameProvided =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        "whatsappUsername"
+      );
+
     const cityProvided =
       Object.prototype.hasOwnProperty.call(
         body,
@@ -15963,6 +16137,7 @@ async (req, res) => {
         ? normalizeDashboardPhoneNumber(
             body.phoneNumber
           )
+
         : current.phone_number;
 
     if (phoneProvided && phone) {
@@ -15999,6 +16174,49 @@ async (req, res) => {
       if (conflict.rows[0]) {
         throw dashboardContactError(
           "Diese Telefonnummer ist bereits einem anderen Kontakt zugeordnet.",
+          409
+        );
+      }
+    }
+
+    const whatsappUsername =
+      usernameProvided
+        ? normalizeDashboardWhatsAppUsername(
+            body.whatsappUsername
+          )
+        : current.whatsapp_username;
+
+    if (usernameProvided && whatsappUsername) {
+      const conflict =
+        await pool.query(
+          `
+            SELECT c.id
+
+            FROM contact_identifiers i
+
+            JOIN contacts c
+              ON c.id = i.contact_id
+
+            WHERE i.identifier_type =
+              'whatsapp_username'
+
+              AND i.normalized_value = $1
+
+              AND c.id <> $2
+
+            LIMIT 1
+          `,
+          [
+            normalizeIdentityValue(
+              whatsappUsername
+            ),
+            contactId
+          ]
+        );
+
+      if (conflict.rows[0]) {
+        throw dashboardContactError(
+          "Dieser WhatsApp-Username ist bereits einem anderen Kontakt zugeordnet.",
           409
         );
       }
@@ -16053,6 +16271,12 @@ async (req, res) => {
               true
           }
         : {}),
+      ...(usernameProvided
+        ? {
+            whatsapp_username:
+              true
+          }
+        : {}),
       ...(cityProvided
         ? {
             city:
@@ -16103,25 +16327,29 @@ async (req, res) => {
             primary_language =
               $6,
 
-            birth_day =
+            whatsapp_username =
               $7,
 
-            birth_month =
+            birth_day =
               $8,
 
-            birth_year =
+            birth_month =
               $9,
 
-            birth_year_inferred =
+            birth_year =
               $10,
 
+            birth_year_inferred =
+              $11,
+
             manual_contact_fields =
-              $11::jsonb,
+              $12::jsonb,
 
             manual_contact_updated_at =
               NOW(),
 
             updated_at =
+
               NOW()
 
           WHERE id =
@@ -16136,6 +16364,7 @@ async (req, res) => {
           city,
           country,
           language,
+          whatsappUsername,
           birthday.birthDay,
           birthday.birthMonth,
           birthday.birthYear,
@@ -16184,6 +16413,33 @@ async (req, res) => {
             "phone",
           value:
             phone,
+          sourcePlatform:
+            "whatsapp",
+          isPrimary:
+            true
+        });
+      }
+    }
+
+    if (usernameProvided) {
+      await pool.query(
+        `
+          DELETE FROM contact_identifiers
+          WHERE contact_id = $1
+            AND identifier_type = 'whatsapp_username'
+        `,
+        [
+          contactId
+        ]
+      );
+
+      if (whatsappUsername) {
+        await addContactIdentifier({
+          contactId,
+          type:
+            "whatsapp_username",
+          value:
+            whatsappUsername,
           sourcePlatform:
             "whatsapp",
           isPrimary:
@@ -16242,6 +16498,8 @@ async (req, res) => {
           updated.whatsapp_display_name,
         phoneNumber:
           updated.phone_number,
+        whatsappUsername:
+          updated.whatsapp_username,
         city:
           updated.city,
         country:
@@ -16278,6 +16536,7 @@ async (req, res) => {
           error?.statusCode
         )
         ||
+
         500
       )
       .json({
@@ -16288,6 +16547,281 @@ async (req, res) => {
           ||
           "Kontaktdaten konnten nicht gespeichert werden."
       });
+  }
+}
+);
+
+
+
+
+/* ==================================================
+ DASHBOARD PROFIL-JSON IMPORT V1
+ - iPhone-freundliche .json-Datei
+ - Vorschau vor dem Schreiben
+ - Fakten landen als human-confirmed im Frauengehirn
+================================================== */
+
+function normalizeDashboardProfileImport(profile) {
+
+if (!isPlainObject(profile)) {
+  throw dashboardContactError("Die Profil-Datei ist ungültig.");
+}
+
+const schema = normalizeText(profile.schema);
+if (schema !== "marcel-woman-profile-v1") {
+  throw dashboardContactError("Nicht unterstütztes Profil-Dateiformat.");
+}
+
+const contact = isPlainObject(profile.contact) ? profile.contact : {};
+const source = isPlainObject(profile.source) ? profile.source : {};
+const rawFacts = Array.isArray(profile.facts) ? profile.facts : [];
+
+if (!rawFacts.length) {
+  throw dashboardContactError("Die Profil-Datei enthält keine Fakten.");
+}
+
+if (rawFacts.length > 100) {
+  throw dashboardContactError("Die Profil-Datei enthält zu viele Fakten.");
+}
+
+const facts = rawFacts.map((item, index) => {
+  if (!isPlainObject(item)) {
+    throw dashboardContactError(`Fakt ${index + 1} ist ungültig.`);
+  }
+
+  const category = normalizeText(item.category);
+  const key = normalizeText(item.key);
+
+  if (!PROFILE_COLUMNS.includes(category) || !key) {
+    throw dashboardContactError(`Fakt ${index + 1} hat eine ungültige Kategorie oder einen ungültigen Schlüssel.`);
+  }
+
+  const rawValue = item.value;
+  const value = isPlainObject(rawValue)
+    ? rawValue
+    : { value: rawValue ?? null };
+
+  return {
+    category,
+    key,
+    value,
+    importance: clampImportance(item.importance),
+    evidence: normalizeText(item.evidence) || null
+  };
+});
+
+const age = dashboardIntegerOrNull(contact.age, 0, 130);
+if (age === false) {
+  throw dashboardContactError("Das Alter in der Profil-Datei ist ungültig.");
+}
+
+const birthDay = dashboardIntegerOrNull(contact.birthDay, 1, 31);
+const birthMonth = dashboardIntegerOrNull(contact.birthMonth, 1, 12);
+const birthYear = dashboardNormalizeBirthYear(contact.birthYear);
+
+if (birthDay === false || birthMonth === false || birthYear === false) {
+  throw dashboardContactError("Das Geburtsdatum in der Profil-Datei ist ungültig.");
+}
+
+return {
+  schema,
+  contact: {
+    name: normalizeText(contact.name) || null,
+    whatsappUsername: normalizeDashboardWhatsAppUsername(contact.whatsappUsername),
+    city: normalizeDashboardCityValue(contact.city),
+    country: normalizeDashboardCountryValue(contact.country),
+    language: normalizeDashboardLanguageValue(contact.language),
+    age,
+    birthDay,
+    birthMonth,
+    birthYear
+  },
+  source: {
+    platform: normalizeText(source.platform).toLowerCase() || "unknown",
+    capturedAt: normalizeText(source.capturedAt) || null,
+    matchDate: normalizeText(source.matchDate) || null,
+    profileName: normalizeText(source.profileName) || normalizeText(contact.name) || null
+  },
+  facts
+};
+}
+
+function profileImportSnapshotFromFacts(facts) {
+const snapshot = {};
+for (const fact of facts) {
+  if (!snapshot[fact.category]) snapshot[fact.category] = {};
+  if (isPlainObject(fact.value)) {
+    snapshot[fact.category] = mergeProfileObjects(snapshot[fact.category], fact.value);
+  } else {
+    snapshot[fact.category][fact.key] = fact.value;
+  }
+}
+return snapshot;
+}
+
+app.post(
+"/dashboard-api/profile-import",
+async (req, res) => {
+  try {
+    if (!dashboardApiReady(res)) return;
+    if (!dashboardApiAuthorized(req)) {
+      return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+    }
+
+    const contactId = Number(req.body?.contactId);
+    if (!Number.isInteger(contactId) || contactId <= 0) {
+      throw dashboardContactError("Ungültige Kontakt-ID.");
+    }
+
+    const selectedContact = await getContactById(contactId);
+    if (!selectedContact || isTestJid(selectedContact.whatsapp_jid)) {
+      throw dashboardContactError("Kontakt nicht gefunden.", 404);
+    }
+
+    const profile = normalizeDashboardProfileImport(req.body?.profile);
+    const action = normalizeText(req.body?.action).toLowerCase() === "import" ? "import" : "preview";
+
+    const selectedName = selectedContact.canonical_name || selectedContact.display_name || selectedContact.whatsapp_display_name || "Unbekannter Kontakt";
+    const nameWarning = profile.contact.name && normalizeIdentityValue(profile.contact.name) !== normalizeIdentityValue(selectedName)
+      ? `Profilname „${profile.contact.name}“ weicht vom ausgewählten Kontakt „${selectedName}“ ab.`
+      : null;
+
+    const preview = {
+      schema: profile.schema,
+      sourcePlatform: profile.source.platform,
+      sourceProfileName: profile.source.profileName,
+      profileName: profile.contact.name,
+      whatsappUsername: profile.contact.whatsappUsername,
+      age: profile.contact.age,
+      city: profile.contact.city,
+      country: profile.contact.country,
+      language: profile.contact.language,
+      factCount: profile.facts.length,
+      facts: profile.facts,
+      warning: nameWarning
+    };
+
+    if (action !== "import") {
+      return res.json({
+        ok: true,
+        preview: true,
+        contact: { id: selectedContact.id, name: selectedName },
+        profile: preview
+      });
+    }
+
+    if (nameWarning && req.body?.confirmNameMismatch !== true) {
+      return res.status(409).json({
+        ok: false,
+        code: "PROFILE_NAME_MISMATCH",
+        error: `${nameWarning} Bitte die Zuordnung ausdrücklich bestätigen.`,
+        profile: preview
+      });
+    }
+
+    if (profile.contact.whatsappUsername) {
+      const conflict = await pool.query(
+        `SELECT contact_id FROM contact_identifiers WHERE identifier_type='whatsapp_username' AND normalized_value=$1 AND contact_id<>$2 LIMIT 1`,
+        [normalizeIdentityValue(profile.contact.whatsappUsername), contactId]
+      );
+      if (conflict.rows[0]) {
+        throw dashboardContactError("Dieser WhatsApp-Username ist bereits einem anderen Kontakt zugeordnet.", 409);
+      }
+    }
+
+    const currentManual = isPlainObject(selectedContact.manual_contact_fields) ? selectedContact.manual_contact_fields : {};
+    const manualFields = {
+      ...currentManual,
+      ...(profile.contact.whatsappUsername ? { whatsapp_username: true } : {}),
+      ...(profile.contact.city ? { city: true } : {}),
+      ...(profile.contact.country ? { country: true } : {}),
+      ...(profile.contact.language ? { primary_language: true } : {})
+    };
+
+    await pool.query(
+      `UPDATE contacts SET
+         whatsapp_username=COALESCE($2,whatsapp_username),
+         city=COALESCE($3,city),
+         country=COALESCE($4,country),
+         primary_language=COALESCE($5,primary_language),
+         source_platform=CASE WHEN $6<>'' THEN $6 ELSE source_platform END,
+         source_profile_name=COALESCE($7,source_profile_name),
+         manual_contact_fields=$8::jsonb,
+         manual_contact_updated_at=NOW(),
+         updated_at=NOW()
+       WHERE id=$1`,
+      [
+        contactId,
+        profile.contact.whatsappUsername,
+        profile.contact.city,
+        profile.contact.country,
+        profile.contact.language,
+        profile.source.platform,
+        profile.source.profileName,
+        JSON.stringify(manualFields)
+      ]
+    );
+
+    if (profile.contact.whatsappUsername) {
+      await pool.query(`DELETE FROM contact_identifiers WHERE contact_id=$1 AND identifier_type='whatsapp_username'`, [contactId]);
+      await addContactIdentifier({
+        contactId,
+        type: "whatsapp_username",
+        value: profile.contact.whatsappUsername,
+        sourcePlatform: "whatsapp",
+        isPrimary: true
+      });
+    }
+
+    const birthday = (profile.contact.birthDay || profile.contact.birthMonth || profile.contact.birthYear || profile.contact.age != null)
+      ? dashboardContactBirthInput({
+          birthDay: profile.contact.birthDay,
+          birthMonth: profile.contact.birthMonth,
+          birthYear: profile.contact.birthYear,
+          age: profile.contact.age
+        }, {})
+      : null;
+
+    await applyDashboardContactHumanFacts({
+      contactId,
+      city: profile.contact.city,
+      country: profile.contact.country,
+      language: profile.contact.language,
+      birthday,
+      age: birthday ? birthday.age : profile.contact.age
+    });
+
+    const sourceLabel = profile.source.platform || "Profil";
+    for (const fact of profile.facts) {
+      const note = `Von Marcel per Profil-JSON importiert (${sourceLabel}).${fact.evidence ? ` Quelle: ${fact.evidence}` : ""}`;
+      await upsertDashboardVerifiedContactMemory({
+        contactId,
+        category: fact.category,
+        memoryKey: fact.key,
+        memoryValue: fact.value,
+        importance: fact.importance,
+        note
+      });
+    }
+
+    const snapshot = profileImportSnapshotFromFacts(profile.facts);
+    if (Object.keys(snapshot).length) {
+      await applyProfileSnapshot(contactId, snapshot, { humanSeed: true });
+    }
+
+    return res.json({
+      ok: true,
+      imported: true,
+      contact: { id: contactId, name: selectedName },
+      profile: preview,
+      message: `${profile.facts.length} Profil-Fakten wurden als bestätigtes Frauen-Memory gespeichert.`
+    });
+  } catch (error) {
+    console.error("Dashboard Profil-JSON Import Fehler:", error);
+    return res.status(Number(error?.statusCode) || 500).json({
+      ok: false,
+      error: error?.message || "Profil-Datei konnte nicht importiert werden."
+    });
   }
 }
 );
@@ -16431,6 +16965,7 @@ async (req, res) => {
 
     const liveStateDisplaySource = {
       current_country:
+
         liveState?.current_country,
       current_city:
         liveState?.current_city,
@@ -16581,6 +17116,7 @@ const response =
     instructions: `
 Du aktualisierst EINEN bereits vorhandenen Fakt in Marcels internem Bot-Memory.
 
+
 WICHTIG:
 - Marcel gibt die Korrektur auf Deutsch ein.
 - Das interne Memory bleibt Englisch und verwendet bei Objekten stabile englische snake_case Keys.
@@ -16728,6 +17264,7 @@ async (req, res) => {
     }
 
     const initialResult =
+
       await pool.query(
         `
           SELECT
@@ -16881,6 +17418,7 @@ async (req, res) => {
         const error =
           new Error(
             "Dieser Fakt wurde inzwischen verändert. Bitte Marcel Brain neu laden und die Korrektur erneut prüfen."
+
           );
         error.statusCode = 409;
         throw error;
@@ -17025,6 +17563,7 @@ async (req, res) => {
 
       try {
         await client.query(
+
           "ROLLBACK"
         );
       } catch {}
@@ -17200,7 +17739,6 @@ async (req, res) => {
         error:
           "KI-Übersetzung konnte nicht erstellt werden."
       });
-
   }
 
 }
@@ -17231,6 +17769,7 @@ async (req, res) => {
 
 
     if (
+
       !dashboardApiAuthorized(
         req
       )
@@ -17432,6 +17971,7 @@ async (req, res) => {
               "active",
               "open"
             ].includes(
+
               event.event_status
             )
         ).length
@@ -17448,7 +17988,6 @@ async (req, res) => {
 
           category:
             item.category,
-
           key:
             item.memory_key,
 
@@ -17596,6 +18135,7 @@ async (req, res) => {
     const normalizedEvents =
       events.map(
         event => ({
+
 
           id:
             event.id,
@@ -17748,6 +18288,7 @@ async (req, res) => {
             item.value
         })
       ),
+
       ...normalizedHistoricalItems.map(
         item => ({
           contextHint:
@@ -17876,6 +18417,9 @@ async (req, res) => {
         phoneNumber:
           contact.phone_number,
 
+        whatsappUsername:
+          contact.whatsapp_username,
+
         name:
           contact.canonical_name
           ||
@@ -17898,6 +18442,7 @@ async (req, res) => {
           translatedContactDisplay.city
           ??
           contact.city,
+
 
         originalCity:
           contact.city,
@@ -18064,6 +18609,7 @@ async (req, res) => {
           false,
 
         error:
+
           "Dashboard-Kontakt konnte nicht geladen werden."
 
       });
@@ -18191,7 +18737,7 @@ async (req, res) => {
 
             (
               SELECT COUNT(*)
-              FROM contacts
+              FROM contacts 
               WHERE memory_identity_key
                 IS NOT NULL
             )
@@ -18270,6 +18816,7 @@ app.get(
 
 }
 );
+
 
 
 /* ==================================================
@@ -18441,7 +18988,6 @@ font-size:13px;
 
 <body>
 
-
 <h1>
 Marcel Memory Test V1.7.2
 </h1>
@@ -18557,6 +19103,7 @@ const loadContactsButton =
 
 
 const contactsSelect =
+
   document.getElementById(
     "contactsSelect"
   );
@@ -18689,7 +19236,7 @@ async function apiRequest(
       await fetch(
         url,
         options
-      );
+      ); 
 
   }catch(error){
 
@@ -18803,6 +19350,7 @@ function renderChat(
             )
             +
             (
+
               item.is_edited
                 ? " · bearbeitet"
                 : ""
@@ -18938,7 +19486,7 @@ async function loadContacts(
 
 
     for(
-      const contact
+      const contact 
       of data.contacts || []
     ){
 
@@ -19025,6 +19573,7 @@ async function loadContacts(
     setStatus(
       globalStatus,
       String(
+
         data.contacts?.length || 0
       )
       +
@@ -19274,6 +19823,7 @@ async function loadSnapshot(){
     outputBox.textContent =
       "FEHLER:\\n"
       +
+
       error.message;
 
   }
@@ -19436,7 +19986,6 @@ async function sendTestMessage(){
 
 
   }finally{
-
     sendMessageButton.disabled =
       false;
 
@@ -19536,6 +20085,7 @@ async (req, res) => {
     if (
       !personaPasswordCorrect(
         req.body.password
+
       )
     ) {
 
@@ -19775,6 +20325,7 @@ async (req, res) => {
   } catch (error) {
 
     console.error(
+
       "Snapshot Fehler:",
       error
     );
@@ -20000,6 +20551,7 @@ async (req, res) => {
           error:
             "OpenAI hat keine Antwort erzeugt."
 
+
         });
 
     }
@@ -20183,7 +20735,6 @@ if (duplicate) {
           "duplicate_reply"
       }
     );
-
   }
 
 
@@ -20262,6 +20813,7 @@ scheduleMemoryUpdate({
     incoming.id,
    outgoingText:
     reply,
+
 
   outgoingMessageDbId:
     outgoing.id
@@ -20531,6 +21083,7 @@ sock.ev.on(
       !pairingCode
     ) {
 
+
       const phone =
         process.env
           .WHATSAPP_PHONE_NUMBER;
@@ -20650,3 +21203,4 @@ async () => {
 
 }
 );
+ 

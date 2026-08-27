@@ -357,7 +357,7 @@ Bei Block akzeptieren.
 Keine Zustimmung erfinden.
 
 
-==================================================
+================================================== 
 GELD
 ==================================================
 
@@ -477,7 +477,7 @@ Paola Maza
 
 Karla Tinder
 !=
-Karla Instagram 
+Karla Instagram
 
 
 ==================================================
@@ -637,7 +637,7 @@ if (
   firstBrace !== -1
   &&
   lastBrace > firstBrace
-) { 
+) {
 
   try {
 
@@ -717,7 +717,7 @@ return (
   &&
   jid.endsWith(
     "@persona.test"
-  )
+  ) 
 );
 
 }
@@ -797,7 +797,7 @@ maxLength = 100
 ) {
 
 if (
-  !Array.isArray( 
+  !Array.isArray(
     values
   )
 ) {
@@ -897,7 +897,6 @@ const incoming =
   isPlainObject(
     incomingValue
   )
-
     ? incomingValue
 
     : {};
@@ -1117,7 +1116,7 @@ let germanScore = 0;
 let englishScore = 0;
 
 
-if (/[¿¡]/.test(text)) { 
+if (/[¿¡]/.test(text)) {
   spanishScore += 4;
 }
 
@@ -1437,7 +1436,7 @@ while (stack.length) {
 
 
   if (
-    Array.isArray(
+    Array.isArray( 
       current
     )
   ) {
@@ -1757,7 +1756,7 @@ return "en";
 
 const WOMEN_SEED = [
 
-{ 
+{
   identityKey:
     "zay_20_medellin",
 
@@ -1797,7 +1796,6 @@ const WOMEN_SEED = [
       ]
 
     },
-
     family: {
 
       lives_with_brother_in_medellin:
@@ -1977,7 +1975,6 @@ const WOMEN_SEED = [
         "Kino",
 
         "gutes Essen",
-
         "gute Gespräche",
 
         "Filme",
@@ -2157,7 +2154,6 @@ const WOMEN_SEED = [
 
       likes_motorcycles:
         true,
-
       loves_animals:
         true,
 
@@ -2237,7 +2233,7 @@ const WOMEN_SEED = [
       extroverted:
         true,
 
-      serious_side: 
+      serious_side:
         true,
 
       sin_prisa:
@@ -2397,6 +2393,7 @@ const WOMEN_SEED = [
 
       sent_kiss_photo:
         true,
+
       whatsapp_for_photos:
         true
 
@@ -2516,7 +2513,7 @@ const WOMEN_SEED = [
         false
 
     },
-
+ 
     financial_context: {
 
       gifts_money_strong_theme:
@@ -3196,6 +3193,7 @@ const WOMEN_SEED = [
 
 },
 
+
 {
   identityKey:
     "stephanie_peace",
@@ -3354,7 +3352,7 @@ const WOMEN_SEED = [
 
       wants_to_feel_again:
         true,
- 
+
       misses_affection:
         true,
 
@@ -3594,7 +3592,7 @@ const WOMEN_SEED = [
     }
 
   }
-
+ 
 },
 
 
@@ -3674,6 +3672,7 @@ const WOMEN_SEED = [
 {
   identityKey:
     "niuber_save_pool",
+
   canonicalName:
     "Niuber",
 
@@ -3833,6 +3832,7 @@ const WOMEN_SEED = [
 
       asked_how_marcel_is:
         true
+
     },
 
     running_gags: {
@@ -3952,7 +3952,7 @@ const WOMEN_SEED = [
 
   }
 
-},
+}, 
 
 
 {
@@ -4132,7 +4132,7 @@ const WOMEN_SEED = [
 
       time_and_interest_show_direction:
         true
-
+ 
     },
 
     stress_support_style: {
@@ -4152,7 +4152,7 @@ const WOMEN_SEED = [
 
     },
 
-    running_gags: { 
+    running_gags: {
 
       hugs_looks_kisses_common_language:
         true
@@ -4312,7 +4312,7 @@ const WOMEN_SEED = [
       medellin_about_years:
         8
 
-    }, 
+    },
 
     family: {
 
@@ -4472,7 +4472,7 @@ const WOMEN_SEED = [
       ]
 
     },
- 
+
     meaningful_details: {
 
       birthday_day_of_first_chat:
@@ -4492,7 +4492,7 @@ const WOMEN_SEED = [
 
   }
 
-},
+}, 
 
 
 {
@@ -4672,7 +4672,7 @@ const WOMEN_SEED = [
 
       active_only_after_actual_message:
         true
-
+ 
     }
 
   }
@@ -4792,7 +4792,7 @@ const WOMEN_SEED = [
 
 async function initDatabase() {
 
-await pool.query(` 
+await pool.query(`
   CREATE TABLE IF NOT EXISTS contacts (
     id SERIAL PRIMARY KEY,
     whatsapp_jid TEXT UNIQUE NOT NULL,
@@ -5032,7 +5032,7 @@ await pool.query(`
       .map(
         column =>
           `${column} JSONB DEFAULT '{}'::jsonb`
-      )
+      ) 
       .join(",")},
 
     profile_version INTEGER
@@ -5112,7 +5112,7 @@ await pool.query(`
       DEFAULT NOW(),
 
     updated_at TIMESTAMPTZ
-      DEFAULT NOW() 
+      DEFAULT NOW()
 
   )
 `);
@@ -5272,7 +5272,7 @@ await pool.query(`
       DEFAULT NOW()
 
   )
-`); 
+`);
 
 
 await pool.query(`
@@ -5323,6 +5323,61 @@ await pool.query(`
 
 
 await pool.query(`
+  ALTER TABLE marcel_memory
+
+    ADD COLUMN IF NOT EXISTS human_review_action TEXT,
+
+    ADD COLUMN IF NOT EXISTS human_review_note TEXT,
+
+    ADD COLUMN IF NOT EXISTS human_reviewed_at TIMESTAMPTZ
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS marcel_memory_review_log (
+
+    id BIGSERIAL PRIMARY KEY,
+
+    memory_id BIGINT
+      REFERENCES marcel_memory(id)
+      ON DELETE SET NULL,
+
+    memory_key TEXT NOT NULL,
+
+    action TEXT NOT NULL,
+
+    old_value JSONB,
+
+    new_value JSONB,
+
+    old_status TEXT,
+
+    new_status TEXT,
+
+    correction_de TEXT,
+
+    reviewed_by TEXT
+      DEFAULT 'marcel_dashboard',
+
+    reviewed_at TIMESTAMPTZ
+      DEFAULT NOW()
+
+  )
+`);
+
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS
+  idx_marcel_memory_review_log_memory
+
+  ON marcel_memory_review_log (
+    memory_id,
+    reviewed_at DESC
+  )
+`);
+
+
+await pool.query(`
   CREATE TABLE IF NOT EXISTS marcel_live_state (
 
     id INTEGER PRIMARY KEY
@@ -5337,7 +5392,7 @@ await pool.query(`
 
     current_timezone TEXT,
 
-    location_status TEXT
+    location_status TEXT 
       DEFAULT 'living',
 
     location_verified_at TIMESTAMPTZ
@@ -5432,7 +5487,7 @@ await pool.query(`
   ON CONFLICT (
     id
   )
- 
+
   DO NOTHING
 `);
 
@@ -5887,6 +5942,9 @@ for (
 
         updated_at =
           NOW()
+
+      WHERE marcel_memory.human_reviewed_at
+        IS NULL
     `,
     [
       category,
@@ -6054,7 +6112,7 @@ if (
   );
 
 } else {
-
+ 
   await pool.query(
     `
       INSERT INTO contact_identifiers (
@@ -6072,6 +6130,7 @@ if (
         is_primary,
 
         human_verified
+
       )
 
       VALUES (
@@ -6233,7 +6292,6 @@ if (
 
 }
 
-
 if (!contact) {
 
   const result =
@@ -6391,7 +6449,7 @@ if (!contact) {
 
           source_platform =
             COALESCE(
-              source_platform, 
+              source_platform,
               $7
             ),
 
@@ -6550,6 +6608,7 @@ if (phone) {
   });
 
 }
+
 
 if (
   woman.whatsappDisplayName
@@ -6710,6 +6769,7 @@ if (
         $1,
 
         $2,
+
         $3,
 
         $4::jsonb,
@@ -6869,6 +6929,7 @@ const values =
 
       }
 
+
       return JSON.stringify(
         incoming
       );
@@ -6950,7 +7011,6 @@ for (
         true
     }
   );
-
 
   for (
     const key
@@ -7130,7 +7190,7 @@ if (contact) {
 
 
     if (
-      conflict.rows[0]
+      conflict.rows[0] 
     ) {
 
       throw new Error(
@@ -7490,7 +7550,6 @@ return (
 
 }
 
-
 async function getContactById(
 contactId
 ) {
@@ -7508,7 +7567,7 @@ const result =
       LIMIT 1
     `,
     [
-      contactId 
+      contactId
     ]
   );
 
@@ -7668,8 +7727,8 @@ await pool.query(
   ]
 );
 
-return result.rows[0];
 
+return result.rows[0];
 }
 
 
@@ -7848,7 +7907,6 @@ return (
 );
 
 }
-
 
 async function detectImmediateDuplicate(
 jid,
@@ -8029,7 +8087,6 @@ const result =
 
         AND direction =
           'incoming'
-
       RETURNING *
     `,
     [
@@ -8626,6 +8683,7 @@ ${batch
   }
 
 }
+
 
 return {
   translated:
@@ -9586,6 +9644,7 @@ const result =
           valid_until IS NULL
           OR valid_until > NOW()
         )
+
       ORDER BY
         importance DESC,
         updated_at DESC
@@ -9647,7 +9706,7 @@ const profileData =
 
     ? Object.fromEntries(
         PROFILE_COLUMNS.map(
-          column => [
+          column => [ 
             column,
             profile[column] || {}
           ]
@@ -9745,6 +9804,7 @@ id:
 
 memory_identity_key:
   contact?.memory_identity_key,
+
 canonical_name:
   contact?.canonical_name,
 
@@ -9904,6 +9964,7 @@ let resolvedLanguage = null;
 
 
 if (jid) {
+
   const contact =
     (
       await getContactByJid(
@@ -10005,7 +10066,7 @@ const languageInstruction =
     : "";
 
 
-const response =
+const response = 
   await openai.responses.create({
 
     model:
@@ -10185,7 +10246,6 @@ return (
 /* ==================================================
  MEMORY RETIRE
 ================================================== */
-
 async function retireMemoryItems(
 contactId,
 ids
@@ -10223,7 +10283,7 @@ await pool.query(
       $1
 
       AND id =
-        ANY( 
+        ANY(
           $2::bigint[]
         )
 
@@ -10383,6 +10443,7 @@ const newSignal =
     item?.category,
 
     item?.memory_key,
+
     item?.memory_value
 
   );
@@ -10544,7 +10605,7 @@ await pool.query(
 
     )
   `,
-  [
+  [ 
     contactId,
 
     JSON.stringify({
@@ -10702,6 +10763,7 @@ for (
       existing.human_review_status
     )
   ) {
+
     continue;
 
   }
@@ -10861,6 +10923,7 @@ for (
           item.valid_until_hours
         );
 
+
   await pool.query(
     `
       INSERT INTO memory_items (
@@ -10902,7 +10965,6 @@ for (
         $3,
 
         $4::jsonb,
-
         $5,
 
         $6,
@@ -11020,6 +11082,7 @@ for (
         event_subtype,
 
         title,
+
         event_data,
 
         event_status,
@@ -11179,6 +11242,7 @@ const [
     getContactMemoryProfile(
       contactId
     ),
+
     getRelevantMemoryItems(
       contactId,
       100
@@ -11440,7 +11504,6 @@ console.log(
 /* ==================================================
  MEMORY UPDATE ASYNCHRON
 ================================================== */
-
 function scheduleMemoryUpdate(
 payload
 ) {
@@ -11800,7 +11863,7 @@ if (Array.isArray(value)) {
     collectDashboardTranslationLeaves(
       item,
       `${contextHint}[]`,
-      target
+      target 
     );
   }
 
@@ -12700,7 +12763,6 @@ async (req, res) => {
             c.country,
 
             c.city,
-
             c.timezone,
 
             c.primary_language,
@@ -12938,7 +13000,7 @@ async (req, res) => {
             dateLock:
               contact.date_lock_enabled
               ===
-              true, 
+              true,
 
             manualReviewRequired:
               contact.manual_review_required
@@ -13060,7 +13122,7 @@ async (req, res) => {
       .status(500)
       .json({
 
-        ok:
+        ok: 
           false,
 
         error:
@@ -13098,7 +13160,7 @@ async (req, res) => {
 
     if (
       !dashboardApiAuthorized(
-        req 
+        req
       )
     ) {
 
@@ -13132,6 +13194,9 @@ async (req, res) => {
               sensitivity,
               source_type,
               human_verified,
+              human_review_action,
+              human_review_note,
+              human_reviewed_at,
               valid_from,
               valid_until,
               allowed_for_bot,
@@ -13183,6 +13248,12 @@ async (req, res) => {
             item.human_verified
             ===
             true,
+          humanReviewAction:
+            item.human_review_action,
+          humanReviewNote:
+            item.human_review_note,
+          humanReviewedAt:
+            item.human_reviewed_at,
           validFrom:
             item.valid_from,
           validUntil:
@@ -13258,6 +13329,7 @@ async (req, res) => {
       ...translatedLiveStateFields
     };
 
+
     const translatedItems =
       items.map(
         (item, index) => ({
@@ -13317,6 +13389,537 @@ async (req, res) => {
 
   }
 
+}
+);
+
+
+/* ==================================================
+ MARCEL BRAIN REVIEW / HUMAN-IN-THE-LOOP
+ - bestaetigen
+ - ablehnen
+ - auf Deutsch korrigieren, intern Englisch speichern
+================================================== */
+
+async function normalizeMarcelReviewCorrectionToEnglish({
+currentValue,
+correctionDe,
+memoryKey,
+category
+}) {
+
+const correction =
+  normalizeText(
+    correctionDe
+  );
+
+if (!correction) {
+  throw new Error(
+    "Bitte die Korrektur eingeben."
+  );
+}
+
+const response =
+  await openai.responses.create({
+    model:
+      MODEL,
+    instructions: `
+Du aktualisierst EINEN bereits vorhandenen Fakt in Marcels internem Bot-Memory.
+
+WICHTIG:
+- Marcel gibt die Korrektur auf Deutsch ein.
+- Das interne Memory bleibt Englisch und verwendet bei Objekten stabile englische snake_case Keys.
+- Aendere nur das, was Marcels Korrektur tatsaechlich korrigiert oder praezisiert.
+- Teile des bisherigen Memory-Werts, denen Marcel nicht widerspricht, bleiben erhalten.
+- Keine Fakten erfinden, ergaenzen oder interpretieren.
+- Namen, Eigennamen, Zahlen, Daten, Handles und Telefonnummern korrekt erhalten.
+- Der JSON-Grundtyp des neuen memory_value MUSS gleich bleiben:
+ Objekt bleibt Objekt, Array bleibt Array, String bleibt String, Zahl bleibt Zahl, Boolean bleibt Boolean.
+- Bei Objekten englische snake_case Keys verwenden.
+- String-Inhalte fuer das interne Bot-Memory natuerlich auf Englisch formulieren.
+- Wenn der komplette Fakt falsch ist, ist dafuer die separate Ablehnen-Funktion zustaendig; hier nur korrigieren.
+
+Antworte ausschliesslich mit gueltigem JSON:
+{"memory_value": <vollstaendig korrigierter Memory-Wert>}
+`,
+    input:
+      JSON.stringify({
+        category:
+          category || null,
+        memory_key:
+          memoryKey || null,
+        current_memory_value:
+          currentValue,
+        correction_de:
+          correction
+      })
+  });
+
+const parsed =
+  safeJsonParse(
+    response.output_text,
+    null
+  );
+
+if (
+  !parsed
+  ||
+  !Object.prototype.hasOwnProperty.call(
+    parsed,
+    "memory_value"
+  )
+) {
+  throw new Error(
+    "Die Korrektur konnte nicht sicher in das interne Memory übertragen werden."
+  );
+}
+
+const nextValue =
+  parsed.memory_value;
+
+if (
+  !dashboardJsonTypeMatches(
+    currentValue,
+    nextValue
+  )
+) {
+  throw new Error(
+    "Die Korrektur hat eine unerwartete Datenstruktur erzeugt und wurde deshalb nicht gespeichert."
+  );
+}
+
+return nextValue;
+}
+
+
+app.post(
+"/dashboard-api/marcel-brain",
+async (req, res) => {
+
+  try {
+
+    if (
+      !dashboardApiReady(
+        res
+      )
+    ) {
+      return;
+    }
+
+    if (
+      !dashboardApiAuthorized(
+        req
+      )
+    ) {
+      return res
+        .status(401)
+        .json({
+          ok:
+            false,
+          error:
+            "Nicht autorisiert."
+        });
+    }
+
+    const memoryId =
+      Number(
+        req.body?.memoryId
+      );
+
+    const action =
+      normalizeText(
+        req.body?.action
+      )
+      .toLowerCase();
+
+    const correctionDe =
+      normalizeText(
+        req.body?.correctionDe
+      );
+
+    if (
+      !Number.isInteger(
+        memoryId
+      )
+      ||
+      memoryId <= 0
+    ) {
+      return res
+        .status(400)
+        .json({
+          ok:
+            false,
+          error:
+            "Ungültige Marcel-Memory-ID."
+        });
+    }
+
+    if (
+      ![
+        "confirm",
+        "reject",
+        "correct"
+      ].includes(
+        action
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          ok:
+            false,
+          error:
+            "Unbekannte Review-Aktion."
+        });
+    }
+
+    const initialResult =
+      await pool.query(
+        `
+          SELECT
+            id,
+            category,
+            memory_key,
+            memory_value,
+            status,
+            importance,
+            human_verified,
+            allowed_for_bot,
+            valid_until
+          FROM marcel_memory
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [
+          memoryId
+        ]
+      );
+
+    const initial =
+      initialResult.rows[0];
+
+    if (!initial) {
+      return res
+        .status(404)
+        .json({
+          ok:
+            false,
+          error:
+            "Marcel-Memory nicht gefunden."
+        });
+    }
+
+    if (
+      initial.status
+      !==
+      "active"
+    ) {
+      return res
+        .status(409)
+        .json({
+          ok:
+            false,
+          error:
+            "Dieser Fakt ist nicht mehr aktiv. Bitte Marcel Brain neu laden."
+        });
+    }
+
+    let correctedValue =
+      null;
+
+    if (
+      action
+      ===
+      "correct"
+    ) {
+
+      if (!correctionDe) {
+        return res
+          .status(400)
+          .json({
+            ok:
+              false,
+            error:
+              "Bitte die richtige Information eingeben."
+          });
+      }
+
+      correctedValue =
+        await normalizeMarcelReviewCorrectionToEnglish({
+          currentValue:
+            initial.memory_value,
+          correctionDe,
+          memoryKey:
+            initial.memory_key,
+          category:
+            initial.category
+        });
+    }
+
+    const client =
+      await pool.connect();
+
+    try {
+
+      await client.query(
+        "BEGIN"
+      );
+
+      const lockedResult =
+        await client.query(
+          `
+            SELECT
+              id,
+              category,
+              memory_key,
+              memory_value,
+              status,
+              importance,
+              human_verified,
+              allowed_for_bot,
+              valid_until
+            FROM marcel_memory
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [
+            memoryId
+          ]
+        );
+
+      const current =
+        lockedResult.rows[0];
+
+      if (!current) {
+        const error =
+          new Error(
+            "Marcel-Memory nicht gefunden."
+          );
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (
+        current.status
+        !==
+        "active"
+      ) {
+        const error =
+          new Error(
+            "Dieser Fakt wurde inzwischen verändert. Bitte Marcel Brain neu laden."
+          );
+        error.statusCode = 409;
+        throw error;
+      }
+
+      if (
+        action
+        ===
+        "correct"
+        &&
+        renderJson(
+          current.memory_value
+        )
+        !==
+        renderJson(
+          initial.memory_value
+        )
+      ) {
+        const error =
+          new Error(
+            "Dieser Fakt wurde inzwischen verändert. Bitte Marcel Brain neu laden und die Korrektur erneut prüfen."
+          );
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const oldValue =
+        current.memory_value;
+
+      const oldStatus =
+        current.status;
+
+      let newValue =
+        oldValue;
+
+      let newStatus =
+        oldStatus;
+
+      if (
+        action
+        ===
+        "confirm"
+      ) {
+
+        await client.query(
+          `
+            UPDATE marcel_memory
+            SET
+              human_verified = TRUE,
+              allowed_for_bot = TRUE,
+              human_review_action = 'confirmed',
+              human_review_note = NULL,
+              human_reviewed_at = NOW(),
+              updated_at = NOW()
+            WHERE id = $1
+          `,
+          [
+            memoryId
+          ]
+        );
+
+      } else if (
+        action
+        ===
+        "reject"
+      ) {
+
+        newStatus =
+          "rejected";
+
+        await client.query(
+          `
+            UPDATE marcel_memory
+            SET
+              status = 'rejected',
+              human_verified = TRUE,
+              allowed_for_bot = FALSE,
+              valid_until = NOW(),
+              human_review_action = 'rejected',
+              human_review_note = 'Von Marcel im Dashboard als falsch markiert.',
+              human_reviewed_at = NOW(),
+              updated_at = NOW()
+            WHERE id = $1
+          `,
+          [
+            memoryId
+          ]
+        );
+
+      } else {
+
+        newValue =
+          correctedValue;
+
+        await client.query(
+          `
+            UPDATE marcel_memory
+            SET
+              memory_value = $2::jsonb,
+              human_verified = TRUE,
+              allowed_for_bot = TRUE,
+              human_review_action = 'corrected',
+              human_review_note = $3,
+              human_reviewed_at = NOW(),
+              updated_at = NOW()
+            WHERE id = $1
+          `,
+          [
+            memoryId,
+            JSON.stringify(
+              correctedValue
+            ),
+            correctionDe
+          ]
+        );
+      }
+
+      await client.query(
+        `
+          INSERT INTO marcel_memory_review_log (
+            memory_id,
+            memory_key,
+            action,
+            old_value,
+            new_value,
+            old_status,
+            new_status,
+            correction_de,
+            reviewed_by
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4::jsonb,
+            $5::jsonb,
+            $6,
+            $7,
+            $8,
+            'marcel_dashboard'
+          )
+        `,
+        [
+          memoryId,
+          current.memory_key,
+          action,
+          JSON.stringify(
+            oldValue
+          ),
+          JSON.stringify(
+            newValue
+          ),
+          oldStatus,
+          newStatus,
+          correctionDe || null
+        ]
+      );
+
+      await client.query(
+        "COMMIT"
+      );
+
+    } catch (error) {
+
+      try {
+        await client.query(
+          "ROLLBACK"
+        );
+      } catch {}
+
+      throw error;
+
+    } finally {
+
+      client.release();
+    }
+
+    return res.json({
+      ok:
+        true,
+      memoryId,
+      action,
+      message:
+        action === "confirm"
+        ? "Fakt bestätigt."
+        : action === "reject"
+        ? "Fakt als falsch markiert und für den Bot deaktiviert."
+        : "Korrektur gespeichert und als menschlich bestätigt markiert."
+    });
+
+  } catch (error) {
+
+    console.error(
+      "Marcel Brain Review Fehler:",
+      error
+    );
+
+    return res
+      .status(
+        Number(
+          error?.statusCode
+        )
+        ||
+        500
+      )
+      .json({
+        ok:
+          false,
+        error:
+          error?.message
+          ||
+          "Marcel Brain konnte nicht aktualisiert werden."
+      });
+  }
 }
 );
 
@@ -13418,7 +14021,6 @@ async (req, res) => {
         contact.whatsapp_jid,
         200
       );
-
 
     return res.json({
       ok:
@@ -14057,7 +14659,7 @@ async (req, res) => {
 
     const translatedEvents =
       normalizedEvents.map(
-        (event, index) => { 
+        (event, index) => {
 
           const translatedText =
             translatedEventTexts[index]
@@ -14377,7 +14979,7 @@ async (req, res) => {
               FROM messages
             )
             AS messages,
- 
+
             (
               SELECT COUNT(*)
               FROM memory_items
@@ -14697,7 +15299,7 @@ id="newContactNameInput"
 type="text"
 placeholder="Neue Testfrau"
 autocomplete="off"
-> 
+>
 
 
 <button
@@ -14857,7 +15459,7 @@ function setStatus(
 }
 
 
-function escapeHtml(value){ 
+function escapeHtml(value){
 
   return String(
     value ?? ""
@@ -15017,7 +15619,7 @@ function renderChat(
               item.is_edited
                 ? " · bearbeitet"
                 : ""
-            ) 
+            )
             +
             '</div>'
             +
@@ -15039,7 +15641,6 @@ function renderSnapshot(
   data,
   extra = {}
 ){
-
   renderChat(
     data?.history || []
   );
@@ -15218,7 +15819,6 @@ async function loadContacts(
             ===
             keepJid
         );
-
 
       if(
         exists
@@ -15399,7 +15999,6 @@ async function createNewTestContact(){
       error
     );
 
-
     setStatus(
       createStatus,
       error.message,
@@ -15497,7 +16096,7 @@ async function loadSnapshot(){
 
 async function sendTestMessage(){
 
-  const jid = 
+  const jid =
     String(
       contactsSelect.value
       ||
@@ -15579,7 +16178,6 @@ async function sendTestMessage(){
       await apiRequest(
         "/persona-test/message",
         {
-
           method:
             "POST",
 
@@ -15817,7 +16415,7 @@ async (req, res) => {
 
     if (
       !personaPasswordCorrect(
-        req.body.password 
+        req.body.password
       )
     ) {
 
@@ -15939,7 +16537,7 @@ async (req, res) => {
 
     }
 
-
+ 
     const jid =
       normalizeText(
         req.body.jid
@@ -16137,7 +16735,7 @@ async (req, res) => {
           contact,
           jid,
           text
-        ); 
+        );
 
 
       const reply =
@@ -16297,7 +16895,7 @@ async (req, res) => {
 
 }
 );
- 
+
 
 /* ==================================================
  WHATSAPP INCOMING HANDLER
@@ -16457,7 +17055,7 @@ await sock.sendMessage(
       reply
   }
 );
- 
+
 
 const outgoing =
   await saveMessage(
@@ -16479,7 +17077,6 @@ scheduleMemoryUpdate({
 
   incomingMessageDbId:
     incoming.id,
-
   outgoingText:
     reply,
 
@@ -16617,7 +17214,7 @@ const {
 const {
   version
 } =
-  await fetchLatestBaileysVersion(); 
+  await fetchLatestBaileysVersion();
 
 
 sock =
@@ -16777,7 +17374,7 @@ sock.ev.on(
 
 
         } catch (error) {
- 
+
           console.error(
             "Pairing-Code Fehler:",
             error
@@ -16872,3 +17469,4 @@ async () => {
 
 }
 );
+ 

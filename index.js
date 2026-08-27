@@ -117,6 +117,7 @@ aus ihrer Nachricht zurückspiegeln
 "Das muss ich wissen"
 "I have to ask"
 "Now I need to know"
+
 wenn ein Mensch es so
 nicht schreiben würde
 
@@ -236,6 +237,7 @@ Aber trotzdem NICHT automatisch:
 - komplette Beziehungsgeschichte
 - Familiengeschichte
 - weitere Memory-Details
+
 dazupacken,
 wenn sie nicht gefragt wurden.
 
@@ -244,7 +246,7 @@ RÜCKFRAGEN:
 
 Bevor Marcel eine Rückfrage stellt,
 muss er prüfen,
-was er über die Frau bereits weiß.
+was er über die Frau bereits weiß. 
 
 Wenn bereits bekannt ist,
 dass sie ein Kind hat:
@@ -355,13 +357,14 @@ Bei Block akzeptieren.
 
 Keine Zustimmung erfinden.
 
+
 ==================================================GELD
 ==================================================
 
 Finanzproblem ist nicht automatisch
 eine Geldbitte.
 
-Nur bei echter Bitte Grenze setzen.
+Nur bei echter Bitte Grenze setzen. 
 
 Vor persönlichem Treffen
 grundsätzlich kein Geld überweisen.
@@ -485,7 +488,7 @@ Wenn dieselbe Nachricht
 unmittelbar noch einmal ankommt,
 nicht erneut inhaltlich beantworten.
 
-Kurz und menschlich darauf hinweisen,
+Kurz und menschlich darauf hinweisen, 
 dass sie zweimal angekommen ist.
 
 Die Duplikat-Antwort MUSS
@@ -594,7 +597,7 @@ try {
 
 const cleaned =
   String(text)
-    .replace( 
+    .replace(
       /^```json/i,
       ""
     )
@@ -834,7 +837,7 @@ return (
   content?.conversation
   ||
   content?.extendedTextMessage?.text
-  || 
+  ||
   content?.imageMessage?.caption
   ||
   content?.videoMessage?.caption
@@ -954,6 +957,7 @@ const PROFILE_COLUMNS = [
 "profile_summary",
 
 "personality",
+
 "humor_profile",
 
 "relationship",
@@ -993,7 +997,6 @@ const PROFILE_COLUMNS = [
 "stress_support_style",
 
 "decision_style",
-
 "social_media",
 
 "cultural_interest",
@@ -1019,6 +1022,121 @@ const PROFILE_COLUMNS = [
 "current_context"
 
 ];
+
+/* ==================================================
+ FRAUEN MEMORY SEMANTIK V1.8
+ Gemeinsame Regeln fuer Live-Extractor und Historical Backfill.
+ Keine UI-, Import-, Uebersetzungs- oder Marcel-Brain-Logik.
+================================================== */
+const WOMAN_MEMORY_SEMANTIC_CORE = `
+SEMANTIK-REGELN FUER FRAUEN-MEMORY:
+
+1. PERSON / SUBJEKT ZUERST BESTIMMEN
+- contact_items und das Frauenprofil enthalten nur Wissen ueber DIESE Frau bzw. ihre Beziehung/Interaktion mit Marcel.
+- Aussagen ueber Marcel gehoeren nicht als Frauenfakt gespeichert; im Historical Backfill gehoeren sie in marcel_items.
+- Aussagen ueber Mutter, Vater, Kinder, Geschwister, Freunde, Ex-Partner, Kollegen oder andere Dritte niemals der Frau selbst zuschreiben.
+- Bei Dritten die Beziehung im Key/Wert ausdruecken, z.B. mother_birthday, son_age, sister_job. Ein Geburtstag der Mutter ist niemals profile_summary.birthday der Frau.
+- Pronomen und kurze Rueckbezuege nur zuordnen, wenn der Dialogkontext die Person eindeutig macht. Bei Unsicherheit nichts als sicheren Fakt speichern.
+
+2. FAKTART RICHTIG WAEHLEN
+- self_reported: Die Frau sagt einen Fakt ueber sich selbst ausdruecklich.
+- explicit_fact: Ein klarer, objektiver Fakt ist eindeutig belegt.
+- observed_pattern: Erst bei wiederholtem Verhalten ueber mehrere Nachrichten/Gelegenheiten; niemals aus einer einzelnen Reaktion eine Persoenlichkeit machen.
+- interpretation: Nur wenn wirklich nuetzlich und gut belegt; vorsichtig formulieren, niedrigere confidence. Keine Gedanken, Motive oder Gefuehle erfinden.
+- temporary_state: Kurzfristiger Zustand wie heute muede, gerade krank, aktuell Stress, momentan bei der Mutter, diese Woche viel Arbeit. Solche Zustaende duerfen nicht als dauerhafte Eigenschaft gespeichert werden.
+
+3. ZEITBEZUG / EREIGNIS VS. DAUERZUSTAND
+- Woerter wie heute, morgen, gestern, gerade, momentan, aktuell, diese Woche, spaeter, gleich, seit ein paar Tagen sind starke Hinweise auf temporaeren Zustand oder Ereignis.
+- Termine, Dates, Vorstellungsgespraeche, Pruefungen, Arzttermine, Fluege, Reisen, Geburtstagsfeiern, konkrete Treffen, Reparaturen und einzelne Krankheits-/Schmerzepisoden sind Ereignisse, keine dauerhaften Profilmerkmale.
+- Ein vergangenes Ereignis darf als shared_history/meaningful_details relevant bleiben, aber nicht so gespeichert werden, als sei es weiterhin aktuell.
+- temporary_state soll eine plausible valid_until_hours bekommen, wenn die Dauer aus dem Kontext abschaetzbar ist: heute/gerade typischerweise 24h, diese Woche bis etwa 168h. Keine kuenstlich lange Gueltigkeit.
+- Langfristige Fakten wie Beruf, Studium, Kinder, Wohnort, feste Vorlieben oder ausdrueckliche Beziehungsabsicht haben normalerweise kein Ablaufdatum.
+
+4. GEBURTSTAG / ALTER
+- profile_summary.birthday, birth_day, birth_month, birth_year und age beziehen sich ausschliesslich auf die Frau selbst.
+- "Der Geburtstag meiner Mutter ist am 29. August" => Familienwissen ueber die Mutter, niemals Geburtstag der Frau.
+- Wenn nur Tag/Monat der Frau bekannt sind, kein Jahr erfinden. Wenn Alter und Geburtstag spaeter ueber die verifizierte Kontaktlogik ein Jahr ergeben, hat diese Human-/Kontaktlogik Vorrang.
+- Alter einer dritten Person (z.B. Sohn 5) nie als Alter der Frau speichern.
+
+5. ARBEIT / AUSBILDUNG
+- "Ich arbeite als/in ..." oder eindeutig aktueller Beruf => work_education als dauerhafter aktueller Fakt.
+- Jobverlust, Jobsuche, Bewerbung oder Vorstellungsgespraech sind nicht automatisch der aktuelle Beruf. Jobverlust kann den alten Beruf historisch machen; Jobsuche/Interview ist Zustand/Ereignis.
+- "Ich habe morgen ein Vorstellungsgespraech" => Ereignis, nicht current_job.
+- Studium/Universitaet nur als aktuell speichern, wenn es tatsaechlich die Frau betrifft und nicht nur ein Plan, Wunsch oder die Ausbildung einer dritten Person ist.
+
+6. GESUNDHEIT
+- Akute Schmerzen, Krankheit, Erschoepfung oder Stress eines Tages => temporary_state oder event.
+- health als dauerhafter Profilbereich nur fuer laenger anhaltende, wiederkehrende, diagnostizierte oder ausdruecklich als dauerhaft beschriebene Themen.
+- Ursache und Person nicht erfinden. "Nackenschmerzen nach der Arbeit" bedeutet nicht automatisch chronische Krankheit.
+
+7. BEZIEHUNG / GEFUEHLE / GEMEINSAME DYNAMIK
+- Ausdrueckliche Dating-Absicht (z.B. feste Beziehung suchen) darf dauerhaft unter relationship gespeichert werden.
+- Einzelne warme/flirtige Saetze sind nicht automatisch Liebe, Bindung, Exklusivitaet oder Angst vor Verlust.
+- Konkrete gemeinsame Erlebnisse und Running Gags eher shared_history/running_gags; dauerhafte Gefuehle nur bei klarer Aussage oder wiederholter belastbarer Evidenz.
+- Aussagen Marcels ueber seine eigenen Gefuehle nicht als Gefuehl der Frau speichern.
+
+8. EROTIK / INTIMITAET
+- sexuality_intimacy nur fuer klar sexuelle/intime Fakten, Vorlieben, Grenzen oder eindeutig bestaetigte intime Dynamik.
+- Keine sexuelle Orientierung, Vorliebe, Zustimmung oder Bereitschaft aus Flirt, Emojis, Foto, Kuss-Emoji oder zweideutiger Nachricht ableiten.
+- Alltag, Arbeit, Gesundheit, Familie und allgemeine Zuneigung nicht wegen einzelner Woerter in Erotik verschieben.
+
+9. KATEGORIEN STABIL VERWENDEN
+- profile_summary: nur stabile Basisdaten der Frau.
+- personality: stabile Selbstbeschreibung oder mehrfach beobachtetes Muster, nicht Tagesstimmung.
+- family/children: Familie und Kinder inklusive klar bezeichneten Drittpersonen.
+- work_education: Beruf, Arbeit, Ausbildung, Studium.
+- financial_context: finanzielle Lage/Bitten nur wenn tatsaechlich belegt.
+- health: dauerhafte/relevante Gesundheit; akute Episode als temporary/event.
+- relationship: Dating-Ziel, stabile Beziehungsinformationen/Gefuehle.
+- sexuality_intimacy: nur eindeutig intime/sexuelle Inhalte.
+- communication: Kommunikationsstil, Sprache, wiederkehrende Kommunikationsvorlieben.
+- lifestyle_routines/preferences/dislikes: stabile Routinen und Vorlieben.
+- goals_dreams/plans: echte Zukunftsplaene; konkrete bevorstehende Termine zusaetzlich/lieber als event.
+- living_situation/travel_future_location: aktuelle stabile Wohn-/Ortslage bzw. belastbare Reise-/Umzugsplaene.
+- shared_history/meaningful_details/running_gags: Vergangenes oder gemeinsame Referenzen, wenn spaeter wirklich nuetzlich.
+- current_context: nur kurzfristig aktueller Kontext; nicht als Ersatz fuer dauerhafte Kategorien missbrauchen.
+- marcel_knowledge_map: ausschliesslich was diese Frau nachweislich ueber Marcel weiss.
+
+10. DEDUPLIKATION / UPDATE / WIDERSPRUCH
+- Gleicher Sachverhalt trotz anderer Formulierung ist kein neuer Fakt.
+- Fuer denselben Sachverhalt einen stabilen snake_case memory_key wiederverwenden.
+- Neue praezisere oder zeitlich aktuellere Information zum selben Sachverhalt => bestehenden Fakt aktualisieren/superseden statt Parallel-Duplikat.
+- Einen alten Fakt nur retiren, wenn die neue Aussage denselben Gegenstand und dieselbe Person eindeutig ersetzt oder widerspricht. Nicht retiren, nur weil er in der aktuellen Nachricht nicht erwaehnt wird.
+- Human confirmed/corrected Fakten niemals automatisch ueberschreiben oder retiren.
+
+11. EVIDENZ / SICHERHEIT
+- source_quote/evidence moeglichst wortnah aus der tatsaechlichen Nachricht; keine erfundene Belegstelle.
+- Bei Ironie, Sarkasmus, Uebersetzungsunsicherheit, unklarem Pronomen, unklarer Person oder widerspruechlichem Kontext konservativ sein.
+- Lieber keinen Fakt speichern als einen falschen Fakt ueber die falsche Person.
+
+12. PROFILE SNAPSHOT
+- profile_snapshot ist die konsolidierte, aktuell gueltige Langzeitansicht und kein Nachrichtenprotokoll.
+- Keine kurzfristigen Tageszustaende oder einmaligen Events in den Snapshot einbrennen.
+- Bereits vorhandene, weiterhin gueltige Profilinformationen erhalten; nur mit neuer eindeutiger Evidenz korrigieren/aktualisieren.
+- Drittpersonen nur in passenden Familien-/Kontextstrukturen ablegen, niemals als Basisdaten der Frau.
+`;
+
+const WOMAN_MEMORY_LIVE_OUTPUT_RULES = `
+LIVE-EXTRACTOR OUTPUT:
+- retire_item_ids: nur eindeutige ersetzte/widersprochene aktive Memory-IDs, niemals Human-confirmed/corrected.
+- items: maximal wirklich neue oder aktualisierte Memory-Fakten. Struktur pro Item:
+ {"category":"","memory_key":"stable_snake_case","memory_value":{},"memory_type":"self_reported|explicit_fact|observed_pattern|interpretation|temporary_state","confidence":0.0,"importance":1,"use_in_reply":true,"source_quote":"","valid_until_hours":null}
+- events: fuer konkrete zeitgebundene Ereignisse. Struktur pro Event:
+ {"event_type":"","event_subtype":"","title":"","event_data":{},"importance":1,"sensitivity":"normal|personal|intimate","evidence_summary":"","requires_follow_up":false,"bot_action":"","marcel_review_required":false}
+- profile_snapshot: alle vorgesehenen PROFILE_COLUMNS liefern; stabile aktuelle Langzeitdaten konsolidieren, temporaere Zustaende/Events nicht als Dauerprofil schreiben.
+- Eine Nachricht darf sowohl einen dauerhaften Fakt als auch ein Ereignis enthalten, wenn beides getrennt korrekt ist. Beispiel: "Ich bin Krankenschwester und habe morgen ein Vorstellungsgespraech" => Berufsfakt + Interview-Event; das Interview ist nicht der Beruf.
+`;
+
+const WOMAN_MEMORY_HISTORICAL_RULES = `
+HISTORICAL BACKFILL:
+- Ziel ist langfristig nutzbares, konsolidiertes Memory aus einem alten Chatverlauf, nicht die Speicherung jedes damaligen Tageszustands.
+- Reine vergangene Tageszustaende und einzelne alte Termine/Events normalerweise nicht als aktives Langzeit-contact_item anlegen.
+- Ein vergangenes Ereignis nur als langfristigen Fakt aufnehmen, wenn seine dauerhafte Folge oder gemeinsame Bedeutung spaeter relevant ist; dann klar als Vergangenheit/shared_history/meaningful_details formulieren, nicht als aktuellen Zustand.
+- SAME/UPDATE/CONTRADICTION/NEW/UNCERTAIN semantisch gegen bestehendes Memory entscheiden.
+- Bei unklarer Person, Zeit oder Bedeutung UNCERTAIN statt falscher Zuordnung.
+`;
+
+
 
 
 /* ==================================================
@@ -1554,6 +1672,7 @@ const directLanguage =
     contact?.primary_language
   );
 
+
 if (directLanguage) {
   return directLanguage;
 }
@@ -1569,7 +1688,6 @@ if (
       await getContactMemoryProfile(
         contact.id
       );
-
 
     const profileHints =
       extractLanguageHintsFromObject(
@@ -1672,7 +1790,7 @@ const currentLanguage =
   );
 
 
-if (currentLanguage) { 
+if (currentLanguage) {
   return currentLanguage;
 }
 
@@ -1780,7 +1898,6 @@ const WOMEN_SEED = [
         20,
 
       notes: [
-
         "Seit ihrem 16. Lebensjahr unabhängig, also ungefähr vier Jahre.",
 
         "Ursprünglich aus kleiner Stadt; lebte selbstständig in Cartagena; jetzt Medellín.",
@@ -1912,6 +2029,7 @@ const WOMEN_SEED = [
 
   city:
     "San Cristóbal",
+
   language:
     "Spanish",
 
@@ -1983,7 +2101,7 @@ const WOMEN_SEED = [
 
         "Süßigkeiten",
 
-        "True Crime",
+        "True Crime", 
 
         "Plot-Twist-Filme"
 
@@ -2094,7 +2212,7 @@ const WOMEN_SEED = [
     open_threads: {
 
       unknown_passion:
-        "Sie sagte, Fotos zeigen ihre Leidenschaft nicht; konkrete Leidenschaft noch unbekannt."
+        "Sie sagte, Fotos zeigen ihre Leidenschaft nicht; konkrete Leidenschaft noch unbekannt." 
 
     }
 
@@ -2151,7 +2269,7 @@ const WOMEN_SEED = [
        loves_animals:
         true,
 
-      interests: [ 
+      interests: [
         "Shopping",
         "Street Food",
         "TikTok"
@@ -2213,7 +2331,7 @@ const WOMEN_SEED = [
 
     },
 
-    living_situation: {
+    living_situation: { 
 
       lives_with_mother_and_siblings:
         true,
@@ -2271,6 +2389,7 @@ const WOMEN_SEED = [
     },
 
     current_context: {
+
       whatsapp_name:
         "Dani",
 
@@ -2321,7 +2440,7 @@ const WOMEN_SEED = [
 
     current_context: {
 
-      separate_person_from_dani:
+      separate_person_from_dani: 
         true,
 
       whatsapp_active_confirmed:
@@ -2510,7 +2629,7 @@ const WOMEN_SEED = [
      financial_context: {
 
       gifts_money_strong_theme:
-        true, 
+        true,
 
       asked_early_for_support:
         true
@@ -2553,7 +2672,7 @@ const WOMEN_SEED = [
 
     relationship: {
 
-      natural_connection:
+      natural_connection: 
         true,
 
       let_it_flow:
@@ -2630,7 +2749,7 @@ const WOMEN_SEED = [
       cosmetologist:
         true
 
-    }, 
+    },
 
     shared_history: {
 
@@ -2702,7 +2821,6 @@ const WOMEN_SEED = [
 {
   identityKey:
     "valeria_adventurous_romantic",
-
   canonicalName:
     "Valeria",
 
@@ -2750,7 +2868,7 @@ const WOMEN_SEED = [
     "CONTACT_KNOWN",
 
   profile: {
- 
+
     relationship: {
 
       sin_prisa:
@@ -2824,7 +2942,6 @@ const WOMEN_SEED = [
     "WHATSAPP_ACTIVE",
 
   profile: {
-
     lifestyle_routines: {
 
       gym:
@@ -2950,7 +3067,6 @@ const WOMEN_SEED = [
 
       marcel_rejected_paid_content:
         true,
-
       serious_relationship_emphasized:
         true
 
@@ -3197,7 +3313,7 @@ const WOMEN_SEED = [
   sourcePlatform:
     "contact",
 
-  platformStatus:
+  platformStatus: 
     "CONTACT_KNOWN",
 
   profile: {
@@ -3230,7 +3346,7 @@ const WOMEN_SEED = [
   platformStatus:
     "CONTACT_KNOWN",
 
-  profile: { 
+  profile: {
 
     personality: {
 
@@ -3350,7 +3466,7 @@ const WOMEN_SEED = [
         true,
 
       wants_someone_by_side:
-        true 
+        true
 
     },
 
@@ -3456,7 +3572,6 @@ const WOMEN_SEED = [
 
       no_abusive_nickname_from_traits:
         true,
-
       natural_warm_addresses_ok:
         true,
 
@@ -3470,7 +3585,7 @@ const WOMEN_SEED = [
       whatsapp_active_confirmed:
         true
 
-    } 
+    }
 
   }
 
@@ -3590,7 +3705,7 @@ const WOMEN_SEED = [
 
 {
   identityKey:
-    "yudi_existing", 
+    "yudi_existing",
 
   canonicalName:
     "Yudi",
@@ -3710,7 +3825,7 @@ const WOMEN_SEED = [
 
     }
 
-  } 
+  }
 
 },
 
@@ -3830,7 +3945,7 @@ const WOMEN_SEED = [
     running_gags: {
 
       local_guide_medellin_flirt:
-        true 
+        true
 
     },
 
@@ -3868,7 +3983,7 @@ const WOMEN_SEED = [
 
 {
   identityKey:
-    "nia_30",
+    "nia_30", 
 
   canonicalName:
     "Nia",
@@ -3950,7 +4065,7 @@ const WOMEN_SEED = [
   identityKey:
     "sarah_26_teacher",
 
-  canonicalName: 
+  canonicalName:
     "Sarah",
 
   country:
@@ -4000,7 +4115,7 @@ const WOMEN_SEED = [
         "Camping",
 
         "gutes Essen",
-
+ 
         "Strandbars",
 
         "Cocktails",
@@ -4190,6 +4305,7 @@ const WOMEN_SEED = [
 
 },
 
+
 {
   identityKey:
     "laura_26_medellin",
@@ -4371,7 +4487,6 @@ const WOMEN_SEED = [
     },
 
     open_threads: {
-
       do_not_reexplain_no_spanish:
         true,
 
@@ -4429,7 +4544,7 @@ const WOMEN_SEED = [
 
       speaks_english:
         true
- 
+
     },
 
     relationship: {
@@ -4669,7 +4784,7 @@ const WOMEN_SEED = [
 },
 
 
-{ 
+{
   identityKey:
     "paola_maza_20",
 
@@ -4739,7 +4854,7 @@ const WOMEN_SEED = [
 
       some_english:
         true
-
+ 
     },
 
     shared_history: {
@@ -4789,6 +4904,7 @@ await pool.query(`
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )
 `);
+
 
 await pool.query(`
   ALTER TABLE contacts
@@ -4840,7 +4956,6 @@ await pool.query(`
     ADD COLUMN IF NOT EXISTS memory_identity_key TEXT,
 
     ADD COLUMN IF NOT EXISTS canonical_name TEXT,
-
     ADD COLUMN IF NOT EXISTS whatsapp_display_name TEXT,
 
     ADD COLUMN IF NOT EXISTS whatsapp_username TEXT,
@@ -4908,7 +5023,7 @@ await pool.query(`
     updated_at TIMESTAMPTZ
       DEFAULT NOW()
 
-  ) 
+  )
 `);
 
 
@@ -5026,8 +5141,9 @@ await pool.query(`
 
 await pool.query(`
   CREATE TABLE IF NOT EXISTS contact_memory_profiles (
-
+ 
     id BIGSERIAL PRIMARY KEY,
+
     contact_id INTEGER UNIQUE NOT NULL
       REFERENCES contacts(id)
       ON DELETE CASCADE,
@@ -5147,6 +5263,7 @@ await pool.query(`
     event_type TEXT NOT NULL,
 
     event_subtype TEXT,
+
     title TEXT,
 
     event_data JSONB
@@ -5266,6 +5383,7 @@ await pool.query(`
 
     received_at TIMESTAMPTZ
       DEFAULT NOW(),
+
     created_at TIMESTAMPTZ
       DEFAULT NOW(),
 
@@ -5784,7 +5902,6 @@ const memories = [
     {
       partner_can_go_out_without_marcel:
         true,
-
       male_best_friend_ok:
         true,
 
@@ -6105,7 +6222,7 @@ if (
       WHERE id =
         $1
     `,
-    [ 
+    [
       same.rows[0].id,
       clean,
       sourcePlatform,
@@ -6350,7 +6467,6 @@ if (
           $2,
 
           $3,
-
           TRUE,
 
           $4,
@@ -6465,7 +6581,7 @@ if (
                 manual_contact_fields,
                 '{}'::jsonb
               ) ? 'city'
-              THEN city 
+              THEN city
               ELSE COALESCE(
                 $5,
                 city
@@ -6556,7 +6672,6 @@ await pool.query(
     VALUES (
       $1
     )
-
     ON CONFLICT (
       contact_id
     )
@@ -6584,6 +6699,7 @@ await addContactIdentifier({
     true
 
 });
+
 
 await addContactIdentifier({
 
@@ -6704,6 +6820,7 @@ const existing =
 
         AND status =
           'active'
+
       ORDER BY
         id DESC
 
@@ -6823,6 +6940,7 @@ if (
         NOW(),
 
         $5,
+
         TRUE
 
       )
@@ -7143,7 +7261,6 @@ for (
       woman
     );
 
-
   const snapshot =
     Object.fromEntries(
       PROFILE_COLUMNS.map(
@@ -7182,7 +7299,7 @@ for (
         value
       )
       &&
-      Object.keys( 
+      Object.keys(
         value
       ).length
     ) {
@@ -7302,6 +7419,7 @@ if (!contact) {
       ]
     );
 
+
   contact =
     direct.rows[0]
     ||
@@ -7345,7 +7463,7 @@ if (contact) {
       conflict.rows[0]     ) {
 
       throw new Error(
-        `WhatsApp-JID ${jid} ist bereits einem anderen Kontakt zugeordnet.`
+        `WhatsApp-JID ${jid} ist bereits einem anderen Kontakt zugeordnet.` 
       );
 
     }
@@ -7571,7 +7689,7 @@ const result =
 
       ON CONFLICT (
         whatsapp_jid
-      )
+      ) 
 
       DO UPDATE SET
 
@@ -7661,7 +7779,7 @@ if (phone) {
     isPrimary:
       true
 
-  }); 
+  });
 
 }
 
@@ -7730,7 +7848,7 @@ return (
   null
 );
 
-}
+} 
 
 
 /* ==================================================
@@ -7781,7 +7899,7 @@ const result =
         source_platform,
 
         current_platform,
- 
+
         source_profile_name,
 
         contact_status,
@@ -7864,7 +7982,7 @@ await pool.query(
       contact_id
     )
 
-    VALUES (
+    VALUES ( 
       $1
     )
 
@@ -8021,7 +8139,6 @@ return result.rows[0];
 /* ==================================================
  DUPLIKAT
 ================================================== */
- 
 async function getLastIncomingMessage(
 jid
 ) {
@@ -8260,6 +8377,7 @@ return (
 );
 
 }
+
 
 /* ==================================================
  VERLAUF
@@ -8500,7 +8618,7 @@ return crypto
     "utf8"
   )
   .digest(
-    "hex" 
+    "hex"
   );
 
 }
@@ -9225,7 +9343,13 @@ async function runHistoricalMemoryBackfill({contact,rawText,senderMapping,jobId=
    const mm=marcelItems.map(x=>`KEY=${x.memory_key}|${x.category}|verified=${x.human_verified===true}|${renderJson(x.memory_value)}`).join('\n');
    const convo=chunk.map(x=>`[${new Date(x.createdAt).toISOString()}] ${x.role}: ${x.text}`).join('\n');
 
-   const response=await openai.responses.create({model:MODEL,instructions:`Du bist der semantische Memory-Konsolidierer fuer Marcels WhatsApp-System. Antworte ausschliesslich mit gueltigem JSON. Verstehe den Dialog als Zusammenhang: Pronomen, kurze Antworten, Rueckbezuege, Korrekturen, Ironie und unterschiedliche Formulierungen desselben Sachverhalts. ZWEI GEHIRNE STRENG TRENNEN: contact_items sind Fakten ueber den Kontakt; marcel_items sind Fakten ueber Marcel. Entscheide semantisch: SAME = gleicher Sachverhalt trotz anderer Formulierung, nichts neu anlegen. UPDATE = gleicher Sachverhalt mit neuer/praeziser/zeitlich aktualisierter Information. CONTRADICTION = echter Widerspruch. NEW = wirklich neuer langfristig/relevant nutzbarer Sachverhalt. UNCERTAIN = Bedeutung, Person, Zeitbezug oder Faktstatus nicht sicher. Keine banalen Flirtphrasen, Emojis, Begruessungen oder Vermutungen speichern. Human/verifiziertes Wissen nie automatisch ersetzen. Bei UPDATE Kontakt existing_memory_id setzen; bei SAME/UPDATE Marcel existing_memory_key setzen. memory_key kurz, stabil, snake_case; bei SAME/UPDATE bestehenden Key verwenden. Bei Unsicherheit UNCERTAIN. JSON exakt: {"contact_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_id":null,"category":"","memory_key":"","memory_value":{},"memory_type":"self_reported|explicit_fact|observed_pattern|interpretation|temporary_state","confidence":0.9,"importance":3,"use_in_reply":true,"evidence":"","reason":""}],"marcel_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_key":null,"category":"","memory_key":"","memory_value":{},"importance":3,"sensitivity":"normal|personal|intimate","evidence":"","reason":""}]}`,
+   const response=await openai.responses.create({model:MODEL,instructions:`Du bist der semantische Memory-Konsolidierer fuer Marcels WhatsApp-System. Antworte ausschliesslich mit gueltigem JSON. Verstehe den Dialog als Zusammenhang: Pronomen, kurze Antworten, Rueckbezuege, Korrekturen, Ironie und unterschiedliche Formulierungen desselben Sachverhalts. ZWEI GEHIRNE STRENG TRENNEN: contact_items sind Fakten ueber den Kontakt; marcel_items sind Fakten ueber Marcel.
+
+${WOMAN_MEMORY_SEMANTIC_CORE}
+
+${WOMAN_MEMORY_HISTORICAL_RULES}
+
+Entscheide semantisch: SAME = gleicher Sachverhalt trotz anderer Formulierung, nichts neu anlegen. UPDATE = gleicher Sachverhalt mit neuer/praeziser/zeitlich aktualisierter Information. CONTRADICTION = echter Widerspruch. NEW = wirklich neuer langfristig/relevant nutzbarer Sachverhalt. UNCERTAIN = Bedeutung, Person, Zeitbezug oder Faktstatus nicht sicher. Keine banalen Flirtphrasen, Emojis, Begruessungen oder Vermutungen speichern. Human/verifiziertes Wissen nie automatisch ersetzen. Bei UPDATE Kontakt existing_memory_id setzen; bei SAME/UPDATE Marcel existing_memory_key setzen. memory_key kurz, stabil, snake_case; bei SAME/UPDATE bestehenden Key verwenden. Bei Unsicherheit UNCERTAIN. JSON exakt: {"contact_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_id":null,"category":"","memory_key":"","memory_value":{},"memory_type":"self_reported|explicit_fact|observed_pattern|interpretation|temporary_state","confidence":0.9,"importance":3,"use_in_reply":true,"evidence":"","reason":""}],"marcel_items":[{"decision":"SAME|UPDATE|CONTRADICTION|NEW|UNCERTAIN","existing_memory_key":null,"category":"","memory_key":"","memory_value":{},"importance":3,"sensitivity":"normal|personal|intimate","evidence":"","reason":""}]}`,
      input:`KONTAKT: ${contact.display_name||contact.canonical_name||contact.whatsapp_jid}\n\nBESTEHENDES KONTAKT-MEMORY:\n${cm||'[keine]'}\n\nBESTEHENDES MARCEL-MEMORY:\n${mm||'[keine]'}\n\nDIALOG-AUSSCHNITT CHRONOLOGISCH:\n${convo}\n\nKonsolidiere nur Memory-wuerdige Informationen.`});
    const parsed=safeJsonParse(response.output_text,{contact_items:[],marcel_items:[]})||{}; const cs=await applyHistoricalContactDecisions(parsed.contact_items||[],contact.id),ms=await applyHistoricalMarcelDecisions(parsed.marcel_items||[],contact.id);
    for(const k of Object.keys(totals.contact))totals.contact[k]+=cs[k]||0; for(const k of Object.keys(totals.marcel))totals.marcel[k]+=ms[k]||0; totals.chunks++; await updateHistoricalBackfillJob(jobId,{status:'running',total_chunks:totalChunks,completed_chunks:totals.chunks,contact_stats:totals.contact,marcel_stats:totals.marcel}); if(start+SIZE>=rows.length)break;
@@ -9314,7 +9438,6 @@ async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMappi
 
    const exportMs = item.createdAt.getTime();
    const usedIds = historical ? usedHistoricalIds : usedLegacyIds;
-
    const candidates = dbRows
      .filter(row => {
        const id = Number(row.id);
@@ -9460,6 +9583,7 @@ app.post("/dashboard-api/cleanup-whatsapp-duplicates", async (req, res) => {
          : "Pruefung fertig. Keine sicheren Dubletten gefunden. Bis jetzt wurde NICHTS geloescht."
      });
    }
+
    if (!suppliedToken || suppliedToken !== plan.confirmationToken) {
      return res.status(409).json({
        ok: false,
@@ -9699,6 +9823,7 @@ const result =
         $1
 
         AND (
+
           event_status IN (
             'active',
             'open'
@@ -9818,6 +9943,7 @@ const result =
 
 
 return result.rows;
+
 }
 
 
@@ -10057,6 +10183,7 @@ nur anhand Namen zusammenführen.
 - Kate Castillo != alte Kathe.
 
 - Paola Maza != ältere Paola.
+
 - Karla Tinder != Karla Instagram.
 
 - marcel_knowledge_map =
@@ -10416,7 +10543,6 @@ const safeIds =
   cleanIntegerArray(
     ids
   );
- 
 
 if (!safeIds.length) {
   return;
@@ -10536,7 +10662,7 @@ if (
 if (
   memoryKey.includes(
     "has_son"
-  ) 
+  )
   ||
   memoryValue.has_son === true
   ||
@@ -10656,6 +10782,7 @@ for (
       existing.category,
 
       existing.memory_key,
+
       value
 
     );
@@ -10895,7 +11022,7 @@ for (
       incomingMessageDbId:
         sourceId,
 
-      incomingText 
+      incomingText
 
     });
 
@@ -11015,7 +11142,7 @@ for (
               ),
 
             source_message_id =
-              COALESCE( 
+              COALESCE(
                 $4,
                 source_message_id
               ),
@@ -11045,7 +11172,6 @@ for (
       continue;
 
     }
-
 
     await pool.query(
       `
@@ -11082,6 +11208,18 @@ for (
       : Number(
           item.valid_until_hours
         );
+
+  const effectiveValidUntilHours =
+    Number.isFinite(
+      validUntilHours
+    )
+      ? Math.max(
+          1,
+          validUntilHours
+        )
+      : memoryType === "temporary_state"
+        ? 24
+        : null;
 
 
   await pool.query(
@@ -11175,11 +11313,7 @@ for (
       confidence,
       sourceId || null,
       quote,
-      Number.isFinite(
-        validUntilHours
-      )
-        ? validUntilHours
-        : null,
+      effectiveValidUntilHours,
       existing?.id || null,
       importance,
       item?.use_in_reply !== false
@@ -11255,7 +11389,7 @@ for (
 
         evidence_summary,
 
-        requires_follow_up, 
+        requires_follow_up,
 
         follow_up_status,
 
@@ -11375,7 +11509,7 @@ for (
 
 /* ==================================================
  MEMORY EXTRACTOR
-================================================== */ 
+================================================== */
 
 async function extractMemoryUpdates({
 jid,
@@ -11426,7 +11560,13 @@ const memoryText =
         +
         `|${item.category}.${item.memory_key}`
         +
+        `|type=${item.memory_type}`
+        +
         `|review=${item.human_review_status}`
+        +
+        `|importance=${item.importance}`
+        +
+        `|valid_until=${item.valid_until || "-"}`
         +
         `|${renderJson(
           item.human_review_status
@@ -11438,6 +11578,27 @@ const memoryText =
             ? item.human_corrected_value
 
             : item.memory_value
+        )}`
+    )
+    .join("\n");
+
+
+const eventText =
+  events
+    .map(
+      event =>
+        `ID=${event.id}`
+        +
+        `|${event.event_type}/${event.event_subtype || "-"}`
+        +
+        `|status=${event.event_status}`
+        +
+        `|${renderJson(
+          event.event_data
+        )}`
+        +
+        `|evidence=${normalizeText(
+          event.evidence_summary
         )}`
     )
     .join("\n");
@@ -11455,59 +11616,20 @@ Du bist Memory-Extractor.
 
 Antworte nicht der Frau.
 
-Neue Fakten erkennen.
+${WOMAN_MEMORY_SEMANTIC_CORE}
 
-Alte Fakten nicht neu speichern.
+${WOMAN_MEMORY_LIVE_OUTPUT_RULES}
 
-Temporäre Zustände sauber ersetzen.
-
-Widersprüche nicht blind überschreiben.
-
-Human confirmed/corrected Memory
-niemals überschreiben oder retiren.
-
-Gleichnamige Frauen nie vermischen.
-
-Dani != Daniela Messe != Dángela.
-
-Kate Castillo != alte Kathe.
-
-Paola Maza != ältere Paola.
-
-Karla Tinder != Karla Instagram.
-
-Frau,
-Marcel
-und Dritte
-strikt trennen.
-
-marcel_knowledge_map
-nur für Wissen dieser Frau über Marcel.
-
-Wenn die Frau überwiegendin einer bestimmten Sprache schreibt
-und das für zukünftige Antworten
-relevant ist,
-darf diese Information
-im Bereich communication
-gespeichert werden.
-
-WICHTIG:
-
-Progressive Disclosure
-ist eine Antwortregel
-und verändert NICHT, 
-wie vollständig Memory
-intern gespeichert werden darf.
-
-Der Extractor darf also
-
-weiterhin genaue Fakten speichern.
-
-Nur der Reply-Bot
-darf nicht automatisch
-alle gespeicherten Details
-in einer Antwort preisgeben.
-
+ZUSAETZLICHE SYSTEMREGELN:
+- Neue Fakten erkennen, aber alte Fakten nicht neu speichern.
+- Temporaere Zustaende sauber ersetzen/ablaufen lassen.
+- Widersprueche nicht blind ueberschreiben.
+- Human confirmed/corrected Memory niemals ueberschreiben oder retiren.
+- Gleichnamige Frauen nie vermischen: Dani != Daniela Messe != Dángela; Kate Castillo != alte Kathe; Paola Maza != aeltere Paola; Karla Tinder != Karla Instagram.
+- Frau, Marcel und Dritte strikt trennen.
+- marcel_knowledge_map nur fuer Wissen dieser Frau ueber Marcel.
+- Wenn die Frau ueberwiegend in einer bestimmten Sprache schreibt und das fuer zukuenftige Antworten relevant ist, darf diese Information im Bereich communication gespeichert werden.
+- Progressive Disclosure ist nur eine Antwortregel. Intern darf Memory vollstaendig und praezise sein; der Reply-Bot entscheidet separat, was er preisgibt.
 Gib ausschließlich JSON:
 
 {
@@ -11527,6 +11649,13 @@ Gib ausschließlich JSON:
 
 
     input: `
+==================================================
+AKTUELLE SYSTEMZEIT
+==================================================
+
+${new Date().toISOString()}
+
+
 ==================================================
 LIVE STATE
 ==================================================
@@ -11553,6 +11682,13 @@ ${memoryText || "[keine]"}
 
 
 ==================================================
+BEREITS GESPEICHERTE EVENTS
+==================================================
+
+${eventText || "[keine]"}
+
+
+==================================================
 VERLAUF
 ==================================================
 
@@ -11562,7 +11698,7 @@ ${history
 )
 .map(
   item =>
-    `${item.direction === "incoming" ? "Sie" : "Marcel"}: ${item.message_text}`
+    `[${new Date(item.created_at).toISOString()}] ${item.direction === "incoming" ? "Sie" : "Marcel"}: ${item.message_text}`
 )
 .join("\n")}
 
@@ -11682,7 +11818,7 @@ setTimeout(
           )
       );
 
-  },
+  }, 
   250
 );
 
@@ -11906,7 +12042,7 @@ if (
 return true;
 
 }
-
+ 
 
 /* ==================================================
  DASHBOARD KONTAKT-STAMMDATEN
@@ -12037,7 +12173,7 @@ const map = {
     "Colombia",
   "spanien":
     "Spain",
-  "spain":
+  "spain": 
     "Spain",
   "kenia":
     "Kenya",
@@ -12455,6 +12591,7 @@ if (match) {
 return {};
 
 }
+
 
 function dashboardBirthdayKeyKind(
 value
@@ -13414,6 +13551,7 @@ return (
 );
 
 }
+
 
 async function upsertDashboardVerifiedContactMemory({
 contactId,
@@ -14973,6 +15111,7 @@ Fuer jede gelieferte ID genau einen Eintrag liefern.
             "deValue"
           )
         ) {
+
           byId.set(
             id,
             item.deValue
@@ -15160,7 +15299,6 @@ async (req, res) => {
             c.birth_month,
 
             c.birth_year,
-
             c.birth_year_inferred,
 
             c.created_at,
@@ -15332,7 +15470,7 @@ async (req, res) => {
               contact.canonical_name
               ||
               contact.display_name
-              || 
+              ||
               contact.whatsapp_display_name
               ||
               "Unbekannter Kontakt",
@@ -16403,7 +16541,6 @@ async (req, res) => {
         });
       }
     }
-
     if (usernameProvided) {
       await pool.query(
         `
@@ -17252,6 +17389,7 @@ async (req, res) => {
       });
 
   }
+
 }
 );
 
@@ -18139,7 +18277,7 @@ async (req, res) => {
             event.marcel_review_required
             ===
             true
-            &&
+            && 
             [
               "active",
               "open"
@@ -18452,6 +18590,7 @@ async (req, res) => {
       ? translatedFixedDisplay.events
       : fixedDisplaySource.events;
 
+
     const structuredDisplayRequests = [
       ...normalizedActiveItems.map(
         item => ({
@@ -18739,7 +18878,7 @@ async (req, res) => {
           null,
 
         profession:
-          translatedContactDisplay.profession
+          translatedContactDisplay.profession 
           ??
           profileSummary.profession
           ??
@@ -18930,6 +19069,7 @@ async (req, res) => {
 
 
   } catch (error) {
+
     console.error(
       "Memory-Status Fehler:",
       error
@@ -18971,7 +19111,6 @@ app.get(
     );
 
   }
-
 
   if (pairingCode) {
 
@@ -19082,7 +19221,7 @@ color:#1677ff;
 font-weight:700;
 cursor:pointer;
 -webkit-appearance:none;
-appearance:none;
+appearance:none; 
 }
 
 button:disabled{
@@ -19169,6 +19308,7 @@ Marcel Memory Test V1.7.2
 <p>
 WhatsApp bleibt bei WHATSAPP_ENABLED=false komplett aus.
 </p>
+
 
 <input
 id="passwordInput"
@@ -19288,7 +19428,7 @@ const newContactNameInput =
 
 
 const createContactButton =
-  document.getElementById( 
+  document.getElementById(
     "createContactButton"
   );
 
@@ -19337,7 +19477,7 @@ const sendStatus =
 
 function getPassword(){
 
-  return String(
+  return String( 
     passwordInput.value || ""
   );
 
@@ -19528,7 +19668,7 @@ function renderChat(
                 : ""
             )
             +
-            '</div>' 
+            '</div>'
             +
             escapeHtml(
               item.message_text
@@ -19601,7 +19741,7 @@ async function loadContacts(
   keepJid = null
 ){
 
-  if(
+  if( 
     !getPassword()
   ){
 
@@ -19648,6 +19788,7 @@ async function loadContacts(
               password:
                 getPassword()
             })
+
         }
       );
 
@@ -19845,7 +19986,6 @@ async function createNewTestContact(){
             "Content-Type":
               "application/json"
           },
-
           body:
             JSON.stringify({
 
@@ -19887,7 +20027,7 @@ async function createNewTestContact(){
 
     setStatus(
       createStatus,
-      "Testkontakt " 
+      "Testkontakt "
       +
       (
         data.contact.display_name
@@ -20247,7 +20387,7 @@ newContactNameInput
 /* ==================================================
  TESTKONTAKTE LADEN
 ================================================== */
- 
+
 app.post(
 "/persona-test/contacts",
 async (req, res) => {
@@ -20339,7 +20479,7 @@ async (req, res) => {
     }
 
 
-    const name =
+    const name = 
       normalizeText(
         req.body.name
       );
@@ -20488,6 +20628,7 @@ async (req, res) => {
 
     }
 
+
     res.json(
       snapshot
     );
@@ -20583,7 +20724,7 @@ async (req, res) => {
         .status(400)
         .json({
 
-          error:
+          error: 
             "Keine Nachricht eingegeben."
 
         });
@@ -20606,7 +20747,7 @@ async (req, res) => {
           error:
             "Testkontakt nicht gefunden."
 
-        }); 
+        });
 
     }
 
@@ -20726,7 +20867,7 @@ async (req, res) => {
         });
 
     }
- 
+
 
     const outgoing =
       await saveMessage(
@@ -20846,7 +20987,7 @@ let contact =
     jid
   );
 
- 
+
 const duplicate =
   await detectImmediateDuplicate(
     jid,
@@ -21086,6 +21227,7 @@ try {
 ================================================== */
 
 async function startWhatsApp() {
+
 if (
   !WHATSAPP_ENABLED
 ) {
@@ -21323,8 +21465,8 @@ sock.ev.on(
           startWhatsApp,
           5000
         );
-
       } else {
+
         console.log(
           "WhatsApp wurde ausgeloggt."
         );

@@ -117,7 +117,6 @@ aus ihrer Nachricht zurückspiegeln
 "Das muss ich wissen"
 "I have to ask"
 "Now I need to know"
-
 wenn ein Mensch es so
 nicht schreiben würde
 
@@ -237,7 +236,6 @@ Aber trotzdem NICHT automatisch:
 - komplette Beziehungsgeschichte
 - Familiengeschichte
 - weitere Memory-Details
-
 dazupacken,
 wenn sie nicht gefragt wurden.
 
@@ -247,6 +245,7 @@ RÜCKFRAGEN:
 Bevor Marcel eine Rückfrage stellt,
 muss er prüfen,
 was er über die Frau bereits weiß.
+
 Wenn bereits bekannt ist,
 dass sie ein Kind hat:
 
@@ -355,7 +354,6 @@ Bei Ausweichen reduzieren.
 Bei Block akzeptieren.
 
 Keine Zustimmung erfinden.
-
 
 ==================================================GELD
 ==================================================
@@ -596,7 +594,7 @@ try {
 
 const cleaned =
   String(text)
-    .replace(
+    .replace( 
       /^```json/i,
       ""
     )
@@ -836,7 +834,7 @@ return (
   content?.conversation
   ||
   content?.extendedTextMessage?.text
-  ||
+  || 
   content?.imageMessage?.caption
   ||
   content?.videoMessage?.caption
@@ -956,7 +954,6 @@ const PROFILE_COLUMNS = [
 "profile_summary",
 
 "personality",
-
 "humor_profile",
 
 "relationship",
@@ -996,6 +993,7 @@ const PROFILE_COLUMNS = [
 "stress_support_style",
 
 "decision_style",
+
 "social_media",
 
 "cultural_interest",
@@ -1556,7 +1554,6 @@ const directLanguage =
     contact?.primary_language
   );
 
-
 if (directLanguage) {
   return directLanguage;
 }
@@ -1675,7 +1672,7 @@ const currentLanguage =
   );
 
 
-if (currentLanguage) {
+if (currentLanguage) { 
   return currentLanguage;
 }
 
@@ -1745,6 +1742,7 @@ if (countryLanguage) {
 return "en";
 
 }
+
 
 /* ==================================================
  FRAUEN MEMORY SEED
@@ -1914,7 +1912,6 @@ const WOMEN_SEED = [
 
   city:
     "San Cristóbal",
-
   language:
     "Spanish",
 
@@ -1994,7 +1991,7 @@ const WOMEN_SEED = [
 
     },
 
-    open_threads: { 
+    open_threads: {
 
       no_immediate_whatsapp:
         true
@@ -2154,7 +2151,7 @@ const WOMEN_SEED = [
        loves_animals:
         true,
 
-      interests: [
+      interests: [ 
         "Shopping",
         "Street Food",
         "TikTok"
@@ -2244,7 +2241,7 @@ const WOMEN_SEED = [
       seeks_humble_calm_man:
         true
 
-    }, 
+    },
 
     preferences: {
 
@@ -2274,7 +2271,6 @@ const WOMEN_SEED = [
     },
 
     current_context: {
-
       whatsapp_name:
         "Dani",
 
@@ -2494,7 +2490,7 @@ const WOMEN_SEED = [
         true,
 
       independent:
-        true 
+        true
 
     },
 
@@ -2514,7 +2510,7 @@ const WOMEN_SEED = [
      financial_context: {
 
       gifts_money_strong_theme:
-        true,
+        true, 
 
       asked_early_for_support:
         true
@@ -2634,7 +2630,7 @@ const WOMEN_SEED = [
       cosmetologist:
         true
 
-    },
+    }, 
 
     shared_history: {
 
@@ -2744,7 +2740,7 @@ const WOMEN_SEED = [
     "Paola",
 
   aliases: [
-    "Paola alt" 
+    "Paola alt"
   ],
 
   sourcePlatform:
@@ -2754,7 +2750,7 @@ const WOMEN_SEED = [
     "CONTACT_KNOWN",
 
   profile: {
-
+ 
     relationship: {
 
       sin_prisa:
@@ -3234,7 +3230,7 @@ const WOMEN_SEED = [
   platformStatus:
     "CONTACT_KNOWN",
 
-  profile: {
+  profile: { 
 
     personality: {
 
@@ -3244,6 +3240,7 @@ const WOMEN_SEED = [
     },
 
     current_context: {
+
       do_not_merge_with_kate_castillo:
         true
 
@@ -3353,7 +3350,7 @@ const WOMEN_SEED = [
         true,
 
       wants_someone_by_side:
-        true
+        true 
 
     },
 
@@ -3473,7 +3470,7 @@ const WOMEN_SEED = [
       whatsapp_active_confirmed:
         true
 
-    }
+    } 
 
   }
 
@@ -3593,7 +3590,7 @@ const WOMEN_SEED = [
 
 {
   identityKey:
-    "yudi_existing",
+    "yudi_existing", 
 
   canonicalName:
     "Yudi",
@@ -3713,7 +3710,7 @@ const WOMEN_SEED = [
 
     }
 
-  }
+  } 
 
 },
 
@@ -3743,7 +3740,7 @@ const WOMEN_SEED = [
   }
 
 },
- 
+
 
 {
   identityKey:
@@ -3833,7 +3830,7 @@ const WOMEN_SEED = [
     running_gags: {
 
       local_guide_medellin_flirt:
-        true
+        true 
 
     },
 
@@ -3953,7 +3950,7 @@ const WOMEN_SEED = [
   identityKey:
     "sarah_26_teacher",
 
-  canonicalName:
+  canonicalName: 
     "Sarah",
 
   country:
@@ -3993,7 +3990,7 @@ const WOMEN_SEED = [
     preferences: {
 
       likes: [
- 
+
         "Reisen",
 
         "Natur",
@@ -4192,7 +4189,6 @@ const WOMEN_SEED = [
   }
 
 },
-
 
 {
   identityKey:
@@ -4433,7 +4429,7 @@ const WOMEN_SEED = [
 
       speaks_english:
         true
-
+ 
     },
 
     relationship: {
@@ -4493,7 +4489,7 @@ const WOMEN_SEED = [
     "luisa_23_medellin",
 
   canonicalName:
-    "Luisa", 
+    "Luisa",
 
   country:
     "Colombia",
@@ -4673,7 +4669,7 @@ const WOMEN_SEED = [
 },
 
 
-{
+{ 
   identityKey:
     "paola_maza_20",
 
@@ -4743,7 +4739,7 @@ const WOMEN_SEED = [
 
       some_english:
         true
- 
+
     },
 
     shared_history: {
@@ -4793,7 +4789,6 @@ await pool.query(`
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )
 `);
-
 
 await pool.query(`
   ALTER TABLE contacts
@@ -4913,7 +4908,7 @@ await pool.query(`
     updated_at TIMESTAMPTZ
       DEFAULT NOW()
 
-  )
+  ) 
 `);
 
 
@@ -5033,7 +5028,6 @@ await pool.query(`
   CREATE TABLE IF NOT EXISTS contact_memory_profiles (
 
     id BIGSERIAL PRIMARY KEY,
-
     contact_id INTEGER UNIQUE NOT NULL
       REFERENCES contacts(id)
       ON DELETE CASCADE,
@@ -5153,7 +5147,6 @@ await pool.query(`
     event_type TEXT NOT NULL,
 
     event_subtype TEXT,
-
     title TEXT,
 
     event_data JSONB
@@ -5243,7 +5236,7 @@ await pool.query(`
 
     thumbnail_path TEXT,
 
-    is_view_once BOOLEAN 
+    is_view_once BOOLEAN
       DEFAULT FALSE,
 
     view_once_status TEXT
@@ -5273,7 +5266,6 @@ await pool.query(`
 
     received_at TIMESTAMPTZ
       DEFAULT NOW(),
-
     created_at TIMESTAMPTZ
       DEFAULT NOW(),
 
@@ -6113,7 +6105,7 @@ if (
       WHERE id =
         $1
     `,
-    [
+    [ 
       same.rows[0].id,
       clean,
       sourcePlatform,
@@ -6243,7 +6235,7 @@ const result =
       FROM contacts
 
       WHERE memory_identity_key =
-        $1 
+        $1
 
       LIMIT 1
     `,
@@ -6473,7 +6465,7 @@ if (
                 manual_contact_fields,
                 '{}'::jsonb
               ) ? 'city'
-              THEN city
+              THEN city 
               ELSE COALESCE(
                 $5,
                 city
@@ -6493,7 +6485,7 @@ if (
               )
             END,
 
-          source_platform = 
+          source_platform =
             COALESCE(
               source_platform,
               $7
@@ -6592,7 +6584,6 @@ await addContactIdentifier({
     true
 
 });
-
 
 await addContactIdentifier({
 
@@ -6713,7 +6704,6 @@ const existing =
 
         AND status =
           'active'
-
       ORDER BY
         id DESC
 
@@ -6833,7 +6823,6 @@ if (
         NOW(),
 
         $5,
-
         TRUE
 
       )
@@ -6993,7 +6982,7 @@ if (
       : {})
   };
 }
- 
+
 
 if (birthday.age != null) {
   profileSummary.age =
@@ -7193,7 +7182,7 @@ for (
         value
       )
       &&
-      Object.keys(
+      Object.keys( 
         value
       ).length
     ) {
@@ -7312,7 +7301,6 @@ if (!contact) {
         jid
       ]
     );
-
 
   contact =
     direct.rows[0]
@@ -7673,7 +7661,7 @@ if (phone) {
     isPrimary:
       true
 
-  });
+  }); 
 
 }
 
@@ -7743,7 +7731,7 @@ return (
 );
 
 }
- 
+
 
 /* ==================================================
  TESTKONTAKT
@@ -7793,7 +7781,7 @@ const result =
         source_platform,
 
         current_platform,
-
+ 
         source_profile_name,
 
         contact_status,
@@ -7993,7 +7981,7 @@ const result =
       )
 
       RETURNING *
-    `, 
+    `,
     [
       jid,
       direction,
@@ -8033,7 +8021,7 @@ return result.rows[0];
 /* ==================================================
  DUPLIKAT
 ================================================== */
-
+ 
 async function getLastIncomingMessage(
 jid
 ) {
@@ -8273,7 +8261,6 @@ return (
 
 }
 
-
 /* ==================================================
  VERLAUF
 ================================================== */
@@ -8493,7 +8480,7 @@ return result.rows
 }
 
 
-/* ================================================== 
+/* ==================================================
  DASHBOARD KI-UEBERSETZUNG DEUTSCH
  - nur letzte 24 Stunden
  - OpenAI statt Wort-fuer-Wort-Uebersetzer
@@ -8513,7 +8500,7 @@ return crypto
     "utf8"
   )
   .digest(
-    "hex"
+    "hex" 
   );
 
 }
@@ -9473,7 +9460,6 @@ app.post("/dashboard-api/cleanup-whatsapp-duplicates", async (req, res) => {
          : "Pruefung fertig. Keine sicheren Dubletten gefunden. Bis jetzt wurde NICHTS geloescht."
      });
    }
-
    if (!suppliedToken || suppliedToken !== plan.confirmationToken) {
      return res.status(409).json({
        ok: false,
@@ -9713,7 +9699,6 @@ const result =
         $1
 
         AND (
-
           event_status IN (
             'active',
             'open'
@@ -9833,7 +9818,6 @@ const result =
 
 
 return result.rows;
-
 }
 
 
@@ -9993,7 +9977,7 @@ whatsapp_username:
   contact?.whatsapp_username,
 
 country:
-  contact?.country, 
+  contact?.country,
 
 city:
   contact?.city,
@@ -10073,7 +10057,6 @@ nur anhand Namen zusammenführen.
 - Kate Castillo != alte Kathe.
 
 - Paola Maza != ältere Paola.
-
 - Karla Tinder != Karla Instagram.
 
 - marcel_knowledge_map =
@@ -10243,7 +10226,7 @@ const languageInstruction =
 
     : "";
 
- 
+
 const response =   await openai.responses.create({
 
     model:
@@ -10433,7 +10416,7 @@ const safeIds =
   cleanIntegerArray(
     ids
   );
-
+ 
 
 if (!safeIds.length) {
   return;
@@ -10553,7 +10536,7 @@ if (
 if (
   memoryKey.includes(
     "has_son"
-  )
+  ) 
   ||
   memoryValue.has_son === true
   ||
@@ -10673,7 +10656,6 @@ for (
       existing.category,
 
       existing.memory_key,
-
       value
 
     );
@@ -10913,7 +10895,7 @@ for (
       incomingMessageDbId:
         sourceId,
 
-      incomingText
+      incomingText 
 
     });
 
@@ -10993,7 +10975,7 @@ for (
     clampImportance(
       item?.importance
     );
- 
+
 
   const quote =
     normalizeText(
@@ -11033,7 +11015,7 @@ for (
               ),
 
             source_message_id =
-              COALESCE(
+              COALESCE( 
                 $4,
                 source_message_id
               ),
@@ -11243,7 +11225,7 @@ for (
       event?.event_type
     );
 
- 
+
   if (!eventType) {
     continue;
   }
@@ -11273,7 +11255,7 @@ for (
 
         evidence_summary,
 
-        requires_follow_up,
+        requires_follow_up, 
 
         follow_up_status,
 
@@ -11393,7 +11375,7 @@ for (
 
 /* ==================================================
  MEMORY EXTRACTOR
-================================================== */
+================================================== */ 
 
 async function extractMemoryUpdates({
 jid,
@@ -11493,6 +11475,7 @@ Kate Castillo != alte Kathe.
 Paola Maza != ältere Paola.
 
 Karla Tinder != Karla Instagram.
+
 Frau,
 Marcel
 und Dritte
@@ -11512,7 +11495,7 @@ WICHTIG:
 
 Progressive Disclosure
 ist eine Antwortregel
-und verändert NICHT,
+und verändert NICHT, 
 wie vollständig Memory
 intern gespeichert werden darf.
 
@@ -11741,6 +11724,7 @@ const contact =
   await getContactByJid(
     jid
   );
+
 
 if (!contact) {
   return null;
@@ -12471,7 +12455,6 @@ if (match) {
 return {};
 
 }
-
 
 function dashboardBirthdayKeyKind(
 value
@@ -13241,6 +13224,7 @@ const actualBirthYear =
   contactYear !== null
 
     ? contactYear
+
     : (
         extracted.year
         ||
@@ -13430,7 +13414,6 @@ return (
 );
 
 }
-
 
 async function upsertDashboardVerifiedContactMemory({
 contactId,
@@ -15349,7 +15332,7 @@ async (req, res) => {
               contact.canonical_name
               ||
               contact.display_name
-              ||
+              || 
               contact.whatsapp_display_name
               ||
               "Unbekannter Kontakt",
@@ -15489,7 +15472,7 @@ async (req, res) => {
 
               historical:
                 Number(
-                  contact.historical_memory_count 
+                  contact.historical_memory_count
                   ||
                   0
                 ),
@@ -16659,6 +16642,149 @@ for (const fact of facts) {
 return snapshot;
 }
 
+async function ensureProfileJsonImportRunsTable() {
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS profile_json_import_runs (
+    import_id TEXT PRIMARY KEY,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    source_platform TEXT,
+    status TEXT NOT NULL DEFAULT 'applied',
+    before_contact JSONB NOT NULL DEFAULT '{}'::jsonb,
+    before_profile JSONB,
+    before_username_identifiers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    touched_memory_pairs JSONB NOT NULL DEFAULT '[]'::jsonb,
+    before_memory_rows JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_memory_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    undone_at TIMESTAMPTZ
+  )
+`);
+}
+
+function profileImportTouchedMemoryPairs(profile, birthday) {
+const pairs = profile.facts.map(fact => ({ category: fact.category, key: fact.key }));
+if (profile.contact.city) pairs.push({ category: 'profile_summary', key: 'city' });
+if (profile.contact.country) pairs.push({ category: 'profile_summary', key: 'country' });
+if (profile.contact.language) pairs.push({ category: 'communication', key: 'primary_language' });
+if (profile.contact.age != null || (birthday?.birthDay && birthday?.birthMonth && birthday?.birthYear)) {
+  pairs.push({ category: 'profile_summary', key: 'age' });
+}
+if (birthday?.birthDay && birthday?.birthMonth) pairs.push({ category: 'profile_summary', key: 'birthday' });
+const seen = new Set();
+return pairs.filter(pair => {
+  const id = `${pair.category}\u0000${pair.key}`;
+  if (seen.has(id)) return false;
+  seen.add(id);
+  return true;
+});
+}
+
+async function profileImportMemoryRows(contactId, pairs) {
+if (!pairs.length) return [];
+const values = [contactId];
+const clauses = pairs.map(pair => {
+  values.push(pair.category, pair.key);
+  const c = values.length - 1;
+  const k = values.length;
+  return `(category=$${c} AND memory_key=$${k})`;
+});
+const result = await pool.query(
+  `SELECT * FROM memory_items WHERE contact_id=$1 AND (${clauses.join(' OR ')}) ORDER BY id`,
+  values
+);
+return result.rows;
+}
+
+async function restoreProfileImportMemoryRow(row, contactId) {
+await pool.query(
+  `UPDATE memory_items SET
+     category=$3,memory_key=$4,memory_value=$5::jsonb,memory_type=$6,confidence=$7,
+     source_message_id=$8,source_quote=$9,source_context=$10::jsonb,valid_from=$11,valid_until=$12,
+     status=$13,supersedes_memory_id=$14,human_review_status=$15,human_corrected_value=$16::jsonb,
+     human_note=$17,human_reviewed_at=$18,importance=$19,use_in_reply=$20,updated_at=$21
+   WHERE id=$1 AND contact_id=$2`,
+  [
+    row.id, contactId, row.category, row.memory_key, JSON.stringify(row.memory_value || {}), row.memory_type,
+    row.confidence, row.source_message_id, row.source_quote, JSON.stringify(row.source_context || {}),
+    row.valid_from, row.valid_until, row.status, row.supersedes_memory_id, row.human_review_status,
+    row.human_corrected_value == null ? null : JSON.stringify(row.human_corrected_value), row.human_note,
+    row.human_reviewed_at, row.importance, row.use_in_reply, row.updated_at
+  ]
+);
+}
+
+async function undoDashboardProfileJsonImport({ contactId, importId }) {
+await ensureProfileJsonImportRunsTable();
+const run = (await pool.query(
+  `SELECT * FROM profile_json_import_runs WHERE import_id=$1 AND contact_id=$2 LIMIT 1`,
+  [importId, contactId]
+)).rows[0];
+if (!run) throw dashboardContactError('Profil-Import zum Rückgängig-Machen nicht gefunden.', 404);
+if (run.status === 'undone') {
+  return { alreadyUndone: true };
+}
+if (run.status !== 'applied') throw dashboardContactError('Dieser Profil-Import kann nicht rückgängig gemacht werden.', 409);
+
+const beforeContact = isPlainObject(run.before_contact) ? run.before_contact : {};
+const beforeProfile = isPlainObject(run.before_profile) ? run.before_profile : null;
+const beforeIdentifiers = Array.isArray(run.before_username_identifiers) ? run.before_username_identifiers : [];
+const beforeMemoryRows = Array.isArray(run.before_memory_rows) ? run.before_memory_rows : [];
+const createdMemoryIds = Array.isArray(run.created_memory_ids) ? run.created_memory_ids.map(Number).filter(Number.isInteger) : [];
+
+if (createdMemoryIds.length) {
+  await pool.query(`DELETE FROM memory_items WHERE contact_id=$1 AND id=ANY($2::bigint[])`, [contactId, createdMemoryIds]);
+}
+for (const row of beforeMemoryRows) {
+  await restoreProfileImportMemoryRow(row, contactId);
+}
+
+await pool.query(
+  `UPDATE contacts SET
+     whatsapp_username=$2,city=$3,country=$4,primary_language=$5,source_platform=$6,
+     source_profile_name=$7,manual_contact_fields=$8::jsonb,manual_contact_updated_at=$9,updated_at=NOW()
+   WHERE id=$1`,
+  [
+    contactId, beforeContact.whatsapp_username ?? null, beforeContact.city ?? null,
+    beforeContact.country ?? null, beforeContact.primary_language ?? null, beforeContact.source_platform ?? null,
+    beforeContact.source_profile_name ?? null, JSON.stringify(beforeContact.manual_contact_fields || {}),
+    beforeContact.manual_contact_updated_at ?? null
+  ]
+);
+
+await pool.query(`DELETE FROM contact_identifiers WHERE contact_id=$1 AND identifier_type='whatsapp_username'`, [contactId]);
+for (const identifier of beforeIdentifiers) {
+  await pool.query(
+    `INSERT INTO contact_identifiers
+      (contact_id,identifier_type,identifier_value,normalized_value,source_platform,is_primary,human_verified,created_at,updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [contactId, identifier.identifier_type, identifier.identifier_value, identifier.normalized_value,
+     identifier.source_platform, identifier.is_primary, identifier.human_verified,
+     identifier.created_at || new Date(), identifier.updated_at || new Date()]
+  );
+}
+
+if (beforeProfile) {
+  const assignments = PROFILE_COLUMNS.map((column, index) => `${column}=$${index + 2}::jsonb`);
+  const values = PROFILE_COLUMNS.map(column => JSON.stringify(beforeProfile[column] || {}));
+  values.push(beforeProfile.profile_version || 1, beforeProfile.last_memory_update_at || null, contactId);
+  await pool.query(
+    `UPDATE contact_memory_profiles SET ${assignments.join(',')},
+       profile_version=$${PROFILE_COLUMNS.length + 2},
+       last_memory_update_at=$${PROFILE_COLUMNS.length + 3},updated_at=NOW()
+     WHERE contact_id=$${PROFILE_COLUMNS.length + 4}`,
+    values
+  );
+} else {
+  await pool.query(`DELETE FROM contact_memory_profiles WHERE contact_id=$1`, [contactId]);
+}
+
+await pool.query(
+  `UPDATE profile_json_import_runs SET status='undone',undone_at=NOW() WHERE import_id=$1`,
+  [importId]
+);
+return { alreadyUndone: false };
+}
+
 app.post(
 "/dashboard-api/profile-import",
 async (req, res) => {
@@ -16678,8 +16804,23 @@ async (req, res) => {
       throw dashboardContactError("Kontakt nicht gefunden.", 404);
     }
 
+    const requestedAction = normalizeText(req.body?.action).toLowerCase();
+    if (requestedAction === 'undo') {
+      const importId = normalizeText(req.body?.importId);
+      if (!importId) throw dashboardContactError('Import-ID fehlt.');
+      const undo = await undoDashboardProfileJsonImport({ contactId, importId });
+      return res.json({
+        ok: true,
+        undone: true,
+        alreadyUndone: undo.alreadyUndone,
+        message: undo.alreadyUndone
+          ? 'Der Profil-Import war bereits rückgängig gemacht.'
+          : 'Der Profil-Import wurde vollständig rückgängig gemacht.'
+      });
+    }
+
     const profile = normalizeDashboardProfileImport(req.body?.profile);
-    const action = normalizeText(req.body?.action).toLowerCase() === "import" ? "import" : "preview";
+    const action = requestedAction === "import" ? "import" : "preview";
 
     const selectedName = selectedContact.canonical_name || selectedContact.display_name || selectedContact.whatsapp_display_name || "Unbekannter Kontakt";
     const nameWarning = profile.contact.name && normalizeIdentityValue(profile.contact.name) !== normalizeIdentityValue(selectedName)
@@ -16729,6 +16870,33 @@ async (req, res) => {
       }
     }
 
+    const birthday = (profile.contact.birthDay || profile.contact.birthMonth || profile.contact.birthYear || profile.contact.age != null)
+      ? dashboardContactBirthInput({
+          birthDay: profile.contact.birthDay,
+          birthMonth: profile.contact.birthMonth,
+          birthYear: profile.contact.birthYear,
+          age: profile.contact.age
+        }, {})
+      : null;
+
+    await ensureProfileJsonImportRunsTable();
+    const importId = `profile-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`;
+    const touchedPairs = profileImportTouchedMemoryPairs(profile, birthday);
+    const beforeMemoryRows = await profileImportMemoryRows(contactId, touchedPairs);
+    const beforeMemoryIds = new Set(beforeMemoryRows.map(row => Number(row.id)));
+    const beforeProfile = (await pool.query(`SELECT * FROM contact_memory_profiles WHERE contact_id=$1 LIMIT 1`, [contactId])).rows[0] || null;
+    const beforeIdentifiers = (await pool.query(`SELECT * FROM contact_identifiers WHERE contact_id=$1 AND identifier_type='whatsapp_username' ORDER BY id`, [contactId])).rows;
+    const beforeContact = {
+      whatsapp_username: selectedContact.whatsapp_username ?? null,
+      city: selectedContact.city ?? null,
+      country: selectedContact.country ?? null,
+      primary_language: selectedContact.primary_language ?? null,
+      source_platform: selectedContact.source_platform ?? null,
+      source_profile_name: selectedContact.source_profile_name ?? null,
+      manual_contact_fields: selectedContact.manual_contact_fields || {},
+      manual_contact_updated_at: selectedContact.manual_contact_updated_at ?? null
+    };
+
     const currentManual = isPlainObject(selectedContact.manual_contact_fields) ? selectedContact.manual_contact_fields : {};
     const manualFields = {
       ...currentManual,
@@ -16773,15 +16941,6 @@ async (req, res) => {
       });
     }
 
-    const birthday = (profile.contact.birthDay || profile.contact.birthMonth || profile.contact.birthYear || profile.contact.age != null)
-      ? dashboardContactBirthInput({
-          birthDay: profile.contact.birthDay,
-          birthMonth: profile.contact.birthMonth,
-          birthYear: profile.contact.birthYear,
-          age: profile.contact.age
-        }, {})
-      : null;
-
     await applyDashboardContactHumanFacts({
       contactId,
       city: profile.contact.city,
@@ -16809,9 +16968,24 @@ async (req, res) => {
       await applyProfileSnapshot(contactId, snapshot, { humanSeed: true });
     }
 
+    const afterMemoryRows = await profileImportMemoryRows(contactId, touchedPairs);
+    const createdMemoryIds = afterMemoryRows.map(row => Number(row.id)).filter(memoryId => !beforeMemoryIds.has(memoryId));
+    await pool.query(
+      `INSERT INTO profile_json_import_runs
+        (import_id,contact_id,source_platform,status,before_contact,before_profile,before_username_identifiers,touched_memory_pairs,before_memory_rows,created_memory_ids)
+       VALUES ($1,$2,$3,'applied',$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb)`,
+      [
+        importId, contactId, profile.source.platform,
+        JSON.stringify(beforeContact), beforeProfile ? JSON.stringify(beforeProfile) : null,
+        JSON.stringify(beforeIdentifiers), JSON.stringify(touchedPairs), JSON.stringify(beforeMemoryRows),
+        JSON.stringify(createdMemoryIds)
+      ]
+    );
+
     return res.json({
       ok: true,
       imported: true,
+      importId,
       contact: { id: contactId, name: selectedName },
       profile: preview,
       message: `${profile.facts.length} Profil-Fakten wurden als bestätigtes Frauen-Memory gespeichert.`
@@ -16825,7 +16999,6 @@ async (req, res) => {
   }
 }
 );
-
 
 /* ==================================================
  DASHBOARD MARCEL BRAIN
@@ -17079,7 +17252,6 @@ async (req, res) => {
       });
 
   }
-
 }
 );
 
@@ -17739,6 +17911,7 @@ async (req, res) => {
         error:
           "KI-Übersetzung konnte nicht erstellt werden."
       });
+
   }
 
 }
@@ -17988,6 +18161,7 @@ async (req, res) => {
 
           category:
             item.category,
+
           key:
             item.memory_key,
 
@@ -18277,7 +18451,6 @@ async (req, res) => {
       )
       ? translatedFixedDisplay.events
       : fixedDisplaySource.events;
-
 
     const structuredDisplayRequests = [
       ...normalizedActiveItems.map(
@@ -18737,7 +18910,7 @@ async (req, res) => {
 
             (
               SELECT COUNT(*)
-              FROM contacts 
+              FROM contacts
               WHERE memory_identity_key
                 IS NOT NULL
             )
@@ -18757,7 +18930,6 @@ async (req, res) => {
 
 
   } catch (error) {
-
     console.error(
       "Memory-Status Fehler:",
       error
@@ -18988,6 +19160,7 @@ font-size:13px;
 
 <body>
 
+
 <h1>
 Marcel Memory Test V1.7.2
 </h1>
@@ -18996,7 +19169,6 @@ Marcel Memory Test V1.7.2
 <p>
 WhatsApp bleibt bei WHATSAPP_ENABLED=false komplett aus.
 </p>
-
 
 <input
 id="passwordInput"
@@ -19116,7 +19288,7 @@ const newContactNameInput =
 
 
 const createContactButton =
-  document.getElementById(
+  document.getElementById( 
     "createContactButton"
   );
 
@@ -19236,7 +19408,7 @@ async function apiRequest(
       await fetch(
         url,
         options
-      ); 
+      );
 
   }catch(error){
 
@@ -19356,7 +19528,7 @@ function renderChat(
                 : ""
             )
             +
-            '</div>'
+            '</div>' 
             +
             escapeHtml(
               item.message_text
@@ -19476,7 +19648,6 @@ async function loadContacts(
               password:
                 getPassword()
             })
-
         }
       );
 
@@ -19486,7 +19657,7 @@ async function loadContacts(
 
 
     for(
-      const contact 
+      const contact
       of data.contacts || []
     ){
 
@@ -19716,7 +19887,7 @@ async function createNewTestContact(){
 
     setStatus(
       createStatus,
-      "Testkontakt "
+      "Testkontakt " 
       +
       (
         data.contact.display_name
@@ -19986,6 +20157,7 @@ async function sendTestMessage(){
 
 
   }finally{
+
     sendMessageButton.disabled =
       false;
 
@@ -20075,7 +20247,7 @@ newContactNameInput
 /* ==================================================
  TESTKONTAKTE LADEN
 ================================================== */
-
+ 
 app.post(
 "/persona-test/contacts",
 async (req, res) => {
@@ -20316,7 +20488,6 @@ async (req, res) => {
 
     }
 
-
     res.json(
       snapshot
     );
@@ -20435,7 +20606,7 @@ async (req, res) => {
           error:
             "Testkontakt nicht gefunden."
 
-        });
+        }); 
 
     }
 
@@ -20555,7 +20726,7 @@ async (req, res) => {
         });
 
     }
-
+ 
 
     const outgoing =
       await saveMessage(
@@ -20675,7 +20846,7 @@ let contact =
     jid
   );
 
-
+ 
 const duplicate =
   await detectImmediateDuplicate(
     jid,
@@ -20735,6 +20906,7 @@ if (duplicate) {
           "duplicate_reply"
       }
     );
+
   }
 
 
@@ -20914,7 +21086,6 @@ try {
 ================================================== */
 
 async function startWhatsApp() {
-
 if (
   !WHATSAPP_ENABLED
 ) {
@@ -21154,7 +21325,6 @@ sock.ev.on(
         );
 
       } else {
-
         console.log(
           "WhatsApp wurde ausgeloggt."
         );
@@ -21203,4 +21373,3 @@ async () => {
 
 }
 );
- 

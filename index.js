@@ -1024,7 +1024,7 @@ const PROFILE_COLUMNS = [
 ];
 
 /* ==================================================
- FRAUEN MEMORY SEMANTIK V1.8
+ FRAUEN MEMORY SEMANTIK V1.9
  Gemeinsame Regeln fuer Live-Extractor und Historical Backfill.
  Keine UI-, Import-, Uebersetzungs- oder Marcel-Brain-Logik.
 ================================================== */
@@ -1093,13 +1093,18 @@ SEMANTIK-REGELN FUER FRAUEN-MEMORY:
 - lifestyle_routines/preferences/dislikes: stabile Routinen und Vorlieben.
 - goals_dreams/plans: echte Zukunftsplaene; konkrete bevorstehende Termine zusaetzlich/lieber als event.
 - living_situation/travel_future_location: aktuelle stabile Wohn-/Ortslage bzw. belastbare Reise-/Umzugsplaene.
-- shared_history/meaningful_details/running_gags: Vergangenes oder gemeinsame Referenzen, wenn spaeter wirklich nuetzlich.
+- shared_history/meaningful_details/running_gags: nur echte gemeinsame Erlebnisse, gemeinsame Referenzen, besondere gemeinsame Gespraeche oder Running Gags. Ein Fakt aus ihrer eigenen Vergangenheit wird NICHT allein dadurch shared_history, dass sie Marcel davon erzaehlt hat.
 - current_context: nur kurzfristig aktueller Kontext; nicht als Ersatz fuer dauerhafte Kategorien missbrauchen.
 - marcel_knowledge_map: ausschliesslich was diese Frau nachweislich ueber Marcel weiss.
 
 10. DEDUPLIKATION / UPDATE / WIDERSPRUCH
 - Gleicher Sachverhalt trotz anderer Formulierung ist kein neuer Fakt.
-- Fuer denselben Sachverhalt einen stabilen snake_case memory_key wiederverwenden.
+- EIN KERNFAKT = EIN MEMORY-ITEM = EINE PRIMAERE KATEGORIE. Auch wenn ein Sachverhalt thematisch zu mehreren Kategorien passt, denselben Kernfakt niemals als mehrere Items in family, relationship, shared_history, meaningful_details usw. wiederholen.
+- Waehle fuer jeden Kernfakt genau die fachlich beste primaere Kategorie. Andere thematische Bezuege duerfen im memory_value als Kontext erhalten bleiben, aber nicht als zusaetzliche Kopien desselben Fakts.
+- Keine Information darf durch Dedup verloren gehen: Wenn zwei Formulierungen denselben Kernfakt enthalten, fuehre die nuetzlichen Details in EINEM vollstaendigen memory_value zusammen.
+- shared_history ist keine Auffangkategorie fuer alles, was die Frau Marcel erzaehlt hat. Nur wirklich gemeinsame Erlebnisse/Referenzen zwischen Marcel und der Frau gehoeren dort hinein.
+- Pruefe Duplikate kategorienuebergreifend ueber den gesamten aktiven Frauen-Memory-Bestand, nicht nur innerhalb der vorgeschlagenen Kategorie.
+- Fuer denselben Sachverhalt einen stabilen snake_case memory_key kategorienuebergreifend wiederverwenden.
 - Neue praezisere oder zeitlich aktuellere Information zum selben Sachverhalt => bestehenden Fakt aktualisieren/superseden statt Parallel-Duplikat.
 - Einen alten Fakt nur retiren, wenn die neue Aussage denselben Gegenstand und dieselbe Person eindeutig ersetzt oder widerspricht. Nicht retiren, nur weil er in der aktuellen Nachricht nicht erwaehnt wird.
 - Human confirmed/corrected Fakten niemals automatisch ueberschreiben oder retiren.
@@ -10500,11 +10505,8 @@ const result =
       WHERE contact_id =
         $1
 
-        AND category =
-          $2
-
         AND memory_key =
-          $3
+          $2
 
         AND status =
           'active'
@@ -10516,7 +10518,6 @@ const result =
     `,
     [
       contactId,
-      category,
       key
     ]
   );

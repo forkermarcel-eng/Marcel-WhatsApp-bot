@@ -419,6 +419,49 @@
      width: 100%;
    }
 
+   .contacts-tabs {
+     display: grid;
+     grid-template-columns: repeat(2, minmax(0, 1fr));
+     gap: 8px;
+     padding: 0 12px 12px;
+     border-bottom: 1px solid var(--border);
+   }
+
+   .contacts-tab {
+     min-height: 38px;
+     display: flex;
+     align-items: center;
+     justify-content: center;
+     gap: 7px;
+     padding: 0 10px;
+     border: 1px solid var(--border);
+     border-radius: 11px;
+     background: rgba(255, 255, 255, 0.03);
+     color: var(--muted);
+     font: inherit;
+     font-size: 11px;
+     font-weight: 800;
+     cursor: pointer;
+   }
+
+   .contacts-tab.active {
+     border-color: rgba(66, 199, 99, 0.36);
+     background: rgba(66, 199, 99, 0.1);
+     color: #c7f4d2;
+   }
+
+   .contacts-tab .tab-count {
+     min-width: 22px;
+     height: 22px;
+     display: inline-grid;
+     place-items: center;
+     padding: 0 6px;
+     border-radius: 999px;
+     background: rgba(0, 0, 0, 0.2);
+     color: inherit;
+     font-size: 9px;
+   }
+
    .contacts-list {
      max-height: 640px;
      overflow-y: auto;
@@ -980,8 +1023,8 @@
        <aside class="panel contacts-panel">
          <div class="panel-header">
            <div class="panel-heading">
-             <h2>Matches & Kontakte</h2>
-             <p>Live aus Tinder · noch nicht im Brain gespeichert</p>
+             <h2>Tinder Kontakte</h2>
+             <p>Neue Matches und Chats getrennt · noch nicht im Brain gespeichert</p>
            </div>
 
            <div class="count-pill" id="matchCount">0</div>
@@ -993,14 +1036,38 @@
            </button>
          </div>
 
+         <div class="contacts-tabs" role="tablist" aria-label="Tinder Kontaktarten">
+           <button
+             class="contacts-tab active"
+             id="newMatchesTab"
+             type="button"
+             role="tab"
+             aria-selected="true"
+           >
+             Neue Matches
+             <span class="tab-count" id="newMatchCount">0</span>
+           </button>
+
+           <button
+             class="contacts-tab"
+             id="chatsTab"
+             type="button"
+             role="tab"
+             aria-selected="false"
+           >
+             Chats
+             <span class="tab-count" id="chatCount">0</span>
+           </button>
+         </div>
+
          <div id="contactsList" class="contacts-list">
            <div class="empty-state" id="contactsEmpty">
              <div class="empty-inner">
                <div class="empty-icon" aria-hidden="true">🔥</div>
                <h3>Noch keine Tinder-Daten geladen</h3>
                <p>
-                 Sobald die Tinder-Sitzung verbunden ist, lesen wir Matches,
-                 Profile und Chats ausschließlich im Read-only-Modus ein.
+                 Sobald die Tinder-Sitzung verbunden ist, lesen wir neue Matches
+                 und bestehende Chats getrennt im Read-only-Modus ein.
                </p>
              </div>
            </div>
@@ -1101,6 +1168,8 @@
    const refreshButton = document.getElementById("refreshStatus");
    const manualLoginButton = document.getElementById("manualLoginButton");
    const loadMatchesButton = document.getElementById("loadMatchesButton");
+   const newMatchesTab = document.getElementById("newMatchesTab");
+   const chatsTab = document.getElementById("chatsTab");
 
    const elements = {
      workerDot: document.getElementById("workerDot"),
@@ -1121,6 +1190,8 @@
      noticeBadge: document.getElementById("noticeBadge"),
      lastChecked: document.getElementById("lastChecked"),
      matchCount: document.getElementById("matchCount"),
+     newMatchCount: document.getElementById("newMatchCount"),
+     chatCount: document.getElementById("chatCount"),
      contactsList: document.getElementById("contactsList"),
      chatTitle: document.getElementById("chatTitle"),
      chatSubtitle: document.getElementById("chatSubtitle"),
@@ -1144,6 +1215,9 @@
    let sessionConnected = false;
    let matchesLoaded = false;
    let matches = [];
+   let newMatches = [];
+   let chats = [];
+   let activeListMode = "new";
    let selectedMatchId = "";
    let readBusy = false;
 
@@ -1200,10 +1274,10 @@
 
    function statusLabel(status) {
      const labels = {
-       NEW_MATCH: "Neu",
-       WAITING_FOR_US: "Wir sind dran",
+       NEW_MATCH: "Neuer Match",
+       WAITING_FOR_US: "Antwort offen",
        WAITING_FOR_HER: "Wartet auf sie",
-       ACTIVE_CHAT: "Aktiv",
+       ACTIVE_CHAT: "Chat",
        DORMANT: "Ruhend"
      };
 
@@ -1211,7 +1285,11 @@
    }
 
    function waitingForLabel(status) {
-     if (status === "NEW_MATCH" || status === "WAITING_FOR_US") {
+     if (status === "NEW_MATCH") {
+       return "Erste Nachricht offen";
+     }
+
+     if (status === "WAITING_FOR_US") {
        return "Marcel / Bot";
      }
 
@@ -1417,29 +1495,82 @@
      return avatar;
    }
 
+   function updateContactTabs() {
+     const showNewMatches =
+       activeListMode === "new";
+
+     newMatchesTab.classList.toggle(
+       "active",
+       showNewMatches
+     );
+     chatsTab.classList.toggle(
+       "active",
+       !showNewMatches
+     );
+
+     newMatchesTab.setAttribute(
+       "aria-selected",
+       String(showNewMatches)
+     );
+     chatsTab.setAttribute(
+       "aria-selected",
+       String(!showNewMatches)
+     );
+
+     elements.newMatchCount.textContent =
+       String(newMatches.length);
+     elements.chatCount.textContent =
+       String(chats.length);
+     elements.matchCount.textContent =
+       String(matches.length);
+   }
+
+   function visibleContacts() {
+     return activeListMode === "new"
+       ? newMatches
+       : chats;
+   }
+
    function renderMatches() {
      elements.contactsList.textContent = "";
-     elements.matchCount.textContent = String(matches.length);
+     updateContactTabs();
 
-     if (!matches.length) {
+     const visibleMatches =
+       visibleContacts();
+
+     if (!visibleMatches.length) {
        const empty = document.createElement("div");
        empty.className = "empty-state";
+
        const inner = document.createElement("div");
        inner.className = "empty-inner";
+
        const icon = document.createElement("div");
        icon.className = "empty-icon";
-       icon.textContent = "🔥";
+       icon.textContent =
+         activeListMode === "new"
+           ? "✨"
+           : "💬";
+
        const title = document.createElement("h3");
-       title.textContent = "Keine Matches gefunden";
+       title.textContent =
+         activeListMode === "new"
+           ? "Keine neuen Matches ohne Chat gefunden"
+           : "Keine Chats gefunden";
+
        const text = document.createElement("p");
-       text.textContent = "Die Tinder-Leseverbindung funktioniert, hat aber aktuell keine Matches geliefert.";
+       text.textContent =
+         activeListMode === "new"
+           ? "Hier erscheinen Tinder-Matches, bei denen noch kein Nachrichtenverlauf erkannt wurde."
+           : "Hier erscheinen Tinder-Matches mit vorhandenem Nachrichtenverlauf.";
+
        inner.append(icon, title, text);
        empty.appendChild(inner);
        elements.contactsList.appendChild(empty);
        return;
      }
 
-     for (const match of matches) {
+     for (const match of visibleMatches) {
        const button = document.createElement("button");
        button.type = "button";
        button.className = "contact-item";
@@ -1470,13 +1601,23 @@
 
        const status = document.createElement("span");
        status.className = "contact-status";
-       status.textContent = statusLabel(match.status);
+       status.textContent =
+         activeListMode === "new"
+           ? "Neuer Match"
+           : statusLabel(match.status);
 
        top.append(name, status);
 
        const preview = document.createElement("div");
        preview.className = "contact-preview";
-       preview.textContent = match.lastMessage?.text || "Noch keine Nachricht";
+
+       if (activeListMode === "new") {
+         preview.textContent = "Noch kein Chat erkannt";
+       } else {
+         preview.textContent =
+           match.lastMessage?.text ||
+           "Chat vorhanden";
+       }
 
        copy.append(top, preview);
        button.appendChild(copy);
@@ -1634,22 +1775,88 @@
      loadMatchesButton.textContent = "Lade Tinder-Daten...";
 
      try {
-       const data = await requestJson("/api/tinder/read?mode=matches");
-       matches = Array.isArray(data.matches) ? data.matches : [];
+       const data = await requestJson(
+         "/api/tinder/read?mode=matches"
+       );
+
+       const incomingNewMatches =
+         Array.isArray(data.newMatches)
+           ? data.newMatches
+           : [];
+       const incomingChats =
+         Array.isArray(data.chats)
+           ? data.chats
+           : [];
+
+       if (
+         incomingNewMatches.length ||
+         incomingChats.length ||
+         data.newMatches ||
+         data.chats
+       ) {
+         newMatches = incomingNewMatches;
+         chats = incomingChats;
+         matches = [
+           ...newMatches,
+           ...chats
+         ];
+       } else {
+         const legacyMatches =
+           Array.isArray(data.matches)
+             ? data.matches
+             : [];
+
+         newMatches =
+           legacyMatches.filter(
+             (match) =>
+               Number(match?.messageCount || 0) === 0 &&
+               !match?.lastMessage?.text
+           );
+         chats =
+           legacyMatches.filter(
+             (match) =>
+               !newMatches.includes(match)
+           );
+         matches = [
+           ...newMatches,
+           ...chats
+         ];
+       }
+
+       if (!matchesLoaded) {
+         activeListMode =
+           newMatches.length
+             ? "new"
+             : "chats";
+       }
+
        matchesLoaded = true;
 
        if (
          selectedMatchId &&
-         !matches.some((match) => match.matchId === selectedMatchId)
+         !matches.some(
+           (match) =>
+             match.matchId ===
+             selectedMatchId
+         )
        ) {
          selectedMatchId = "";
          resetBrain();
        }
 
        renderMatches();
+
+       setNotice(
+         "info",
+         "Tinder Read-only geladen",
+         `${newMatches.length} neue Matches ohne Chat · ${chats.length} Chats. Es wurde nichts gesendet, geswiped oder im Brain gespeichert.`,
+         "READ ONLY"
+       );
      } catch (error) {
        matchesLoaded = false;
        matches = [];
+       newMatches = [];
+       chats = [];
        renderMatches();
 
        setNotice(
@@ -1659,7 +1866,9 @@
          error?.code || "READ ERROR"
        );
 
-       if (error?.code === "TINDER_AUTH_REQUIRED") {
+       if (
+         error?.code === "TINDER_AUTH_REQUIRED"
+       ) {
          await loadStatus();
        }
      } finally {
@@ -1680,6 +1889,16 @@
        await loadMatches();
      }
    }
+
+   newMatchesTab.addEventListener("click", () => {
+     activeListMode = "new";
+     renderMatches();
+   });
+
+   chatsTab.addEventListener("click", () => {
+     activeListMode = "chats";
+     renderMatches();
+   });
 
    refreshButton.addEventListener("click", () => {
      void refreshAll();

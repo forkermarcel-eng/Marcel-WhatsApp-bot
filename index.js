@@ -117,6 +117,7 @@ aus ihrer Nachricht zurückspiegeln
 "Das muss ich wissen"
 "I have to ask"
 "Now I need to know"
+
 wenn ein Mensch es so
 nicht schreiben würde
 
@@ -236,6 +237,7 @@ Aber trotzdem NICHT automatisch:
 - komplette Beziehungsgeschichte
 - Familiengeschichte
 - weitere Memory-Details
+
 dazupacken,
 wenn sie nicht gefragt wurden.
 
@@ -355,6 +357,7 @@ Bei Block akzeptieren.
 
 Keine Zustimmung erfinden.
 
+
 ==================================================GELD
 ==================================================
 
@@ -456,25 +459,12 @@ IDENTITÄTSREGEL
 
 Gleichnamige Frauen niemals vermischen.
 
-Besonders:
+Identitäten nur über die gespeicherte Kontakt-ID,
+den Memory Identity Key oder bestätigte Identifier
+wie Telefonnummer, WhatsApp-JID oder Username zuordnen.
 
-Dani
-!=
-Daniela Messe
-!=
-Dángela
-
-Kate Castillo
-!=
-alte Kathe
-
-Paola Maza
-!=
-ältere Paola
-
-Karla Tinder
-!=
-Karla Instagram
+Ein gleicher oder ähnlicher Name allein reicht niemals
+zum Zusammenführen zweier Kontakte.
 
 
 ==================================================
@@ -954,6 +944,7 @@ const PROFILE_COLUMNS = [
 "profile_summary",
 
 "personality",
+
 "humor_profile",
 
 "relationship",
@@ -1673,6 +1664,7 @@ languageCodeFromStoredValue(
   contact?.primary_language
 );
 
+
 if (directLanguage) {
 return directLanguage;
 }
@@ -1863,3025 +1855,6 @@ return "en";
 
 
 /* ==================================================
-FRAUEN MEMORY SEED
-================================================== */
-
-const WOMEN_SEED = [
-
-{
-identityKey:
-  "zay_20_medellin",
-
-canonicalName:
-  "Zay",
-
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish/Some English",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      20,
-
-    notes: [
-      "Seit ihrem 16. Lebensjahr unabhängig, also ungefähr vier Jahre.",
-
-      "Ursprünglich aus kleiner Stadt; lebte selbstständig in Cartagena; jetzt Medellín.",
-
-      "Jüngstes Kind; Daddy's Girl und stolz auf Selbstständigkeit."
-
-    ]
-
-  },
-   family: {
-
-    lives_with_brother_in_medellin:
-      true,
-
-    mother_is_reassured:
-      true
-
-  },
-
-  work_education: {
-
-    education_completed:
-      true,
-
-    several_certificates:
-      true,
-
-    wants_university_again:
-      true,
-
-    planned_study:
-      "Mikrobiologie und Bioanalyse",
-
-    english_lessons_paused:
-      true,
-
-    wants_to_improve_english:
-      true
-
-  },
-
-  preferences: {
-
-    music: [
-      "Vallenato",
-      "Silvestre",
-      "Poncho"
-    ],
-
-    interests: [
-      "Fotografie",
-      "Instagram",
-      "Kochen",
-      "Foodie",
-      "Selbstliebe",
-      "Lesen",
-      "Volleyball",
-      "Sprachaustausch",
-      "Natur",
-      "Fitness"
-    ]
-
-  },
-
-  personality: {
-
-    independent:
-      true,
-
-    clear_goals:
-      true
-
-  },
-
-  investment: {
-
-    reinitiated_after_silence:
-      true,
-
-    examples: [
-      "Good morning",
-      "good night",
-      "He",
-      "Hello"
-    ]
-
-  },
-
-  running_gags: {
-
-    independent_woman_and_daddys_girl:
-      true,
-
-    english_for_spanish_exchange:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_ask_again: [
-
-      "Warum seit 16 unabhängig",
-
-      "familienverbunden",
-
-
-      "warum Bruder",
-
-      "Studium",
-
-      "Englisch"
-
-    ]
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "natalia_24_san_cristobal",
-
-canonicalName:
-  "Natalia",
-
-city:
-  "San Cristóbal",
-
-language:
-  "Spanish",
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      24,
-
-    height_cm:
-      177
-
-  },
-
-  personality: {
-
-    relaxed:
-      true,
-
-    calm:
-      true,
-
-    friendly:
-      true
-
-  },
-
-  relationship: {
-
-    wants_connection:
-      true,
-
-    wants_affection:
-      true,
-
-    wants_open_feelings:
-      true,
-
-    wants_honest_loving_man:
-      true
-
-  },
-
-  preferences: {
-
-    likes: [
-
-      "Kino",
-
-      "gutes Essen",
-       "gute Gespräche",
-
-      "Filme",
-
-      "Serien",
-
-      "Bücher",
-
-      "Manga",
-
-      "Spaziergänge",
-
-      "Süßigkeiten",
-
-      "True Crime",
-
-      "Plot-Twist-Filme"
-
-    ]
-
-  },
-
-  open_threads: {
-
-    no_immediate_whatsapp:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "lu_travel_home_english",
-
-canonicalName:
-  "Lu",
-
-language:
-  "English/Spanish",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  preferences: {
-
-    likes_home_time_alone:
-      true,
-
-    travels_a_lot:
-      true
-
-  },
-
-  communication: {
-
-    english_fairly_good:
-      true,
-
-    says_not_perfect:
-      true
-
-  },
-
-  investment: {
-
-    liked_marcels_photo:
-      true,
-
-    said_unusual_message_made_difference:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_repeat_her_statements:
-      true,
-
-    no_immediate_whatsapp:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "lorena_tinder",
-
-canonicalName:
-  "Lorena",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  investment: {
-
-    liked_marcels_name:
-      true,
-
-    liked_non_generic_opener:
-      true
-
-  },
-
-  open_threads: {
-
-    unknown_passion:
-      "Sie sagte, Fotos zeigen ihre Leidenschaft nicht; konkrete Leidenschaft noch unbekannt."
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "luu_18",
-
-canonicalName:
-  "Luu",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      18,
-
-    height_cm:
-      171,
-
-    adult:
-      true
-
-  },
-
-  relationship: {
-
-    wants_contacts_or_friends:
-      true,
-
-    open_to_casual_sex:
-      true
-
-  },
-
-  preferences: {
-
-    likes_motorcycles:
-      true,
-     loves_animals:
-      true,
-
-    interests: [
-      "Shopping",
-      "Street Food",
-      "TikTok"
-    ]
-
-  },
-
-  personal_boundaries: {
-
-
-    note:
-      "Nicht als reine Beziehungssuche speichern."
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "dani_existing_daniela_27_medellin",
-
-canonicalName:
-  "Daniela",
-
-aliases: [
-  "Dani"
-],
-
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-whatsappDisplayName:
-  "Dani",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      27,
-
-    city:
-      "Medellín"
-
-  },
-
-  living_situation: {
-
-    lives_with_mother_and_siblings:
-      true,
-
-    context:
-      "Jobverlust; seit ca. 1,5 Monaten dort."
-
-  },
-
-  personality: {
-
-    extroverted:
-      true,
-
-    serious_side:
-      true,
-
-    sin_prisa:
-      true
-
-  },
-
-  relationship: {
-
-    seeks_humble_calm_man:
-      true
-
-  },
-
-  preferences: {
-
-    love_language:
-      "Geschenke",
-
-    zodiac:
-      "Taurus"
-
-  },
-
-  marcel_knowledge_map: {
-
-    asked_future_neighborhood:
-      true,
-
-    knows_move_to_medellin:
-      true
-
-  },
-
-  meaningful_details: {
-
-    warned_marcel_about_medellin:
-      true
-
-  },
-
-  current_context: {
-
-    whatsapp_name:
-      "Dani",
-    do_not_merge_with_daniela_mass:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "daniela_mass_separate",
-
-canonicalName:
-  "Daniela",
-
-aliases: [
-  "Daniela Messe"
-],
-
-country:
-  "Colombia",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-
-  religion_values: {
-
-    self_reported:
-      "Ich gehe jeden Tag zur Messe.",
-
-    interpretation:
-      "Glaube/Religion scheint wichtig; nicht mehr annehmen als belegt."
-
-  },
-
-  current_context: {
-
-    separate_person_from_dani:
-      true,
-
-    whatsapp_active_confirmed:
-      true
-
-  },
-  open_threads: {
-
-    early_getting_to_know:
-      true,
-
-    do_not_invent_religious_assumptions:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "sandy_san_32",
-
-canonicalName:
-  "Sandry",
-
-aliases: [
-  "Sandy",
-  "San"
-],
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      32
-
-  },
-
-  shared_history: {
-
-    strong_flirt:
-      true,
-
-    themes: [
-      "Dusche",
-      "Morgenküsse",
-      "acostumbrarnos juntos"
-    ],
-
-    sent_kiss_photo:
-      true,
-
-    whatsapp_for_photos:
-      true
-
-  },
-
-  communication: {
-    responds_well_to_warmth_and_heart_emojis:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "karla_tinder_older_men",
-
-canonicalName:
-  "Karla",
-
-aliases: [
-  "Karla Tinder"
-],
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-
-  "TINDER_ACTIVE",
-
-profile: {
-
-  relationship: {
-
-    attracted_to_older_mature_men:
-      true
-
-  },
-
-  open_threads: {
-
-    age_topic_already_discussed:
-      true,
-
-    do_not_merge_with_karla_instagram:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "karla_instagram_bed",
-
-canonicalName:
-  "Karla",
-
-aliases: [
-  "Karla Instagram"
-],
-
-sourcePlatform:
-  "instagram",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  living_situation: {
-
-    bed_broken:
-      true,
-
-    compared_repair_prices_with_mother:
-      true
-
-  },
-
-  personality: {
-
-    affectionate:
-      true,
-
-    real:
-      true,
-
-    sensitive:
-      true,
-
-    loyal:
-      true,
-
-    independent:
-      true
-
-  },
-
-  religion_values: {
-
-    catholic_family_background:
-      true
-
-  },
-
-  children: {
-
-    has_children:
-      false
-
-  },
-   financial_context: {
-
-    gifts_money_strong_theme:
-      true,
-
-    asked_early_for_support:
-      true
-
-  },
-
-  personal_boundaries: {
-
-    marcel_money_boundary_relevant:
-      true
-
-  },
-
-  current_context: {
-
-    do_not_merge_with_karla_tinder:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "elena_whatsapp",
-
-canonicalName:
-  "Elena",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-
-  relationship: {
-
-    natural_connection:
-      true,
-
-    let_it_flow:
-      true,
-
-    patient:
-      true,
-
-    no_forcing:
-      true
-
-  },
-
-  social_media: {
-
-    whatsapp:
-      true,
-
-    instagram:
-      true
-
-  },
-
-  shared_history: {
-
-    heart_sent:
-      true,
-
-    nervous_sweet_smile_flirt:
-      true,
-
-    affectionate_hug_flirt:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "marcela_medellin_guide",
-
-canonicalName:
-  "Marcela",
-
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  work_education: {
-
-    tourist_guide:
-      true,
-
-    spanish_teacher:
-      true,
-
-    cosmetologist:
-      true
-
-  },
-
-  shared_history: {
-    mirador_plan:
-      true,
-
-    offered_show_medellin:
-      true,
-
-    offered_massage:
-      true,
-
-    photo_sent:
-      true
-
-  },
-
-  social_media: {
-
-    whatsapp_discussed:
-      true,
-
-    instagram_discussed:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "michell_home",
-
-canonicalName:
-  "Michell",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  preferences: {
-
-    prefers_home:
-      true,
-
-    likes_calm_plans:
-      true,
-
-    likes_cinema:         true,
-
-    likes_food:
-      true
-
-  }
-
-}
-
-
-},
-
-
-{
-identityKey:
-  "valeria_adventurous_romantic",
-canonicalName:
-  "Valeria",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  personality: {
-
-    sensible:
-      true,
-
-    adventurous:
-      true,
-
-    romantic:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "paola_old_existing",
-
-canonicalName:
-  "Paola",
-
-aliases: [
-  "Paola alt"
-],
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  relationship: {
-
-    sin_prisa:
-      true,
-
-    open_to_getting_to_know:
-      true
-
-  },
-
-  current_context: {
-
-    do_not_merge_with_paola_maza:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "traccy_cosmetology",
-
-canonicalName:
-  "Traccy",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  work_education: {
-
-    cosmetology_student:
-      true,
-
-    classes_most_of_day:
-      true
-
-  },
-
-  running_gags: {
-
-    lado_travieso:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "tiana_whatsapp",
-
-canonicalName:
-  "Tiana",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-  lifestyle_routines: {
-
-    gym:
-      true,
-
-    disciplined:
-      true
-
-  },
-
-  running_gags: {
-
-    juice_jugo:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "evelyn_whatsapp",
-
-canonicalName:
-  "Evelyn",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-
-  work_education: {
-
-    works_in_store:
-      true
-   },
-
-  shared_history: {
-
-    noodles_topic:
-      true,
-
-    working_hours_topic:
-      true
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "mafe_whatsapp",
-
-canonicalName:
-  "Mafe",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-
-  communication: {
-
-    attempted_video_call:
-      true
-
-  },
-
-  shared_history: {
-
-    last_known_text:
-      "Que hace"
-
-  },
-
-  open_threads: {
-
-    check_history_before_reply:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "vanessa_content_money",
-
-canonicalName:
-  "Vanessa",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  financial_context: {
-
-    erotic_content_money_negotiation:
-      true
-
-  },
-
-  personal_boundaries: {
-
-    marcel_rejected_paid_content:
-      true,
-    serious_relationship_emphasized:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "isabela_university_food",
-
-canonicalName:
-  "Isabela",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  financial_context: {
-
-    asked_for_food_and_university_items:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-
-identityKey:
-  "chantall_late_sleep",
-
-canonicalName:
-  "Chantall",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  communication: {
-
-    gave_number:
-      true,
-
-    late_sleep_4am_topic:
-      true,
-
-    said_she_thought_marcel_would_write:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "kira_tinder",
-
-canonicalName:
-  "Kira",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  social_media: {
-
-    says_no_instagram:
-      true
-
-  },
-
-  shared_history: {
-
-    later_message:         "Bien amor"
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "milena_work_question",
-
-canonicalName:
-  "Milena",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  marcel_knowledge_map: {
-
-    asked_what_marcel_does_for_work:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "dayana_vargas",
-
-canonicalName:
-  "Dayana Vargas",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  shared_history: {
-
-    topics: [
-      "palabras",
-      "no soy así"
-    ],
-
-    photo_with_smile:
-      true,
-
-    asked:
-      "¿por qué problema?"
-
-  }
-
-}
-
-},
-
-{
-identityKey:
-  "lizeth_32",
-
-canonicalName:
-  "Lizeth",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "WHATSAPP_INVITED",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      32
-
-  },
-
-  relationship: {
-
-    does_not_want_casual:
-      true
-
-  },
-
-  preferences: {
-
-    little_party:
-      true,
-
-    prefers_calm_plans:
-      true,
-
-    likes_food_and_conversation:
-      true
-
-  },
-
-  shared_history: {
-
-    important_quote:
-      "me quedaría contigo",
-
-    meaning:
-      "Ich würde bei dir bleiben.",
-
-    date_closeness_flirt:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_ask_party_vs_calm_again:
-      true,
-
-    do_not_overinterpret_quote:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "stephanie_peace",
-
-canonicalName:
-  "Stephanie",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  preferences: {
-
-    prefers_peace_calm:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "kathe_old_unclear",
-
-canonicalName:
-  "Kathe",
-
-aliases: [
-  "Kathe alt"
-],
-
-sourcePlatform:     "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  personality: {
-
-    strong_temper:
-      true
-  },
-
-  current_context: {
-
-    do_not_merge_with_kate_castillo:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "dulce_working",
-
-canonicalName:
-  "Dulce",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  current_context: {
-
-    last_known:
-
-      "working"
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "miri_busy",
-
-canonicalName:
-  "Miri",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  current_context: {
-
-    busy_day:
-      true,
-
-    wanted_to_rest:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "anggie_23",
-
-canonicalName:
-  "Anggie",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "WHATSAPP_INVITED",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      23
-
-  },
-
-  marcel_knowledge_map: {
-
-    knows_move_to_medellin:
-      true,
-
-    knows_self_employed_projects:
-      true
-
-  },
-
-  relationship: {
-
-    wants_to_feel_again:
-      true,
-
-    misses_affection:
-      true,
-
-    wants_someone_by_side:
-      true
-
-  },
-
-  running_gags: {
-
-    profesora_language_translator:
-      true
-
-  },
-
-  shared_history: {
-
-    tinder_silence_explained_by_projects:
-      true,
-
-    whatsapp_offered_for_translation:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_treat_profesora_as_new:
-      true,
-
-    do_not_repeat_emotional_openness:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "maye_existing",
-
-canonicalName:
-  "Maye",
-
-country:
-  "Colombia",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-  personality: {
-
-    romantic:
-      true,
-
-    temperamental:
-      true,
-
-    self_description_context: [
-      "mala clase",
-      "mal genio"
-    ]
-
-  },
-
-  stress_support_style: {
-
-    needs_distance_when_really_serious:
-      true
-
-  },
-
-  personal_boundaries: {
-
-    values_respectful_treatment:
-      true,
-
-    says_she_would_not_treat_badly:
-      true
-
-  },
-
-  running_gags: {
-
-    temper_vs_romantic_side:
-      true
-
-  },
-
-  shared_history: {
-
-    whatsapp_reason:
-      "Tinder-Inaktivität + Übersetzung"
-
-  },
-
-  open_threads: {
-
-    no_abusive_nickname_from_traits:
-      true,
-    natural_warm_addresses_ok:
-      true,
-
-    do_not_repeat_conflict_questions:
-      true
-
-  },
-
-  current_context: {
-
-    whatsapp_active_confirmed:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "and_different_writing",
-
-canonicalName:
-  "And",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  meaningful_details: {
-
-    quote_meaning:
-      "Sie akzeptierte Marcel, weil er anders geschrieben hat."
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "neicy_soy_lo_que_ves",
-
-canonicalName:
-  "Neicy",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  meaningful_details: {
-
-    quote:
-      "soy lo que ves",
-
-    meaning:
-      "Ich bin, was du siehst."
-
-  }
-
-}
-
-},
-
-
-{
-
-identityKey:
-  "eri_buenos_dias",
-
-canonicalName:
-  "Eri",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  current_context: {
-
-    last_known:
-      "Buenos días ?"
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "alejandra_bien_y_tu",
-
-canonicalName:
-  "Alejandra",
-
-sourcePlatform:
-  "contact",
-
-platformStatus:
-  "CONTACT_KNOWN",
-
-profile: {
-
-  current_context: {
-
-    last_known:
-      "Bien y tú"
-
-  }
-
-}
-},
-
-
-{
-identityKey:
-  "yudi_existing",
-
-canonicalName:
-  "Yudi",
-
-country:
-  "Colombia",
-language:
-  "Spanish",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "WHATSAPP_INVITED",
-
-profile: {
-
-  relationship: {
-
-    seeks_serious_relationship:
-      true
-
-  },
-
-  preferences: {
-
-    likes_travel:
-      true,
-
-    fitness:
-      true,
-
-    likes_new_things:
-      true
-
-  },
-
-  running_gags: {
-
-    spanish_teacher:
-      true,
-
-    marcel_teaches_german:
-      true
-
-  },
-
-  shared_history: {
-
-    she_offered_teach_spanish:
-      true,
-
-    whatsapp_offered_number_sent:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_ask_again_about_teaching_spanish:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "niuber_save_pool",
-
-canonicalName:
-  "Niuber",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "SAVE_POOL",
-
-profile: {
-
-  current_context: {
-
-    insufficient_detail_profile:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "nicol_save_pool",
-
-canonicalName:
-  "Nicol",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "SAVE_POOL",
-
-profile: {
-
-  current_context: {
-
-    insufficient_detail_profile:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "jesila_save_pool",
-
-canonicalName:
-  "Jesila",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "SAVE_POOL",
-
-profile: {
-
-  current_context: {
-
-    insufficient_detail_profile:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "karol_save_pool",
-
-canonicalName:
-  "Karol",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "SAVE_POOL",
-
-profile: {
-
-  current_context: {
-
-    insufficient_detail_profile:
-      true
-
-  }
-
-}
-},
-
-
-{
-identityKey:
-  "geral_27_colombia",
-
-canonicalName:
-  "Geral",
-
-country:
-  "Colombia",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      27
-
-  },
-
-  relationship: {
-
-    not_forcing_serious:
-      true,
-
-    open_to_serious_if_develops:
-      true
-
-  },
-
-  personality: {
-
-    warm_playful:
-      true
-
-  },
-
-  investment: {
-
-    reinitiated_after_pause:
-      true,
-
-    used_carino:
-      true,
-
-
-    asked_how_marcel_is:
-      true
-
-  },
-
-  running_gags: {
-
-    local_guide_medellin_flirt:
-      true
-
-  },
-
-  shared_history: {
-
-    whatsapp_reason:
-      "wenig Tinder + Übersetzung"
-
-  },
-
-  open_threads: {
-
-    do_not_reexplain_tinder_inactivity:
-      true
-
-  },
-
-  current_context: {
-
-    whatsapp_active_confirmed:
-      true,
-
-    correct_spelling:
-      "Geral",
-
-    not_gerald:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "nia_30",
-
-canonicalName:
-  "Nia",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      30
-
-  },
-
-  personality: {
-
-    initially_shy:
-      true,
-
-    very_funny_with_trust:
-      true
-
-  },
-
-  preferences: {
-
-    likes: [
-
-      "Kulturen/Menschen",
-
-      "Tanzen",
-
-      "Kochen",
-
-      "Sport",
-
-      "Filme",
-
-      "Unternehmungen"
-
-    ]
-
-  },
-
-  investment: {
-
-    complimented_marcel:
-      "estás muy guapo"
-
-  },
-
-  shared_history: {
-
-    said_marcel_must_find_out_if_she_is_interesting:
-      true
-
-  },
-
-  open_threads: {
-
-    no_whatsapp_push_yet:
-      true,
-
-    shy_funny_side_playful_not_interview:
-      true
-
-  }
-
-}
-
-},
-
-{
-identityKey:
-  "sarah_26_teacher",
-
-canonicalName:
-  "Sarah",
-
-country:
-  "Colombia",
-
-language:
-  "English",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      26,
-
-    nationality:
-      "Colombian",
-
-    profession:
-      "Teacher"
-
-  },
-
-  relationship: {
-
-    serious_or_see_what_develops:
-      true
-
-  },
-
-  preferences: {
-
-    likes: [
-
-      "Reisen",
-
-      "Natur",
-
-      "Picknick",
-
-      "Camping",
-
-      "gutes Essen",
-
-      "Strandbars",
-
-      "Cocktails",
-
-      "Pole-Dancing"
-
-    ]
-
-  },
-
-  investment: {
-
-    liked_marcels_photo:
-      true
-
-  },
-
-  communication: {
-
-    speaks_english:
-      true
-
-  },
-
-  shared_history: {
-
-    noted_marcel_did_not_know_english:
-      true
-
-  },
-
-  open_threads: {
-
-    use_english_directly:
-      true,
-
-    no_whatsapp_push_early:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "kate_castillo_31_medellin",
-
-canonicalName:
-  "Kate Castillo",
-
-aliases: [
-  "Kathe Castillo"
-],
-
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-phoneNumber:
-  "573242540896",
-
-whatsappDisplayName:
-  "Kate Castillo",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      31,
-
-    city:
-      "Medellín"
-
-  },
-
-  personality: {
-
-    extroverted:
-      true,
-
-    friendly:
-
-      true,
-
-    strong_temper:
-      true,
-
-    affectionate:
-      true,
-
-    not_overly_clingy:
-      true
-
-  },
-
-  relationship: {
-
-    wants_real_honest_man:
-      true,
-
-    wants_man_who_knows_what_he_wants:
-      true,
-
-    no_forcing:
-      true,
-
-    time_and_interest_show_direction:
-      true
-   },
-
-  stress_support_style: {
-
-    values_communication_trust_security:
-      true,
-
-    can_get_angry_then_wants_affection:
-      true
-
-  },
-
-  sexuality_intimacy: {
-
-    hugs_kisses_closeness_flirt:
-      true
-
-  },
-
-  running_gags: {
-
-    hugs_looks_kisses_common_language:
-      true
-
-  },
-
-  shared_history: {
-
-    would_take_closeness_risk:
-      true,
-
-    does_not_need_anger_for_affection:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_ask_again_hugs_kisses:
-      true,
-
-    do_not_assume_clinginess:
-      true
-
-  },
-
-  current_context: {
-
-    whatsapp_active_confirmed:
-      true,
-
-    correct_name:
-      "Kate Castillo",
-
-    old_spelling:
-      "Kathe Castillo",
-
-    do_not_merge_old_kathe:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "laura_26_medellin",
-
-canonicalName:
-  "Laura",
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      26,
-
-    city:
-      "Medellín"
-
-  },
-
-  personality: {
-
-    independent:
-      true
-
-  },
-
-  relationship: {
-
-    wants_positive_contribution:
-      true,
-
-    wants_care_and_pampering:
-      true
-
-  },
-
-  preferences: {
-
-    likes_attention:
-      true,
-
-    likes_flowers_without_occasion:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_assume_money_orientation:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "dangela_26_venezuela_medellin",
-
-canonicalName:
-  "Dángela",
-
-aliases: [
-  "Dangela"
-],
-
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "whatsapp",
-
-platformStatus:
-  "WHATSAPP_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      26,
-
-    nationality:
-      "Venezuelan",
-
-    medellin_about_years:
-      8
-
-  },
-  family: {
-
-    mother_from_colombia:
-      true,
-
-    much_family_in_colombia:
-      true
-
-  },
-
-  relationship: {
-
-    seeks_serious_relationship:
-      true
-
-  },
-
-  preferences: {
-
-    loves_dancing:
-      true,
-
-    likes_romeo_santos:
-      true,
-
-    goes_out_with_friends:
-      true
-
-  },
-
-  shared_history: {
-
-    offered_food:
-      true,
-
-    offered_show_medellin:
-      true,
-
-    nervous_flirt:
-      "eso depende",
-
-    marcel_must_find_out_in_person:
-      true,
-
-
-    translator_then_without_words:
-      true,
-
-    she_confirmed_plan:
-      "Perfecto / Un buen plan"
-
-  },
-
-  running_gags: {
-
-    dancing_food_medellin_looks_language:
-      true
-
-  },
-
-  marcel_knowledge_map: {
-
-    knows_marcel_no_spanish:
-      true
-
-  },
-
-  open_threads: {
-    do_not_reexplain_no_spanish:
-      true,
-
-    continue_tinder_history_on_whatsapp:
-      true
-
-  },
-
-  current_context: {
-
-    whatsapp_active_confirmed:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "veronica_29_medellin",
-
-canonicalName:
-  "Veronica",
-
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish/English",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      29,
-
-    city:
-      "Medellín",
-
-    speaks_spanish:
-      true,
-
-    speaks_english:
-      true
-
-  },
-
-  relationship: {
-
-    no_casual_sex:
-      true,
-
-    no_mutual_benefits:
-      true,
-
-    wants_people_friends_language_exchange:
-      true
-
-  },
-
-  travel_future_location: {
-
-    new_in_medellin:
-      true
-
-  },
-
-  preferences: {
-
-    likes: [
-      "Süßes",
-      "Street Food",
-      "Outdoor",
-      "Tanzen"
-    ]
-
-  },
-
-  meaningful_details: {
-
-    birthday_day_of_first_chat:
-      true
-
-  },
-
-  open_threads: {
-
-    english_can_be_used:
-      true,
-
-    do_not_ignore_no_casual_boundary:
-      true
-
-  }
-
-}
-
-},
-
-{
-identityKey:
-  "luisa_23_medellin",
-
-canonicalName:
-  "Luisa",
-
-country:
-  "Colombia",
-
-city:
-  "Medellín",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "TINDER_ACTIVE",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      23,
-
-    city:
-      "Medellín",
-
-    height_cm:
-      155,
-
-    university_profile:
-      "Universidad Alfonso Reyes, S.C.",
-
-    double_date_friend:
-      "Manu"
-
-  },
-
-  personality: {
-
-    original: [
-      "chévere",
-      "respetuosa",
-      "parchada"
-    ],
-
-    relaxed:
-      true,
-
-    respectful:
-      true,
-
-    adventurous:
-      true
-
-  },
-
-  relationship: {
-
-    dating_intent_original:
-      "Conocer y disfrutar por el momento",
-
-    meaning:
-      "Im Moment kennenlernen und genießen.",
-
-    not_confirmed_casual_only:
-      true
-
-  },
-
-  sexuality_intimacy: {
-
-    light_double_meaning_not_rejected:
-      true
-
-  },
-
-  open_threads: {
-
-    do_not_list_back_traits:
-      true,
-
-    treat_dating_intent_as_current_changeable:
-      true
-
-  }
-
-}
-
-},
-
-
-{
-identityKey:
-  "salome_26_cali",
-
-canonicalName:
-  "Salome",
-
-country:
-  "Colombia",
-
-city:
-  "Cali",
-
-language:
-  "Spanish",
-
-sourcePlatform:
-  "tinder",
-
-
-platformStatus:
-  "WHATSAPP_INVITED",
-
-phoneNumber:
-  "573005092127",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      26,
-
-    city:
-      "Cali"
-
-  },
-
-  relationship: {
-
-    not_serious_required_but_open_to_serious:
-      true
-
-  },
-
-  preferences: {
-
-    likes: [
-      "Selbstliebe",
-      "Street Food",
-      "Kochen",
-      "Musik",
-      "Unternehmertum",
-      "Walking"
-    ]
-
-  },
-
-  shared_history: {
-
-    gave_whatsapp_number:
-      true,
-
-    number:
-      "+57 300 509 2127",
-
-    said_write_me_if_you_want:
-      true
-
-  },
-
-  open_threads: {
-
-    she_initiated_move:
-      true,
-
-    first_whatsapp_short:
-      true,
-
-    active_only_after_actual_message:
-      true
-   }
-
-}
-
-},
-
-
-{
-identityKey:
-  "paola_maza_20",
-
-canonicalName:
-  "Paola Maza",
-
-country:
-  "Colombia",
-
-language:
-  "Spanish/Some English",
-
-sourcePlatform:
-  "tinder",
-
-platformStatus:
-  "WHATSAPP_INVITED",
-
-profile: {
-
-  profile_summary: {
-
-    age:
-      20
-
-  },
-
-  personality: {
-
-    respectful:
-      true,
-
-    says_good_heart:
-      true
-
-  },
-
-  lifestyle_routines: {
-
-    gym_important:
-      true,
-
-    disciplined:
-      true
-
-  },
-
-  preferences: {
-
-    likes: [
-      "gutes Essen",
-      "Reisen",
-      "Filme",
-      "Spaziergänge"
-    ]
-
-  },
-
-  relationship: {
-
-    tinder_goal:
-      "Feste Beziehung, mal sehen"
-
-  },
-
-  communication: {
-
-    some_english:
-      true
-
-  },
-
-  shared_history: {
-
-    sent_wave_first:
-      true,
-
-    accepted_whatsapp:
-      true,
-
-    quote:
-      "You WhatsApp it is",
-
-    marcel_number_sent:
-      true
-
-  },
-
-  current_context: {
-
-    do_not_merge_other_paola:
-      true,
-
-    waiting_for_whatsapp_message:
-      true
-
-  }
-
-}
-
-}
-
-];
-
-
-/* ==================================================
 DATENBANK INITIALISIEREN
 ================================================== */
 
@@ -4903,6 +1876,7 @@ ALTER TABLE contacts
   ADD COLUMN IF NOT EXISTS phone_number TEXT,
 
   ADD COLUMN IF NOT EXISTS display_name TEXT,
+
   ADD COLUMN IF NOT EXISTS nickname TEXT,
 
   ADD COLUMN IF NOT EXISTS country TEXT,
@@ -5383,6 +2357,7 @@ CREATE TABLE IF NOT EXISTS media (
 )
 `);
 
+
 await pool.query(`
 CREATE TABLE IF NOT EXISTS marcel_memory (
 
@@ -5602,7 +2577,9 @@ DO NOTHING
 
 await seedMarcelMemory();
 
-await seedWomenMemory();
+console.log(
+"Frauen-Kontakte: PostgreSQL ist die einzige Datenquelle; kein Frauen-Code-Seed wird geladen."
+);
 
 
 console.log(
@@ -6361,548 +3338,6 @@ null
 
 
 /* ==================================================
-FRAUEN PROFILE
-================================================== */
-
-async function ensureWomanProfile(
-woman
-) {
-
-let contact =
-await getContactByIdentityKey(
-  woman.identityKey
-);
-
-
-const phone =
-woman.phoneNumber
-  ? String(
-      woman.phoneNumber
-    )
-      .replace(
-        /\D/g,
-        ""
-      )
-  : null;
-
-
-if (
-!contact
-&&
-phone
-) {
-
-contact =
-  await findContactByIdentifier(
-    "phone",
-    phone
-  );
-
-}
-
-if (!contact) {
-
-const result =
-  await pool.query(
-    `
-      INSERT INTO contacts (
-
-        whatsapp_jid,
-
-        display_name,
-
-        canonical_name,
-
-        memory_identity_key,
-
-        identity_locked,
-
-        phone_number,
-
-        country,
-
-        city,
-
-        primary_language,
-
-        source_platform,
-
-        current_platform,
-
-        platform_status,
-
-        whatsapp_display_name,
-
-        contact_status,
-
-        relationship_stage,
-
-        auto_reply_enabled,
-
-        date_lock_enabled,
-
-        first_contact_at,
-
-        updated_at
-
-      )
-
-      VALUES (
-
-        $1,
-
-        $2,
-
-        $2,
-
-        $3,
-        TRUE,
-
-        $4,
-
-        $5,
-        $6,
-
-        $7,
-
-        $8,
-
-        $8,
-
-        $9,
-
-        $10,
-
-        'active',
-
-        'new',
-
-        TRUE,
-
-        FALSE,
-
-        NOW(),
-
-        NOW()
-
-      )
-
-      RETURNING *
-    `,
-    [
-      createProfileJid(
-        woman.identityKey
-
-      ),
-      woman.canonicalName,
-      woman.identityKey,
-      phone,
-      woman.country || null,
-      woman.city || null,
-      woman.language || null,
-      woman.sourcePlatform || null,
-      woman.platformStatus || null,
-      woman.whatsappDisplayName || null
-    ]
-  );
-
-
-contact =
-  result.rows[0];
-
-} else {
-
-const result =
-  await pool.query(
-    `
-      UPDATE contacts
-
-      SET
-        canonical_name =
-          CASE
-            WHEN COALESCE(
-              manual_contact_fields,
-              '{}'::jsonb
-            ) ? 'canonical_name'
-            THEN canonical_name
-            ELSE COALESCE(
-              canonical_name,
-              $2
-            )
-          END,
-
-        display_name =
-          COALESCE(
-            display_name,
-            $2
-          ),
-
-        phone_number =
-          CASE
-            WHEN COALESCE(
-              manual_contact_fields,
-              '{}'::jsonb
-            ) ? 'phone_number'
-            THEN phone_number
-            ELSE COALESCE(
-              phone_number,
-              $3
-            )
-          END,
-
-        country =
-          CASE
-            WHEN COALESCE(
-              manual_contact_fields,
-              '{}'::jsonb
-            ) ? 'country'
-            THEN country
-            ELSE COALESCE(
-              country,
-              $4
-            )
-          END,
-
-        city =
-          CASE
-            WHEN COALESCE(
-              manual_contact_fields,
-              '{}'::jsonb
-            ) ? 'city'
-            THEN city
-            ELSE COALESCE(
-              city,
-              $5
-            )
-          END,
-
-        primary_language =
-          CASE
-            WHEN COALESCE(
-              manual_contact_fields,
-              '{}'::jsonb
-            ) ? 'primary_language'
-            THEN primary_language
-            ELSE COALESCE(
-              primary_language,
-              $6
-            )
-          END,
-
-        source_platform =
-          COALESCE(
-            source_platform,
-            $7
-          ),
-
-        current_platform =
-          COALESCE(
-            current_platform,
-            $7
-          ),
-
-        platform_status =
-          COALESCE(
-            platform_status,
-            $8
-          ),
-
-        whatsapp_display_name =
-          COALESCE(
-            whatsapp_display_name,
-            $9
-          ),
-
-        memory_identity_key =             COALESCE(
-            memory_identity_key,
-            $10
-          ),
-
-        identity_locked =
-          TRUE,
-
-        updated_at =
-          NOW()
-
-      WHERE id =
-        $1
-
-      RETURNING *
-    `,
-    [
-      contact.id,
-      woman.canonicalName,
-      phone,
-      woman.country || null,
-
-      woman.city || null,
-      woman.language || null,
-      woman.sourcePlatform || null,
-      woman.platformStatus || null,
-      woman.whatsappDisplayName || null,
-      woman.identityKey
-    ]
-  );
-
-
-contact =
-  result.rows[0];
-
-}
-
-
-await pool.query(
-`
-  INSERT INTO contact_memory_profiles (
-    contact_id
-  )
-
-  VALUES (
-    $1
-  )
-  ON CONFLICT (
-    contact_id
-  )
-
-  DO NOTHING
-`,
-[
-  contact.id
-]
-);
-
-
-await addContactIdentifier({
-
-contactId:
-  contact.id,
-
-type:
-  "identity_key",
-
-value:
-  woman.identityKey,
-
-isPrimary:
-  true
-
-});
-
-
-await addContactIdentifier({
-
-contactId:
-  contact.id,
-
-type:
-  "canonical_name",
-
-value:
-  woman.canonicalName,
-
-isPrimary:
-  true
-
-});
-
-
-for (
-const alias
-of woman.aliases || []
-) {
-
-await addContactIdentifier({
-
-  contactId:
-    contact.id,
-
-  type:
-    "alias",
-
-  value:
-    alias
-
-});
-
-}
-
-
-if (phone) {
-
-await addContactIdentifier({
-
-  contactId:
-    contact.id,
-
-  type:
-    "phone",
-
-  value:
-    phone,
-
-  sourcePlatform:
-    "whatsapp",
-
-  isPrimary:
-    true
-
-});
-
-}
-
-
-if (
-woman.whatsappDisplayName
-) {
-
-await addContactIdentifier({
-
-  contactId:
-    contact.id,
-
-  type:
-    "whatsapp_display_name",
-
-  value:
-    woman.whatsappDisplayName,
-
-  sourcePlatform:
-    "whatsapp"
-
-});
-
-}
-
-
-return contact;
-
-}
-
-
-/* ==================================================
-VERIFIED SEED MEMORY
-================================================== */
-
-async function upsertVerifiedSeedMemory({
-contactId,
-category,
-memoryKey,
-memoryValue,
-importance = 3
-}) {
-
-const existing =
-await pool.query(     `
-    SELECT *
-
-    FROM memory_items
-
-    WHERE contact_id =
-      $1
-
-      AND category =
-        $2
-
-      AND memory_key =
-        $3
-
-    ORDER BY
-      id DESC
-
-    LIMIT 1
-  `,
-  [
-    contactId,
-    category,
-    memoryKey
-  ]
-);
-
-
-if (
-existing.rows[0]
-) {
-
-return existing.rows[0];
-
-}
-
-await pool.query(
-  `
-    INSERT INTO memory_items (
-
-      contact_id,
-
-      category,
-
-      memory_key,
-
-
-      memory_value,
-
-      memory_type,
-
-      confidence,
-
-      status,
-
-      human_review_status,
-
-      human_note,
-
-      human_reviewed_at,
-
-      importance,
-
-      use_in_reply
-
-    )
-
-    VALUES (
-
-      $1,
-
-      $2,
-
-      $3,
-
-      $4::jsonb,
-
-      'explicit_fact',
-
-      1.0,
-
-      'active',
-
-      'confirmed',
-
-      'Manuell gepflegtes Frauen-Memory UPDATE3.',
-
-      NOW(),
-
-      $5,
-
-      TRUE
-
-    )
-  `,
-  [
-    contactId,
-    category,
-    memoryKey,
-    JSON.stringify(
-      memoryValue
-    ),
-    clampImportance(
-      importance
-    )
-  ]
-);
-
-}
-
-
-/* ==================================================
 KONTAKT MEMORY PROFIL
 ================================================== */
 
@@ -6939,6 +3374,7 @@ await pool.query(
     contactId
   ]
 );
+
 
 const row =
 result.rows[0]
@@ -7061,8 +3497,7 @@ async function applyProfileSnapshot(
 contactId,
 snapshot,
 {
-humanSeed = false,
-seedBootstrap = false
+humanSeed = false
 } = {}
 ) {
 
@@ -7106,20 +3541,6 @@ PROFILE_COLUMNS.map(
         ? current[column]
 
         : {};
-
-
-    if (
-      seedBootstrap
-    ) {
-
-      return JSON.stringify(
-        mergeProfileObjects(
-          incoming,
-          currentColumn
-        )
-      );
-
-    }
 
 
     if (
@@ -7179,6 +3600,7 @@ await pool.query(
 
   SET
     ${assignments.join(",")},
+
     profile_version =
       profile_version + 1,
 
@@ -7196,108 +3618,6 @@ values
 
 }
 
-
-/* ==================================================
-FRAUEN MEMORY LADEN
-================================================== */
-
-async function seedWomenMemory() {
-
-for (
-const woman
-of WOMEN_SEED
-) {
-
-const contact =
-  await ensureWomanProfile(
-    woman
-  );
-
-const snapshot =
-  Object.fromEntries(
-    PROFILE_COLUMNS.map(
-      key => [
-        key,
-        woman.profile?.[key] || {}
-      ]
-    )
-  );
-
-
-await applyProfileSnapshot(
-  contact.id,
-  snapshot,
-  {
-    seedBootstrap:
-      true
-  }
-);
-
-for (
-  const key
-  of PROFILE_COLUMNS
-) {
-
-  const value =
-    snapshot[key];
-
-
-  if (
-    value
-    &&
-    typeof value === "object"
-    &&
-    !Array.isArray(
-      value
-    )
-    &&
-    Object.keys(
-      value
-    ).length
-  ) {
-
-    await upsertVerifiedSeedMemory({
-
-      contactId:
-        contact.id,
-
-      category:
-        key,
-
-      memoryKey:
-        `seed_${key}`,
-
-      memoryValue:
-        value,
-
-      importance:
-
-        [
-          "current_context",
-          "open_threads",
-          "relationship",
-          "children",
-          "marcel_knowledge_map"
-        ].includes(
-          key
-        )
-          ? 5
-          : 3
-
-    });
-
-  }
-
-}
-
-}
-
-
-console.log(
-`Frauen-Memory geladen: ${WOMEN_SEED.length} getrennte Profile.`
-);
-
-}
 
 /* ==================================================
 KONTAKT AUFLÖSUNG
@@ -7537,6 +3857,7 @@ await addContactIdentifier({
     true
 
 });
+
 
 if (phone) {
 
@@ -8016,6 +4337,7 @@ const result =
 await pool.query(
   `
     INSERT INTO messages (
+
       whatsapp_jid,
 
       direction,
@@ -8255,6 +4577,7 @@ return (
 /* ==================================================
 EDITED MESSAGE
 ================================================== */
+
 async function updateEditedIncomingMessage({
 jid,
 whatsappMessageId,
@@ -8613,6 +4936,7 @@ await pool.query(
 
 const rows =
 result.rows.reverse();
+
 
 const emojiOnlyRows =
 rows.filter(
@@ -9693,6 +6017,7 @@ await pool.query(
         )
 
         THEN 0
+
         ELSE 1
 
       END,
@@ -10124,13 +6449,8 @@ hat Vorrang.
 - Gleichnamige Frauen nie
 nur anhand Namen zusammenführen.
 
-- Dani != Daniela Messe != Dángela.
-
-- Kate Castillo != alte Kathe.
-
-- Paola Maza != ältere Paola.
-
-- Karla Tinder != Karla Instagram.
+- Kontakt-ID, Memory Identity Key und bestätigte Identifier
+haben Vorrang vor Namensähnlichkeit.
 
 - marcel_knowledge_map =
 nur was diese Frau über Marcel weiß.
@@ -10532,6 +6852,7 @@ await pool.query(
 
 }
 
+
 /* ==================================================
 KINDER LOGIK
 ================================================== */
@@ -10891,6 +7212,7 @@ await pool.query(
 
 MEMORY ITEMS ANWENDEN
 ================================================== */
+
 async function applyMemoryItems(
 contactId,
 items,
@@ -11010,6 +7332,7 @@ const memoryType =
     ? item.memory_type
 
     : "interpretation";
+
 
 const value =     item?.memory_value
   &&
@@ -11490,6 +7813,7 @@ await Promise.all([
 
 ]);
 
+
 const memoryText =
 items
   .map(
@@ -11563,7 +7887,7 @@ ZUSAETZLICHE SYSTEMREGELN:
 - Temporaere Zustaende sauber ersetzen/ablaufen lassen.
 - Widersprueche nicht blind ueberschreiben.
 - Human confirmed/corrected Memory niemals ueberschreiben oder retiren.
-- Gleichnamige Frauen nie vermischen: Dani != Daniela Messe != Dángela; Kate Castillo != alte Kathe; Paola Maza != aeltere Paola; Karla Tinder != Karla Instagram.
+- Gleichnamige Frauen nie vermischen. Kontakt-ID, Memory Identity Key und bestätigte Identifier haben Vorrang vor Namensähnlichkeit.
 - Frau, Marcel und Dritte strikt trennen.
 - marcel_knowledge_map nur fuer Wissen dieser Frau ueber Marcel.
 - Wenn die Frau ueberwiegend in einer bestimmten Sprache schreibt und das fuer zukuenftige Antworten relevant ist, darf diese Information im Bereich communication gespeichert werden.
@@ -11848,6 +8172,7 @@ return {
 contact,
 
 history,
+
 profile,
 
 activeItems,
@@ -11967,6 +8292,7 @@ res
 
     error:
       "Dashboard-API ist nicht konfiguriert."
+
   });
 
 
@@ -13046,6 +9372,7 @@ if (humanAge != null) {
 return humanAge;
 }
 
+
 const direct =
 dashboardAgeFromValue(
   profile?.profile_summary?.age
@@ -13766,6 +10093,7 @@ await pool.query(
 
 }
 
+
 function dashboardContactBirthInput(
 body = {},
 fallback = {}
@@ -14364,6 +10692,7 @@ return value.map(
     )
 );
 }
+
 if (
 value
 &&
@@ -14483,6 +10812,7 @@ await pool.query(
 values
 );
 }
+
 async function translateDashboardValueListToGerman(
 entries = []
 ) {
@@ -14602,6 +10932,7 @@ Du bist die reine Deutsch-Praesentationsschicht fuer Marcels privates WhatsApp-D
 Die gelieferten Texte stammen aus internem Bot-Memory, Profilen, Events oder Live-State.
 Uebersetze jeden gelieferten TEXT natuerlich und vollstaendig ins Deutsche.
 Die internen Bot-Daten bleiben Englisch; du erzeugst ausschliesslich die deutsche Anzeige.
+
 REGELN:
 - Englisch, Spanisch und gemischte Texte ins Deutsche uebersetzen.
 - Bereits korrektes Deutsch unveraendert lassen.
@@ -14721,6 +11052,7 @@ return entries.map(
       translations
     )
 );
+
 } catch (error) {
 
 console.error(
@@ -15320,6 +11652,7 @@ try {
             m.direction,
 
             m.message_text,
+
             m.is_edited,
 
             m.created_at
@@ -15439,6 +11772,7 @@ try {
 
           relationshipStage:
             contact.relationship_stage,
+
           autoReply:
             contact.auto_reply_enabled
             !==
@@ -15558,6 +11892,7 @@ try {
               )
 
           }
+
         };
 
       }
@@ -16397,6 +12732,7 @@ try {
             NOW(),
 
           updated_at =
+
             NOW()
 
         WHERE id =
@@ -16598,6 +12934,565 @@ try {
 );
 
 
+
+
+/* ==================================================
+DASHBOARD KONTAKT ENDGUELTIG LOESCHEN
+DELETE /dashboard-api/contacts/:id
+- entfernt nur kontaktbezogene Daten
+- Marcel Brain / Marcel Memory / Live State bleiben erhalten
+- laufender Historical-Memory-Backfill blockiert das Loeschen
+================================================== */
+
+app.delete(
+"/dashboard-api/contacts/:id",
+async (req, res) => {
+
+let client = null;
+
+try {
+
+  if (
+    !dashboardApiReady(
+      res
+    )
+  ) {
+    return;
+  }
+
+
+  if (
+    !dashboardApiAuthorized(
+      req
+    )
+  ) {
+    return res
+      .status(401)
+      .json({
+        ok:
+          false,
+        error:
+          "Nicht autorisiert."
+      });
+  }
+
+
+  const contactId =
+    Number(
+      req.params.id
+    );
+
+
+  if (
+    !Number.isInteger(
+      contactId
+    )
+    ||
+    contactId <= 0
+  ) {
+    throw dashboardContactError(
+      "Ungültige Kontakt-ID."
+    );
+  }
+
+
+  const confirmation =
+    normalizeText(
+      req.body?.confirmation
+    );
+
+
+  if (
+    confirmation !==
+      "DELETE_CONTACT_PERMANENTLY"
+  ) {
+    throw dashboardContactError(
+      "Löschen wurde nicht eindeutig bestätigt.",
+      400
+    );
+  }
+
+
+  await ensureHistoricalMemoryReviewTable();
+  await ensureHistoricalBackfillJobsTable();
+  await ensureProfileJsonImportRunsTable();
+
+
+  const runningBackfill =
+    await pool.query(
+      `
+        SELECT job_id,
+               status
+
+        FROM historical_memory_backfill_jobs
+
+        WHERE contact_id =
+          $1
+
+          AND status IN (
+            'queued',
+            'running'
+          )
+
+        ORDER BY created_at DESC
+
+        LIMIT 1
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  if (
+    runningBackfill.rows[0]
+  ) {
+    throw dashboardContactError(
+      "Für diesen Kontakt läuft noch eine Memory-Analyse. Bitte warten, bis sie abgeschlossen ist, und danach erneut löschen.",
+      409
+    );
+  }
+
+
+  client =
+    await pool.connect();
+
+
+  await client.query(
+    "BEGIN"
+  );
+
+
+  const contactResult =
+    await client.query(
+      `
+        SELECT *
+
+        FROM contacts
+
+        WHERE id =
+          $1
+
+        FOR UPDATE
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  const contact =
+    contactResult.rows[0]
+    ||
+    null;
+
+
+  if (
+    !contact
+    ||
+    isTestJid(
+      contact.whatsapp_jid
+    )
+  ) {
+    throw dashboardContactError(
+      "Kontakt nicht gefunden.",
+      404
+    );
+  }
+
+
+  const contactName =
+    contact.canonical_name
+    ||
+    contact.display_name
+    ||
+    contact.whatsapp_display_name
+    ||
+    "Unbekannter Kontakt";
+
+
+  const jidResult =
+    await client.query(
+      `
+        SELECT identifier_value
+
+        FROM contact_identifiers
+
+        WHERE contact_id =
+          $1
+
+          AND identifier_type =
+            'whatsapp_jid'
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  const whatsappJids =
+    [
+      contact.whatsapp_jid,
+      ...jidResult.rows.map(
+        row =>
+          normalizeText(
+            row.identifier_value
+          )
+      )
+    ]
+      .filter(
+        Boolean
+      )
+      .filter(
+        (
+          value,
+          index,
+          values
+        ) =>
+          values.indexOf(
+            value
+          ) === index
+      );
+
+
+  const [
+    memoryCountResult,
+    eventCountResult,
+    mediaCountResult,
+    profileCountResult,
+    identifierCountResult,
+    profileImportCountResult,
+    contactReviewCountResult,
+    marcelReviewCountResult
+  ] =
+    await Promise.all([
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM memory_items WHERE contact_id = $1`,
+        [
+          contactId
+        ]
+      ),
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM memory_events WHERE contact_id = $1`,
+        [
+          contactId
+        ]
+      ),
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM media WHERE contact_id = $1`,
+        [
+          contactId
+        ]
+      ),
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM contact_memory_profiles WHERE contact_id = $1`,
+        [
+          contactId
+        ]
+      ),
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM contact_identifiers WHERE contact_id = $1`,
+        [
+          contactId
+        ]
+      ),
+      client.query(
+        `SELECT COUNT(*)::int AS count FROM profile_json_import_runs WHERE contact_id = $1`,
+        [
+          contactId
+        ]
+      ),
+      client.query(
+        `
+          SELECT COUNT(*)::int AS count
+
+          FROM memory_import_review
+
+          WHERE contact_id =
+            $1
+
+            AND LOWER(
+              subject_type
+            ) <> 'marcel'
+        `,
+        [
+          contactId
+        ]
+      ),
+      client.query(
+        `
+          SELECT COUNT(*)::int AS count
+
+          FROM memory_import_review
+
+          WHERE contact_id =
+            $1
+
+            AND LOWER(
+              subject_type
+            ) = 'marcel'
+        `,
+        [
+          contactId
+        ]
+      )
+    ]);
+
+
+  let messageCount =
+    0;
+
+
+  if (
+    whatsappJids.length
+  ) {
+    const messageCountResult =
+      await client.query(
+        `
+          SELECT COUNT(*)::int AS count
+
+          FROM messages
+
+          WHERE whatsapp_jid =
+            ANY(
+              $1::text[]
+            )
+        `,
+        [
+          whatsappJids
+        ]
+      );
+
+    messageCount =
+      Number(
+        messageCountResult.rows[0]?.count
+        ||
+        0
+      );
+  }
+
+
+  const backfillDeleteResult =
+    await client.query(
+      `
+        DELETE FROM historical_memory_backfill_jobs
+
+        WHERE contact_id =
+          $1
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  const contactReviewDeleteResult =
+    await client.query(
+      `
+        DELETE FROM memory_import_review
+
+        WHERE contact_id =
+          $1
+
+          AND LOWER(
+            subject_type
+          ) <> 'marcel'
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  let messageDeleteResult = {
+    rowCount:
+      0
+  };
+
+
+  if (
+    whatsappJids.length
+  ) {
+    messageDeleteResult =
+      await client.query(
+        `
+          DELETE FROM messages
+
+          WHERE whatsapp_jid =
+            ANY(
+              $1::text[]
+            )
+        `,
+        [
+          whatsappJids
+        ]
+      );
+  }
+
+
+  const contactDeleteResult =
+    await client.query(
+      `
+        DELETE FROM contacts
+
+        WHERE id =
+          $1
+
+        RETURNING id
+      `,
+      [
+        contactId
+      ]
+    );
+
+
+  if (
+    !contactDeleteResult.rows[0]
+  ) {
+    throw dashboardContactError(
+      "Kontakt konnte nicht gelöscht werden.",
+      409
+    );
+  }
+
+
+  await client.query(
+    "COMMIT"
+  );
+
+
+  return res.json({
+    ok:
+      true,
+    deleted:
+      true,
+    contact: {
+      id:
+        contactId,
+      name:
+        contactName
+    },
+    deletedData: {
+      messages:
+        Number(
+          messageDeleteResult.rowCount
+          ??
+          messageCount
+        ),
+      womanMemoryItems:
+        Number(
+          memoryCountResult.rows[0]?.count
+          ||
+          0
+        ),
+      womanEvents:
+        Number(
+          eventCountResult.rows[0]?.count
+          ||
+          0
+        ),
+      media:
+        Number(
+          mediaCountResult.rows[0]?.count
+          ||
+          0
+        ),
+      profileRows:
+        Number(
+          profileCountResult.rows[0]?.count
+          ||
+          0
+        ),
+      identifiers:
+        Number(
+          identifierCountResult.rows[0]?.count
+          ||
+          0
+        ),
+      profileJsonImports:
+        Number(
+          profileImportCountResult.rows[0]?.count
+          ||
+          0
+        ),
+      contactReviewRows:
+        Number(
+          contactReviewDeleteResult.rowCount
+          ??
+          contactReviewCountResult.rows[0]?.count
+          ??
+          0
+        ),
+      historicalBackfillJobs:
+        Number(
+          backfillDeleteResult.rowCount
+          ||
+          0
+        )
+    },
+    marcelData: {
+      preserved:
+        true,
+      preservedMarcelReviewRows:
+        Number(
+          marcelReviewCountResult.rows[0]?.count
+          ||
+          0
+        )
+    },
+    message:
+      `Kontakt „${contactName}“ und seine kontaktbezogenen Daten wurden gelöscht. Marcel Brain und Marcel Memory bleiben erhalten.`
+  });
+
+} catch (error) {
+
+  if (client) {
+    try {
+      await client.query(
+        "ROLLBACK"
+      );
+    } catch (
+      rollbackError
+    ) {
+      console.error(
+        "Rollback beim Kontakt löschen fehlgeschlagen:",
+        rollbackError
+      );
+    }
+  }
+
+
+  console.error(
+    "Dashboard Kontakt löschen Fehler:",
+    error
+  );
+
+
+  return res
+    .status(
+      Number(
+        error?.statusCode
+      )
+      ||
+      500
+    )
+    .json({
+      ok:
+        false,
+      error:
+        error?.message
+        ||
+        "Kontakt konnte nicht gelöscht werden."
+    });
+
+} finally {
+
+  if (client) {
+    client.release();
+  }
+}
+}
+);
 
 
 /* ==================================================
@@ -17116,6 +14011,7 @@ try {
 DASHBOARD MARCEL BRAIN
 READ ONLY V0.2 + DEUTSCHE PRAESENTATION
 ================================================== */
+
 app.get(
 "/dashboard-api/marcel-brain",
 async (req, res) => {
@@ -18556,6 +15452,7 @@ try {
     ||
     contactDisplaySource;
 
+
   const translatedEventTexts =
     Array.isArray(
       translatedFixedDisplay.events
@@ -19514,6 +16411,7 @@ options = {}
 
 let response;
 
+
 try{
 
   response =
@@ -20113,6 +17011,7 @@ try{
 
 }
 
+
 async function sendTestMessage(){
 
 const jid =
@@ -20472,6 +17371,7 @@ try {
 
   const contact =
     await createTestContact({
+
       name,
 
       country:
@@ -20951,6 +17851,7 @@ if (!text) {
 return;
 }
 
+
 let contact =
 await ensureContact(
   jid
@@ -21189,6 +18090,7 @@ console.error(
 }
 
 }
+
 
 /* ==================================================
 WHATSAPP START

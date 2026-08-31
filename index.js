@@ -6501,7 +6501,163 @@ eher kurz:
 
 
 /* ==================================================
-KI ANTWORT
+SHARED REPLY CORE
+================================================== */
+
+async function generateSharedReply({
+incomingText,
+conversation = "",
+memoryContext = "",
+resolvedLanguage = null,
+extraInstructions = "",
+channelLabel = "Chat"
+}) {
+
+const languageInstruction =
+resolvedLanguage
+
+  ? (
+      "Bevorzugte Antwortsprache für diese Nachricht: "
+      +
+      languageNameFromCode(
+        resolvedLanguage
+      )
+      +
+      "."
+    )
+
+  : "";
+
+
+const response =
+await openai.responses.create({
+
+  model:
+    MODEL,
+
+
+  instructions: `
+${MARCEL_PERSONA_V1_7_2}
+
+${memoryContext}
+
+${languageInstruction}
+
+Nutze Verlauf
+als Kurzzeitgedächtnis
+und aktive Memories
+als Langzeitwissen.
+
+Widersprich bekannten Fakten nicht.
+
+Frage nichts erneut.
+
+SEHR WICHTIG:
+
+Memory ist Hintergrundwissen
+und keine Aufforderung,
+alle Details auszugeben.
+
+Beantworte nur die tatsächlich
+gestellten Fragen
+in natürlicher Tiefe.
+
+Wenn Marcel z.B.
+nach seinen Kindern gefragt wird,
+reiche nicht automatisch
+Namen und Alter mit,
+nur weil sie im Memory stehen.
+
+Bei einfacher Frage:
+"Ja, zwei.
+Einen Jungen und ein Mädchen."
+
+Weitere Details erst,
+wenn danach gefragt wird
+oder sie später natürlich relevant sind.
+
+Wenn die Frau mehrere Fragen stellt,
+beantworte ihre echten Fragen,
+aber füge keine unnötigen
+zusätzlichen Marcel-Fakten hinzu.
+
+Bevor du eine Rückfrage stellst,
+prüfe Frauenprofil,
+aktive Memories
+und Gesprächsverlauf.
+
+Frage niemals etwas,
+das über sie bereits bekannt ist.
+
+Formuliere Rückfragen kurz
+und wie ein echter ${channelLabel}-Chat.
+
+Nicht:
+"Und du, würdest du irgendwann gerne
+noch weitere Kinder haben?"
+
+Wenn passend eher:
+"Und bist du noch offen für Kinder?"
+
+Keine KI-Füllsätze.
+
+Keine Eigenschaftslisten.
+
+Keine künstlichen Kosenamen.
+
+${extraInstructions || ""}
+
+Gib ausschließlich
+Marcels Nachricht aus.
+`,
+
+
+  input: `
+==================================================
+BISHERIGER VERLAUF
+==================================================
+
+${conversation || "[keiner]"}
+
+
+==================================================
+NEUE NACHRICHT
+==================================================
+
+${incomingText}
+
+
+==================================================
+AUFGABE
+==================================================
+
+Schreibe Marcels Antwort.
+
+Beantworte,
+was wirklich gefragt wurde.
+
+Nutze Memory,
+aber schütte es nicht aus.
+
+
+Prüfe vor Rückfragen,
+was über die Frau bereits bekannt ist.
+`
+});
+
+
+return (
+response.output_text
+  ?.trim()
+||
+""
+);
+
+}
+
+
+/* ==================================================
+WHATSAPP REPLY ADAPTER
 ================================================== */
 
 async function generateAIReply(
@@ -6604,144 +6760,22 @@ resolvedLanguage =
 }
 
 
-const languageInstruction =
-resolvedLanguage
+return generateSharedReply({
 
-  ? (
-      "Bevorzugte Antwortsprache für diese Nachricht: "
-      +
-      languageNameFromCode(
-        resolvedLanguage
-      )
-      +
-      "."
-    )
+incomingText,
 
-  : "";
+conversation,
 
+memoryContext,
 
-const response =   await openai.responses.create({
+resolvedLanguage,
 
-  model:
-    MODEL,
+extraInstructions,
 
+channelLabel:
+  "WhatsApp"
 
-  instructions: `
-${MARCEL_PERSONA_V1_7_2}
-
-${memoryContext}
-
-${languageInstruction}
-
-Nutze Verlauf
-als Kurzzeitgedächtnis
-und aktive Memories
-als Langzeitwissen.
-
-Widersprich bekannten Fakten nicht.
-
-Frage nichts erneut.
-
-SEHR WICHTIG:
-
-Memory ist Hintergrundwissen
-und keine Aufforderung,
-alle Details auszugeben.
-
-Beantworte nur die tatsächlich
-gestellten Fragen
-in natürlicher Tiefe.
-
-Wenn Marcel z.B.
-nach seinen Kindern gefragt wird,
-reiche nicht automatisch
-Namen und Alter mit,
-nur weil sie im Memory stehen.
-
-Bei einfacher Frage:
-"Ja, zwei.
-Einen Jungen und ein Mädchen."
-
-Weitere Details erst,
-wenn danach gefragt wird
-oder sie später natürlich relevant sind.
-
-Wenn die Frau mehrere Fragen stellt,
-beantworte ihre echten Fragen,
-aber füge keine unnötigen
-zusätzlichen Marcel-Fakten hinzu.
-
-Bevor du eine Rückfrage stellst,
-prüfe Frauenprofil,
-aktive Memories
-und Gesprächsverlauf.
-
-Frage niemals etwas,
-das über sie bereits bekannt ist.
-
-Formuliere Rückfragen kurz
-und wie ein echter WhatsApp-Chat.
-
-Nicht:
-"Und du, würdest du irgendwann gerne
-noch weitere Kinder haben?"
-
-Wenn passend eher:
-"Und bist du noch offen für Kinder?"
-
-Keine KI-Füllsätze.
-
-Keine Eigenschaftslisten.
-
-Keine künstlichen Kosenamen.
-
-${extraInstructions || ""}
-
-Gib ausschließlich
-Marcels Nachricht aus.
-`,
-
-
-  input: `
-==================================================
-BISHERIGER VERLAUF
-==================================================
-
-${conversation || "[keiner]"}
-
-
-==================================================
-NEUE NACHRICHT
-==================================================
-
-${incomingText}
-
-
-==================================================
-AUFGABE
-==================================================
-
-Schreibe Marcels Antwort.
-
-Beantworte,
-was wirklich gefragt wurde.
-
-Nutze Memory,
-aber schütte es nicht aus.
-
-
-Prüfe vor Rückfragen,
-was über die Frau bereits bekannt ist.
-`
 });
-
-
-return (
-response.output_text
-  ?.trim()
-||
-""
-);
 
 }
 

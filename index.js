@@ -8,11 +8,31 @@ useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 import P from "pino";
 import pg from "pg";
+import { DEVICE_BRIDGE_PROTOCOL } from "./device-bridge/protocol-v1.js";
+import { ensureDeviceBridgeTables } from "./device-bridge/database.js";
+import {
+  deviceBridgeFoundationMiddleware,
+  deviceBridgeRawBodyErrorMiddleware,
+  markDeviceBridgeReady
+} from "./device-bridge/readiness.js";
 
 const { Pool } = pg;
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+/* ==================================================
+DEVICE BRIDGE T0 — PROTOCOL V1 RAW BODY
+================================================== */
+app.use(
+  "/device-bridge/v1",
+  express.raw({
+    type: "application/json",
+    limit: DEVICE_BRIDGE_PROTOCOL.maximumRequestBytes
+  })
+);
+app.use("/device-bridge/v1", deviceBridgeRawBodyErrorMiddleware);
+app.use("/device-bridge/v1", deviceBridgeFoundationMiddleware);
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -1859,6 +1879,15 @@ DATENBANK INITIALISIEREN
 ================================================== */
 
 async function initDatabase() {
+
+try {
+  await ensureDeviceBridgeTables(pool);
+  markDeviceBridgeReady();
+  console.log("Device Bridge T0 Protocol V1 database foundation ready.");
+} catch (error) {
+  console.error("Device Bridge T0 Protocol V1 database initialization failed.");
+  throw error;
+}
 
 await pool.query(`
 CREATE TABLE IF NOT EXISTS contacts (

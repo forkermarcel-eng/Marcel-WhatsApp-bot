@@ -337,6 +337,17 @@
      color: #ffabb4;
    }
 
+   .device-command-block {
+     margin-top: 18px;
+     padding-top: 16px;
+     border-top: 1px solid var(--border);
+   }
+
+   .device-command-block h3 {
+     margin-bottom: 5px;
+     font-size: 14px;
+   }
+
    .notice {
      display: flex;
      align-items: flex-start;
@@ -728,6 +739,18 @@
          <button class="button" id="copyEnrollmentCode" type="button">Kopieren</button>
          <span class="enrollment-message">Gültig bis: <strong id="enrollmentExpires"></strong></span>
        </div>
+
+       <div class="device-command-block" aria-labelledby="deviceCommandHeading">
+         <h3 id="deviceCommandHeading">Sichere Gerätebefehle</h3>
+         <p>Commands werden erstellt und beim nächsten Heartbeat an das eindeutig ausgewählte Online-Gerät ausgeliefert.</p>
+         <div class="enrollment-actions">
+           <button class="button info" id="pingDevice" type="button" disabled>PING</button>
+           <button class="button info" id="requestDeviceStatus" type="button" disabled>STATUS ANFORDERN</button>
+           <span class="enrollment-message" id="deviceCommandMessage" role="status" aria-live="polite">
+             Gerätestatus wird geladen.
+           </span>
+         </div>
+       </div>
      </section>
 
      <section class="workspace" aria-label="Tinder Arbeitsbereich">
@@ -851,11 +874,18 @@
      enrollmentCode: document.getElementById("enrollmentCode"),
      enrollmentExpires: document.getElementById("enrollmentExpires"),
      enrollmentMessage: document.getElementById("enrollmentMessage"),
+     pingDevice: document.getElementById("pingDevice"),
+     requestDeviceStatus: document.getElementById("requestDeviceStatus"),
+     deviceCommandMessage: document.getElementById("deviceCommandMessage"),
      lastChecked: document.getElementById("lastChecked")
    };
 
    let requestBusy = false;
    let latestStatus = null;
+   let selectedDevice = null;
+   let commandBusy = false;
+   let commandFeedback = "";
+   let commandFeedbackIsError = false;
 
    function setDot(element, state) {
      element.className = "dot";
@@ -994,6 +1024,27 @@
      elements.deviceAutomationSub.textContent = "Kein eindeutiger Gerätestatus";
    }
 
+   function updateCommandControls() {
+     const commandAvailable = Boolean(
+       selectedDevice &&
+       String(selectedDevice.device_status).toUpperCase() === "ONLINE" &&
+       String(selectedDevice.enrollment_state).toUpperCase() === "ACTIVE"
+     );
+     elements.pingDevice.disabled = commandBusy || !commandAvailable;
+     elements.requestDeviceStatus.disabled = commandBusy || !commandAvailable;
+     elements.deviceCommandMessage.className = commandFeedbackIsError
+       ? "enrollment-message enrollment-error"
+       : "enrollment-message";
+     elements.deviceCommandMessage.textContent = commandFeedback;
+   }
+
+   function setCommandAvailability(device, message, isError = false) {
+     selectedDevice = device;
+     commandFeedback = message;
+     commandFeedbackIsError = isError;
+     updateCommandControls();
+   }
+
    function renderDeviceStatus(data) {
      const devices = Array.isArray(data?.devices) ? data.devices : [];
 
@@ -1002,13 +1053,16 @@
        elements.deviceValue.textContent = "Kein Gerät";
        elements.deviceSub.textContent = "Noch kein Gerät registriert";
        setUnavailableDeviceDetails("Nicht verfügbar");
+       setCommandAvailability(null, "Kein aktives Gerät verfügbar.");
      } else if (devices.length > 1) {
        setDot(elements.deviceDot, "warn");
        elements.deviceValue.textContent = "Mehrere Geräte";
        elements.deviceSub.textContent = `${devices.length} Geräte · Auswahl erforderlich`;
        setUnavailableDeviceDetails("Auswahl erforderlich");
+       setCommandAvailability(null, "Mehrere Geräte – Auswahl erforderlich.");
      } else {
        const device = devices[0];
+       const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
        const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();
        const tinderStatus = String(device?.tinder_state || "UNKNOWN").toUpperCase();
@@ -1053,6 +1107,17 @@
        );
        elements.deviceAutomationValue.textContent = automationStatus;
        elements.deviceAutomationSub.textContent = `Konfiguration: ${device?.configuration_revision ?? "–"}`;
+
+       if (enrollment !== "ACTIVE") {
+         setCommandAvailability(device, "Kein aktives Gerät verfügbar.");
+       } else if (deviceStatus !== "ONLINE") {
+         setCommandAvailability(device, "Gerät ist offline. Kein Command wird gesendet.");
+       } else if (previousDeviceId !== deviceId || !commandFeedback) {
+         setCommandAvailability(device, "Bereit für sichere T0-Gerätebefehle.");
+       } else {
+         selectedDevice = device;
+         updateCommandControls();
+       }
      }
 
      elements.lastChecked.textContent = formatNow();
@@ -1063,7 +1128,46 @@
      elements.deviceValue.textContent = "Nicht verfügbar";
      elements.deviceSub.textContent = error?.message || "Device-Bridge-Status konnte nicht geladen werden";
      setUnavailableDeviceDetails("Unbekannt");
+     setCommandAvailability(null, "Gerätestatus nicht verfügbar. Kein Command wird gesendet.", true);
      elements.lastChecked.textContent = formatNow();
+   }
+
+   async function createDeviceCommand(type) {
+     if (commandBusy) return;
+
+     const device = selectedDevice;
+     if (!device || String(device.enrollment_state).toUpperCase() !== "ACTIVE") {
+       setCommandAvailability(null, "Kein aktives Gerät verfügbar.", true);
+       return;
+     }
+     if (String(device.device_status).toUpperCase() !== "ONLINE") {
+       setCommandAvailability(device, "Gerät ist offline. Kein Command wurde gesendet.", true);
+       return;
+     }
+
+     commandBusy = true;
+     commandFeedback = `${type} wird erstellt...`;
+     commandFeedbackIsError = false;
+     updateCommandControls();
+
+     try {
+       const data = await requestJson("/api/tinder/device-command", {
+         method: "POST",
+         body: JSON.stringify({ device_id: device.device_id, type })
+       });
+       const commandId = String(data?.command?.command_id || "");
+       if (!commandId || data?.command?.type !== type) {
+         throw new Error("Das Backend hat keine gültige Command-Bestätigung geliefert.");
+       }
+       commandFeedback = `Command ${type} erstellt · ${commandId.slice(0, 8)}… · wartet auf Gerät.`;
+       commandFeedbackIsError = false;
+     } catch (error) {
+       commandFeedback = error?.message || "Command konnte nicht erstellt werden.";
+       commandFeedbackIsError = true;
+     } finally {
+       commandBusy = false;
+       updateCommandControls();
+     }
    }
 
    async function loadDeviceStatus() {
@@ -1350,6 +1454,14 @@
 
    elements.copyEnrollmentCode.addEventListener("click", () => {
      void copyEnrollmentCode();
+   });
+
+   elements.pingDevice.addEventListener("click", () => {
+     void createDeviceCommand("PING");
+   });
+
+   elements.requestDeviceStatus.addEventListener("click", () => {
+     void createDeviceCommand("REQUEST_STATUS");
    });
 
    window.addEventListener("focus", () => {

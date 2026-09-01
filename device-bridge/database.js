@@ -1,3 +1,9 @@
+import {
+  ensureDeviceBridgeAckSchema,
+  FINAL_ACK_CHECK_EXPRESSION,
+  FINAL_ACK_CONSTRAINT_NAME
+} from "./ack-schema.js";
+
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 DATABASE
 ================================================== */
@@ -123,15 +129,11 @@ export async function ensureDeviceBridgeTables(pool) {
           REFERENCES device_bridge_commands(command_id, device_id) ON DELETE RESTRICT,
         CHECK (result IS NULL OR jsonb_typeof(result) = 'object'),
         CHECK (error IS NULL OR jsonb_typeof(error) = 'object'),
-        CHECK (
-          (status = 'RECEIVED' AND result IS NULL AND error IS NULL)
-          OR (status = 'SUCCEEDED' AND error IS NULL)
-          OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL)
-          OR (status = 'REJECTED' AND result IS NULL)
-          OR (status = 'EXPIRED' AND result IS NULL AND error IS NULL)
-        )
+        CONSTRAINT ${FINAL_ACK_CONSTRAINT_NAME}
+          CHECK (${FINAL_ACK_CHECK_EXPRESSION})
       )
     `);
+    await ensureDeviceBridgeAckSchema(client);
     await client.query(`
       CREATE INDEX IF NOT EXISTS device_bridge_command_acks_device_idx
       ON device_bridge_command_acks(device_id, accepted_at DESC)

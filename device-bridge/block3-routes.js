@@ -3,6 +3,7 @@ import { createCommandAckHandler } from "./command-ack.js";
 import {
   createAdminCommandHandler,
   createAdminDeviceListHandler,
+  createAdminDeviceRevokeHandler,
   createAdminDeviceStatusHandler
 } from "./admin.js";
 
@@ -21,6 +22,7 @@ export function registerDeviceBridgeBlock3Routes({
   const commandAck = createCommandAckHandler(pool);
   const listDevices = createAdminDeviceListHandler(pool);
   const deviceStatus = createAdminDeviceStatusHandler(pool);
+  const revokeDevice = createAdminDeviceRevokeHandler(pool);
   const createCommand = createAdminCommandHandler(pool);
 
   const admin = handler => async (req, res) => {
@@ -34,5 +36,6 @@ export function registerDeviceBridgeBlock3Routes({
   app.post("/device-bridge/v1/devices/:deviceId/commands/:commandId/ack", commandAck);
   app.get("/dashboard-api/device-bridge/devices", admin(listDevices));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/status", admin(deviceStatus));
+  app.post("/dashboard-api/device-bridge/devices/:deviceId/revoke", admin(revokeDevice));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/commands", admin(createCommand));
 }

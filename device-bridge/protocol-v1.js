@@ -10,6 +10,7 @@ export const DEVICE_BRIDGE_PROTOCOL = Object.freeze({
   offlineAfterSeconds: 90,
   signatureWindowSeconds: 300,
   maximumRequestBytes: 64 * 1024,
+  commandBatchLimit: 50,
   commands: Object.freeze(["PING", "REQUEST_STATUS", "STOP_BRIDGE"])
 });
 

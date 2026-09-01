@@ -14,6 +14,7 @@ import {
   createAdminEnrollmentCodeHandler,
   createDeviceEnrollmentHandler
 } from "./device-bridge/enrollment.js";
+import { registerDeviceBridgeBlock3Routes } from "./device-bridge/block3-routes.js";
 import {
   deviceBridgeFoundationMiddleware,
   deviceBridgeRawBodyErrorMiddleware,
@@ -8408,6 +8409,14 @@ app.post(
   "/device-bridge/v1/enroll",
   deviceEnrollmentHandler
 );
+
+registerDeviceBridgeBlock3Routes({
+  app,
+  pool,
+  dashboardApiReady,
+  dashboardApiAuthorized,
+  requireDeviceBridgeReady
+});
 
 
 /* ==================================================

@@ -48,6 +48,7 @@ test("Protocol V1 constants are fixed", () => {
     offlineAfterSeconds: 90,
     signatureWindowSeconds: 300,
     maximumRequestBytes: 65536,
+    commandBatchLimit: 50,
     commands: ["PING", "REQUEST_STATUS", "STOP_BRIDGE"]
   });
 });

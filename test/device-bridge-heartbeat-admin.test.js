@@ -309,11 +309,10 @@ test("command insert and audit are atomic and audit contains no sensitive values
   assert.equal(JSON.stringify(audit).match(/signature|public_key|enrollment_code|secret|cookie/i), null);
 });
 
-test("Block 3 routes reuse dashboard auth/readiness and define no ack route", () => {
+test("Block 3 admin routes reuse dashboard auth/readiness", () => {
   const source = fs.readFileSync(new URL("../device-bridge/block3-routes.js", import.meta.url), "utf8");
   assert.match(source, /dashboardApiReady\(res\)/);
   assert.match(source, /dashboardApiAuthorized\(req\)/);
   assert.match(source, /requireDeviceBridgeReady\(res\)/);
   assert.match(source, /devices\/:deviceId\/heartbeat/);
-  assert.equal(/\/ack/.test(source), false);
 });

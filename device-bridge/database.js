@@ -125,8 +125,10 @@ export async function ensureDeviceBridgeTables(pool) {
         CHECK (error IS NULL OR jsonb_typeof(error) = 'object'),
         CHECK (
           (status = 'RECEIVED' AND result IS NULL AND error IS NULL)
-          OR (status = 'SUCCEEDED' AND result IS NOT NULL AND error IS NULL)
-          OR (status IN ('FAILED', 'REJECTED', 'EXPIRED') AND result IS NULL AND error IS NOT NULL)
+          OR (status = 'SUCCEEDED' AND error IS NULL)
+          OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL)
+          OR (status = 'REJECTED' AND result IS NULL)
+          OR (status = 'EXPIRED' AND result IS NULL AND error IS NULL)
         )
       )
     `);

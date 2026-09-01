@@ -1,4 +1,5 @@
 import { createHeartbeatHandler } from "./heartbeat.js";
+import { createCommandAckHandler } from "./command-ack.js";
 import {
   createAdminCommandHandler,
   createAdminDeviceListHandler,
@@ -17,6 +18,7 @@ export function registerDeviceBridgeBlock3Routes({
   requireDeviceBridgeReady
 }) {
   const heartbeat = createHeartbeatHandler(pool);
+  const commandAck = createCommandAckHandler(pool);
   const listDevices = createAdminDeviceListHandler(pool);
   const deviceStatus = createAdminDeviceStatusHandler(pool);
   const createCommand = createAdminCommandHandler(pool);
@@ -29,6 +31,7 @@ export function registerDeviceBridgeBlock3Routes({
   };
 
   app.post("/device-bridge/v1/devices/:deviceId/heartbeat", heartbeat);
+  app.post("/device-bridge/v1/devices/:deviceId/commands/:commandId/ack", commandAck);
   app.get("/dashboard-api/device-bridge/devices", admin(listDevices));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/status", admin(deviceStatus));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/commands", admin(createCommand));

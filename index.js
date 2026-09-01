@@ -11,9 +11,14 @@ import pg from "pg";
 import { DEVICE_BRIDGE_PROTOCOL } from "./device-bridge/protocol-v1.js";
 import { ensureDeviceBridgeTables } from "./device-bridge/database.js";
 import {
+  createAdminEnrollmentCodeHandler,
+  createDeviceEnrollmentHandler
+} from "./device-bridge/enrollment.js";
+import {
   deviceBridgeFoundationMiddleware,
   deviceBridgeRawBodyErrorMiddleware,
-  markDeviceBridgeReady
+  markDeviceBridgeReady,
+  requireDeviceBridgeReady
 } from "./device-bridge/readiness.js";
 
 const { Pool } = pg;
@@ -8367,6 +8372,42 @@ return false;
 return true;
 
 }
+
+
+/* ==================================================
+DEVICE BRIDGE T0 — PROTOCOL V1 ENROLLMENT ROUTES
+================================================== */
+
+const adminEnrollmentCodeHandler =
+createAdminEnrollmentCodeHandler(pool);
+
+const deviceEnrollmentHandler =
+createDeviceEnrollmentHandler(pool);
+
+app.post(
+  "/dashboard-api/device-bridge/enrollment-codes",
+  async (req, res) => {
+
+    if (!dashboardApiReady(res)) return;
+
+    if (!dashboardApiAuthorized(req)) {
+      return res.status(401).json({
+        ok: false,
+        error: "Nicht autorisiert."
+      });
+    }
+
+    if (!requireDeviceBridgeReady(res)) return;
+
+    return adminEnrollmentCodeHandler(req, res);
+
+  }
+);
+
+app.post(
+  "/device-bridge/v1/enroll",
+  deviceEnrollmentHandler
+);
 
 
 /* ==================================================

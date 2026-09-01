@@ -19,6 +19,13 @@ export function isDeviceBridgeReady() {
   return ready;
 }
 
+export function requireDeviceBridgeReady(res) {
+  if (ready) return true;
+  const error = new DeviceBridgeProtocolError(503, "BACKEND_NOT_READY", "Device bridge backend is not ready", true);
+  res.status(error.status).json(protocolErrorBody(error));
+  return false;
+}
+
 export function deviceBridgeFoundationMiddleware(req, res, next) {
   try {
     if (req.originalUrl.includes("?")) {

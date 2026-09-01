@@ -71,6 +71,81 @@ export function createAdminDeviceStatusHandler(pool) {
   };
 }
 
+function commandStatusRow(command, acknowledgement) {
+  const status = command.terminal_status || acknowledgement?.status || "NONE";
+  return {
+    protocol_version: Number(command.protocol_version),
+    command_id: command.command_id,
+    device_id: command.device_id,
+    type: command.command_type,
+    status,
+    terminal_status: command.terminal_status,
+    created_at: new Date(command.issued_at).toISOString(),
+    issued_at: new Date(command.issued_at).toISOString(),
+    delivered_at: command.delivered_at ? new Date(command.delivered_at).toISOString() : null,
+    acknowledged_at: acknowledgement?.accepted_at
+      ? new Date(acknowledgement.accepted_at).toISOString()
+      : null,
+    occurred_at: acknowledgement?.occurred_at
+      ? new Date(acknowledgement.occurred_at).toISOString()
+      : null,
+    terminal_at: command.terminal_at ? new Date(command.terminal_at).toISOString() : null,
+    result: acknowledgement?.result ?? null,
+    error: acknowledgement?.error ?? null
+  };
+}
+
+export function createAdminCommandStatusHandler(pool) {
+  return async function adminCommandStatusHandler(req, res) {
+    try {
+      if (!isUuidV4(req.params.deviceId) || !isUuidV4(req.params.commandId)) {
+        throw new DeviceBridgeProtocolError(400, "INVALID_IDENTIFIER", "Device or command identifier is invalid");
+      }
+
+      const device = await pool.query(
+        "SELECT device_id FROM device_bridge_devices WHERE device_id=$1",
+        [req.params.deviceId]
+      );
+      if (!device.rows[0]) {
+        throw new DeviceBridgeProtocolError(404, "DEVICE_NOT_FOUND", "Device was not found");
+      }
+
+      const commandResult = await pool.query(
+        `SELECT command_id, device_id, protocol_version, command_type, issued_at,
+                delivered_at, terminal_status, terminal_at
+         FROM device_bridge_commands
+         WHERE device_id=$1 AND command_id=$2`,
+        [req.params.deviceId, req.params.commandId]
+      );
+      const command = commandResult.rows[0];
+      if (!command) {
+        throw new DeviceBridgeProtocolError(404, "COMMAND_NOT_FOUND", "Command was not found");
+      }
+
+      const acknowledgement = await pool.query(
+        `SELECT status, occurred_at, result, error, accepted_at
+         FROM device_bridge_command_acks
+         WHERE device_id=$1 AND command_id=$2
+         ORDER BY accepted_at DESC, ack_id DESC
+         LIMIT 1`,
+        [req.params.deviceId, req.params.commandId]
+      );
+
+      return res.status(200).json({
+        ok: true,
+        server_time: new Date().toISOString(),
+        command: commandStatusRow(command, acknowledgement.rows[0])
+      });
+    } catch (error) {
+      const status = error instanceof DeviceBridgeProtocolError ? error.status : 500;
+      if (!(error instanceof DeviceBridgeProtocolError)) {
+        console.error("Device Bridge admin command-status read failed.");
+      }
+      return res.status(status).json(protocolErrorBody(error));
+    }
+  };
+}
+
 export function canonicalCommand(type) {
   if (!Object.hasOwn(COMMAND_EXPIRY_MS, type)) {
     throw new DeviceBridgeProtocolError(400, "COMMAND_TYPE_UNSUPPORTED", "Command type is not supported");

@@ -1132,6 +1132,59 @@
      elements.lastChecked.textContent = formatNow();
    }
 
+   function wait(milliseconds) {
+     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+   }
+
+   function renderCommandAck(type, commandId, command) {
+     const status = String(command?.status || "NONE").toUpperCase();
+     const shortId = `${commandId.slice(0, 8)}…`;
+
+     if (status === "NONE") {
+       commandFeedback = `Command ${type} erstellt · ${shortId} · wartet auf Gerät.`;
+       commandFeedbackIsError = false;
+       return false;
+     }
+     if (status === "RECEIVED") {
+       commandFeedback = `Command ${type} · ${shortId} · RECEIVED · wartet auf Abschluss.`;
+       commandFeedbackIsError = false;
+       return false;
+     }
+     if (status === "SUCCEEDED") {
+       commandFeedback = `Command ${type} · ${shortId} · SUCCEEDED · erfolgreich ausgeführt.`;
+       commandFeedbackIsError = false;
+       return true;
+     }
+     if (["FAILED", "REJECTED", "EXPIRED"].includes(status)) {
+       const errorCode = command?.error?.code ? ` · ${command.error.code}` : "";
+       commandFeedback = `Command ${type} · ${shortId} · ${status}${errorCode}.`;
+       commandFeedbackIsError = true;
+       return true;
+     }
+
+     throw new Error("Das Backend hat einen unbekannten Command-Status geliefert.");
+   }
+
+   async function pollCommandStatus(deviceId, commandId, type) {
+     for (let attempt = 0; attempt < 15; attempt += 1) {
+       if (attempt > 0) await wait(2000);
+
+       const query = new URLSearchParams({ deviceId, commandId });
+       const data = await requestJson(`/api/tinder/device-command-status?${query}`);
+       if (!data?.command || data.command.command_id !== commandId || data.command.device_id !== deviceId) {
+         throw new Error("Das Backend hat keine gültige Command-Status-Antwort geliefert.");
+       }
+
+       const terminal = renderCommandAck(type, commandId, data.command);
+       updateCommandControls();
+       if (terminal) return;
+     }
+
+     commandFeedback = `Command ${type} · ${commandId.slice(0, 8)}… · noch keine abschließende Bestätigung.`;
+     commandFeedbackIsError = false;
+     updateCommandControls();
+   }
+
    async function createDeviceCommand(type) {
      if (commandBusy) return;
 
@@ -1161,6 +1214,8 @@
        }
        commandFeedback = `Command ${type} erstellt · ${commandId.slice(0, 8)}… · wartet auf Gerät.`;
        commandFeedbackIsError = false;
+       updateCommandControls();
+       await pollCommandStatus(device.device_id, commandId, type);
      } catch (error) {
        commandFeedback = error?.message || "Command konnte nicht erstellt werden.";
        commandFeedbackIsError = true;

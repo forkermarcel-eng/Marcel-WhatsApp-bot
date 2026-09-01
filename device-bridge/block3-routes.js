@@ -2,6 +2,7 @@ import { createHeartbeatHandler } from "./heartbeat.js";
 import { createCommandAckHandler } from "./command-ack.js";
 import {
   createAdminCommandHandler,
+  createAdminCommandStatusHandler,
   createAdminDeviceListHandler,
   createAdminDeviceRevokeHandler,
   createAdminDeviceStatusHandler
@@ -24,6 +25,7 @@ export function registerDeviceBridgeBlock3Routes({
   const deviceStatus = createAdminDeviceStatusHandler(pool);
   const revokeDevice = createAdminDeviceRevokeHandler(pool);
   const createCommand = createAdminCommandHandler(pool);
+  const commandStatus = createAdminCommandStatusHandler(pool);
 
   const admin = handler => async (req, res) => {
     if (!dashboardApiReady(res)) return;
@@ -36,6 +38,7 @@ export function registerDeviceBridgeBlock3Routes({
   app.post("/device-bridge/v1/devices/:deviceId/commands/:commandId/ack", commandAck);
   app.get("/dashboard-api/device-bridge/devices", admin(listDevices));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/status", admin(deviceStatus));
+  app.get("/dashboard-api/device-bridge/devices/:deviceId/commands/:commandId", admin(commandStatus));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/revoke", admin(revokeDevice));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/commands", admin(createCommand));
 }

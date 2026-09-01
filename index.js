@@ -9,7 +9,7 @@ useMultiFileAuthState
 import P from "pino";
 import pg from "pg";
 import { DEVICE_BRIDGE_PROTOCOL } from "./device-bridge/protocol-v1.js";
-import { ensureDeviceBridgeTables } from "./device-bridge/database.js";
+import { initializeDeviceBridgeDatabase } from "./device-bridge/initialization.js";
 import {
   createAdminEnrollmentCodeHandler,
   createDeviceEnrollmentHandler
@@ -18,7 +18,6 @@ import { registerDeviceBridgeBlock3Routes } from "./device-bridge/block3-routes.
 import {
   deviceBridgeFoundationMiddleware,
   deviceBridgeRawBodyErrorMiddleware,
-  markDeviceBridgeReady,
   requireDeviceBridgeReady
 } from "./device-bridge/readiness.js";
 
@@ -1886,14 +1885,7 @@ DATENBANK INITIALISIEREN
 
 async function initDatabase() {
 
-try {
-  await ensureDeviceBridgeTables(pool);
-  markDeviceBridgeReady();
-  console.log("Device Bridge T0 Protocol V1 database foundation ready.");
-} catch (error) {
-  console.error("Device Bridge T0 Protocol V1 database initialization failed.");
-  throw error;
-}
+await initializeDeviceBridgeDatabase(pool);
 
 await pool.query(`
 CREATE TABLE IF NOT EXISTS contacts (

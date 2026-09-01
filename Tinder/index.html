@@ -623,38 +623,38 @@
      <section class="status-grid" aria-label="Tinder Systemstatus">
        <article class="status-card">
          <div class="status-top">
-           <div class="status-name">Worker</div>
-           <span class="dot" id="workerDot" aria-hidden="true"></span>
+           <div class="status-name">Android-Gerät</div>
+           <span class="dot" id="deviceDot" aria-hidden="true"></span>
          </div>
-         <div class="status-value" id="workerValue">Prüfe...</div>
-         <div class="status-sub" id="workerSub">Railway-Verbindung wird geprüft</div>
+         <div class="status-value" id="deviceValue">Prüfe...</div>
+         <div class="status-sub" id="deviceSub">Gerätestatus wird geladen</div>
        </article>
 
        <article class="status-card">
          <div class="status-top">
-           <div class="status-name">Tinder-Verbindung</div>
-           <span class="dot" id="browserDot" aria-hidden="true"></span>
+           <div class="status-name">Bridge</div>
+           <span class="dot" id="bridgeDot" aria-hidden="true"></span>
          </div>
-         <div class="status-value" id="browserValue">Prüfe...</div>
-         <div class="status-sub" id="browserSub">Manuelles Verbindungsgate wird geladen</div>
+         <div class="status-value" id="bridgeValue">Prüfe...</div>
+         <div class="status-sub" id="bridgeSub">Bridge-Status wird geladen</div>
        </article>
 
        <article class="status-card">
          <div class="status-top">
-           <div class="status-name">Tinder Session</div>
-           <span class="dot" id="sessionDot" aria-hidden="true"></span>
+           <div class="status-name">Tinder</div>
+           <span class="dot" id="tinderDot" aria-hidden="true"></span>
          </div>
-         <div class="status-value" id="sessionValue">Prüfe...</div>
-         <div class="status-sub" id="sessionSub">Anmeldestatus wird geladen</div>
+         <div class="status-value" id="tinderValue">Prüfe...</div>
+         <div class="status-sub" id="tinderSub">Tinder-Status wird geladen</div>
        </article>
 
        <article class="status-card">
          <div class="status-top">
            <div class="status-name">Automation</div>
-           <span class="dot" id="automationDot" aria-hidden="true"></span>
+           <span class="dot" id="deviceAutomationDot" aria-hidden="true"></span>
          </div>
-         <div class="status-value" id="automationValue">Prüfe...</div>
-         <div class="status-sub" id="automationSub">Manuelle Freigabe wird geladen</div>
+         <div class="status-value" id="deviceAutomationValue">Prüfe...</div>
+         <div class="status-sub" id="deviceAutomationSub">Automation-Status wird geladen</div>
        </article>
      </section>
 
@@ -812,18 +812,30 @@
  <script>
    const elements = {
      refreshStatus: document.getElementById("refreshStatus"),
-     workerDot: document.getElementById("workerDot"),
-     workerValue: document.getElementById("workerValue"),
-     workerSub: document.getElementById("workerSub"),
-     browserDot: document.getElementById("browserDot"),
-     browserValue: document.getElementById("browserValue"),
-     browserSub: document.getElementById("browserSub"),
-     sessionDot: document.getElementById("sessionDot"),
-     sessionValue: document.getElementById("sessionValue"),
-     sessionSub: document.getElementById("sessionSub"),
-     automationDot: document.getElementById("automationDot"),
-     automationValue: document.getElementById("automationValue"),
-     automationSub: document.getElementById("automationSub"),
+     deviceDot: document.getElementById("deviceDot"),
+     deviceValue: document.getElementById("deviceValue"),
+     deviceSub: document.getElementById("deviceSub"),
+     bridgeDot: document.getElementById("bridgeDot"),
+     bridgeValue: document.getElementById("bridgeValue"),
+     bridgeSub: document.getElementById("bridgeSub"),
+     tinderDot: document.getElementById("tinderDot"),
+     tinderValue: document.getElementById("tinderValue"),
+     tinderSub: document.getElementById("tinderSub"),
+     deviceAutomationDot: document.getElementById("deviceAutomationDot"),
+     deviceAutomationValue: document.getElementById("deviceAutomationValue"),
+     deviceAutomationSub: document.getElementById("deviceAutomationSub"),
+     workerDot: document.createElement("span"),
+     workerValue: document.createElement("span"),
+     workerSub: document.createElement("span"),
+     browserDot: document.createElement("span"),
+     browserValue: document.createElement("span"),
+     browserSub: document.createElement("span"),
+     sessionDot: document.createElement("span"),
+     sessionValue: document.createElement("span"),
+     sessionSub: document.createElement("span"),
+     automationDot: document.createElement("span"),
+     automationValue: document.createElement("span"),
+     automationSub: document.createElement("span"),
      statusNotice: document.getElementById("statusNotice"),
      noticeTitle: document.getElementById("noticeTitle"),
      noticeText: document.getElementById("noticeText"),
@@ -953,6 +965,115 @@
      } catch {
        elements.enrollmentMessage.className = "enrollment-message enrollment-error";
        elements.enrollmentMessage.textContent = "Kopieren nicht möglich. Bitte Code manuell markieren.";
+     }
+   }
+
+   function formatTimestamp(value) {
+     if (!value) return "Kein Heartbeat";
+
+     const date = new Date(value);
+     if (Number.isNaN(date.getTime())) return "Heartbeat-Zeit unbekannt";
+
+     return `Heartbeat: ${new Intl.DateTimeFormat("de-DE", {
+       dateStyle: "short",
+       timeStyle: "medium"
+     }).format(date)}`;
+   }
+
+   function setUnavailableDeviceDetails(value) {
+     setDot(elements.bridgeDot, "info");
+     elements.bridgeValue.textContent = value;
+     elements.bridgeSub.textContent = "Kein eindeutiger Gerätestatus";
+
+     setDot(elements.tinderDot, "info");
+     elements.tinderValue.textContent = value;
+     elements.tinderSub.textContent = "Kein eindeutiger Gerätestatus";
+
+     setDot(elements.deviceAutomationDot, "info");
+     elements.deviceAutomationValue.textContent = value;
+     elements.deviceAutomationSub.textContent = "Kein eindeutiger Gerätestatus";
+   }
+
+   function renderDeviceStatus(data) {
+     const devices = Array.isArray(data?.devices) ? data.devices : [];
+
+     if (devices.length === 0) {
+       setDot(elements.deviceDot, "info");
+       elements.deviceValue.textContent = "Kein Gerät";
+       elements.deviceSub.textContent = "Noch kein Gerät registriert";
+       setUnavailableDeviceDetails("Nicht verfügbar");
+     } else if (devices.length > 1) {
+       setDot(elements.deviceDot, "warn");
+       elements.deviceValue.textContent = "Mehrere Geräte";
+       elements.deviceSub.textContent = `${devices.length} Geräte · Auswahl erforderlich`;
+       setUnavailableDeviceDetails("Auswahl erforderlich");
+     } else {
+       const device = devices[0];
+       const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
+       const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();
+       const tinderStatus = String(device?.tinder_state || "UNKNOWN").toUpperCase();
+       const automationStatus = String(device?.automation_state || "UNKNOWN").toUpperCase();
+       const deviceName = String(device?.display_name || "Android-Gerät");
+       const deviceId = String(device?.device_id || "Keine Device-ID");
+       const enrollment = String(device?.enrollment_state || "UNKNOWN").toUpperCase();
+
+       setDot(
+         elements.deviceDot,
+         deviceStatus === "ONLINE" ? "good" : deviceStatus === "OFFLINE" ? "bad" : "warn"
+       );
+       elements.deviceValue.textContent = deviceStatus;
+       elements.deviceSub.textContent =
+         `${deviceName} · ${deviceId} · Enrollment: ${enrollment} · ${formatTimestamp(device?.last_heartbeat_accepted_at)}`;
+
+       setDot(
+         elements.bridgeDot,
+         bridgeStatus === "RUNNING"
+           ? "good"
+           : bridgeStatus === "ERROR"
+             ? "bad"
+             : ["STARTING", "STOPPING"].includes(bridgeStatus) ? "warn" : "info"
+       );
+       elements.bridgeValue.textContent = bridgeStatus;
+       elements.bridgeSub.textContent = `App ${device?.app_version || "–"} · Build ${device?.app_build || "–"}`;
+
+       setDot(
+         elements.tinderDot,
+         tinderStatus === "CONNECTED"
+           ? "good"
+           : ["AUTH_REQUIRED", "REVIEW_REQUIRED"].includes(tinderStatus) ? "warn" : "info"
+       );
+       elements.tinderValue.textContent = tinderStatus;
+       elements.tinderSub.textContent = tinderStatus === "UNKNOWN"
+         ? "Gültiger Status · noch keine Tinder-Aussage"
+         : "Status der Android Device Bridge";
+
+       setDot(
+         elements.deviceAutomationDot,
+         automationStatus === "RUNNING" ? "good" : automationStatus === "STOPPED" ? "info" : "warn"
+       );
+       elements.deviceAutomationValue.textContent = automationStatus;
+       elements.deviceAutomationSub.textContent = `Konfiguration: ${device?.configuration_revision ?? "–"}`;
+     }
+
+     elements.lastChecked.textContent = formatNow();
+   }
+
+   function renderDeviceStatusError(error) {
+     setDot(elements.deviceDot, "bad");
+     elements.deviceValue.textContent = "Nicht verfügbar";
+     elements.deviceSub.textContent = error?.message || "Device-Bridge-Status konnte nicht geladen werden";
+     setUnavailableDeviceDetails("Unbekannt");
+     elements.lastChecked.textContent = formatNow();
+   }
+
+   async function loadDeviceStatus() {
+     try {
+       const data = await requestJson("/api/tinder/device-status");
+       renderDeviceStatus(data);
+       return data;
+     } catch (error) {
+       renderDeviceStatusError(error);
+       return null;
      }
    }
 
@@ -1197,8 +1318,14 @@
      }
    }
 
+   async function refreshAllStatuses() {
+     elements.refreshStatus.disabled = true;
+     await Promise.all([loadDeviceStatus(), loadStatus()]);
+     elements.refreshStatus.disabled = false;
+   }
+
    elements.refreshStatus.addEventListener("click", () => {
-     void loadStatus();
+     void refreshAllStatuses();
    });
 
    elements.connectButton.addEventListener("click", () => {
@@ -1226,13 +1353,13 @@
    });
 
    window.addEventListener("focus", () => {
-     void loadStatus();
+     void refreshAllStatuses();
    });
 
-   void loadStatus();
+   void refreshAllStatuses();
 
    window.setInterval(() => {
-     void loadStatus();
+     void refreshAllStatuses();
    }, 60000);
  </script>
 </body>

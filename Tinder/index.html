@@ -290,6 +290,53 @@
      text-transform: uppercase;
    }
 
+   .enrollment-panel {
+     margin-bottom: 16px;
+     padding: 18px;
+     border: 1px solid var(--border);
+     border-radius: 17px;
+     background: var(--panel);
+     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+   }
+
+   .enrollment-panel h2 {
+     margin-bottom: 5px;
+     font-size: 15px;
+   }
+
+   .enrollment-panel p,
+   .enrollment-message {
+     color: var(--muted);
+     font-size: 13px;
+     line-height: 1.5;
+   }
+
+   .enrollment-actions,
+   .enrollment-result {
+     display: flex;
+     align-items: center;
+     gap: 12px;
+     margin-top: 14px;
+     flex-wrap: wrap;
+   }
+
+   .enrollment-code {
+     padding: 11px 13px;
+     border: 1px solid rgba(66, 199, 99, 0.32);
+     border-radius: 12px;
+     background: var(--green-soft);
+     color: #b8f0c5;
+     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+     font-size: 15px;
+     font-weight: 800;
+     letter-spacing: 0.5px;
+     overflow-wrap: anywhere;
+   }
+
+   .enrollment-error {
+     color: #ffabb4;
+   }
+
    .notice {
      display: flex;
      align-items: flex-start;
@@ -665,6 +712,24 @@
        </div>
      </section>
 
+     <section class="enrollment-panel" aria-labelledby="enrollmentHeading">
+       <h2 id="enrollmentHeading">Android Device Bridge</h2>
+       <p>Erstellt einen einmaligen, zehn Minuten gültigen Enrollment-Code für das ZTE-Gerät.</p>
+
+       <div class="enrollment-actions">
+         <button class="button primary" id="createEnrollmentCode" type="button">
+           Enrollment-Code erstellen
+         </button>
+         <span class="enrollment-message" id="enrollmentMessage" role="status" aria-live="polite"></span>
+       </div>
+
+       <div class="enrollment-result" id="enrollmentResult" hidden>
+         <code class="enrollment-code" id="enrollmentCode"></code>
+         <button class="button" id="copyEnrollmentCode" type="button">Kopieren</button>
+         <span class="enrollment-message">Gültig bis: <strong id="enrollmentExpires"></strong></span>
+       </div>
+     </section>
+
      <section class="workspace" aria-label="Tinder Arbeitsbereich">
        <aside class="panel">
          <div class="panel-header">
@@ -768,6 +833,12 @@
      disconnectButton: document.getElementById("disconnectButton"),
      automationStartButton: document.getElementById("automationStartButton"),
      automationStopButton: document.getElementById("automationStopButton"),
+     createEnrollmentCode: document.getElementById("createEnrollmentCode"),
+     copyEnrollmentCode: document.getElementById("copyEnrollmentCode"),
+     enrollmentResult: document.getElementById("enrollmentResult"),
+     enrollmentCode: document.getElementById("enrollmentCode"),
+     enrollmentExpires: document.getElementById("enrollmentExpires"),
+     enrollmentMessage: document.getElementById("enrollmentMessage"),
      lastChecked: document.getElementById("lastChecked")
    };
 
@@ -837,6 +908,52 @@
      }
 
      return data;
+   }
+
+   async function createEnrollmentCode() {
+     elements.createEnrollmentCode.disabled = true;
+     elements.enrollmentResult.hidden = true;
+     elements.enrollmentMessage.className = "enrollment-message";
+     elements.enrollmentMessage.textContent = "Enrollment-Code wird erstellt...";
+
+     try {
+       const data = await requestJson("/api/tinder/enrollment-code", {
+         method: "POST",
+         body: JSON.stringify({})
+       });
+
+       if (!data?.enrollment_code || !data?.expires_at) {
+         throw new Error("Das Backend hat keinen gültigen Enrollment-Code geliefert.");
+       }
+
+       elements.enrollmentCode.textContent = data.enrollment_code;
+       elements.enrollmentExpires.textContent = new Intl.DateTimeFormat("de-DE", {
+         dateStyle: "medium",
+         timeStyle: "medium"
+       }).format(new Date(data.expires_at));
+       elements.enrollmentResult.hidden = false;
+       elements.enrollmentMessage.textContent = "Code erfolgreich erstellt.";
+     } catch (error) {
+       elements.enrollmentMessage.className = "enrollment-message enrollment-error";
+       elements.enrollmentMessage.textContent =
+         error?.message || "Enrollment-Code konnte nicht erstellt werden.";
+     } finally {
+       elements.createEnrollmentCode.disabled = false;
+     }
+   }
+
+   async function copyEnrollmentCode() {
+     const code = elements.enrollmentCode.textContent;
+     if (!code) return;
+
+     try {
+       await navigator.clipboard.writeText(code);
+       elements.enrollmentMessage.className = "enrollment-message";
+       elements.enrollmentMessage.textContent = "Enrollment-Code kopiert.";
+     } catch {
+       elements.enrollmentMessage.className = "enrollment-message enrollment-error";
+       elements.enrollmentMessage.textContent = "Kopieren nicht möglich. Bitte Code manuell markieren.";
+     }
    }
 
    function applyDisconnectedState() {
@@ -1098,6 +1215,14 @@
 
    elements.automationStopButton.addEventListener("click", () => {
      void runControl("automation-stop");
+   });
+
+   elements.createEnrollmentCode.addEventListener("click", () => {
+     void createEnrollmentCode();
+   });
+
+   elements.copyEnrollmentCode.addEventListener("click", () => {
+     void copyEnrollmentCode();
    });
 
    window.addEventListener("focus", () => {

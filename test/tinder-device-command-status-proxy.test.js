@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
-import handler from "../api/tinder/device-command-status.js";
+import handler from "../api/tinder/device-status.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const COMMAND_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
@@ -103,6 +103,28 @@ test("valid GET calls the exact backend command-status endpoint", async () => wi
   assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
 }));
 
+test("GET without command identifiers preserves the device-list proxy", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z", devices: [] });
+      }
+    };
+  };
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices, []);
+  assert.equal(call.url, "https://backend.example/dashboard-api/device-bridge/devices");
+  assert.equal(call.options.method, "GET");
+}));
+
 test("invalid device and command identifiers are rejected before backend access", async () => withEnvironment(async () => {
   globalThis.fetch = async () => { throw new Error("fetch must not run"); };
   for (const options of [{ deviceId: "invalid" }, { commandId: "invalid" }]) {
@@ -143,10 +165,10 @@ test("backend and network errors are controlled", async () => withEnvironment(as
   }
 }));
 
-test("non-GET method is rejected", async () => withEnvironment(async () => {
+test("unsupported method is rejected", async () => withEnvironment(async () => {
   globalThis.fetch = async () => { throw new Error("fetch must not run"); };
   const res = responseRecorder();
-  await handler(request({ method: "POST" }), res);
+  await handler(request({ method: "PUT" }), res);
   assert.equal(res.statusCode, 405);
-  assert.equal(res.headers.Allow, "GET");
+  assert.equal(res.headers.Allow, "GET, POST");
 }));

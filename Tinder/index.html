@@ -1170,7 +1170,7 @@
        if (attempt > 0) await wait(2000);
 
        const query = new URLSearchParams({ deviceId, commandId });
-       const data = await requestJson(`/api/tinder/device-command-status?${query}`);
+       const data = await requestJson(`/api/tinder/device-status?${query}`);
        if (!data?.command || data.command.command_id !== commandId || data.command.device_id !== deviceId) {
          throw new Error("Das Backend hat keine gültige Command-Status-Antwort geliefert.");
        }
@@ -1204,7 +1204,7 @@
      updateCommandControls();
 
      try {
-       const data = await requestJson("/api/tinder/device-command", {
+       const data = await requestJson("/api/tinder/device-status", {
          method: "POST",
          body: JSON.stringify({ device_id: device.device_id, type })
        });

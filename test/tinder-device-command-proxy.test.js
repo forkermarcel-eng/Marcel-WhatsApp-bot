@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
-import handler from "../api/tinder/device-command.js";
+import handler from "../api/tinder/device-status.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const COMMAND_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";

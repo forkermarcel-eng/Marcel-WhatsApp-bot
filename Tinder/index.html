@@ -1270,7 +1270,7 @@
    }
 
    async function pollCommandStatus(deviceId, commandId, type) {
-     for (let attempt = 0; attempt < 15; attempt += 1) {
+     for (let attempt = 0; attempt < 31; attempt += 1) {
        if (attempt > 0) await wait(2000);
 
        const query = new URLSearchParams({ deviceId, commandId });

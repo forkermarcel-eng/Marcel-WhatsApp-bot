@@ -14,3 +14,8 @@ test("Tinder page provides a safe multi-device selection with no key material", 
   assert.doesNotMatch(page, /device\.key_id/);
   assert.doesNotMatch(page, /device\.public_key/);
 });
+
+test("Tinder page polls command status for a full heartbeat interval plus ACK buffer", () => {
+  assert.match(page, /for \(let attempt = 0; attempt < 31; attempt \+= 1\)/);
+  assert.match(page, /if \(terminal\) return;/);
+});

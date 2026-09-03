@@ -78,19 +78,50 @@ test("woman profile reference view hides technical profile and audit data", () =
   assert.doesNotMatch(contacts, /x\.humanNote|notes\.map/);
 });
 
-test("flirt tension is conservative and based on reciprocal conversation signals", () => {
-  assert.equal(P.tensionPresentation([], []).level, "Keine");
-  assert.equal(P.tensionPresentation([{ direction: "incoming", text: "ein Kuss" }], []).level, "Leicht");
+test("semantic facts preserve keys, booleans, nested values and birthdays", () => {
+  const intimacy=P.semanticFacts([{category:"sexuality_intimacy",key:"preferences",value:{hair_pulling:true,soft_kisses:true,boundary_crossing:false}}]);
+  assert.deepEqual(intimacy.map(fact=>fact.text),[
+    "Mag es, wenn Marcel ihr an den Haaren zieht.",
+    "Mag sanfte Küsse.",
+    "Boundary Crossing: Nein."
+  ]);
+  assert.ok(intimacy.every(fact=>![/^Ja\.?$/,/^Nein\.?$/].some(pattern=>pattern.test(fact.text))));
+  assert.deepEqual(P.semanticFacts([{category:"profile_summary",key:"birthday",value:{day:13,month:3,year:1994,year_inferred:true}}]).map(fact=>fact.text),["Geburtstag: 13. März 1994."]);
+  assert.deepEqual(P.semanticFacts([{category:"profile_summary",key:"birthday",value:{day:13,month:3}}]).map(fact=>fact.text),["Geburtstag: 13. März."]);
+  assert.deepEqual(P.semanticFacts([{category:"family",key:"children",value:{children:[{name:"Mia",age:5}],has_children:true}}]).map(fact=>fact.text),["Name: Mia.","Alter: 5.","Hat Kinder."]);
+});
+
+test("semantic summaries and contact details use labelled facts", () => {
+  const items=[{category:"relationship",key:"shared_history",value:{accepted_whatsapp:true,themes:["Dusche","Morgenküsse"]}}];
+  const summary=P.semanticSummary(items);
+  assert.match(summary,/WhatsApp akzeptiert: Ja/);
+  assert.match(summary,/Themen: Dusche und Morgenküsse/);
+  assert.match(contacts,/P\.semanticSummary\(group/);
+  assert.match(contacts,/facts=P\.semanticFacts\(group\)/);
+  assert.match(contacts,/facts\.slice\(0,8\).*fact\.text/);
+  assert.match(contacts,/cleanDetailRows\(item\.value\)/);
+});
+
+test("flirt tension prioritizes structured Woman Brain facts and keeps conversation secondary", () => {
+  assert.equal(P.tensionPresentation([], [], []).level, "Keine");
+  assert.equal(P.tensionPresentation([], [{ direction: "incoming", text: "ein Kuss" }], []).level, "Leicht");
   assert.equal(P.tensionPresentation([
+  ], [
     { direction: "incoming", text: "ein Kuss" },
     { direction: "outgoing", text: "flirtige Antwort" }
   ], []).level, "Spürbar");
-  assert.equal(P.tensionPresentation([
+  assert.equal(P.tensionPresentation([], [
     { direction: "incoming", text: "Kuss" },
     { direction: "outgoing", text: "Flirt" },
     { direction: "incoming", text: "Nähe" },
     { direction: "outgoing", text: "Anziehung" }
   ], []).level, "Stark");
+  const confirmed=[{category:"sexuality_intimacy",key:"preferences",value:{hair_pulling:true},reviewStatus:"confirmed",importance:5,confidence:1}];
+  assert.equal(P.tensionPresentation(confirmed,[],[]).level,"Spürbar");
+  assert.equal(P.tensionPresentation([...confirmed,{category:"sexuality_intimacy",key:"desire",value:{explicitly_confirmed_desire:true},reviewStatus:"confirmed",importance:5}],[],[]).level,"Stark");
+  assert.equal(P.tensionPresentation([{category:"sexuality_intimacy",key:"boundary",value:{hair_pulling:false},reviewStatus:"confirmed",importance:5}],[],[]).level,"Keine");
+  assert.equal(P.tensionPresentation([], [{direction:"incoming",text:"Tengo deseo de hacer el amor"}], []).level,"Leicht");
+  assert.match(contacts,/P\.tensionPresentation\(activeItems,detail\?\.messages/);
 });
 
 test("woman profile uses three responsive areas and a separate selected topic detail", () => {
@@ -134,7 +165,7 @@ test("Brain facts use compact topic accordions without losing granular details",
   assert.match(contacts, /class="brain-topic-row/);
   assert.match(contacts, /P\.topic\(item\.category,item\.key\)/);
   assert.match(contacts, /topicIcon\(topic\)/);
-  assert.match(contacts, /topic-copy[\s\S]*humanProfileSummary\(group/);
+  assert.match(contacts, /topic-copy[\s\S]*semanticSummary\(group/);
 });
 
 test("contact preview and media foundation preserve source data", () => {

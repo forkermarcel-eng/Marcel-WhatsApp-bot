@@ -2,7 +2,7 @@
   "use strict";
 
   const labels = Object.freeze({
-    primary_language: "Sprache", birthday: "Geburtstag", seeking_new_job: "Arbeit",
+    primary_language: "Sprache", birthday: "Geburtstag", age: "Alter", day: "Tag", month: "Monat", year: "Jahr", seeking_new_job: "Arbeit",
     seed_shared_history: "Gemeinsame Geschichte", shared_history: "Gemeinsame Geschichte",
     temporary_state: "Temporärer Zustand", interaction_patterns: "Interaktionsmuster",
     current_context: "Aktueller Kontext", profile_summary: "Profil", relationship: "Beziehung",
@@ -20,6 +20,7 @@
     relationship_history: "Beziehungsgeschichte", relationship_values: "Beziehungswerte",
     marriage_religion: "Ehe und Religion", sexuality: "Intimität", housing: "Wohnen",
     preferences: "Vorlieben", health: "Gesundheit", travel: "Reisen", finance: "Finanzen",
+    name: "Name", has_children: "Hat Kinder", themes: "Themen", accepted_whatsapp: "WhatsApp akzeptiert",
     current_country: "Aktuelles Land", current_city: "Aktuelle Stadt", current_timezone: "Zeitzone",
     location_status: "Ortsstatus", relocation_target_country: "Umzugs-Zielland",
     relocation_target_city: "Umzugs-Zielstadt", relocation_stage: "Umzugsphase",
@@ -66,6 +67,83 @@
     if (value&&typeof value==="object") return Object.entries(value).flatMap(([key,item])=>displayRows(item,`${path}${path?" · ":""}${label(key)}`));
     return [{ label:path||"Wert", value:scalar(value) }];
   }
+  const technicalKeys = /(?:^|_)(?:id|inferred|source|audit|review|status|updated|created|confidence|importance)(?:_|$)/i;
+  const monthNames = ["", "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+  function normalizedKey(value){return String(value??"").trim().toLowerCase().replace(/[^a-z0-9äöüß]+/g,"_").replace(/^_+|_+$/g,"")}
+  function birthdayText(value) {
+    if(!value||typeof value!=="object"||Array.isArray(value))return "";
+    const entries=Object.entries(value),get=pattern=>entries.find(([key])=>pattern.test(normalizedKey(key)))?.[1];
+    const day=Number(get(/^(?:birth_?)?day$|^(?:geburtstags?_?)?tag$/)),monthRaw=get(/^(?:birth_?)?month$|^(?:geburts_?)?monat$/),year=Number(get(/^(?:birth_?)?year$|^(?:geburts_?)?jahr$/));
+    const monthNumber=Number(monthRaw),month=monthNames[monthNumber]||(typeof monthRaw==="string"&&!/^\d+$/.test(monthRaw.trim())?monthRaw.trim():"");
+    if(!Number.isInteger(day)||day<1||day>31)return "";
+    const parts=[`${day}.`,month,Number.isInteger(year)&&year>0?String(year):""].filter(Boolean);
+    return `Geburtstag: ${parts.join(" ")}`;
+  }
+  const booleanPhrases = Object.freeze({
+    hair_pulling:"Mag es, wenn Marcel ihr an den Haaren zieht",
+    likes_hair_pulling:"Mag es, wenn Marcel ihr an den Haaren zieht",
+    soft_kisses:"Mag sanfte Küsse",
+    likes_soft_kisses:"Mag sanfte Küsse",
+    explicitly_confirmed_desire:"Sexuelles Verlangen ausdrücklich bestätigt"
+  });
+  function semanticLabel(value){
+    const raw=String(value??"").trim(),known=booleanPhrases[normalizedKey(raw)];
+    if(known)return known;
+    if(/[\säöüÄÖÜß]/.test(raw)&&!raw.includes("_"))return raw.replace(/^./,letter=>letter.toUpperCase());
+    return label(raw||"Information");
+  }
+  function semanticFactText(factLabel,value) {
+    const normalized=normalizedKey(factLabel),known=booleanPhrases[normalized];
+    if(typeof value==="boolean"){
+      if(known)return value?`${known}.`:`${known}: Nein.`;
+      const shownLabel=semanticLabel(factLabel);
+      if(value&&/^(?:Mag|Möchte|Hat|Ist|Kann|Will|Braucht|Sucht|Akzeptiert|Reagiert)\b|bestätigt$/i.test(shownLabel))return `${shownLabel}.`;
+      return `${shownLabel}: ${value?"Ja":"Nein"}.`;
+    }
+    if(Array.isArray(value)){
+      const values=value.filter(item=>item!==null&&item!==undefined&&item!=="").map(scalar);
+      return values.length?`${semanticLabel(factLabel)}: ${list(values)}.`:"";
+    }
+    if(value===null||value===undefined||value==="")return "";
+    const shown=scalar(value),shownLabel=semanticLabel(factLabel);
+    return `${shownLabel}: ${shown}.`;
+  }
+  function semanticFacts(input) {
+    const items=Array.isArray(input)?input:[input],facts=[];
+    const add=(text,labelText,path,value)=>{if(text&&!facts.some(fact=>fact.text.toLowerCase()===text.toLowerCase()))facts.push({text,label:labelText,path,value})};
+    const walk=(value,path,rootKey)=>{
+      if(Array.isArray(value)&&value.some(item=>item&&typeof item==="object")){
+        value.forEach(item=>walk(item,path,rootKey));
+        return;
+      }
+      if(value&&typeof value==="object"&&!Array.isArray(value)){
+        const birthday=birthdayText(value);
+        if(birthday&&/(?:birth|birthday|geburtstag)/i.test(`${path} ${rootKey}`)){add(`${birthday}.`,"Geburtstag",path,value);return}
+        for(const [key,item] of Object.entries(value)){
+          if(technicalKeys.test(normalizedKey(key)))continue;
+          walk(item,key,rootKey);
+        }
+        return;
+      }
+      const factLabel=path||rootKey||"Information",text=semanticFactText(factLabel,value);
+      add(text,semanticLabel(factLabel),path,value);
+    };
+    for(const item of items){
+      if(item===null||item===undefined)continue;
+      const value=item&&typeof item==="object"&&Object.prototype.hasOwnProperty.call(item,"value")?item.value:item;
+      const rootKey=item&&typeof item==="object"?(item.key||item.memory_key||item.category||""):"";
+      if(value&&typeof value==="object"&&!Array.isArray(value)){
+        const birthday=birthdayText(value);
+        if(birthday&&/(?:birth|birthday|geburtstag)/i.test(rootKey)){add(`${birthday}.`,"Geburtstag",rootKey,value);continue}
+      }
+      walk(value,rootKey,rootKey);
+    }
+    return facts;
+  }
+  function semanticSummary(items,fallback="Noch keine verlässliche Kurzbeschreibung vorhanden.",limit=3) {
+    const facts=semanticFacts(items).map(fact=>fact.text);
+    return facts.length?facts.slice(0,limit).join(" "):fallback;
+  }
   function dateTime(value){if(!value)return "Keine Zeitangabe";const date=new Date(value);return Number.isNaN(date.getTime())?scalar(value):new Intl.DateTimeFormat("de-DE",{dateStyle:"medium",timeStyle:"short"}).format(date)}
   function list(values){const clean=[...new Set(values.map(scalar).filter(value=>value!=="Keine Angabe"))];if(clean.length<2)return clean[0]||"";return `${clean.slice(0,-1).join(", ")} und ${clean.at(-1)}`}
   function summary(value, heading="Information") {
@@ -89,16 +167,33 @@
     if(!fragments.length)return fallback;
     return fragments.map(text=>/[.!?]$/.test(text)?text:`${text}.`).join(" ");
   }
-  function tensionPresentation(messages=[], events=[]) {
-    const pattern=/\b(?:flirt|flirty|sexy|sexuell|anziehung|kuss|küssen|küssen|nähe|heiß|hot|kiss|attraction|intim)\w*/i;
+  function tensionPresentation(memoryItems=[], messages=[], events=[]) {
+    const memoryPattern=/(?:sexual|intim|erotic|desire|passion|kiss|kuss|beso|touch|physical|hair.?pull|haar|foreplay|vorspiel|flirt|attraction|anziehung|affection)/i;
+    const strongPattern=/(?:sexual|intim|explicit|ausdrücklich|desire|verlangen|hacer el amor|hair.?pull|haar|oral|foreplay|vorspiel)/i;
+    let memoryScore=0,strongFacts=0;
+    for(const item of memoryItems||[]){
+      if(item?.useInReply===false)continue;
+      const source=`${item?.category||""} ${item?.key||item?.memory_key||""} ${JSON.stringify(item?.value??item?.memory_value??"")}`;
+      if(!memoryPattern.test(source))continue;
+      const values=displayRows(item?.value??item?.memory_value).map(row=>row.value);
+      if(values.length&&values.every(value=>value==="Nein"||value==="Keine Angabe"))continue;
+      const strong=strongPattern.test(source);
+      memoryScore+=strong?3:2;
+      if(strong)strongFacts++;
+      if(["confirmed","corrected"].includes(item?.reviewStatus||item?.human_review_status))memoryScore+=1;
+      if(Number(item?.importance)>=4)memoryScore+=1;
+      if(Number(item?.confidence)>=0.9)memoryScore+=1;
+    }
+    const pattern=/(?:\bflirt\w*|sexy|sexuell|anziehung|kuss|küssen|nähe|heiß|hot|\bkiss\w*|attraction|intim|\bbeso\w*|\bdeseo\w*|hacer el amor|sentirnos)/i;
     const hits=(messages||[]).filter(message=>pattern.test(String(message?.translationDe||message?.translation_de||message?.text||"")));
     const eventHits=(events||[]).filter(event=>pattern.test(String(event?.title||event?.evidenceSummary||"")));
     const directions=new Set(hits.map(message=>message?.direction).filter(Boolean));
-    const count=hits.length+eventHits.length;
-    if(!count)return {level:"Keine",summary:"Bisher sind keine verlässlichen flirtigen oder sexuellen Signale dokumentiert."};
-    if(count===1||directions.size<2)return {level:"Leicht",summary:"Einzelne flirtige Signale sind vorhanden; eine stärkere gegenseitige Spannung ist noch nicht verlässlich bestätigt."};
-    if(count<4)return {level:"Spürbar",summary:"Wiederkehrende flirtige Signale sind in beiden Gesprächsrichtungen erkennbar."};
-    return {level:"Stark",summary:"Mehrere wiederkehrende und gegenseitige flirtige oder intime Signale sind dokumentiert."};
+    const secondaryScore=(directions.size>=2?3:0)+(hits.length+eventHits.length>=4?5:0);
+    const score=memoryScore+secondaryScore;
+    if(!score&&hits.length+eventHits.length===0)return {level:"Keine",summary:"Bisher sind keine verlässlichen flirtigen oder sexuellen Signale dokumentiert."};
+    if(score<3)return {level:"Leicht",summary:"Einzelne flirtige Signale sind vorhanden; eine stärkere gegenseitige Spannung ist noch nicht verlässlich bestätigt."};
+    if(score<8)return {level:"Spürbar",summary:"Bestätigte intime Fakten oder wiederkehrende gegenseitige Flirtsignale zeigen eine spürbare Spannung."};
+    return {level:"Stark",summary:`Mehrere ${strongFacts?"deutliche intime Fakten und ":""}gegenseitige flirtige oder intime Signale sind dokumentiert.`};
   }
-  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,dateTime,summary,topic,readableFragments,humanProfileSummary,tensionPresentation});
+  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,semanticFacts,semanticSummary,birthdayText,dateTime,summary,topic,readableFragments,humanProfileSummary,tensionPresentation});
 })(globalThis);

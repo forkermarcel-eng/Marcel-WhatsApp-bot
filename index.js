@@ -2538,6 +2538,44 @@ CREATE TABLE IF NOT EXISTS marcel_live_state (
 
 
 await pool.query(`
+CREATE TABLE IF NOT EXISTS marcel_live_state_audit (
+
+  id BIGSERIAL PRIMARY KEY,
+
+  changed_at TIMESTAMPTZ NOT NULL
+    DEFAULT NOW(),
+
+  source TEXT NOT NULL
+    DEFAULT 'manual_dashboard',
+
+  actor TEXT,
+
+  request_reference TEXT,
+
+  changed_fields JSONB NOT NULL
+    DEFAULT '[]'::jsonb,
+
+  old_values JSONB NOT NULL
+    DEFAULT '{}'::jsonb,
+
+  new_values JSONB NOT NULL
+    DEFAULT '{}'::jsonb
+
+)
+`);
+
+
+await pool.query(`
+CREATE INDEX IF NOT EXISTS
+idx_marcel_live_state_audit_changed_at
+
+ON marcel_live_state_audit (
+  changed_at DESC
+)
+`);
+
+
+await pool.query(`
 INSERT INTO marcel_live_state (
 
   id,
@@ -14899,6 +14937,412 @@ try {
 }
 }
 );
+
+
+/* ==================================================
+MARCEL BRAIN MANUAL WRITES
+================================================== */
+
+const MARCEL_MANUAL_FACT_CATEGORIES = new Set([
+  "identity",
+  "languages",
+  "work",
+  "family",
+  "communication",
+  "nicknames",
+  "lifestyle",
+  "food_drinks",
+  "skills",
+  "personal_stories",
+  "relationship_history",
+  "relationship_values",
+  "marriage_religion",
+  "sexuality",
+  "housing",
+  "preferences",
+  "health",
+  "travel",
+  "finance"
+]);
+
+const MARCEL_LIVE_STATE_FIELDS = Object.freeze({
+  current_country: "text",
+  current_city: "text",
+  current_timezone: "text",
+  location_status: "text",
+  relocation_target_country: "text",
+  relocation_target_city: "text",
+  relocation_stage: "text",
+  relocation_eta: "text",
+  temporary_travel_country: "text",
+  temporary_travel_city: "text",
+  temporary_travel_until: "timestamp",
+  housing_stage: "text",
+  manual_location_lock: "boolean"
+});
+
+function brainWriteError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function assertOnlyBodyFields(body, allowed) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw brainWriteError("Ungültiger Request-Body.");
+  }
+  const unknown = Object.keys(body).filter(key => !allowed.has(key));
+  if (unknown.length) {
+    throw brainWriteError("Nicht erlaubte Felder im Request.");
+  }
+}
+
+function jsonDepth(value, depth = 0) {
+  if (depth > 6) return depth;
+  if (!value || typeof value !== "object") return depth;
+  return Math.max(depth, ...Object.values(value).map(item => jsonDepth(item, depth + 1)));
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.keys(value).sort().reduce((result, key) => {
+      result[key] = canonicalJson(value[key]);
+      return result;
+    }, {});
+  }
+  return value;
+}
+
+function normalizedJsonText(value) {
+  return JSON.stringify(canonicalJson(value));
+}
+
+function validateManualFactValue(value) {
+  if (value === undefined || value === null) {
+    throw brainWriteError("Ein Wert ist erforderlich.");
+  }
+  const encoded = JSON.stringify(value);
+  if (
+    encoded === undefined
+    || encoded.length > 16000
+    || jsonDepth(value) > 6
+    || (typeof value === "number" && !Number.isFinite(value))
+  ) {
+    throw brainWriteError("Der Wert ist ungültig oder zu groß.");
+  }
+  return value;
+}
+
+function validateManualFactFields(body, { partial = false } = {}) {
+  const result = {};
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "category")) {
+    const category = normalizeText(body.category).toLowerCase();
+    if (!MARCEL_MANUAL_FACT_CATEGORIES.has(category)) {
+      throw brainWriteError("Ungültige Kategorie.");
+    }
+    result.category = category;
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "key")) {
+    const key = normalizeText(body.key).toLowerCase();
+    if (!/^[a-z][a-z0-9_]{1,79}$/.test(key)) {
+      throw brainWriteError("Ungültiger Memory-Key.");
+    }
+    result.key = key;
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "value")) {
+    result.value = validateManualFactValue(body.value);
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "importance")) {
+    const importance = Number(body.importance);
+    if (!Number.isInteger(importance) || importance < 1 || importance > 5) {
+      throw brainWriteError("Importance muss zwischen 1 und 5 liegen.");
+    }
+    result.importance = importance;
+  }
+  if (!partial || Object.prototype.hasOwnProperty.call(body, "use_in_reply")) {
+    if (typeof body.use_in_reply !== "boolean") {
+      throw brainWriteError("use_in_reply muss ein Boolean sein.");
+    }
+    result.allowedForBot = body.use_in_reply;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "valid_until")) {
+    if (body.valid_until === null || body.valid_until === "") {
+      result.validUntil = null;
+    } else {
+      const date = new Date(body.valid_until);
+      if (!Number.isFinite(date.getTime()) || date <= new Date()) {
+        throw brainWriteError("valid_until muss ein gültiger zukünftiger Zeitpunkt sein.");
+      }
+      result.validUntil = date.toISOString();
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "notes")) {
+    const notes = normalizeText(body.notes);
+    if (notes.length > 1000) throw brainWriteError("Die Notiz ist zu lang.");
+    result.notes = notes || null;
+  }
+  return result;
+}
+
+function safeExistingFact(row) {
+  return {
+    id: row.id,
+    category: row.category,
+    key: row.memory_key,
+    value: row.memory_value,
+    importance: Number(row.importance),
+    use_in_reply: row.allowed_for_bot !== false,
+    valid_until: row.valid_until,
+    notes: row.usage_notes,
+    updatedAt: row.updated_at
+  };
+}
+
+app.post("/dashboard-api/marcel-brain/facts", async (req, res) => {
+  if (!dashboardApiReady(res)) return;
+  if (!dashboardApiAuthorized(req)) {
+    return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+  }
+  try {
+    assertOnlyBodyFields(req.body, new Set([
+      "category", "key", "value", "importance", "use_in_reply", "valid_until", "notes"
+    ]));
+    const fact = validateManualFactFields(req.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext($1))",
+        [fact.key]
+      );
+      const existingResult = await client.query(
+        `SELECT * FROM marcel_memory WHERE memory_key = $1 FOR UPDATE`,
+        [fact.key]
+      );
+      const existing = existingResult.rows[0];
+      if (existing) {
+        if (normalizedJsonText(existing.memory_value) === normalizedJsonText(fact.value)) {
+          await client.query("COMMIT");
+          return res.status(200).json({
+            ok: true,
+            created: false,
+            idempotent: true,
+            fact: safeExistingFact(existing)
+          });
+        }
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          error: "Für diesen Memory-Key existiert bereits ein anderer Wert.",
+          existing: safeExistingFact(existing),
+          proposed: {
+            category: fact.category,
+            key: fact.key,
+            value: fact.value,
+            importance: fact.importance,
+            use_in_reply: fact.allowedForBot,
+            valid_until: fact.validUntil ?? null,
+            notes: fact.notes ?? null
+          }
+        });
+      }
+      const inserted = (await client.query(
+        `INSERT INTO marcel_memory (
+          category, memory_key, memory_value, status, importance, sensitivity,
+          source_type, human_verified, human_review_action, human_review_note,
+          human_reviewed_at, valid_until, allowed_for_bot, usage_notes
+        ) VALUES ($1,$2,$3::jsonb,'active',$4,'normal','manual_dashboard',TRUE,
+          'confirmed',$5,NOW(),$6,$7,$5)
+        RETURNING *`,
+        [
+          fact.category, fact.key, JSON.stringify(fact.value), fact.importance,
+          fact.notes ?? null, fact.validUntil ?? null, fact.allowedForBot
+        ]
+      )).rows[0];
+      await client.query(
+        `INSERT INTO marcel_memory_review_log
+          (memory_id,memory_key,action,old_value,new_value,old_status,new_status,correction_de,reviewed_by)
+         VALUES ($1,$2,'create',NULL,$3::jsonb,NULL,'active',NULL,'marcel_dashboard')`,
+        [inserted.id, inserted.memory_key, JSON.stringify(inserted.memory_value)]
+      );
+      await client.query("COMMIT");
+      return res.status(201).json({ ok: true, created: true, fact: safeExistingFact(inserted) });
+    } catch (error) {
+      try { await client.query("ROLLBACK"); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error("Marcel Brain Fact Create Fehler:", error?.message || "unknown");
+    const statusCode = error?.code === "23505" ? 409 : Number(error?.statusCode) || 500;
+    return res.status(statusCode).json({
+      ok: false,
+      error: statusCode === 409
+        ? "Dieser Memory-Key wurde inzwischen angelegt oder verändert. Bitte Brain neu laden."
+        : error?.statusCode ? error.message : "Marcel-Fakt konnte nicht gespeichert werden."
+    });
+  }
+});
+
+app.patch("/dashboard-api/marcel-brain/facts/:id", async (req, res) => {
+  if (!dashboardApiReady(res)) return;
+  if (!dashboardApiAuthorized(req)) {
+    return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+  }
+  try {
+    const memoryId = Number(req.params.id);
+    if (!Number.isInteger(memoryId) || memoryId <= 0) throw brainWriteError("Ungültige Marcel-Memory-ID.");
+    assertOnlyBodyFields(req.body, new Set([
+      "category", "key", "value", "importance", "use_in_reply", "valid_until", "notes",
+      "expectedUpdatedAt", "explicitConflictConfirmation"
+    ]));
+    if (req.body.explicitConflictConfirmation !== true) {
+      throw brainWriteError("Die bewusste Änderungsbestätigung fehlt.", 409);
+    }
+    const expected = new Date(req.body.expectedUpdatedAt);
+    if (!Number.isFinite(expected.getTime())) throw brainWriteError("expectedUpdatedAt ist ungültig.");
+    const editable = ["category", "key", "value", "importance", "use_in_reply", "valid_until", "notes"];
+    if (!editable.some(key => Object.prototype.hasOwnProperty.call(req.body, key))) {
+      throw brainWriteError("Keine Änderung angegeben.");
+    }
+    const changes = validateManualFactFields(req.body, { partial: true });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = (await client.query(
+        `SELECT * FROM marcel_memory WHERE id = $1 FOR UPDATE`, [memoryId]
+      )).rows[0];
+      if (!current) throw brainWriteError("Marcel-Memory nicht gefunden.", 404);
+      if (current.status !== "active" || current.human_verified !== true) {
+        throw brainWriteError("Nur aktive menschlich bestätigte Fakten dürfen hier geändert werden.", 409);
+      }
+      if (new Date(current.updated_at).toISOString() !== expected.toISOString()) {
+        throw brainWriteError("Dieser Fakt wurde inzwischen verändert. Bitte Brain neu laden.", 409);
+      }
+      const next = {
+        category: changes.category ?? current.category,
+        key: changes.key ?? current.memory_key,
+        value: Object.prototype.hasOwnProperty.call(changes, "value") ? changes.value : current.memory_value,
+        importance: changes.importance ?? Number(current.importance),
+        allowedForBot: Object.prototype.hasOwnProperty.call(changes, "allowedForBot") ? changes.allowedForBot : current.allowed_for_bot,
+        validUntil: Object.prototype.hasOwnProperty.call(changes, "validUntil") ? changes.validUntil : current.valid_until,
+        notes: Object.prototype.hasOwnProperty.call(changes, "notes") ? changes.notes : current.usage_notes
+      };
+      const updated = (await client.query(
+        `UPDATE marcel_memory SET
+          category=$2,memory_key=$3,memory_value=$4::jsonb,importance=$5,
+          allowed_for_bot=$6,valid_until=$7,usage_notes=$8,
+          source_type='manual_dashboard',human_verified=TRUE,status='active',
+          human_review_action='confirmed',human_review_note=$8,human_reviewed_at=NOW(),updated_at=NOW()
+         WHERE id=$1 RETURNING *`,
+        [
+          memoryId, next.category, next.key, JSON.stringify(next.value), next.importance,
+          next.allowedForBot, next.validUntil, next.notes
+        ]
+      )).rows[0];
+      await client.query(
+        `INSERT INTO marcel_memory_review_log
+          (memory_id,memory_key,action,old_value,new_value,old_status,new_status,correction_de,reviewed_by)
+         VALUES ($1,$2,'update',$3::jsonb,$4::jsonb,$5,'active',NULL,'marcel_dashboard')`,
+        [memoryId, updated.memory_key, JSON.stringify(current.memory_value), JSON.stringify(updated.memory_value), current.status]
+      );
+      await client.query("COMMIT");
+      return res.json({ ok: true, updated: true, fact: safeExistingFact(updated) });
+    } catch (error) {
+      try { await client.query("ROLLBACK"); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error("Marcel Brain Fact Update Fehler:", error?.message || "unknown");
+    const statusCode = error?.code === "23505" ? 409 : Number(error?.statusCode) || 500;
+    return res.status(statusCode).json({
+      ok: false,
+      error: statusCode === 409
+        ? "Dieser Memory-Key ist bereits vergeben oder wurde inzwischen verändert."
+        : error?.statusCode ? error.message : "Marcel-Fakt konnte nicht geändert werden."
+    });
+  }
+});
+
+app.patch("/dashboard-api/marcel-brain/live-state", async (req, res) => {
+  if (!dashboardApiReady(res)) return;
+  if (!dashboardApiAuthorized(req)) {
+    return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+  }
+  try {
+    assertOnlyBodyFields(req.body, new Set(Object.keys(MARCEL_LIVE_STATE_FIELDS)));
+    const entries = Object.entries(req.body);
+    if (!entries.length) throw brainWriteError("Keine Zustandsänderung angegeben.");
+    const values = {};
+    for (const [field, value] of entries) {
+      const type = MARCEL_LIVE_STATE_FIELDS[field];
+      if (type === "boolean") {
+        if (typeof value !== "boolean") throw brainWriteError(`${field} muss ein Boolean sein.`);
+        values[field] = value;
+      } else if (type === "timestamp") {
+        if (value === null || value === "") values[field] = null;
+        else {
+          const date = new Date(value);
+          if (!Number.isFinite(date.getTime())) throw brainWriteError(`${field} ist kein gültiger Zeitpunkt.`);
+          values[field] = date.toISOString();
+        }
+      } else {
+        if (value !== null && (typeof value !== "string" || value.trim().length > 200)) {
+          throw brainWriteError(`${field} muss Text mit höchstens 200 Zeichen sein.`);
+        }
+        values[field] = value === null ? null : value.trim() || null;
+      }
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = (await client.query(
+        `SELECT * FROM marcel_live_state WHERE id=1 FOR UPDATE`
+      )).rows[0];
+      if (!current) throw brainWriteError("Marcel Live State fehlt.", 404);
+      const changedFields = Object.keys(values).filter(
+        field => normalizedJsonText(current[field]) !== normalizedJsonText(values[field])
+      );
+      if (!changedFields.length) {
+        await client.query("COMMIT");
+        return res.json({ ok: true, updated: false, idempotent: true, liveState: current });
+      }
+      const parameters = changedFields.map(field => values[field]);
+      const assignments = changedFields.map((field, index) => `${field}=$${index + 1}`);
+      const updated = (await client.query(
+        `UPDATE marcel_live_state SET ${assignments.join(",")},
+          updated_by='manual_dashboard',updated_at=NOW() WHERE id=1 RETURNING *`,
+        parameters
+      )).rows[0];
+      const oldValues = Object.fromEntries(changedFields.map(field => [field, current[field]]));
+      const newValues = Object.fromEntries(changedFields.map(field => [field, updated[field]]));
+      await client.query(
+        `INSERT INTO marcel_live_state_audit
+          (source,actor,changed_fields,old_values,new_values)
+         VALUES ('manual_dashboard','dashboard_user',$1::jsonb,$2::jsonb,$3::jsonb)`,
+        [JSON.stringify(changedFields), JSON.stringify(oldValues), JSON.stringify(newValues)]
+      );
+      await client.query("COMMIT");
+      return res.json({ ok: true, updated: true, changedFields, liveState: updated });
+    } catch (error) {
+      try { await client.query("ROLLBACK"); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error("Marcel Brain Live State Fehler:", error?.message || "unknown");
+    return res.status(Number(error?.statusCode) || 500).json({
+      ok: false,
+      error: error?.statusCode ? error.message : "Aktueller Zustand konnte nicht gespeichert werden."
+    });
+  }
+});
 
 
 /* ==================================================

@@ -3,7 +3,10 @@ export const config = {
    "/Hub/:path*",
    "/Dashboard/:path*",
    "/Tinder/:path*",
-   "/Brain/:path*"
+   "/Brain/:path*",
+   "/Trading/:path*",
+   "/Analyse/:path*",
+   "/Einstellungen/:path*"
  ]
 };
 

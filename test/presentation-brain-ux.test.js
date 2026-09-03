@@ -91,10 +91,27 @@ test("semantic facts preserve keys, booleans, nested values and birthdays", () =
   assert.deepEqual(P.semanticFacts([{category:"family",key:"children",value:{children:[{name:"Mia",age:5}],has_children:true}}]).map(fact=>fact.text),["Name: Mia.","Alter: 5.","Hat Kinder."]);
 });
 
+test("positive semantic booleans omit redundant yes while false and normal values retain meaning", () => {
+  const facts=P.semanticFacts([{value:{
+    "Legt Wert auf gegenseitiges Verlangen":true,
+    "Freut sich darauf, Marcel zu treffen und ihm nahe zu sein":true,
+    "Grenzüberschreitung akzeptiert":false,
+    "Sprache":"Spanisch"
+  }}]).map(fact=>fact.text);
+  assert.deepEqual(facts,[
+    "Legt Wert auf gegenseitiges Verlangen.",
+    "Freut sich darauf, Marcel zu treffen und ihm nahe zu sein.",
+    "Grenzüberschreitung akzeptiert: Nein.",
+    "Sprache: Spanisch."
+  ]);
+  assert.doesNotMatch(facts.join(" "),/: Ja\b|(?:^|\s)Ja\./);
+  assert.equal(P.semanticFacts([{key:"birthday",value:{day:13,month:3,year:1994}}])[0].text,"Geburtstag: 13. März 1994.");
+});
+
 test("semantic summaries and contact details use labelled facts", () => {
   const items=[{category:"relationship",key:"shared_history",value:{accepted_whatsapp:true,themes:["Dusche","Morgenküsse"]}}];
   const summary=P.semanticSummary(items);
-  assert.match(summary,/WhatsApp akzeptiert: Ja/);
+  assert.match(summary,/WhatsApp akzeptiert\./);
   assert.match(summary,/Themen: Dusche und Morgenküsse/);
   assert.match(contacts,/P\.semanticSummary\(group/);
   assert.match(contacts,/facts=P\.semanticFacts\(group\)/);

@@ -97,8 +97,7 @@
     if(typeof value==="boolean"){
       if(known)return value?`${known}.`:`${known}: Nein.`;
       const shownLabel=semanticLabel(factLabel);
-      if(value&&/^(?:Mag|Möchte|Hat|Ist|Kann|Will|Braucht|Sucht|Akzeptiert|Reagiert)\b|bestätigt$/i.test(shownLabel))return `${shownLabel}.`;
-      return `${shownLabel}: ${value?"Ja":"Nein"}.`;
+      return value?`${shownLabel}.`:`${shownLabel}: Nein.`;
     }
     if(Array.isArray(value)){
       const values=value.filter(item=>item!==null&&item!==undefined&&item!=="").map(scalar);

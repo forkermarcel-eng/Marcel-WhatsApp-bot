@@ -41,6 +41,24 @@
   function label(value){return labels[String(value??"").toLowerCase()]||humanize(value)}
   function status(value){return statuses[String(value??"").toLowerCase()]||humanize(value)}
   function channel(value){return channels[String(value??"").toLowerCase()]||humanize(value)}
+  const topicRules = Object.freeze([
+    ["Aktueller Kontext", /current|temporary|context|status|open_threads/],
+    ["Intimität", /sexual|intim|physical|affection/],
+    ["Beziehungen & Liebe", /relationship|romance|love|marriage|partner|dating/],
+    ["Kommunikation", /communication|language|interaction|conflict|support|humor/],
+    ["Familie", /family|children|parent|mother|father|sister|brother/],
+    ["Arbeit & Alltag", /work|education|career|job|routine|lifestyle|finance/],
+    ["Zukunft & Pläne", /goal|dream|future|plan|promise|relocation/],
+    ["Wohnort & Reisen", /travel|location|country|city|housing|living/],
+    ["Gesundheit", /health|medical|wellbeing/],
+    ["Vorlieben", /preference|food|drink|cultural|interest|like|favorite/],
+    ["Persönlichkeit", /personality|identity|profile|decision|boundary|story|meaningful|knowledge_map/]
+  ]);
+  function topic(category,key="") {
+    const source=`${category||""} ${key||""}`.toLowerCase();
+    const match=topicRules.find(([,pattern])=>pattern.test(source));
+    return match?match[0]:label(category||"Wissen");
+  }
   function memoryType(value){return types[String(value??"").toLowerCase()]||humanize(value)}
   function scalar(value){if(value===null||value===undefined||value==="")return "Keine Angabe";const mapped=words[String(value).toLowerCase()];if(mapped)return mapped;if(typeof value==="string"&&/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(value)){const date=new Date(value.length===10?`${value}T12:00:00`:value);if(!Number.isNaN(date.getTime()))return new Intl.DateTimeFormat("de-DE",{dateStyle:"medium"}).format(date)}return String(value)}
   function displayRows(value, path="") {
@@ -57,5 +75,5 @@
     for(const [key,item] of entries){const clean=key.replace(/^seed_/,"");if(/^likes?(?:_\d+)?$|^mag(?:_\d+)?$|preference/i.test(clean)){if(Array.isArray(item))likes.push(...item);else if(item!==false&&item!=null)likes.push(item);continue}if(item===true){(/avoid|vermeiden|not_|no_/i.test(clean)?negative:positive).push(label(clean));continue}if(item===false)continue;if(Array.isArray(item)){facts.push(`${label(clean)}: ${list(item)}`);continue}if(item&&typeof item==="object"){const nested=summary(item,clean);if(nested)facts.push(nested.replace(/\.$/,""));continue}if(item!==null&&item!=="")facts.push(`${label(clean)}: ${scalar(item)}`)}
     const sentences=[];if(likes.length)sentences.push(`Mag ${list(likes)}`);if(positive.length)sentences.push(`${list(positive)} trifft zu`);if(negative.length)sentences.push(`${list(negative)} vermeiden`);if(facts.length)sentences.push(...facts);return sentences.length?sentences.map(text=>/[.!?]$/.test(text)?text:`${text}.`).join(" "):"Keine Angaben vorhanden."
   }
-  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,dateTime,summary});
+  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,dateTime,summary,topic});
 })(globalThis);

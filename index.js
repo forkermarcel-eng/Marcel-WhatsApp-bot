@@ -20,6 +20,7 @@ import {
   deviceBridgeRawBodyErrorMiddleware,
   requireDeviceBridgeReady
 } from "./device-bridge/readiness.js";
+import { createContactMediaService } from "./services/contact-media.js";
 
 const { Pool } = pg;
 
@@ -57,6 +58,7 @@ apiKey: process.env.OPENAI_API_KEY
 const pool = new Pool({
 connectionString: process.env.DATABASE_URL
 });
+const { listContactMedia } = createContactMediaService(pool);
 
 const WHATSAPP_ENABLED =
 String(
@@ -15658,7 +15660,8 @@ try {
     profile,
     activeItems,
     historicalItems,
-    events
+    events,
+    mediaRows
   ] =
     await Promise.all([
 
@@ -15687,7 +15690,9 @@ try {
       getAllMemoryEvents(
         contact.id,
         200
-      )
+      ),
+
+      listContactMedia(contact.id)
 
     ]);
 
@@ -15998,7 +16003,6 @@ try {
 
       })
     );
-
 
   const contactDisplaySource = {
     city:
@@ -16375,6 +16379,9 @@ try {
 
     events:
       translatedEvents,
+
+    mediaItems:
+      mediaRows,
 
     memoryStatus
 

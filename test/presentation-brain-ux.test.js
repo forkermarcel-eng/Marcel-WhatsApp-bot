@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import "../presentation.js";
+import { normalizeContactMediaItem, normalizePublicMediaRef } from "../services/contact-media.js";
 
 const brain = readFileSync(new URL("../Brain/index.html", import.meta.url), "utf8");
 const contacts = readFileSync(new URL("../Kontakte/index.html", import.meta.url), "utf8");
 const tinder = readFileSync(new URL("../Tinder/index.html", import.meta.url), "utf8");
 const backend = readFileSync(new URL("../index.js", import.meta.url), "utf8");
+const contactMedia = readFileSync(new URL("../services/contact-media.js", import.meta.url), "utf8");
 const proxy = readFileSync(new URL("../api/dashboard/marcel-brain.js", import.meta.url), "utf8");
 const P = globalThis.MarcelPresentation;
 
@@ -69,6 +71,43 @@ test("Brain natural input is preview-only and supports per-candidate decisions",
   assert.match(backend, /MARCEL_LIVE_STATE_FIELDS/);
   assert.match(backend, /MARCEL_MANUAL_FACT_CATEGORIES/);
   assert.match(proxy, /resource === "classify"/);
+});
+
+test("Brain facts use compact topic accordions without losing granular details", () => {
+  assert.equal(P.topic("sexuality", "intimacy_style"), "Intimität");
+  assert.equal(P.topic("relationship_values", "physical_affection"), "Intimität");
+  assert.equal(P.topic("relationship_history", "former_partner"), "Beziehungen & Liebe");
+  assert.match(brain, /class="brain-stats"/);
+  assert.match(brain, /class="topic"/);
+  assert.match(brain, /aktive API-Fakten/);
+  assert.match(brain, /Details anzeigen/);
+  assert.match(contacts, /class="brain-topic"/);
+  assert.match(contacts, /P\.topic\(item\.category,item\.key\)/);
+});
+
+test("contact preview and media foundation preserve source data", () => {
+  assert.match(contacts, /class="small message-preview"/);
+  assert.match(readFileSync(new URL("../platform.css", import.meta.url), "utf8"), /-webkit-line-clamp:2/);
+  assert.match(contacts, /gallery:"Galerie"/);
+  assert.match(contacts, /Noch keine Medien für diesen Kontakt/);
+  assert.match(contacts, /\["photo","video","sticker"\]/);
+  assert.match(contacts, /data-media-filter/);
+  assert.match(contacts, /data-activity-media/);
+  assert.match(contactMedia, /FROM media[\s\S]*WHERE contact_id = \$1/);
+  assert.match(contactMedia, /function normalizeContactMediaItem/);
+  assert.match(contactMedia, /function normalizePublicMediaRef/);
+  assert.match(contactMedia, /fingerprint: null/);
+  assert.match(backend, /listContactMedia\(contact\.id\)/);
+  assert.match(backend, /mediaItems:\s*mediaRows/);
+  assert.doesNotMatch(backend, /rawType|stickerCatalog|publicMediaRef/);
+  assert.doesNotMatch(contacts, /last\(c\)\.slice/);
+  assert.equal(normalizePublicMediaRef("C:\\private\\photo.jpg"), null);
+  assert.equal(normalizePublicMediaRef("/media/photo.jpg"), "/media/photo.jpg");
+  const sticker = normalizeContactMediaItem({ id: 7, contact_id: 4, media_type: "sticker", storage_path: "/media/s.webp" });
+  assert.equal(sticker.type, "sticker");
+  assert.equal(sticker.contactId, 4);
+  assert.equal(sticker.fileRef, "/media/s.webp");
+  assert.equal(sticker.metadata.stickerCatalog.favorite, null);
 });
 
 test("Tinder status is compact while diagnostics remain collapsed and runtime calls stay unchanged", () => {

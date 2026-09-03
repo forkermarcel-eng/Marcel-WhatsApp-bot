@@ -26,12 +26,32 @@ test("structured values become display rows instead of raw JSON", () => {
   assert.match(brain, /P\.displayRows/);
 });
 
+test("presentation condenses preferences, boolean groups, seed labels and ISO dates", () => {
+  assert.equal(P.label("seed_relationship"), "Beziehung");
+  assert.doesNotMatch(P.label("seed_preferences"), /Seed/i);
+  assert.match(P.summary({ likes_1: "gutes Essen", likes_2: "Reisen", likes_3: "Filme" }), /Mag gutes Essen, Reisen und Filme\./);
+  assert.match(P.summary({ warm: true, loving: true, avoid_ai_phrasing: true }), /trifft zu/);
+  assert.doesNotMatch(P.summary({ warm: true, loving: true }), /Ja|Nein/);
+  assert.doesNotMatch(P.scalar("2026-08-25"), /2026-08-25/);
+});
+
 test("contact detail has cards, human authority, timeline and edit action in header", () => {
   assert.match(contacts, /class="timeline"/);
   assert.match(contacts, /translationDe\|\|m\.translation_de/);
   assert.match(contacts, /Menschlich bestätigt|P\.status\(x\.reviewStatus\)/);
   assert.match(contacts, /detail-head[\s\S]*Dashboard\/\?view=edit-contact/);
   assert.match(contacts, /@media\(min-width:760px\) and \(max-width:1180px\)/);
+});
+
+test("contacts start full width, sort A-Z and open a channel-neutral profile overlay", () => {
+  assert.match(contacts, /\.workspace\{display:block!important\}/);
+  assert.match(contacts, /localeCompare\(bn,"de",\{sensitivity:"base"\}\)/);
+  assert.match(contacts, /classList\.add\("open"\)/);
+  assert.match(contacts, /function closeProfile\(/);
+  assert.doesNotMatch(contacts, /if\(contacts\[0\]\)select/);
+  assert.match(contacts, /\/Dashboard\/\?contact=/);
+  assert.match(contacts, /WhatsApp.*öffnen|P\.channel\(channel\).*öffnen/s);
+  assert.match(contacts, /Dashboard\/\?view=edit-contact&contact=/);
 });
 
 test("Brain natural input is preview-only and supports per-candidate decisions", () => {
@@ -52,10 +72,12 @@ test("Brain natural input is preview-only and supports per-candidate decisions",
 });
 
 test("Tinder status is compact while diagnostics remain collapsed and runtime calls stay unchanged", () => {
+  assert.match(tinder, /\.status-grid\{order:1;display:flex;flex-wrap:nowrap/);
   assert.match(tinder, /\.status-card\{position:relative;min-height:0/);
   assert.match(tinder, /<details class="technical">/);
   assert.match(tinder, /<summary>Technik &amp; Diagnose<\/summary>/);
   assert.match(tinder, /\.matches\{order:2/);
   assert.match(tinder, /\.technical\{order:4/);
   assert.match(tinder, /MarcelPresentation\.status\(deviceStatus\)/);
+  assert.doesNotMatch(tinder, /<div class="logo">MARCEL/);
 });

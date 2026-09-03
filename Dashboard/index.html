@@ -153,5 +153,5 @@ $("marcelConfirmBtn").onclick=()=>submitMarcelReview("confirm");
 $("marcelCorrectBtn").onclick=()=>submitMarcelReview("correct");
 $("marcelRejectBtn").onclick=()=>submitMarcelReview("reject");
 $("platformToggle").onclick=()=>document.querySelector(".side").classList.toggle("open");
-loadMarcelBrain(false);load().then(async()=>{const p=new URLSearchParams(location.search),view=p.get("view");if(view==="add-contact")$("addModal").classList.add("open");if(view==="edit-contact"){await openContactsManager();const contactId=p.get("contact");if(contactId)await openContactEditor(contactId)}}).catch(e=>$("messages").innerHTML=`<div class="empty">${esc(e.message)}</div>`);})();
+loadMarcelBrain(false);load().then(async()=>{const p=new URLSearchParams(location.search),view=p.get("view"),contactId=p.get("contact");if(contactId&&view!=="edit-contact")await load(contactId);if(view==="add-contact")$("addModal").classList.add("open");if(view==="edit-contact"){await openContactsManager();if(contactId)await openContactEditor(contactId)}}).catch(e=>$("messages").innerHTML=`<div class="empty">${esc(e.message)}</div>`);})();
 </script></body></html>

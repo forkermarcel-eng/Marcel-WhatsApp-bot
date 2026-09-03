@@ -665,7 +665,7 @@
    .technical{margin:16px 0;border:1px solid var(--border);border-radius:17px;background:var(--panel);overflow:hidden}.technical>summary{cursor:pointer;padding:17px 18px;font-weight:800}.technical-body{padding:0 16px 16px}.technical .control-panel,.technical .notice,.technical .enrollment-panel{box-shadow:none}
    @media(max-width:900px){.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
    @media(max-width:620px){.platform-layout{grid-template-columns:1fr}.platform-rail{height:auto;padding:10px 14px;display:grid;grid-template-columns:1fr auto}.platform-brand{padding:7px;font-size:15px}.platform-toggle{display:block;border:1px solid var(--border);background:#171e24;color:#fff;border-radius:8px;padding:7px 10px}.platform-nav{display:none;grid-column:1/-1;padding-top:8px}.platform-rail.open .platform-nav{display:grid}.platform-nav a{font-size:14px;text-align:left}.platform-secondary{margin-top:8px}.status-grid{grid-template-columns:1fr 1fr}}
-   main{display:flex;flex-direction:column}.status-grid{order:1;display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}.status-card{position:relative;min-height:0;flex:1 1 145px;padding:9px 11px;border-radius:999px}.status-top{display:flex;align-items:center;justify-content:flex-start;gap:7px}.status-value{display:inline;font-size:12px;margin-left:4px}.status-name{font-size:11px}.status-sub{display:none;position:absolute;z-index:8;top:calc(100% + 5px);left:8px;width:max-content;max-width:280px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#111820}.status-card:hover .status-sub,.status-card:focus-within .status-sub{display:block}.matches{order:2;margin:8px 0}.workspace{order:3}.technical{order:4;margin-top:12px}.technical>summary{padding:12px 15px}.status-grid .status-card:nth-child(2){display:none}@media(max-width:620px){.status-grid{display:grid;grid-template-columns:1fr 1fr}.status-card{border-radius:12px}.status-sub{max-width:220px}}
+   main{display:flex;flex-direction:column}.shell>header{padding-top:12px;padding-bottom:12px}.content-title{margin:0;font-size:22px}.status-grid{order:1;display:flex;flex-wrap:nowrap;gap:0;margin:0 0 8px;padding:5px 7px;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow-x:auto}.status-card{position:relative;min-height:0;flex:1 0 auto;padding:6px 10px;border:0;border-radius:0;background:transparent;box-shadow:none}.status-card+.status-card{border-left:1px solid var(--border)}.status-top{display:flex;align-items:center;justify-content:flex-start;gap:6px;white-space:nowrap}.status-value{display:inline;font-size:11px;margin-left:2px}.status-name{font-size:10px}.status-sub{display:none;position:absolute;z-index:8;top:calc(100% + 5px);left:8px;width:max-content;max-width:280px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#111820}.status-card:hover .status-sub,.status-card:focus-within .status-sub{display:block}.matches{order:2;margin:6px 0}.workspace{order:3}.technical{order:4;margin-top:10px}.technical>summary{padding:12px 15px}.status-grid .status-card:nth-child(2){display:none}@media(max-width:620px){.status-grid{display:flex;flex-wrap:nowrap}.status-card{border-radius:0}.status-sub{max-width:220px}}
  </style>
 </head>
 
@@ -673,12 +673,7 @@
  <div class="shell">
    <header>
      <div class="brand-wrap">
-       <div class="logo">MARCEL <span>AI</span></div>
-
-       <div class="module-label">
-         <strong>Tinder</strong>
-         <span>Manuell gesteuerter Sicherheitsmodus</span>
-       </div>
+       <div class="module-label"><h1 class="content-title">Tinder</h1><span>Manuell gesteuerter Sicherheitsmodus</span></div>
      </div>
 
      <div class="header-actions">
@@ -727,7 +722,7 @@
        </article>
 
        <article class="status-card"><div class="status-top"><div class="status-name">Ruhephase</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht gemeldet</div><div class="status-sub">Keine produktiven Ruhephasen-Daten</div></article>
-       <article class="status-card"><div class="status-top"><div class="status-name">Queue</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Leer</div><div class="status-sub">Noch keine Nachrichten-Queue verbunden</div></article>
+      <article class="status-card"><div class="status-top"><div class="status-name">Queue</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht verbunden</div><div class="status-sub">Noch keine Nachrichten-Queue verbunden</div></article>
      </section>
 
      <details class="technical">

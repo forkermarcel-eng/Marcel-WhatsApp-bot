@@ -5,7 +5,8 @@
     primary_language: "Sprache", birthday: "Geburtstag", seeking_new_job: "Arbeit",
     seed_shared_history: "Gemeinsame Geschichte", shared_history: "Gemeinsame Geschichte",
     temporary_state: "Temporärer Zustand", interaction_patterns: "Interaktionsmuster",
-    current_context: "Aktueller Kontext", profile_summary: "Profil",
+    current_context: "Aktueller Kontext", profile_summary: "Profil", relationship: "Beziehung",
+    lifestyle_routines: "Alltag und Routinen", personality: "Persönlichkeit",
     work_education: "Arbeit und Ausbildung", financial_context: "Finanzen",
     goals_dreams: "Ziele und Träume", travel_future_location: "Reisen und künftiger Wohnort",
     living_situation: "Wohnsituation", personal_boundaries: "Persönliche Grenzen",
@@ -32,7 +33,7 @@
   const words = Object.freeze({ true:"Ja", false:"Nein", null:"Keine Angabe", planned:"Geplant", current:"Aktuell", completed:"Abgeschlossen" });
 
   function humanize(value) {
-    const key=String(value??"").trim().toLowerCase();
+    const key=String(value??"").trim().toLowerCase().replace(/^seed_/,"");
     if (!key) return "Keine Angabe";
     if (labels[key]) return labels[key];
     return key.replace(/[_-]+/g," ").replace(/\b\w/g,letter=>letter.toUpperCase());
@@ -41,12 +42,20 @@
   function status(value){return statuses[String(value??"").toLowerCase()]||humanize(value)}
   function channel(value){return channels[String(value??"").toLowerCase()]||humanize(value)}
   function memoryType(value){return types[String(value??"").toLowerCase()]||humanize(value)}
-  function scalar(value){if(value===null||value===undefined||value==="")return "Keine Angabe";const mapped=words[String(value).toLowerCase()];return mapped||String(value)}
+  function scalar(value){if(value===null||value===undefined||value==="")return "Keine Angabe";const mapped=words[String(value).toLowerCase()];if(mapped)return mapped;if(typeof value==="string"&&/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(value)){const date=new Date(value.length===10?`${value}T12:00:00`:value);if(!Number.isNaN(date.getTime()))return new Intl.DateTimeFormat("de-DE",{dateStyle:"medium"}).format(date)}return String(value)}
   function displayRows(value, path="") {
     if (Array.isArray(value)) return value.flatMap((item,index)=>displayRows(item,`${path}${path?" · ":""}${index+1}`));
     if (value&&typeof value==="object") return Object.entries(value).flatMap(([key,item])=>displayRows(item,`${path}${path?" · ":""}${label(key)}`));
     return [{ label:path||"Wert", value:scalar(value) }];
   }
   function dateTime(value){if(!value)return "Keine Zeitangabe";const date=new Date(value);return Number.isNaN(date.getTime())?scalar(value):new Intl.DateTimeFormat("de-DE",{dateStyle:"medium",timeStyle:"short"}).format(date)}
-  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,dateTime});
+  function list(values){const clean=[...new Set(values.map(scalar).filter(value=>value!=="Keine Angabe"))];if(clean.length<2)return clean[0]||"";return `${clean.slice(0,-1).join(", ")} und ${clean.at(-1)}`}
+  function summary(value, heading="Information") {
+    if(Array.isArray(value))return value.length?`${label(heading)}: ${list(value)}.`:"Keine Angaben vorhanden.";
+    if(!value||typeof value!=="object")return scalar(value);
+    const entries=Object.entries(value),likes=[],positive=[],negative=[],facts=[];
+    for(const [key,item] of entries){const clean=key.replace(/^seed_/,"");if(/^likes?(?:_\d+)?$|^mag(?:_\d+)?$|preference/i.test(clean)){if(Array.isArray(item))likes.push(...item);else if(item!==false&&item!=null)likes.push(item);continue}if(item===true){(/avoid|vermeiden|not_|no_/i.test(clean)?negative:positive).push(label(clean));continue}if(item===false)continue;if(Array.isArray(item)){facts.push(`${label(clean)}: ${list(item)}`);continue}if(item&&typeof item==="object"){const nested=summary(item,clean);if(nested)facts.push(nested.replace(/\.$/,""));continue}if(item!==null&&item!=="")facts.push(`${label(clean)}: ${scalar(item)}`)}
+    const sentences=[];if(likes.length)sentences.push(`Mag ${list(likes)}`);if(positive.length)sentences.push(`${list(positive)} trifft zu`);if(negative.length)sentences.push(`${list(negative)} vermeiden`);if(facts.length)sentences.push(...facts);return sentences.length?sentences.map(text=>/[.!?]$/.test(text)?text:`${text}.`).join(" "):"Keine Angaben vorhanden."
+  }
+  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,dateTime,summary});
 })(globalThis);

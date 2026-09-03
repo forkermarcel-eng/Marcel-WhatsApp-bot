@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
-import factsHandler from "../api/dashboard/marcel-brain/facts.js";
-import liveStateHandler from "../api/dashboard/marcel-brain/live-state.js";
+import brainHandler from "../api/dashboard/marcel-brain.js";
 
 const backend = readFileSync(new URL("../index.js", import.meta.url), "utf8");
 const brainPage = readFileSync(new URL("../Brain/index.html", import.meta.url), "utf8");
+const vercelConfiguration = JSON.parse(
+  readFileSync(new URL("../vercel.json", import.meta.url), "utf8")
+);
 const PASSWORD = "brain-test-password";
 
 function cookie() {
@@ -45,7 +47,7 @@ async function environment(run) {
 test("fact create proxy requires dashboard authentication", async () => environment(async () => {
   globalThis.fetch = async () => { throw Error("must not fetch"); };
   const res = responseRecorder();
-  await factsHandler({ method: "POST", headers: { cookie: "" }, query: {}, body: {} }, res);
+  await brainHandler({ method: "POST", headers: { cookie: "" }, query: { resource: "facts" }, body: {} }, res);
   assert.equal(res.statusCode, 401);
 }));
 
@@ -57,7 +59,7 @@ test("fact create proxy forwards only to the fact-create backend route", async (
   };
   const body = { category: "identity", key: "favorite_color", value: "green", importance: 2, use_in_reply: true };
   const res = responseRecorder();
-  await factsHandler({ method: "POST", headers: { cookie: cookie() }, query: {}, body }, res);
+  await brainHandler({ method: "POST", headers: { cookie: cookie() }, query: { resource: "facts" }, body }, res);
   assert.equal(res.statusCode, 201);
   assert.equal(call.url, "https://brain-backend.example/dashboard-api/marcel-brain/facts");
   assert.deepEqual(JSON.parse(call.options.body), body);
@@ -71,10 +73,10 @@ test("fact update proxy requires and encodes a positive id", async () => environ
     return { ok: true, status: 200, async text() { return '{"ok":true}'; } };
   };
   const res = responseRecorder();
-  await factsHandler({ method: "PATCH", headers: { cookie: cookie() }, query: { id: "17" }, body: {} }, res);
+  await brainHandler({ method: "PATCH", headers: { cookie: cookie() }, query: { resource: "facts", id: "17" }, body: {} }, res);
   assert.equal(url, "https://brain-backend.example/dashboard-api/marcel-brain/facts/17");
   const invalid = responseRecorder();
-  await factsHandler({ method: "PATCH", headers: { cookie: cookie() }, query: { id: "bad" }, body: {} }, invalid);
+  await brainHandler({ method: "PATCH", headers: { cookie: cookie() }, query: { resource: "facts", id: "bad" }, body: {} }, invalid);
   assert.equal(invalid.statusCode, 400);
 }));
 
@@ -84,7 +86,7 @@ test("fact proxy preserves controlled 409 conflict payload", async () => environ
     async text() { return '{"ok":false,"conflict":true,"error":"Konflikt","existing":{"id":1}}'; }
   });
   const res = responseRecorder();
-  await factsHandler({ method: "POST", headers: { cookie: cookie() }, query: {}, body: {} }, res);
+  await brainHandler({ method: "POST", headers: { cookie: cookie() }, query: { resource: "facts" }, body: {} }, res);
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.conflict, true);
 }));
@@ -92,10 +94,10 @@ test("fact proxy preserves controlled 409 conflict payload", async () => environ
 test("live-state proxy accepts PATCH only and requires auth", async () => environment(async () => {
   globalThis.fetch = async () => { throw Error("must not fetch"); };
   const unauthenticated = responseRecorder();
-  await liveStateHandler({ method: "PATCH", headers: { cookie: "" }, body: {} }, unauthenticated);
+  await brainHandler({ method: "PATCH", headers: { cookie: "" }, query: { resource: "live-state" }, body: {} }, unauthenticated);
   assert.equal(unauthenticated.statusCode, 401);
   const wrongMethod = responseRecorder();
-  await liveStateHandler({ method: "POST", headers: { cookie: cookie() }, body: {} }, wrongMethod);
+  await brainHandler({ method: "POST", headers: { cookie: cookie() }, query: { resource: "live-state" }, body: {} }, wrongMethod);
   assert.equal(wrongMethod.statusCode, 405);
 }));
 
@@ -106,7 +108,7 @@ test("live-state proxy targets only the dedicated backend route", async () => en
     return { ok: true, status: 200, async text() { return '{"ok":true}'; } };
   };
   const res = responseRecorder();
-  await liveStateHandler({ method: "PATCH", headers: { cookie: cookie() }, body: { current_city: "Berlin" } }, res);
+  await brainHandler({ method: "PATCH", headers: { cookie: cookie() }, query: { resource: "live-state" }, body: { current_city: "Berlin" } }, res);
   assert.equal(call.url, "https://brain-backend.example/dashboard-api/marcel-brain/live-state");
   assert.deepEqual(JSON.parse(call.options.body), { current_city: "Berlin" });
 }));
@@ -187,4 +189,24 @@ test("Brain UI separates fact and state writes and performs explicit 409 update"
   assert.match(brainPage, /explicitConflictConfirmation:true/);
   assert.match(brainPage, /existing\.updatedAt/);
   assert.match(brainPage, /await load\(\)/);
+});
+
+test("Brain write routes reuse one Vercel function and remain below the function limit", () => {
+  const apiRoot = new URL("../api/", import.meta.url);
+  const functionFiles = readdirSync(apiRoot, { recursive: true })
+    .filter(file => String(file).endsWith(".js"));
+  assert.equal(functionFiles.length, 12);
+  assert.equal(functionFiles.includes("dashboard\\marcel-brain\\facts.js"), false);
+  assert.equal(functionFiles.includes("dashboard\\marcel-brain\\live-state.js"), false);
+  assert.equal(functionFiles.includes("dashboard\\_brain-write-proxy.js"), false);
+  assert.deepEqual(vercelConfiguration.rewrites, [
+    {
+      source: "/api/dashboard/marcel-brain/facts",
+      destination: "/api/dashboard/marcel-brain?resource=facts"
+    },
+    {
+      source: "/api/dashboard/marcel-brain/live-state",
+      destination: "/api/dashboard/marcel-brain?resource=live-state"
+    }
+  ]);
 });

@@ -1,4 +1,14 @@
 {
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/api/dashboard/marcel-brain/facts",
+      "destination": "/api/dashboard/marcel-brain?resource=facts"
+    },
+    {
+      "source": "/api/dashboard/marcel-brain/live-state",
+      "destination": "/api/dashboard/marcel-brain?resource=live-state"
+    }
+  ]
 }

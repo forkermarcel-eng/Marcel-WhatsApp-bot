@@ -181,11 +181,13 @@ export default async function handler(
    req.method !== "GET"
    &&
    req.method !== "POST"
+   &&
+   req.method !== "PATCH"
  ) {
  
    res.setHeader(
      "Allow",
-     "GET, POST"
+    "GET, POST, PATCH"
    );
  
    return res
@@ -296,8 +298,133 @@ export default async function handler(
     RAILWAY TARGET
  ================================================== */
  
- const railwayPath =
+ const resource =
+   String(
+     req.query?.resource
+     ||
+     ""
+   )
+     .trim()
+     .toLowerCase();
+
+ let railwayPath =
    "/dashboard-api/marcel-brain";
+
+ if (
+   resource === "facts"
+ ) {
+
+   if (
+     ![
+       "POST",
+       "PATCH"
+     ].includes(
+       req.method
+     )
+   ) {
+
+     return res
+       .status(405)
+       .json({
+         ok:
+           false,
+         error:
+           "Methode nicht erlaubt."
+       });
+
+   }
+
+   railwayPath +=
+     "/facts";
+
+   if (
+     req.method === "PATCH"
+   ) {
+
+     const factId =
+       Number(
+         req.query?.id
+       );
+
+     if (
+       !Number.isInteger(
+         factId
+       )
+       ||
+       factId <= 0
+     ) {
+
+       return res
+         .status(400)
+         .json({
+           ok:
+             false,
+           error:
+             "Ungültige oder fehlende Marcel-Memory-ID."
+         });
+
+     }
+
+     railwayPath +=
+       "/"
+       +
+       encodeURIComponent(
+         String(
+           factId
+         )
+       );
+
+   }
+
+ } else if (
+   resource === "live-state"
+ ) {
+
+   if (
+     req.method !== "PATCH"
+   ) {
+
+     return res
+       .status(405)
+       .json({
+         ok:
+           false,
+         error:
+           "Methode nicht erlaubt."
+       });
+
+   }
+
+   railwayPath +=
+     "/live-state";
+
+ } else if (
+   resource
+ ) {
+
+   return res
+     .status(400)
+     .json({
+       ok:
+         false,
+       error:
+         "Unbekannte Brain-Ressource."
+     });
+
+ } else if (
+   req.method === "PATCH"
+ ) {
+
+   return res
+     .status(405)
+     .json({
+       ok:
+         false,
+       error:
+         "Methode nicht erlaubt."
+     });
+
+ }
  
  const railwayUrl =
    railwayBackendUrl
@@ -311,8 +438,13 @@ export default async function handler(
  
  try {
  
-   const isPost =
-     req.method === "POST";
+   const hasBody =
+     [
+       "POST",
+       "PATCH"
+     ].includes(
+       req.method
+     );
  
    const railwayResponse =
      await fetch(
@@ -330,7 +462,7 @@ export default async function handler(
            Accept:
              "application/json",
  
-           ...(isPost
+           ...(hasBody
              ? {
                  "Content-Type":
                    "application/json"
@@ -339,7 +471,7 @@ export default async function handler(
  
          },
  
-         ...(isPost
+         ...(hasBody
            ? {
                body:
                  JSON.stringify(
@@ -474,7 +606,7 @@ export default async function handler(
          passthroughStatus
        )
        .json({
- 
+         ...data,
          ok:
            false,
  
@@ -509,7 +641,9 @@ export default async function handler(
    ================================================== */
  
    return res
-     .status(200)
+     .status(
+       railwayResponse.status
+     )
      .json(
        data
      );

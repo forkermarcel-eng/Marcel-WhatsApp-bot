@@ -377,6 +377,16 @@ export default async function handler(
    }
 
  } else if (
+   resource === "classify"
+ ) {
+
+   if (req.method !== "POST") {
+     return res.status(405).json({ ok: false, error: "Methode nicht erlaubt." });
+   }
+
+   railwayPath += "/classify";
+
+ } else if (
    resource === "live-state"
  ) {
 
@@ -592,7 +602,8 @@ export default async function handler(
        [
          400,
          404,
-         409
+         409,
+         422
        ].includes(
          railwayResponse.status
        )

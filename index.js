@@ -15099,6 +15099,63 @@ function safeExistingFact(row) {
   };
 }
 
+function validateBrainCandidate(candidate, index) {
+  const kind = normalizeText(candidate?.kind).toLowerCase();
+  const confidence = Number(candidate?.confidence);
+  if (!["fact", "live_state"].includes(kind) || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
+  const base = {
+    id: `candidate-${index + 1}`,
+    kind,
+    labelDe: normalizeText(candidate?.label_de) || "Erkannte Information",
+    displayValueDe: normalizeText(candidate?.display_value_de) || renderJson(candidate?.value),
+    permanence: kind === "live_state" ? "current" : normalizeText(candidate?.permanence).toLowerCase() === "limited" ? "limited" : "permanent",
+    confidence
+  };
+  if (kind === "live_state") {
+    const field = normalizeText(candidate?.field).toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(MARCEL_LIVE_STATE_FIELDS, field)) return null;
+    try {
+      const value = validateManualFactValue(candidate?.value);
+      return { ...base, field, value, useInReply: true, validUntil: null };
+    } catch { return null; }
+  }
+  try {
+    const fact = validateManualFactFields({
+      category: candidate?.category,
+      key: candidate?.key,
+      value: candidate?.value,
+      importance: candidate?.importance,
+      use_in_reply: candidate?.use_in_reply,
+      ...(candidate?.valid_until ? { valid_until: candidate.valid_until } : {})
+    });
+    return { ...base, category: fact.category, key: fact.key, value: fact.value, importance: fact.importance, useInReply: fact.allowedForBot, validUntil: fact.validUntil ?? null };
+  } catch { return null; }
+}
+
+app.post("/dashboard-api/marcel-brain/classify", async (req, res) => {
+  if (!dashboardApiReady(res)) return;
+  if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+  try {
+    assertOnlyBodyFields(req.body, new Set(["text"]));
+    const text = normalizeText(req.body?.text);
+    if (text.length < 3 || text.length > 4000) throw brainWriteError("Bitte 3 bis 4.000 Zeichen natürlichen Text eingeben.");
+    const existing = (await pool.query(`SELECT category,memory_key,memory_value,human_verified FROM marcel_memory WHERE status='active' ORDER BY importance DESC LIMIT 250`)).rows;
+    const response = await openai.responses.create({
+      model: MODEL,
+      instructions: `Du klassifizierst Marcels eigene, auf Deutsch eingegebene Informationen für das bestehende Marcel-Memory. Du schreibst NICHTS. Liefere nur eine sichere Vorschau. Zerlege den Text in eigenständige Fakten. Nutze dieselbe konservative Memory-Semantik wie der bestehende Extractor: keine Erfindungen, ein Kernfakt pro Kandidat, stabile englische snake_case Keys, kurzfristige Angaben als live_state, langfristige Angaben als fact. Bestehendes menschlich bestätigtes Wissen niemals überschreiben. Erlaubte Fact-Kategorien: ${[...MARCEL_MANUAL_FACT_CATEGORIES].join(", ")}. Erlaubte Live-State-Felder: ${Object.keys(MARCEL_LIVE_STATE_FIELDS).join(", ")}. Interne Werte und Keys kanonisch Englisch; label_de und display_value_de natürlich Deutsch. Bei Unsicherheit confidence unter 0.75. use_in_reply nur wenn die Information sicher für Antworten geeignet ist. importance 1 bis 5. valid_until nur als zukünftiger ISO-Zeitpunkt oder null. Antworte ausschließlich als JSON: {"candidates":[{"kind":"fact|live_state","category":"","key":"","field":"","value":null,"label_de":"","display_value_de":"","permanence":"permanent|limited|current","importance":3,"use_in_reply":true,"valid_until":null,"confidence":0.9}]}`,
+      input: JSON.stringify({ text_de: text, existing_memory: existing })
+    });
+    const parsed = safeJsonParse(response.output_text, { candidates: [] });
+    const rawCandidates = Array.isArray(parsed?.candidates) ? parsed.candidates.slice(0, 12) : [];
+    const candidates = rawCandidates.map(validateBrainCandidate).filter(Boolean);
+    if (!candidates.length) return res.status(422).json({ ok: false, error: "Aus dem Text konnten keine ausreichend strukturierten Informationen erkannt werden." });
+    return res.json({ ok: true, previewOnly: true, presentationLanguage: "de", candidates });
+  } catch (error) {
+    console.error("Marcel Brain Klassifikation Fehler:", error?.message || "unknown");
+    return res.status(Number(error?.statusCode) || 500).json({ ok: false, error: error?.statusCode ? error.message : "Der Text konnte nicht sicher analysiert werden." });
+  }
+});
+
 app.post("/dashboard-api/marcel-brain/facts", async (req, res) => {
   if (!dashboardApiReady(res)) return;
   if (!dashboardApiAuthorized(req)) {

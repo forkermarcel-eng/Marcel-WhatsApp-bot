@@ -66,6 +66,19 @@ test("fact create proxy forwards only to the fact-create backend route", async (
   assert.equal(call.options.headers.Authorization, "Bearer backend-secret");
 }));
 
+test("natural Brain classification is preview-only through the shared proxy", async () => environment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return { ok: true, status: 200, async text() { return '{"ok":true,"previewOnly":true,"candidates":[]}'; } };
+  };
+  const res = responseRecorder();
+  await brainHandler({ method: "POST", headers: { cookie: cookie() }, query: { resource: "classify" }, body: { text: "Ich ziehe nach Medellín." } }, res);
+  assert.equal(call.url, "https://brain-backend.example/dashboard-api/marcel-brain/classify");
+  assert.deepEqual(JSON.parse(call.options.body), { text: "Ich ziehe nach Medellín." });
+  assert.equal(res.body.previewOnly, true);
+}));
+
 test("fact update proxy requires and encodes a positive id", async () => environment(async () => {
   let url;
   globalThis.fetch = async (target) => {
@@ -203,6 +216,10 @@ test("Brain write routes reuse one Vercel function and remain below the function
     {
       source: "/api/dashboard/marcel-brain/facts",
       destination: "/api/dashboard/marcel-brain?resource=facts"
+    },
+    {
+      source: "/api/dashboard/marcel-brain/classify",
+      destination: "/api/dashboard/marcel-brain?resource=classify"
     },
     {
       source: "/api/dashboard/marcel-brain/live-state",

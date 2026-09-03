@@ -7,6 +7,10 @@
       "destination": "/api/dashboard/marcel-brain?resource=facts"
     },
     {
+      "source": "/api/dashboard/marcel-brain/classify",
+      "destination": "/api/dashboard/marcel-brain?resource=classify"
+    },
+    {
       "source": "/api/dashboard/marcel-brain/live-state",
       "destination": "/api/dashboard/marcel-brain?resource=live-state"
     }

@@ -21,6 +21,7 @@ import {
   requireDeviceBridgeReady
 } from "./device-bridge/readiness.js";
 import { createContactMediaService } from "./services/contact-media.js";
+import { createContactIdentityService } from "./services/contact-identities.js";
 
 const { Pool } = pg;
 
@@ -59,6 +60,12 @@ const pool = new Pool({
 connectionString: process.env.DATABASE_URL
 });
 const { listContactMedia } = createContactMediaService(pool);
+const {
+  listContactIdentities,
+  listContactIdentityMap,
+  upsertContactIdentity,
+  removeContactIdentity
+} = createContactIdentityService(pool);
 
 const WHATSAPP_ENABLED =
 String(
@@ -11844,6 +11851,11 @@ try {
     );
 
 
+  const contactIdentityMap =
+    await listContactIdentityMap(
+      result.rows.map(contact => contact.id)
+    );
+
   const contacts =
     result.rows.map(
       contact => {
@@ -11981,6 +11993,9 @@ try {
 
           updatedAt:
             contact.updated_at,
+
+          identities:
+            contactIdentityMap.get(String(contact.id)) || [],
 
           lastMessage:
             contact.last_message_text
@@ -15540,6 +15555,42 @@ CHAT + PROFIL + MEMORY + EVENTS
 READ ONLY V0.2
 ================================================== */
 
+app.post(
+"/dashboard-api/contacts/:id/identities",
+async (req, res) => {
+  try {
+    if (!dashboardApiReady(res)) return;
+    if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+    const contactId = Number(req.params.id);
+    if (!Number.isInteger(contactId) || contactId <= 0) throw dashboardContactError("Ungültige Kontakt-ID.");
+    const contact = await getContactById(contactId);
+    if (!contact || isTestJid(contact.whatsapp_jid)) throw dashboardContactError("Kontakt nicht gefunden.", 404);
+    const result = await upsertContactIdentity(contactId, req.body || {});
+    return res.status(result.idempotent ? 200 : 201).json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(Number(error?.statusCode) || 500).json({ ok: false, error: error?.message || "Kanalidentität konnte nicht gespeichert werden." });
+  }
+}
+);
+
+app.delete(
+"/dashboard-api/contacts/:id/identities",
+async (req, res) => {
+  try {
+    if (!dashboardApiReady(res)) return;
+    if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok: false, error: "Nicht autorisiert." });
+    const contactId = Number(req.params.id);
+    if (!Number.isInteger(contactId) || contactId <= 0) throw dashboardContactError("Ungültige Kontakt-ID.");
+    const contact = await getContactById(contactId);
+    if (!contact || isTestJid(contact.whatsapp_jid)) throw dashboardContactError("Kontakt nicht gefunden.", 404);
+    const result = await removeContactIdentity(contactId, req.body?.channel);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(Number(error?.statusCode) || 500).json({ ok: false, error: error?.message || "Kanalidentität konnte nicht entfernt werden." });
+  }
+}
+);
+
 app.get(
 "/dashboard-api/contacts/:id",
 async (req, res) => {
@@ -15661,7 +15712,8 @@ try {
     activeItems,
     historicalItems,
     events,
-    mediaRows
+    mediaRows,
+    identities
   ] =
     await Promise.all([
 
@@ -15692,7 +15744,9 @@ try {
         200
       ),
 
-      listContactMedia(contact.id)
+      listContactMedia(contact.id),
+
+      listContactIdentities(contact.id)
 
     ]);
 
@@ -16382,6 +16436,8 @@ try {
 
     mediaItems:
       mediaRows,
+
+    identities,
 
     memoryStatus
 

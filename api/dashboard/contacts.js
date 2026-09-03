@@ -228,7 +228,6 @@ const contactId =
     value
   );
 
-
 if (
   !Number.isInteger(
     contactId
@@ -402,6 +401,17 @@ const contactId =
     req.query?.id
   );
 
+const resource =
+  String(req.query?.resource || "").trim().toLowerCase();
+
+if (resource && resource !== "identities") {
+  return res.status(400).json({ ok: false, error: "Ungültige Kontakt-Ressource." });
+}
+
+if (resource === "identities" && !contactId) {
+  return res.status(400).json({ ok: false, error: "Für Kanalidentitäten fehlt die Kontakt-ID." });
+}
+
 
 if (
   contactId === false
@@ -426,6 +436,8 @@ if (
   req.method === "POST"
   &&
   contactId
+  &&
+  resource !== "identities"
 ) {
 
   return res
@@ -487,6 +499,7 @@ const railwayPath =
           )
         )
       )
+      + (resource === "identities" ? "/identities" : "")
 
     : "/dashboard-api/contacts";
 

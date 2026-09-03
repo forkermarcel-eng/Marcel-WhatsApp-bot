@@ -54,6 +54,14 @@ test("contacts start full width, sort A-Z and open a channel-neutral profile ove
   assert.match(contacts, /\/Dashboard\/\?contact=/);
   assert.match(contacts, /WhatsApp.*öffnen|P\.channel\(channel\).*öffnen/s);
   assert.match(contacts, /Dashboard\/\?view=edit-contact&contact=/);
+  assert.match(contacts, /profile-overview/);
+  assert.match(contacts, /Über sie/);
+  assert.match(contacts, /Kanäle &amp; Profile/);
+  assert.match(contacts, /gallery:"Galerie"/);
+  assert.doesNotMatch(contacts, /short=\{whatsapp:"WA"/);
+  for (const channel of ["whatsapp", "tinder", "instagram", "x"]) assert.match(contacts, new RegExp(`${channel}:'<path`));
+  assert.match(contacts, /data-identity-edit/);
+  assert.match(contacts, /resource=identities/);
 });
 
 test("Brain natural input is preview-only and supports per-candidate decisions", () => {
@@ -83,6 +91,8 @@ test("Brain facts use compact topic accordions without losing granular details",
   assert.match(brain, /Details anzeigen/);
   assert.match(contacts, /class="brain-topic"/);
   assert.match(contacts, /P\.topic\(item\.category,item\.key\)/);
+  assert.match(contacts, /topicIcon\(topic\)/);
+  assert.match(contacts, /topic-copy[\s\S]*summaries\.slice\(0,2\)/);
 });
 
 test("contact preview and media foundation preserve source data", () => {

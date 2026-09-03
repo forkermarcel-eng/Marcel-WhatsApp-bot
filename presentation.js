@@ -75,5 +75,30 @@
     for(const [key,item] of entries){const clean=key.replace(/^seed_/,"");if(/^likes?(?:_\d+)?$|^mag(?:_\d+)?$|preference/i.test(clean)){if(Array.isArray(item))likes.push(...item);else if(item!==false&&item!=null)likes.push(item);continue}if(item===true){(/avoid|vermeiden|not_|no_/i.test(clean)?negative:positive).push(label(clean));continue}if(item===false)continue;if(Array.isArray(item)){facts.push(`${label(clean)}: ${list(item)}`);continue}if(item&&typeof item==="object"){const nested=summary(item,clean);if(nested)facts.push(nested.replace(/\.$/,""));continue}if(item!==null&&item!=="")facts.push(`${label(clean)}: ${scalar(item)}`)}
     const sentences=[];if(likes.length)sentences.push(`Mag ${list(likes)}`);if(positive.length)sentences.push(`${list(positive)} trifft zu`);if(negative.length)sentences.push(`${list(negative)} vermeiden`);if(facts.length)sentences.push(...facts);return sentences.length?sentences.map(text=>/[.!?]$/.test(text)?text:`${text}.`).join(" "):"Keine Angaben vorhanden."
   }
-  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,dateTime,summary,topic});
+  const hiddenProfileKeys = /(?:^|_)(?:id|age|birth|birthday|day|month|year|inferred|source|audit|review|status|updated|created|confidence|importance)(?:_|$)/i;
+  function readableFragments(value, path="") {
+    if (value === null || value === undefined || value === "" || typeof value === "boolean") return [];
+    if (Array.isArray(value)) return value.flatMap(item => readableFragments(item, path));
+    if (typeof value === "object") return Object.entries(value).flatMap(([key,item]) => hiddenProfileKeys.test(key) ? [] : readableFragments(item, key));
+    if (typeof value === "number" || /^\d{4}-\d{2}-\d{2}/.test(String(value))) return [];
+    const text=String(value).trim();
+    return text && !/^(?:true|false|null|active|historical|confirmed|corrected|unreviewed)$/i.test(text) ? [text] : [];
+  }
+  function humanProfileSummary(items, fallback="Noch keine verlässliche Kurzbeschreibung vorhanden.") {
+    const fragments=[...new Set((items||[]).flatMap(item=>readableFragments(item?.value??item)).filter(text=>text.length>2))].slice(0,3);
+    if(!fragments.length)return fallback;
+    return fragments.map(text=>/[.!?]$/.test(text)?text:`${text}.`).join(" ");
+  }
+  function tensionPresentation(messages=[], events=[]) {
+    const pattern=/\b(?:flirt|flirty|sexy|sexuell|anziehung|kuss|küssen|küssen|nähe|heiß|hot|kiss|attraction|intim)\w*/i;
+    const hits=(messages||[]).filter(message=>pattern.test(String(message?.translationDe||message?.translation_de||message?.text||"")));
+    const eventHits=(events||[]).filter(event=>pattern.test(String(event?.title||event?.evidenceSummary||"")));
+    const directions=new Set(hits.map(message=>message?.direction).filter(Boolean));
+    const count=hits.length+eventHits.length;
+    if(!count)return {level:"Keine",summary:"Bisher sind keine verlässlichen flirtigen oder sexuellen Signale dokumentiert."};
+    if(count===1||directions.size<2)return {level:"Leicht",summary:"Einzelne flirtige Signale sind vorhanden; eine stärkere gegenseitige Spannung ist noch nicht verlässlich bestätigt."};
+    if(count<4)return {level:"Spürbar",summary:"Wiederkehrende flirtige Signale sind in beiden Gesprächsrichtungen erkennbar."};
+    return {level:"Stark",summary:"Mehrere wiederkehrende und gegenseitige flirtige oder intime Signale sind dokumentiert."};
+  }
+  root.MarcelPresentation=Object.freeze({label,status,channel,memoryType,scalar,displayRows,dateTime,summary,topic,readableFragments,humanProfileSummary,tensionPresentation});
 })(globalThis);

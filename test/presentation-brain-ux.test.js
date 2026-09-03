@@ -54,7 +54,7 @@ test("contacts start full width, sort A-Z and open a channel-neutral profile ove
   assert.match(contacts, /\/Dashboard\/\?contact=/);
   assert.match(contacts, /WhatsApp.*öffnen|P\.channel\(channel\).*öffnen/s);
   assert.match(contacts, /Dashboard\/\?view=edit-contact&contact=/);
-  assert.match(contacts, /profile-overview/);
+  assert.match(contacts, /reference-layout/);
   assert.match(contacts, /Über sie/);
   assert.match(contacts, /Kanäle &amp; Profile/);
   assert.match(contacts, /gallery:"Galerie"/);
@@ -62,6 +62,48 @@ test("contacts start full width, sort A-Z and open a channel-neutral profile ove
   for (const channel of ["whatsapp", "tinder", "instagram", "x"]) assert.match(contacts, new RegExp(`${channel}:'<path`));
   assert.match(contacts, /data-identity-edit/);
   assert.match(contacts, /resource=identities/);
+});
+
+test("woman profile reference view hides technical profile and audit data", () => {
+  const summary = P.humanProfileSummary([
+    { value: { age: 32, year_inferred: true, birthday: { day: 13, month: 3, year: 1994 } } },
+    { value: { character: "Warm und humorvoll" } }
+  ]);
+  assert.equal(summary, "Warm und humorvoll.");
+  assert.doesNotMatch(summary, /Age|Year|Inferred|trifft zu|1994/);
+  assert.match(contacts, /Über sie/);
+  assert.match(contacts, /Zwischen euch/);
+  assert.match(contacts, /Flirt &amp; sexuelle Spannung/);
+  assert.doesNotMatch(contacts, /<h3>Notizen<\/h3>/);
+  assert.doesNotMatch(contacts, /x\.humanNote|notes\.map/);
+});
+
+test("flirt tension is conservative and based on reciprocal conversation signals", () => {
+  assert.equal(P.tensionPresentation([], []).level, "Keine");
+  assert.equal(P.tensionPresentation([{ direction: "incoming", text: "ein Kuss" }], []).level, "Leicht");
+  assert.equal(P.tensionPresentation([
+    { direction: "incoming", text: "ein Kuss" },
+    { direction: "outgoing", text: "flirtige Antwort" }
+  ], []).level, "Spürbar");
+  assert.equal(P.tensionPresentation([
+    { direction: "incoming", text: "Kuss" },
+    { direction: "outgoing", text: "Flirt" },
+    { direction: "incoming", text: "Nähe" },
+    { direction: "outgoing", text: "Anziehung" }
+  ], []).level, "Stark");
+});
+
+test("woman profile uses three responsive areas and a separate selected topic detail", () => {
+  const css = readFileSync(new URL("../Kontakte/contact-profile.css", import.meta.url), "utf8");
+  assert.match(contacts, /brainTopicList\(groups\)/);
+  assert.match(contacts, /brainTopicDetail\(groups\)/);
+  assert.match(contacts, /data-topic=/);
+  assert.match(contacts, /class="topic-detail"/);
+  assert.match(contacts, /Zusammenfassung/);
+  assert.match(contacts, /Details anzeigen/);
+  assert.match(css, /grid-template-columns:\s*minmax\(250px,[\s\S]*minmax\(300px,[\s\S]*minmax\(320px/);
+  assert.match(css, /@media \(max-width: 980px\)/);
+  assert.match(css, /@media \(max-width: 820px\)/);
 });
 
 test("Brain natural input is preview-only and supports per-candidate decisions", () => {
@@ -89,10 +131,10 @@ test("Brain facts use compact topic accordions without losing granular details",
   assert.match(brain, /class="topic"/);
   assert.match(brain, /aktive API-Fakten/);
   assert.match(brain, /Details anzeigen/);
-  assert.match(contacts, /class="brain-topic"/);
+  assert.match(contacts, /class="brain-topic-row/);
   assert.match(contacts, /P\.topic\(item\.category,item\.key\)/);
   assert.match(contacts, /topicIcon\(topic\)/);
-  assert.match(contacts, /topic-copy[\s\S]*summaries\.slice\(0,2\)/);
+  assert.match(contacts, /topic-copy[\s\S]*humanProfileSummary\(group/);
 });
 
 test("contact preview and media foundation preserve source data", () => {

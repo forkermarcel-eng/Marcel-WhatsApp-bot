@@ -231,6 +231,7 @@ test("command delivery is device-scoped, ordered, bounded and non-terminalizing"
 function statusRow(lastAccepted = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
+    created_at: NOW,
     last_accepted_heartbeat_at: lastAccepted, app_version_name: "1.0", app_version_code: "1",
     bridge_service_state: "RUNNING", tinder_state: "UNKNOWN", automation_state: "STOPPED",
     configuration_revision: 1
@@ -242,6 +243,7 @@ test("admin list and status expose separated states without sensitive key data",
   const listRes = responseRecorder();
   await createAdminDeviceListHandler(pool)({}, listRes);
   assert.equal(listRes.body.devices[0].device_status, "OFFLINE");
+  assert.equal(listRes.body.devices[0].enrolled_at, NOW.toISOString());
   const statusRes = responseRecorder();
   await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, statusRes);
   assert.equal(statusRes.body.device.tinder_state, "UNKNOWN");

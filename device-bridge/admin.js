@@ -23,6 +23,7 @@ function statusRow(row, now) {
     display_name: row.display_name,
     enrollment_state: row.enrollment_state,
     device_status: deriveDeviceStatus(row.last_accepted_heartbeat_at, now),
+    enrolled_at: row.created_at ? new Date(row.created_at).toISOString() : null,
     last_heartbeat_accepted_at: row.last_accepted_heartbeat_at ? new Date(row.last_accepted_heartbeat_at).toISOString() : null,
     app_version: row.app_version_name,
     app_build: row.app_version_code === null ? null : Number(row.app_version_code),
@@ -33,7 +34,7 @@ function statusRow(row, now) {
   };
 }
 
-const STATUS_COLUMNS = `device_id, display_name, enrollment_state, last_accepted_heartbeat_at,
+const STATUS_COLUMNS = `device_id, display_name, enrollment_state, created_at, last_accepted_heartbeat_at,
   app_version_name, app_version_code, bridge_service_state, tinder_state,
   automation_state, configuration_revision`;
 

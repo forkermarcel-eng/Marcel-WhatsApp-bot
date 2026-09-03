@@ -343,6 +343,55 @@
      border-top: 1px solid var(--border);
    }
 
+   .device-selection {
+     margin-top: 16px;
+     padding: 14px;
+     border: 1px solid var(--border);
+     border-radius: 14px;
+     background: rgba(255, 255, 255, 0.02);
+   }
+
+   .device-selection h3 {
+     margin-bottom: 5px;
+     font-size: 14px;
+   }
+
+   .device-selection-list {
+     display: grid;
+     gap: 8px;
+     margin-top: 12px;
+   }
+
+   .device-choice {
+     width: 100%;
+     padding: 11px 12px;
+     border: 1px solid var(--border);
+     border-radius: 10px;
+     background: rgba(255, 255, 255, 0.03);
+     color: var(--text);
+     cursor: pointer;
+     font: inherit;
+     text-align: left;
+   }
+
+   .device-choice:hover,
+   .device-choice.selected {
+     border-color: rgba(105, 167, 255, 0.72);
+     background: var(--blue-soft);
+   }
+
+   .device-choice-title {
+     display: block;
+     font-weight: 800;
+   }
+
+   .device-choice-meta {
+     display: block;
+     margin-top: 3px;
+     color: var(--muted);
+     font-size: 12px;
+   }
+
    .device-command-block h3 {
      margin-bottom: 5px;
      font-size: 14px;
@@ -740,6 +789,12 @@
          <span class="enrollment-message">Gültig bis: <strong id="enrollmentExpires"></strong></span>
        </div>
 
+       <div class="device-selection" id="deviceSelection" hidden aria-labelledby="deviceSelectionHeading">
+         <h3 id="deviceSelectionHeading">Android-Gerät auswählen</h3>
+         <p>Wähle den Eintrag anhand der gekürzten Device-ID und der Registrierungszeit. Die neueste Registrierung ist als solche markiert.</p>
+         <div class="device-selection-list" id="deviceSelectionList"></div>
+       </div>
+
        <div class="device-command-block" aria-labelledby="deviceCommandHeading">
          <h3 id="deviceCommandHeading">Sichere Gerätebefehle</h3>
          <p>Commands werden erstellt und beim nächsten Heartbeat an das eindeutig ausgewählte Online-Gerät ausgeliefert.</p>
@@ -874,6 +929,8 @@
      enrollmentCode: document.getElementById("enrollmentCode"),
      enrollmentExpires: document.getElementById("enrollmentExpires"),
      enrollmentMessage: document.getElementById("enrollmentMessage"),
+     deviceSelection: document.getElementById("deviceSelection"),
+     deviceSelectionList: document.getElementById("deviceSelectionList"),
      pingDevice: document.getElementById("pingDevice"),
      requestDeviceStatus: document.getElementById("requestDeviceStatus"),
      deviceCommandMessage: document.getElementById("deviceCommandMessage"),
@@ -1045,16 +1102,63 @@
      updateCommandControls();
    }
 
+   function shortDeviceId(value) {
+     const id = String(value || "");
+     return id.length > 8 ? `…${id.slice(-8)}` : id || "unbekannt";
+   }
+
+   function newestEnrollmentId(devices) {
+     return devices.reduce((latest, device) => {
+       const timestamp = Date.parse(device?.enrolled_at || "");
+       const latestTimestamp = Date.parse(latest?.enrolled_at || "");
+       return Number.isFinite(timestamp) && (!Number.isFinite(latestTimestamp) || timestamp > latestTimestamp)
+         ? device
+         : latest;
+     }, null)?.device_id || null;
+   }
+
+   function renderDeviceSelection(devices) {
+     const newestDeviceId = newestEnrollmentId(devices);
+     elements.deviceSelection.hidden = false;
+     elements.deviceSelectionList.replaceChildren(...devices.map((device) => {
+       const deviceId = String(device?.device_id || "");
+       const button = document.createElement("button");
+       const title = document.createElement("span");
+       const meta = document.createElement("span");
+       button.type = "button";
+       button.className = `device-choice${deviceId === selectedDevice?.device_id ? " selected" : ""}`;
+       title.className = "device-choice-title";
+       meta.className = "device-choice-meta";
+       title.textContent = `${device?.display_name || "Android-Gerät"}${deviceId === newestDeviceId ? " · Neueste Registrierung" : ""}`;
+       meta.textContent = `Device-ID ${shortDeviceId(deviceId)} · ${String(device?.enrollment_state || "UNKNOWN").toUpperCase()} · ${String(device?.device_status || "UNKNOWN").toUpperCase()} · registriert ${formatTimestamp(device?.enrolled_at)} · letzter Heartbeat ${formatTimestamp(device?.last_heartbeat_accepted_at)}`;
+       button.append(title, meta);
+       button.addEventListener("click", () => {
+         selectedDevice = device;
+         renderDeviceSelection(devices);
+         renderDeviceStatus({ devices: [device] });
+       });
+       return button;
+     }));
+   }
+
    function renderDeviceStatus(data) {
      const devices = Array.isArray(data?.devices) ? data.devices : [];
 
      if (devices.length === 0) {
+       elements.deviceSelection.hidden = true;
+       elements.deviceSelectionList.replaceChildren();
        setDot(elements.deviceDot, "info");
        elements.deviceValue.textContent = "Kein Gerät";
        elements.deviceSub.textContent = "Noch kein Gerät registriert";
        setUnavailableDeviceDetails("Nicht verfügbar");
        setCommandAvailability(null, "Kein aktives Gerät verfügbar.");
      } else if (devices.length > 1) {
+       const selected = devices.find((device) => device?.device_id === selectedDevice?.device_id);
+       renderDeviceSelection(devices);
+       if (selected) {
+         renderDeviceStatus({ devices: [selected] });
+         return;
+       }
        setDot(elements.deviceDot, "warn");
        elements.deviceValue.textContent = "Mehrere Geräte";
        elements.deviceSub.textContent = `${devices.length} Geräte · Auswahl erforderlich`;

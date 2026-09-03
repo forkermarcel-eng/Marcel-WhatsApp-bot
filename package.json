@@ -8,7 +8,8 @@
     "start": "node index.js",
     "test:device-bridge": "node --test test/device-bridge-protocol-v1.test.js test/device-bridge-enrollment-auth.test.js test/device-bridge-heartbeat-admin.test.js test/device-bridge-command-ack.test.js test/device-bridge-command-status-admin.test.js test/device-bridge-initialization.test.js test/device-bridge-ack-schema-revoke.test.js test/tinder-device-command-proxy.test.js test/tinder-device-command-status-proxy.test.js test/tinder-device-selection.test.js",
     "test:brain-write": "node --test test/marcel-brain-manual-write.test.js",
-    "test": "npm run test:device-bridge && npm run test:brain-write"
+    "test:web-ui": "node --test test/web-ui-navigation.test.js",
+    "test": "npm run test:device-bridge && npm run test:brain-write && npm run test:web-ui"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.14",

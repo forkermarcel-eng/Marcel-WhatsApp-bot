@@ -657,18 +657,18 @@
      }
    }
    .platform-layout{min-height:100dvh;display:grid;grid-template-columns:176px minmax(0,1fr)}
-   .platform-rail{position:sticky;top:0;height:100dvh;padding:22px 13px;background:#0c1116;border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:20}
+   .platform-rail{position:sticky;top:0;height:100dvh;padding:22px 13px;background:#0c1116;border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:20;min-width:0;overflow:hidden}
    .platform-brand{padding:5px 9px 22px;font-weight:900;letter-spacing:.7px}.platform-brand span{color:var(--green)}
-   .platform-nav{display:grid;gap:4px}.platform-nav a{padding:10px 11px;border-radius:9px;text-decoration:none;color:var(--muted);font-size:14px;font-weight:650}.platform-nav a:hover,.platform-nav a.active{background:rgba(255,79,123,.11);color:#fff}.platform-nav a.active{box-shadow:inset 3px 0 #ff4f7b}.platform-secondary{margin-top:auto;padding-top:18px;border-top:1px solid var(--border)}.platform-toggle{display:none}
+   .platform-nav{display:grid;gap:4px;min-width:0}.platform-nav a{display:block;width:100%;min-width:0;padding:10px 11px;border-radius:9px;text-decoration:none;color:var(--muted);font-size:14px;font-weight:650;overflow:hidden;text-overflow:ellipsis}.platform-nav a:hover,.platform-nav a.active{background:rgba(255,79,123,.11);color:#fff}.platform-nav a.active{box-shadow:inset 3px 0 #ff4f7b}.platform-secondary{display:grid;gap:4px;margin-top:auto;padding-top:18px;border-top:1px solid var(--border)}.platform-toggle{display:none}
    .status-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.status-grid .status-card:nth-child(2){display:none}
    .matches{margin:16px 0;padding:18px;border:1px solid var(--border);border-radius:17px;background:var(--panel)}.matches h2{font-size:12px;letter-spacing:1.3px;margin:0 0 14px}.match-row{display:flex;gap:13px;overflow:auto}.match-empty{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13px}.match-circle{width:58px;height:58px;flex:0 0 58px;border-radius:50%;display:grid;place-items:center;border:2px dashed rgba(255,79,123,.38);background:rgba(255,79,123,.07);font-size:22px}
    .technical{margin:16px 0;border:1px solid var(--border);border-radius:17px;background:var(--panel);overflow:hidden}.technical>summary{cursor:pointer;padding:17px 18px;font-weight:800}.technical-body{padding:0 16px 16px}.technical .control-panel,.technical .notice,.technical .enrollment-panel{box-shadow:none}
-   @media(max-width:900px){.platform-layout{grid-template-columns:76px minmax(0,1fr)}.platform-brand{font-size:12px}.platform-nav a{font-size:0;text-align:center}.platform-nav a:first-letter{font-size:15px}.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+   @media(max-width:900px){.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
    @media(max-width:620px){.platform-layout{grid-template-columns:1fr}.platform-rail{height:auto;padding:10px 14px;display:grid;grid-template-columns:1fr auto}.platform-brand{padding:7px;font-size:15px}.platform-toggle{display:block;border:1px solid var(--border);background:#171e24;color:#fff;border-radius:8px;padding:7px 10px}.platform-nav{display:none;grid-column:1/-1;padding-top:8px}.platform-rail.open .platform-nav{display:grid}.platform-nav a{font-size:14px;text-align:left}.platform-secondary{margin-top:8px}.status-grid{grid-template-columns:1fr 1fr}}
  </style>
 </head>
 
-<body><div class="platform-layout"><aside class="platform-rail"><div class="platform-brand">MARCEL <span>AI</span></div><button class="platform-toggle">Menü</button><nav class="platform-nav"><a href="/Hub/">Hub</a><a href="/Dashboard/">WhatsApp</a><a class="active" href="/Tinder/">Tinder</a><a href="/Brain/">Brain</a><a href="/Trading/">Trading</a><div class="platform-secondary"><a href="/Dashboard/?view=contacts">Kontakte</a><a href="/Analyse/">Analyse</a><a href="/Einstellungen/">Einstellungen</a></div></nav></aside>
+<body><div class="platform-layout"><aside class="platform-rail"><div class="platform-brand">MARCEL <span>AI</span></div><button class="platform-toggle">Menü</button><nav class="platform-nav"><a href="/Hub/">Hub</a><a href="/Dashboard/">WhatsApp</a><a class="active" href="/Tinder/">Tinder</a><a href="/Instagram/">Instagram</a><a href="/X/">X (Twitter)</a><a href="/Brain/">Brain</a><a href="/Trading/">Trading</a><div class="platform-secondary"><a href="/Kontakte/">Kontakte</a><a href="/Analyse/">Analyse</a><a href="/Einstellungen/">Einstellungen</a></div></nav></aside>
  <div class="shell">
    <header>
      <div class="brand-wrap">
@@ -681,7 +681,6 @@
      </div>
 
      <div class="header-actions">
-       <a class="ghost-link" href="/Hub/">← Hub</a>
        <button class="button" id="refreshStatus" type="button">
          ↻ Status aktualisieren
        </button>

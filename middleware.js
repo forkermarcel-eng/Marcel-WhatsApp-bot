@@ -3,8 +3,11 @@ export const config = {
    "/Hub/:path*",
    "/Dashboard/:path*",
    "/Tinder/:path*",
+   "/Instagram/:path*",
+   "/X/:path*",
    "/Brain/:path*",
    "/Trading/:path*",
+   "/Kontakte/:path*",
    "/Analyse/:path*",
    "/Einstellungen/:path*"
  ]

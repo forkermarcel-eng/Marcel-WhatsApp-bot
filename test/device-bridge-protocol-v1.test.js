@@ -149,20 +149,14 @@ test("audit helper drops sensitive and unknown fields", () => {
   assert.deepEqual(safeAuditDetails({ device_id: "safe", signature: "must-not-survive", enrollment_code: "must-not-survive", cookie: "must-not-survive" }), { device_id: "safe" });
 });
 
-test("DDL contains all seven idempotent tables, transactional boundaries and constraints", () => {
+test("explicit T1 migration is transactional and never bootstraps foundation tables", () => {
   const ddl = fs.readFileSync(new URL("../device-bridge/database.js", import.meta.url), "utf8");
-  for (const table of [
-    "device_bridge_devices", "device_bridge_keys", "device_bridge_enrollment_codes",
-    "device_bridge_commands", "device_bridge_command_acks", "device_bridge_request_nonces",
-    "device_bridge_audit_events"
-  ]) assert.match(ddl, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
-  assert.match(ddl, /CREATE (?:UNIQUE )?INDEX IF NOT EXISTS/g);
   assert.match(ddl, /await client\.query\("BEGIN"\)/);
   assert.match(ddl, /await client\.query\("COMMIT"\)/);
   assert.match(ddl, /await client\.query\("ROLLBACK"\)/);
-  assert.match(ddl, /enrollment_attempt_id UUID UNIQUE/);
-  assert.match(ddl, /installation_id UUID NOT NULL UNIQUE/);
-  assert.match(ddl, /PRIMARY KEY \(auth_subject, request_id\)/);
+  assert.match(ddl, /preflightDeviceBridgeT1Release/);
+  assert.match(ddl, /applyVerifiedT1SchemaPlan/);
+  assert.doesNotMatch(ddl, /CREATE TABLE|CREATE INDEX|migrateDeviceBridgeAckSchema/);
 });
 
 test("bridge readiness returns controlled 503 before initialization", async () => {

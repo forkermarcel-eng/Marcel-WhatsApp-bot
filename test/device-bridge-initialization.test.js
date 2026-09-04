@@ -18,6 +18,12 @@ const REQUIRED_TABLES = new Set([
   "device_bridge_request_nonces",
   "device_bridge_audit_events"
 ]);
+const FINAL_TINDER_STATES = ["DISCONNECTED", "CONNECTING", "CONNECTED", "AUTH_REQUIRED", "REVIEW_REQUIRED", "UNKNOWN"];
+const FINAL_COMMAND_TYPES = ["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER"];
+
+function checkDefinition(column, values) {
+  return `CHECK (${column} IN (${values.map(value => `'${value}'`).join(", ")}))`;
+}
 
 function loggerRecorder() {
   const entries = [];
@@ -39,15 +45,32 @@ function schemaPool({ t1Constraint = T1_TINDER_STATE_CONSTRAINT_NAME } = {}) {
         return { rows: [{ relation_name: REQUIRED_TABLES.has(params[0]) ? params[0] : null }] };
       }
       if (sql.includes("device_bridge_devices")) {
-        return { rows: [{ conname: t1Constraint, convalidated: true, column_names: ["tinder_state"] }] };
+        return { rows: [{
+          conname: t1Constraint,
+          convalidated: true,
+          condeferrable: false,
+          condeferred: false,
+          constraint_definition: checkDefinition("tinder_state", FINAL_TINDER_STATES),
+          column_names: ["tinder_state"]
+        }] };
       }
       if (sql.includes("device_bridge_commands")) {
-        return { rows: [{ conname: T1_COMMAND_TYPE_CONSTRAINT_NAME, convalidated: true, column_names: ["command_type"] }] };
+        return { rows: [{
+          conname: T1_COMMAND_TYPE_CONSTRAINT_NAME,
+          convalidated: true,
+          condeferrable: false,
+          condeferred: false,
+          constraint_definition: checkDefinition("command_type", FINAL_COMMAND_TYPES),
+          column_names: ["command_type"]
+        }] };
       }
       if (sql.includes("device_bridge_command_acks")) {
         return { rows: [{
           conname: FINAL_ACK_CONSTRAINT_NAME,
           convalidated: true,
+          condeferrable: false,
+          condeferred: false,
+          constraint_definition: "CHECK ((status = 'RECEIVED' AND result IS NULL AND error IS NULL) OR (status = 'SUCCEEDED' AND error IS NULL) OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL) OR (status = 'REJECTED' AND result IS NULL) OR (status = 'EXPIRED' AND result IS NULL AND error IS NULL))",
           column_names: ["error", "result", "status"]
         }] };
       }
@@ -59,7 +82,7 @@ function schemaPool({ t1Constraint = T1_TINDER_STATE_CONSTRAINT_NAME } = {}) {
 }
 
 function hasMutation(calls) {
-  return calls.some(call => /\b(ALTER|CREATE|DROP|UPDATE|LOCK|BEGIN|COMMIT|ROLLBACK)\b/i.test(call.sql));
+  return calls.some(call => /\b(ALTER|CREATE|DELETE|DROP|INSERT|UPDATE|LOCK|BEGIN|COMMIT|ROLLBACK)\b/i.test(call.sql));
 }
 
 test("normal startup runs only the read-only schema verifier before readiness", async () => {

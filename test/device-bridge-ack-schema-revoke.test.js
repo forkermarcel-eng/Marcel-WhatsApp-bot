@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import {
-  ensureDeviceBridgeAckSchema,
+  migrateDeviceBridgeAckSchema,
   FINAL_ACK_CONSTRAINT_NAME
 } from "../device-bridge/ack-schema.js";
 import {
@@ -10,7 +10,7 @@ import {
   T1_TINDER_STATE_CONSTRAINT_NAME
 } from "../device-bridge/t1-schema.js";
 import { createAdminDeviceRevokeHandler } from "../device-bridge/admin.js";
-import { ensureDeviceBridgeTables } from "../device-bridge/database.js";
+import { migrateDeviceBridgeSchema } from "../device-bridge/database.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const NOW = new Date("2026-09-01T12:34:56.000Z");
@@ -19,26 +19,31 @@ const ACK_COLUMNS = ["error", "result", "status"];
 
 function schemaClient({ constraint = FINAL_ACK_CONSTRAINT_NAME, validated = true, incompatible = false } = {}) {
   const calls = [];
+  const state = { constraint, validated };
   return {
     calls,
     async query(sql) {
       calls.push(sql);
-      if (sql.includes("FROM pg_constraint")) return { rows: [{ conname: constraint, convalidated: validated, column_names: ACK_COLUMNS }] };
+      if (sql.includes(`ADD CONSTRAINT ${FINAL_ACK_CONSTRAINT_NAME}`)) {
+        state.constraint = FINAL_ACK_CONSTRAINT_NAME;
+        state.validated = true;
+      }
+      if (sql.includes("FROM pg_constraint")) return { rows: [{ conname: state.constraint, convalidated: state.validated, column_names: ACK_COLUMNS }] };
       if (sql.includes("AS incompatible")) return { rows: [{ incompatible }] };
       return { rows: [] };
     }
   };
 }
 
-test("fresh database DDL creates the named final ACK constraint", () => {
+test("explicit database migration creates the named final ACK constraint", () => {
   const ddl = fs.readFileSync(new URL("../device-bridge/database.js", import.meta.url), "utf8");
   assert.match(ddl, /CONSTRAINT \$\{FINAL_ACK_CONSTRAINT_NAME\}/);
-  assert.match(ddl, /ensureDeviceBridgeAckSchema\(client\)/);
+  assert.match(ddl, /migrateDeviceBridgeAckSchema\(client\)/);
 });
 
 test("existing old schema without ACK rows is migrated by constraint identity, not name", async () => {
   const client = schemaClient({ constraint: OLD_CONSTRAINT, incompatible: false });
-  const result = await ensureDeviceBridgeAckSchema(client);
+  const result = await migrateDeviceBridgeAckSchema(client);
   assert.deepEqual(result, { migrated: true });
   assert.equal(client.calls.some(sql => sql.includes(`DROP CONSTRAINT \"${OLD_CONSTRAINT}\"`)), true);
   assert.equal(client.calls.some(sql => sql.includes(`ADD CONSTRAINT ${FINAL_ACK_CONSTRAINT_NAME}`)), true);
@@ -46,7 +51,7 @@ test("existing old schema without ACK rows is migrated by constraint identity, n
 
 test("existing old schema with compatible ACK rows is migrated", async () => {
   const client = schemaClient({ constraint: "arbitrary_generated_name", incompatible: false });
-  await ensureDeviceBridgeAckSchema(client);
+  await migrateDeviceBridgeAckSchema(client);
   const compatibility = client.calls.findIndex(sql => sql.includes("AS incompatible"));
   const mutation = client.calls.findIndex(sql => sql.includes("ALTER TABLE"));
   assert.ok(compatibility > -1 && mutation > compatibility);
@@ -54,15 +59,15 @@ test("existing old schema with compatible ACK rows is migrated", async () => {
 
 test("already final schema is unchanged and repeated initialization is idempotent", async () => {
   const client = schemaClient();
-  assert.deepEqual(await ensureDeviceBridgeAckSchema(client), { migrated: false });
-  assert.deepEqual(await ensureDeviceBridgeAckSchema(client), { migrated: false });
+  assert.deepEqual(await migrateDeviceBridgeAckSchema(client), { migrated: false });
+  assert.deepEqual(await migrateDeviceBridgeAckSchema(client), { migrated: false });
   assert.equal(client.calls.some(sql => sql.includes("ALTER TABLE")), false);
   assert.equal(client.calls.some(sql => sql.includes("AS incompatible")), false);
 });
 
 test("incompatible existing ACK data refuses every schema mutation", async () => {
   const client = schemaClient({ constraint: OLD_CONSTRAINT, incompatible: true });
-  await assert.rejects(() => ensureDeviceBridgeAckSchema(client), /incompatible with Protocol V1/);
+  await assert.rejects(() => migrateDeviceBridgeAckSchema(client), /incompatible with Protocol V1/);
   assert.equal(client.calls.some(sql => sql.includes("ALTER TABLE")), false);
 });
 
@@ -72,29 +77,31 @@ test("missing, ambiguous or unvalidated ACK constraint fails closed", async () =
     { conname: "another", convalidated: true, column_names: ACK_COLUMNS }
   ]]) {
     const client = { async query(sql) { return sql.includes("FROM pg_constraint") ? { rows } : { rows: [] }; } };
-    await assert.rejects(() => ensureDeviceBridgeAckSchema(client), /compatibility check failed/);
+    await assert.rejects(() => migrateDeviceBridgeAckSchema(client), /compatibility check failed/);
   }
-  await assert.rejects(() => ensureDeviceBridgeAckSchema(schemaClient({ validated: false })), /compatibility check failed/);
+  await assert.rejects(() => migrateDeviceBridgeAckSchema(schemaClient({ validated: false })), /compatibility check failed/);
 });
 
 test("ACK migration runs inside the Device Bridge DDL transaction", async () => {
   const calls = [];
+  let ackConstraint = OLD_CONSTRAINT;
   const client = {
     async query(sql) {
       calls.push(sql);
+      if (sql.includes(`ADD CONSTRAINT ${FINAL_ACK_CONSTRAINT_NAME}`)) ackConstraint = FINAL_ACK_CONSTRAINT_NAME;
       if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_devices")) {
         return { rows: [{ conname: T1_TINDER_STATE_CONSTRAINT_NAME, convalidated: true, column_names: ["tinder_state"] }] };
       }
       if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_commands")) {
         return { rows: [{ conname: T1_COMMAND_TYPE_CONSTRAINT_NAME, convalidated: true, column_names: ["command_type"] }] };
       }
-      if (sql.includes("FROM pg_constraint")) return { rows: [{ conname: OLD_CONSTRAINT, convalidated: true, column_names: ACK_COLUMNS }] };
+      if (sql.includes("FROM pg_constraint")) return { rows: [{ conname: ackConstraint, convalidated: true, column_names: ACK_COLUMNS }] };
       if (sql.includes("AS incompatible")) return { rows: [{ incompatible: false }] };
       return { rows: [] };
     },
     release() {}
   };
-  await ensureDeviceBridgeTables({ async connect() { return client; } });
+  await migrateDeviceBridgeSchema({ async connect() { return client; } });
   const begin = calls.indexOf("BEGIN");
   const lock = calls.indexOf("LOCK TABLE device_bridge_command_acks IN ACCESS EXCLUSIVE MODE");
   const alter = calls.findIndex(sql => sql.includes("ALTER TABLE"));
@@ -120,7 +127,7 @@ test("incompatible ACK data rolls the complete Device Bridge DDL transaction bac
     release() {}
   };
   await assert.rejects(
-    () => ensureDeviceBridgeTables({ async connect() { return client; } }),
+    () => migrateDeviceBridgeSchema({ async connect() { return client; } }),
     /incompatible with Protocol V1/
   );
   assert.equal(calls.includes("ROLLBACK"), true);

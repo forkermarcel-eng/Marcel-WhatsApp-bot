@@ -1,24 +1,38 @@
 import {
-  ensureDeviceBridgeAckSchema,
+  migrateDeviceBridgeAckSchema,
   FINAL_ACK_CHECK_EXPRESSION,
   FINAL_ACK_CONSTRAINT_NAME
 } from "./ack-schema.js";
 import {
-  ensureDeviceBridgeT1Schema,
+  migrateDeviceBridgeT1Schema,
   T1_COMMAND_TYPE_CHECK_EXPRESSION,
   T1_COMMAND_TYPE_CONSTRAINT_NAME,
   T1_TINDER_STATE_CHECK_EXPRESSION,
   T1_TINDER_STATE_CONSTRAINT_NAME
 } from "./t1-schema.js";
+import { REQUIRED_TABLES } from "./schema-readiness.js";
 
 /* ==================================================
-DEVICE BRIDGE T0 — PROTOCOL V1 DATABASE
+DEVICE BRIDGE — EXPLICIT SCHEMA MIGRATION ONLY
 ================================================== */
 
-export async function ensureDeviceBridgeTables(pool) {
+async function inspectDeviceBridgeFoundationState(client) {
+  let present = 0;
+  for (const table of REQUIRED_TABLES) {
+    const result = await client.query("SELECT to_regclass($1) AS relation_name", [table]);
+    if (result.rows[0]?.relation_name) present += 1;
+  }
+  if (present === 0) return "EMPTY";
+  if (present === REQUIRED_TABLES.length) return "READY";
+  throw new Error("Device Bridge schema compatibility check failed.");
+}
+
+export async function migrateDeviceBridgeSchema(pool) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const foundationState = await inspectDeviceBridgeFoundationState(client);
+    if (foundationState === "EMPTY") {
     await client.query(`
       CREATE TABLE IF NOT EXISTS device_bridge_devices (
         device_id UUID PRIMARY KEY,
@@ -143,8 +157,6 @@ export async function ensureDeviceBridgeTables(pool) {
           CHECK (${FINAL_ACK_CHECK_EXPRESSION})
       )
     `);
-    await ensureDeviceBridgeT1Schema(client);
-    await ensureDeviceBridgeAckSchema(client);
     await client.query(`
       CREATE INDEX IF NOT EXISTS device_bridge_command_acks_device_idx
       ON device_bridge_command_acks(device_id, accepted_at DESC)
@@ -186,7 +198,11 @@ export async function ensureDeviceBridgeTables(pool) {
       CREATE INDEX IF NOT EXISTS device_bridge_audit_command_time_idx
       ON device_bridge_audit_events(command_id, created_at DESC)
     `);
+    }
+    const t1Result = await migrateDeviceBridgeT1Schema(client);
+    const ackResult = await migrateDeviceBridgeAckSchema(client);
     await client.query("COMMIT");
+    return { migrated: foundationState === "EMPTY" || t1Result.migrated || ackResult.migrated };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

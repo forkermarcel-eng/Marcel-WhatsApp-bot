@@ -1,4 +1,4 @@
-import { ensureDeviceBridgeTables } from "./database.js";
+import { verifyDeviceBridgeSchema } from "./schema-readiness.js";
 import { markDeviceBridgeReady } from "./readiness.js";
 
 /* ==================================================
@@ -8,18 +8,18 @@ DEVICE BRIDGE T0 — DATABASE INITIALIZATION ISOLATION
 export async function initializeDeviceBridgeDatabase(
   pool,
   {
-    ensureTables = ensureDeviceBridgeTables,
+    verifySchema = verifyDeviceBridgeSchema,
     markReady = markDeviceBridgeReady,
     logger = console
   } = {}
 ) {
   try {
-    await ensureTables(pool);
+    await verifySchema(pool);
     markReady();
-    logger.log("Device Bridge T0 Protocol V1 database foundation ready.");
+    logger.log("Device Bridge Protocol V1 schema readiness verified.");
     return true;
   } catch {
-    logger.error("Device Bridge T0 Protocol V1 database initialization failed.");
+    logger.error("Device Bridge Protocol V1 schema readiness check failed.");
     return false;
   }
 }

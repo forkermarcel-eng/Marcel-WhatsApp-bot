@@ -6,6 +6,7 @@ import {
   protocolErrorBody
 } from "./protocol-v1.js";
 import { deriveDeviceStatus } from "./heartbeat.js";
+import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 ADMIN READ/COMMANDS
@@ -149,6 +150,34 @@ export function createAdminCommandStatusHandler(pool) {
         console.error("Device Bridge admin command-status read failed.");
       }
       return res.status(status).json(protocolErrorBody(error));
+    }
+  };
+}
+
+export function createAdminT1ReadOnlyPreflightHandler(pool, { runPreflight = runDeviceBridgeT1ReadOnlyPreflight } = {}) {
+  return async function adminT1ReadOnlyPreflightHandler(req, res) {
+    res.setHeader?.("Cache-Control", "no-store, max-age=0");
+    if (Object.keys(req.query || {}).length !== 0) {
+      return res.status(400).json({ ok: false, error: { code: "INVALID_REQUEST" } });
+    }
+    try {
+      const preflight = await runPreflight(pool);
+      const status = preflight.preflight_pass
+        ? 200
+        : preflight.reason_code === "PREFLIGHT_UNAVAILABLE" || preflight.reason_code === "PREFLIGHT_GUARD_BLOCKED"
+          ? 503
+          : 409;
+      return res.status(status).json({
+        ok: preflight.preflight_pass,
+        foundation: preflight.foundation,
+        ack: preflight.ack,
+        t1: preflight.t1,
+        preflight_pass: preflight.preflight_pass,
+        reason_code: preflight.reason_code
+      });
+    } catch {
+      console.error("Device Bridge T1 read-only preflight failed.");
+      return res.status(503).json({ ok: false, reason_code: "PREFLIGHT_UNAVAILABLE" });
     }
   };
 }

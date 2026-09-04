@@ -6,6 +6,7 @@ import {
   createAdminDeviceListHandler,
   createAdminDeviceRevokeHandler,
   createAdminDeviceStatusHandler,
+  createAdminAckFoundationDiagnosisHandler,
   createAdminT1ReadOnlyPreflightHandler
 } from "./admin.js";
 
@@ -28,6 +29,7 @@ export function registerDeviceBridgeBlock3Routes({
   const createCommand = createAdminCommandHandler(pool);
   const commandStatus = createAdminCommandStatusHandler(pool);
   const t1ReadOnlyPreflight = createAdminT1ReadOnlyPreflightHandler(pool);
+  const ackFoundationDiagnosis = createAdminAckFoundationDiagnosisHandler(pool);
 
   const admin = handler => async (req, res) => {
     if (!dashboardApiReady(res)) return;
@@ -49,6 +51,7 @@ export function registerDeviceBridgeBlock3Routes({
   app.get("/dashboard-api/device-bridge/devices", admin(listDevices));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/status", admin(deviceStatus));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/commands/:commandId", admin(commandStatus));
+  app.get("/dashboard-api/device-bridge/ack-schema-diagnosis", diagnostic(ackFoundationDiagnosis));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/revoke", admin(revokeDevice));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/commands", admin(createCommand));
   app.get("/dashboard-api/device-bridge/t1-schema-preflight", diagnostic(t1ReadOnlyPreflight));

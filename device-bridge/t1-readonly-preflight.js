@@ -7,14 +7,16 @@ import {
   inspectDeviceBridgeT1Schema,
   preflightDeviceBridgeT1SchemaMigration
 } from "./t1-schema.js";
+import {
+  READ_ONLY_GUARD_CODE,
+  withDeviceBridgeReadOnlyTransaction
+} from "./read-only-transaction.js";
 
 /* ==================================================
 DEVICE BRIDGE T1 — PROTECTED READ-ONLY PREFLIGHT
 ================================================== */
 
 const CONSTRAINT_STATES = new Set(["LEGACY", "FINAL", "INVALID"]);
-const READ_ONLY_GUARD_CODE = "READ_ONLY_QUERY_REJECTED";
-
 function emptyResult() {
   return {
     foundation: { present: null, compatible: null },
@@ -44,16 +46,6 @@ function applyT1Inspection(result, inspection) {
       result.t1.legacy_command_type_constraint = state;
     }
   }
-}
-
-function queryText(statement) {
-  if (typeof statement === "string") return statement;
-  if (statement && typeof statement.text === "string") return statement.text;
-  return "";
-}
-
-function isSelectOnly(statement) {
-  return /^\s*SELECT\b/i.test(queryText(statement));
 }
 
 function reasonCode(stage, error) {
@@ -110,55 +102,34 @@ export async function runDeviceBridgeT1ReadOnlyPreflight(pool, dependencies = {}
   const inspectT1 = dependencies.inspectT1 || inspectDeviceBridgeT1Schema;
   const preflightT1 = dependencies.preflightT1 || preflightDeviceBridgeT1SchemaMigration;
   const result = emptyResult();
-  let client;
-  let rawQuery;
-  let originalQuery;
-  let transactionStarted = false;
   let stage = "connect";
 
   try {
-    client = await pool.connect();
-    rawQuery = client.query.bind(client);
+    return await withDeviceBridgeReadOnlyTransaction(pool, async client => {
+      stage = "foundation-presence";
+      const foundationPresence = await inspectFoundation(client);
+      markFoundationPresence(result, foundationPresence);
 
-    stage = "begin";
-    await rawQuery("BEGIN");
-    transactionStarted = true;
-    stage = "transaction";
-    await rawQuery("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+      stage = "foundation";
+      await preflightFoundation(client);
+      result.foundation.present = true;
+      result.foundation.compatible = true;
 
-    originalQuery = client.query;
-    client.query = (...args) => {
-      if (!isSelectOnly(args[0])) {
-        const error = new Error("Read-only preflight rejected a non-SELECT query.");
-        error.code = READ_ONLY_GUARD_CODE;
-        throw error;
-      }
-      return rawQuery(...args);
-    };
+      stage = "ack";
+      result.ack.present = true;
+      await preflightAck(client);
+      result.ack.compatible = true;
 
-    stage = "foundation-presence";
-    const foundationPresence = await inspectFoundation(client);
-    markFoundationPresence(result, foundationPresence);
+      stage = "t1-inspection";
+      applyT1Inspection(result, await inspectT1(client));
 
-    stage = "foundation";
-    await preflightFoundation(client);
-    result.foundation.present = true;
-    result.foundation.compatible = true;
-
-    stage = "ack";
-    result.ack.present = true;
-    await preflightAck(client);
-    result.ack.compatible = true;
-
-    stage = "t1-inspection";
-    applyT1Inspection(result, await inspectT1(client));
-
-    stage = "t1";
-    await preflightT1(client);
-    result.t1.incompatible_rows = false;
-    result.t1.preflight_pass = true;
-    result.preflight_pass = true;
-    return result;
+      stage = "t1";
+      await preflightT1(client);
+      result.t1.incompatible_rows = false;
+      result.t1.preflight_pass = true;
+      result.preflight_pass = true;
+      return result;
+    });
   } catch (error) {
     result.preflight_pass = false;
     result.t1.preflight_pass = false;
@@ -174,10 +145,6 @@ export async function runDeviceBridgeT1ReadOnlyPreflight(pool, dependencies = {}
       result.t1.incompatible_rows = true;
     }
     return result;
-  } finally {
-    if (client && originalQuery) client.query = originalQuery;
-    if (transactionStarted) await rawQuery("ROLLBACK").catch(() => {});
-    client?.release();
   }
 }
 

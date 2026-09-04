@@ -7,6 +7,7 @@ import {
 } from "./protocol-v1.js";
 import { deriveDeviceStatus } from "./heartbeat.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
+import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 ADMIN READ/COMMANDS
@@ -178,6 +179,141 @@ export function createAdminT1ReadOnlyPreflightHandler(pool, { runPreflight = run
     } catch {
       console.error("Device Bridge T1 read-only preflight failed.");
       return res.status(503).json({ ok: false, reason_code: "PREFLIGHT_UNAVAILABLE" });
+    }
+  };
+}
+
+function hasDiagnosticInput(req) {
+  const queryHasInput = req.query !== undefined && req.query !== null && (
+    typeof req.query !== "object" || Array.isArray(req.query) || Object.keys(req.query).length !== 0
+  );
+  const bodyHasInput = req.body !== undefined && req.body !== null && (
+    typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).length !== 0
+  );
+  return queryHasInput || bodyHasInput;
+}
+
+function boundedAckDiagnosis(diagnosis) {
+  return {
+    table: {
+      exists: diagnosis.table?.exists === true,
+      object_type: diagnosis.table?.object_type || "MISSING"
+    },
+    columns: {
+      columns: Array.isArray(diagnosis.columns?.columns) ? diagnosis.columns.columns.map(column => ({
+        name: column.name,
+        expected_data_type: column.expected_data_type || null,
+        expected_not_null: typeof column.expected_not_null === "boolean" ? column.expected_not_null : null,
+        expected_default: column.expected_default || "NONE",
+        present: column.present === true,
+        data_type: column.data_type || null,
+        not_null: typeof column.not_null === "boolean" ? column.not_null : null,
+        default_status: column.default_status || "NOT_CHECKED",
+        status: column.status || "NOT_CHECKED"
+      })) : [],
+      unexpected_column_count: Number.isSafeInteger(diagnosis.columns?.unexpected_column_count)
+        ? diagnosis.columns.unexpected_column_count : 0
+    },
+    relationships: {
+      relationships: Array.isArray(diagnosis.relationships?.relationships) ? diagnosis.relationships.relationships.map(item => ({
+        rule: item.rule,
+        columns: Array.isArray(item.columns) ? item.columns : [],
+        reference_table: item.reference_table || null,
+        reference_columns: Array.isArray(item.reference_columns) ? item.reference_columns : null,
+        delete_action: item.delete_action || null,
+        update_action: item.update_action || null,
+        status: item.status || "NOT_CHECKED",
+        actual: item.actual && typeof item.actual === "object" ? {
+          constraint_type: item.actual.constraint_type || null,
+          columns: Array.isArray(item.actual.columns) ? item.actual.columns : [],
+          reference_table: item.actual.reference_table || null,
+          reference_columns: Array.isArray(item.actual.reference_columns) ? item.actual.reference_columns : [],
+          delete_action: item.actual.delete_action || null,
+          update_action: item.actual.update_action || null,
+          match_type: item.actual.match_type || null,
+          validation: item.actual.validation || "NOT_CHECKED"
+        } : null
+      })) : [],
+      unexpected_constraint_count: Number.isSafeInteger(diagnosis.relationships?.unexpected_constraint_count)
+        ? diagnosis.relationships.unexpected_constraint_count : 0
+    },
+    indexes: {
+      required: Array.isArray(diagnosis.indexes?.required) ? diagnosis.indexes.required.map(index => ({
+        name: index.name,
+        unique: index.unique === true,
+        keys: Array.isArray(index.keys) ? index.keys : [],
+        order_options: Array.isArray(index.order_options) ? index.order_options : [],
+        predicate_required: index.predicate_required || "NO",
+        status: index.status || "NOT_CHECKED",
+        actual: index.actual && typeof index.actual === "object" ? {
+          unique: index.actual.unique === true,
+          valid: index.actual.valid === true,
+          ready: index.actual.ready === true,
+          access_method: index.actual.access_method || null,
+          key_status: index.actual.key_status || "NOT_CHECKED",
+          order_status: index.actual.order_status || "NOT_CHECKED",
+          predicate_status: index.actual.predicate_status || "NOT_CHECKED"
+        } : null
+      })) : [],
+      unexpected_noncontractual_index_count: Number.isSafeInteger(diagnosis.indexes?.unexpected_noncontractual_index_count)
+        ? diagnosis.indexes.unexpected_noncontractual_index_count : 0,
+      unexpected_noncontractual_index_status: diagnosis.indexes?.unexpected_noncontractual_index_status || "NOT_CHECKED"
+    },
+    checks: {
+      checks: Array.isArray(diagnosis.checks?.checks) ? diagnosis.checks.checks.map(check => ({
+        rule: check.rule,
+        expected_name: check.expected_name || null,
+        status: check.status || "NOT_CHECKED",
+        actual_rule: check.actual_rule || "NOT_CHECKED",
+        validation: check.validation || "NOT_CHECKED"
+      })) : [],
+      observed: Array.isArray(diagnosis.checks?.observed) ? diagnosis.checks.observed.slice(0, 8).map(check => ({
+        columns: Array.isArray(check.columns) ? check.columns : [],
+        semantic_rule: check.semantic_rule || "NONCANONICAL",
+        payload_name_status: check.payload_name_status || "NOT_CHECKED",
+        validation: check.validation || "NOT_CHECKED"
+      })) : [],
+      observed_truncated: diagnosis.checks?.observed_truncated === true,
+      actual_check_count: Number.isSafeInteger(diagnosis.checks?.actual_check_count)
+        ? diagnosis.checks.actual_check_count : 0,
+      unexpected_check_count: Number.isSafeInteger(diagnosis.checks?.unexpected_check_count)
+        ? diagnosis.checks.unexpected_check_count : 0
+    },
+    row_compatibility: {
+      status: diagnosis.row_compatibility?.status || "NOT_CHECKED",
+      incompatible_count: Number.isSafeInteger(diagnosis.row_compatibility?.incompatible_count)
+        ? diagnosis.row_compatibility.incompatible_count : null
+    },
+    classification: diagnosis.classification || "NOT_CHECKED",
+    contract_compatible: diagnosis.contract_compatible === true,
+    comparator: {
+      normalizes_equivalent_pg_definitions: diagnosis.comparator?.normalizes_equivalent_pg_definitions === true,
+      false_positive_status: diagnosis.comparator?.false_positive_status === "UNRESOLVED_REQUIRES_SEMANTIC_REVIEW"
+        ? "UNRESOLVED_REQUIRES_SEMANTIC_REVIEW" : "NOT_IDENTIFIED",
+      assessment: diagnosis.comparator?.assessment || "NOT_CHECKED"
+    }
+  };
+}
+
+export function createAdminAckFoundationDiagnosisHandler(pool, { runDiagnosis = runDeviceBridgeAckReadOnlyDiagnosis } = {}) {
+  return async function adminAckFoundationDiagnosisHandler(req, res) {
+    res.setHeader?.("Cache-Control", "no-store, max-age=0");
+    if (hasDiagnosticInput(req)) {
+      return res.status(400).json({ ok: false, error: { code: "INVALID_REQUEST" } });
+    }
+    try {
+      const result = await runDiagnosis(pool);
+      if (!result?.ok) {
+        return res.status(503).json({ ok: false, reason_code: "DIAGNOSIS_UNAVAILABLE" });
+      }
+      return res.status(200).json({
+        ok: true,
+        diagnosis: boundedAckDiagnosis(result.diagnosis),
+        reason_code: result.reason_code === "ACK_DIAGNOSIS_COMPLETE" ? result.reason_code : "ACK_DIAGNOSIS_COMPLETE"
+      });
+    } catch {
+      console.error("Device Bridge ACK read-only diagnosis failed.");
+      return res.status(503).json({ ok: false, reason_code: "DIAGNOSIS_UNAVAILABLE" });
     }
   };
 }

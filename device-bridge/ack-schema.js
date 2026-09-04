@@ -4,6 +4,7 @@ DEVICE BRIDGE T0 — ACK SCHEMA COMPATIBILITY
 
 import { canonicalCheckDefinition } from "./schema-contract.js";
 
+export const ACK_FOUNDATION_TABLE = "device_bridge_command_acks";
 export const FINAL_ACK_CONSTRAINT_NAME = "device_bridge_command_acks_payload_check_v1";
 
 export const FINAL_ACK_CHECK_EXPRESSION = `
@@ -16,30 +17,35 @@ export const FINAL_ACK_CHECK_EXPRESSION = `
 
 const ACK_STATUS_VALUES = Object.freeze(["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"]);
 const ACK_CONSTRAINT_COLUMNS = ["error", "result", "status"];
-const ACK_REQUIRED_CHECKS = Object.freeze([
+export const ACK_REQUIRED_CHECKS = Object.freeze([
   Object.freeze({
+    id: "ACK_STATUS_VALUES",
     columns: ["status"],
     expression: `status IN (${ACK_STATUS_VALUES.map(value => `'${value}'`).join(", ")})`
   }),
   Object.freeze({
+    id: "ACK_RESULT_OBJECT",
     columns: ["result"],
     expression: "result IS NULL OR jsonb_typeof(result) = 'object'"
   }),
   Object.freeze({
+    id: "ACK_ERROR_OBJECT",
     columns: ["error"],
     expression: "error IS NULL OR jsonb_typeof(error) = 'object'"
   }),
   Object.freeze({
+    id: "ACK_BODY_SHA256",
     columns: ["body_sha256"],
     expression: "body_sha256 ~ '^[0-9a-f]{64}$'"
   }),
   Object.freeze({
+    id: "ACK_PAYLOAD_V1",
     name: FINAL_ACK_CONSTRAINT_NAME,
     columns: ACK_CONSTRAINT_COLUMNS,
     expression: FINAL_ACK_CHECK_EXPRESSION
   })
 ]);
-const ACK_REQUIRED_COLUMN_TYPES = Object.freeze({ status: "text", result: "jsonb", error: "jsonb" });
+export const ACK_REQUIRED_COLUMN_TYPES = Object.freeze({ status: "text", result: "jsonb", error: "jsonb" });
 
 function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
@@ -62,7 +68,11 @@ function hasExpectedDefinition(row, specification) {
   }
 }
 
-async function readAckConstraints(client) {
+export function hasExpectedAckCheckDefinition(row, specification) {
+  return hasExpectedDefinition(row, specification);
+}
+
+export async function readDeviceBridgeAckCheckConstraints(client) {
   return client.query(`
     SELECT c.conname, c.convalidated, c.condeferrable, c.condeferred,
       pg_get_constraintdef(c.oid, true) AS constraint_definition,
@@ -74,7 +84,7 @@ async function readAckConstraints(client) {
         ORDER BY a.attname
       ) AS column_names
     FROM pg_constraint c
-    WHERE c.conrelid = 'device_bridge_command_acks'::regclass
+    WHERE c.conrelid = '${ACK_FOUNDATION_TABLE}'::regclass
       AND c.contype = 'c'
   `);
 }
@@ -86,7 +96,7 @@ function findPayloadConstraint(rows) {
 
 /** Read-only inspection for runtime readiness. */
 export async function inspectDeviceBridgeAckSchema(client) {
-  const constraints = await readAckConstraints(client);
+  const constraints = await readDeviceBridgeAckCheckConstraints(client);
   const payload = findPayloadConstraint(constraints.rows);
   const payloadSpecification = ACK_REQUIRED_CHECKS.at(-1);
   const ready = Boolean(payload && hasExpectedDefinition(payload, payloadSpecification));
@@ -116,7 +126,7 @@ async function inspectAckColumnTypes(client) {
  * never repairs it and scans current rows before the first T1 DDL.
  */
 export async function preflightDeviceBridgeAckSchemaForT1(client) {
-  const constraints = await readAckConstraints(client);
+  const constraints = await readDeviceBridgeAckCheckConstraints(client);
   const validChecks = constraints.rows.length === ACK_REQUIRED_CHECKS.length
     && ACK_REQUIRED_CHECKS.every(specification =>
       constraints.rows.filter(row => hasExpectedDefinition(row, specification)).length === 1
@@ -141,7 +151,7 @@ export async function preflightDeviceBridgeAckSchemaForT1(client) {
 /** Separate ACK migration helper; the T1 runner never imports or calls it. */
 export async function preflightDeviceBridgeAckSchemaMigration(client) {
   await client.query("LOCK TABLE device_bridge_command_acks IN ACCESS EXCLUSIVE MODE");
-  const constraints = await readAckConstraints(client);
+  const constraints = await readDeviceBridgeAckCheckConstraints(client);
   const current = findPayloadConstraint(constraints.rows);
   if (!current || current.convalidated !== true) {
     throw new Error("Device Bridge ACK schema compatibility check failed.");

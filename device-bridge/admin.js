@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import {
-  DEVICE_BRIDGE_PROTOCOL,
   DeviceBridgeProtocolError,
+  isTinderManualGateCapable,
   isUuidV4,
   protocolErrorBody
 } from "./protocol-v1.js";
@@ -14,8 +14,13 @@ DEVICE BRIDGE T0 — PROTOCOL V1 ADMIN READ/COMMANDS
 const COMMAND_EXPIRY_MS = Object.freeze({
   PING: 5 * 60 * 1000,
   REQUEST_STATUS: 5 * 60 * 1000,
-  STOP_BRIDGE: 10 * 60 * 1000
+  STOP_BRIDGE: 10 * 60 * 1000,
+  CONNECT_TINDER: 5 * 60 * 1000,
+  DISCONNECT_TINDER: 5 * 60 * 1000
 });
+
+const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
+const CONNECTABLE_TINDER_STATES = new Set(["DISCONNECTED", "CONNECTED"]);
 
 function statusRow(row, now) {
   return {
@@ -30,13 +35,14 @@ function statusRow(row, now) {
     bridge_service_state: row.bridge_service_state,
     tinder_state: row.tinder_state,
     automation_state: row.automation_state,
+    tinder_manual_gate_capable: isTinderManualGateCapable(row.capabilities),
     configuration_revision: row.configuration_revision
   };
 }
 
 const STATUS_COLUMNS = `device_id, display_name, enrollment_state, created_at, last_accepted_heartbeat_at,
   app_version_name, app_version_code, bridge_service_state, tinder_state,
-  automation_state, configuration_revision`;
+  automation_state, capabilities, configuration_revision`;
 
 export function createAdminDeviceListHandler(pool) {
   return async function adminDeviceListHandler(req, res) {
@@ -157,6 +163,22 @@ export function canonicalCommand(type) {
   };
 }
 
+function assertTinderManualGateCommandDeviceGates(type, row, now) {
+  if (!TINDER_MANUAL_GATE_COMMANDS.has(type)) return;
+  if (!isTinderManualGateCapable(row.capabilities)) {
+    throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual gate");
+  }
+  if (deriveDeviceStatus(row.last_accepted_heartbeat_at, now) !== "ONLINE") {
+    throw new DeviceBridgeProtocolError(409, "DEVICE_OFFLINE", "Device must be online for this command");
+  }
+  if (row.bridge_service_state !== "RUNNING") {
+    throw new DeviceBridgeProtocolError(409, "BRIDGE_NOT_RUNNING", "Bridge must be running for this command");
+  }
+  if (type === "CONNECT_TINDER" && !CONNECTABLE_TINDER_STATES.has(row.tinder_state)) {
+    throw new DeviceBridgeProtocolError(409, "TINDER_STATE_UNSAFE", "Tinder state is not safe for connect");
+  }
+}
+
 export function createAdminCommandHandler(pool) {
   return async function adminCommandHandler(req, res) {
     let client;
@@ -172,13 +194,15 @@ export function createAdminCommandHandler(pool) {
       client = await pool.connect();
       await client.query("BEGIN");
       const device = await client.query(
-        `SELECT device_id, enrollment_state, revoked_at, configuration_revision
+        `SELECT device_id, enrollment_state, revoked_at, configuration_revision,
+                last_accepted_heartbeat_at, bridge_service_state, tinder_state, capabilities
          FROM device_bridge_devices WHERE device_id=$1 FOR UPDATE`,
         [req.params.deviceId]
       );
       const row = device.rows[0];
       if (!row) throw new DeviceBridgeProtocolError(404, "DEVICE_NOT_FOUND", "Device was not found");
       if (row.enrollment_state !== "ACTIVE" || row.revoked_at) throw new DeviceBridgeProtocolError(403, "DEVICE_REVOKED", "Device is not active");
+      assertTinderManualGateCommandDeviceGates(req.body.type, row, issuedAt);
       await client.query(
         `INSERT INTO device_bridge_commands
           (command_id, device_id, protocol_version, command_type, payload,

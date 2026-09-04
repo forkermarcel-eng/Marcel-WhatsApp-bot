@@ -1,5 +1,10 @@
 import {
+  BRIDGE_SERVICE_STATES,
+  DEVICE_BRIDGE_COMMANDS,
   DeviceBridgeProtocolError,
+  T1_TINDER_MANUAL_GATE_COMMANDS,
+  isKnownTinderStateForCapabilities,
+  isTinderManualGateCapable,
   isExactUtcTimestamp,
   isUuidV4,
   protocolErrorBody,
@@ -16,8 +21,9 @@ DEVICE BRIDGE T0 — PROTOCOL V1 COMMAND ACK
 
 const ACK_STATUSES = new Set(["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"]);
 const TERMINAL_STATUSES = new Set(["SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"]);
-const T0_COMMANDS = new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE"]);
-const BRIDGE_STATES = new Set(["STOPPED", "STARTING", "RUNNING", "STOPPING", "ERROR"]);
+const SUPPORTED_COMMANDS = new Set(DEVICE_BRIDGE_COMMANDS);
+const TINDER_MANUAL_GATE_COMMANDS = new Set(T1_TINDER_MANUAL_GATE_COMMANDS);
+const BRIDGE_STATES = new Set(BRIDGE_SERVICE_STATES);
 const MAX_RESULT_BYTES = 1024;
 const MAX_ERROR_BYTES = 1024;
 const T0_ERROR_MESSAGES = Object.freeze({
@@ -45,15 +51,21 @@ function jsonBytes(value) {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
-function validateSucceededResult(commandType, result) {
-  if (result === null) return;
+function validateSucceededResult(commandType, result, capabilities = null) {
+  if (result === null) {
+    if (!TINDER_MANUAL_GATE_COMMANDS.has(commandType)) return;
+    throw invalidAck("Ack result is required for this Tinder manual gate command");
+  }
   if (jsonBytes(result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
   if (commandType === "PING" && exactKeys(result, ["pong"]) && result.pong === true) return;
   if (commandType === "STOP_BRIDGE" && exactKeys(result, ["stopped", "reason"]) && result.stopped === true && result.reason === "ADMIN_REQUEST") return;
   if (commandType === "REQUEST_STATUS" && exactKeys(result, ["device_status"]) &&
       exactKeys(result.device_status, ["bridge_service_state", "tinder_state", "automation_state"]) &&
       BRIDGE_STATES.has(result.device_status.bridge_service_state) &&
-      result.device_status.tinder_state === "UNKNOWN" && result.device_status.automation_state === "STOPPED") return;
+      isKnownTinderStateForCapabilities(result.device_status.tinder_state, capabilities) &&
+      result.device_status.automation_state === "STOPPED") return;
+  if (commandType === "CONNECT_TINDER" && exactKeys(result, ["tinder_state"]) && result.tinder_state === "CONNECTED") return;
+  if (commandType === "DISCONNECT_TINDER" && exactKeys(result, ["tinder_state"]) && result.tinder_state === "DISCONNECTED") return;
   throw invalidAck("Ack result is not allowed for this T0 command");
 }
 
@@ -66,7 +78,7 @@ function validateTechnicalError(error) {
   }
 }
 
-export function parseAndValidateCommandAck(req, commandType = null) {
+export function parseAndValidateCommandAck(req, commandType = null, capabilities = null) {
   let body;
   try {
     body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(req.body));
@@ -83,7 +95,7 @@ export function parseAndValidateCommandAck(req, commandType = null) {
     if (body.result !== null || body.error !== null) throw invalidAck(`${body.status} requires null result and error`);
   } else if (body.status === "SUCCEEDED") {
     if (body.error !== null) throw invalidAck("SUCCEEDED requires null error");
-    if (commandType) validateSucceededResult(commandType, body.result);
+    if (commandType) validateSucceededResult(commandType, body.result, capabilities);
     else if (body.result !== null && jsonBytes(body.result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
   } else if (body.status === "FAILED") {
     if (body.result !== null) throw invalidAck("FAILED requires null result");
@@ -127,7 +139,8 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     await client.query("BEGIN");
     const identity = await client.query(
       `SELECT d.device_id, d.enrollment_state, d.revoked_at,
-              d.configuration_revision, k.key_id, k.revoked_at AS key_revoked_at
+              d.configuration_revision, d.capabilities,
+              k.key_id, k.revoked_at AS key_revoked_at
        FROM device_bridge_devices d
        JOIN device_bridge_keys k ON k.device_id=d.device_id AND k.key_id=$2
        WHERE d.device_id=$1 FOR UPDATE OF d, k`,
@@ -148,10 +161,13 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     const command = commandResult.rows[0];
     if (!command) throw new DeviceBridgeProtocolError(404, "COMMAND_NOT_FOUND", "Command was not found");
     if (command.device_id !== auth.deviceId) throw new DeviceBridgeProtocolError(409, "COMMAND_DEVICE_MISMATCH", "Command does not belong to this device");
-    if (!T0_COMMANDS.has(command.command_type)) throw new DeviceBridgeProtocolError(400, "COMMAND_TYPE_UNSUPPORTED", "Command type is not supported");
+    if (!SUPPORTED_COMMANDS.has(command.command_type)) throw new DeviceBridgeProtocolError(400, "COMMAND_TYPE_UNSUPPORTED", "Command type is not supported");
+    if (TINDER_MANUAL_GATE_COMMANDS.has(command.command_type) && !isTinderManualGateCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual gate");
+    }
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
 
-    validateSucceededResultForCommand(ack, command.command_type);
+    validateSucceededResultForCommand(ack, command.command_type, device.capabilities);
     const semanticHash = commandAckSemanticHash(ack);
     const history = await client.query(
       `SELECT status, occurred_at, result, error, body_sha256, accepted_at
@@ -202,8 +218,8 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
   }
 }
 
-function validateSucceededResultForCommand(ack, commandType) {
-  if (ack.status === "SUCCEEDED") validateSucceededResult(commandType, ack.result);
+function validateSucceededResultForCommand(ack, commandType, capabilities) {
+  if (ack.status === "SUCCEEDED") validateSucceededResult(commandType, ack.result, capabilities);
 }
 
 export function createCommandAckHandler(pool) {

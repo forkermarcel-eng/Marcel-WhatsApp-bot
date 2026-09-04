@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
-import { canonicalRequest, sha256Hex } from "../device-bridge/protocol-v1.js";
+import {
+  T0_DEVICE_CAPABILITIES,
+  T1_DEVICE_CAPABILITIES,
+  canonicalRequest,
+  sha256Hex
+} from "../device-bridge/protocol-v1.js";
 import {
   createHeartbeatHandler,
   deriveDeviceStatus,
@@ -22,10 +27,7 @@ const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
 const REQUEST_ID = "d2675347-0888-4548-9feb-ae4d71a972cf";
 const INSTALLATION_ID = "c7cb0b92-ad3c-4ec6-88dc-d149ef536c3d";
-const CAPABILITIES = [
-  "COMMAND_ACK_V1", "COMMAND_PING_V1", "COMMAND_REQUEST_STATUS_V1",
-  "COMMAND_STOP_BRIDGE_V1", "DEVICE_HEARTBEAT_V1"
-];
+const CAPABILITIES = T0_DEVICE_CAPABILITIES;
 
 function heartbeatPayload(overrides = {}) {
   return {
@@ -108,7 +110,14 @@ function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt =
         state.updates += 1; return { rowCount: 1, rows: [] };
       }
       if (sql.includes("INSERT INTO device_bridge_audit_events")) { state.audits += 1; return { rowCount: 1, rows: [] }; }
-      if (sql.includes("FROM device_bridge_commands")) return { rows: commands };
+      if (sql.includes("FROM device_bridge_commands")) {
+        const deliversT1 = sql.includes("CONNECT_TINDER") && sql.includes("DISCONNECT_TINDER");
+        return {
+          rows: commands.filter(command =>
+            deliversT1 || !["CONNECT_TINDER", "DISCONNECT_TINDER"].includes(command.command_type)
+          )
+        };
+      }
       return { rows: [] };
     },
     release() { state.released = true; }
@@ -135,13 +144,31 @@ test("valid signed heartbeat reaches handler and returns Protocol V1 response", 
   assert.equal(fake.state.commits, 1);
 });
 
-test("heartbeat validation enforces T0 states and sorted capabilities", () => {
+test("heartbeat validation preserves T0 and accepts only the exact T1 state profile", () => {
   assert.doesNotThrow(() => parseAndValidateHeartbeat(heartbeatRequest().req));
+  for (const tinderState of ["DISCONNECTED", "CONNECTING", "CONNECTED", "AUTH_REQUIRED", "REVIEW_REQUIRED", "UNKNOWN"]) {
+    assert.doesNotThrow(() => parseAndValidateHeartbeat(heartbeatRequest(heartbeatPayload({
+      capabilities: T1_DEVICE_CAPABILITIES,
+      tinder_state: tinderState
+    })).req));
+  }
   for (const payload of [
     heartbeatPayload({ tinder_state: "CONNECTED" }),
+    heartbeatPayload({ capabilities: T1_DEVICE_CAPABILITIES, tinder_state: "NOT_A_STATE" }),
     heartbeatPayload({ automation_state: "RUNNING" }),
-    heartbeatPayload({ capabilities: [...CAPABILITIES].reverse() })
+    heartbeatPayload({ capabilities: [...CAPABILITIES].reverse() }),
+    heartbeatPayload({ capabilities: [...T1_DEVICE_CAPABILITIES, "TINDER_VISIBLE_CHAT_READ_V1"] })
   ]) assert.throws(() => parseAndValidateHeartbeat(heartbeatRequest(payload).req), error => error.code === "INVALID_DEVICE_STATE");
+});
+
+test("T1 heartbeat persists the local Tinder state without deriving it from online state", async () => {
+  const payload = heartbeatPayload({ capabilities: T1_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const request = heartbeatRequest(payload);
+  const fake = heartbeatPool({ request });
+  await processHeartbeatTransaction(fake.pool, { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash }, payload, NOW);
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  assert.equal(update.params[9], "CONNECTED");
+  assert.equal(update.params[10], 1);
 });
 
 test("heartbeat sequence 1 and higher sequence update exactly once", async () => {
@@ -228,12 +255,31 @@ test("command delivery is device-scoped, ordered, bounded and non-terminalizing"
   assert.equal(fake.calls.some(call => /UPDATE device_bridge_commands/.test(call.sql)), false);
 });
 
-function statusRow(lastAccepted = null) {
+test("T1 command delivery is capability-gated against the current heartbeat profile", async () => {
+  const command = commandRow("CONNECT_TINDER", new Date(NOW.valueOf() - 1000), "33333333-3333-4333-8333-333333333333");
+  const t0Request = heartbeatRequest();
+  const t0 = heartbeatPool({ request: t0Request, commands: [command] });
+  const t0Response = await processHeartbeatTransaction(t0.pool, { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t0Request.hash }, heartbeatPayload(), NOW);
+  const t0Query = t0.calls.find(call => call.sql.includes("FROM device_bridge_commands"));
+  assert.doesNotMatch(t0Query.sql, /CONNECT_TINDER/);
+  assert.deepEqual(t0Response.commands, []);
+
+  const t1Payload = heartbeatPayload({ capabilities: T1_DEVICE_CAPABILITIES, tinder_state: "DISCONNECTED" });
+  const t1Request = heartbeatRequest(t1Payload);
+  const t1 = heartbeatPool({ request: t1Request, commands: [command] });
+  const response = await processHeartbeatTransaction(t1.pool, { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t1Request.hash }, t1Payload, NOW);
+  const t1Query = t1.calls.find(call => call.sql.includes("FROM device_bridge_commands"));
+  assert.match(t1Query.sql, /CONNECT_TINDER/);
+  assert.equal(response.commands[0].type, "CONNECT_TINDER");
+  assert.deepEqual(response.commands[0].payload, {});
+});
+
+function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN") {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
     last_accepted_heartbeat_at: lastAccepted, app_version_name: "1.0", app_version_code: "1",
-    bridge_service_state: "RUNNING", tinder_state: "UNKNOWN", automation_state: "STOPPED",
+    bridge_service_state: "RUNNING", tinder_state: tinderState, automation_state: "STOPPED", capabilities,
     configuration_revision: 1
   };
 }
@@ -248,11 +294,27 @@ test("admin list and status expose separated states without sensitive key data",
   await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, statusRes);
   assert.equal(statusRes.body.device.tinder_state, "UNKNOWN");
   assert.equal(statusRes.body.device.automation_state, "STOPPED");
+  assert.equal(statusRes.body.device.tinder_manual_gate_capable, false);
   const serialized = JSON.stringify(statusRes.body);
   for (const field of ["public_key", "signature", "enrollment_code", "key_id"]) assert.equal(serialized.includes(field), false);
 });
 
-function commandPool({ active = true, failAudit = false } = {}) {
+test("admin status exposes only the derived T1 capability flag", async () => {
+  const pool = { async query() { return { rows: [statusRow(NOW, T1_DEVICE_CAPABILITIES, "CONNECTED")] }; } };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.equal(res.body.device.tinder_manual_gate_capable, true);
+  assert.equal(JSON.stringify(res.body).includes("TINDER_MANUAL_GATE_V1"), false);
+});
+
+function commandPool({
+  active = true,
+  failAudit = false,
+  capabilities = CAPABILITIES,
+  lastAcceptedHeartbeatAt = new Date(),
+  bridgeServiceState = "RUNNING",
+  tinderState = "DISCONNECTED"
+} = {}) {
   const calls = [];
   const state = { commit: false, rollback: false };
   const client = {
@@ -261,7 +323,16 @@ function commandPool({ active = true, failAudit = false } = {}) {
       if (sql === "BEGIN") return { rows: [] };
       if (sql === "COMMIT") { state.commit = true; return { rows: [] }; }
       if (sql === "ROLLBACK") { state.rollback = true; return { rows: [] }; }
-      if (sql.includes("FOR UPDATE")) return { rows: [{ device_id: DEVICE_ID, enrollment_state: active ? "ACTIVE" : "REVOKED", revoked_at: active ? null : NOW, configuration_revision: 1 }] };
+      if (sql.includes("FOR UPDATE")) return { rows: [{
+        device_id: DEVICE_ID,
+        enrollment_state: active ? "ACTIVE" : "REVOKED",
+        revoked_at: active ? null : NOW,
+        configuration_revision: 1,
+        capabilities,
+        last_accepted_heartbeat_at: lastAcceptedHeartbeatAt,
+        bridge_service_state: bridgeServiceState,
+        tinder_state: tinderState
+      }] };
       if (sql.includes("COMMAND_CREATED") && failAudit) throw new Error("simulated audit failure");
       return { rowCount: 1, rows: [] };
     },
@@ -281,6 +352,41 @@ test("admin creates canonical PING, REQUEST_STATUS and STOP_BRIDGE commands", as
     assert.equal(new Date(res.body.command.expires_at) - new Date(res.body.command.issued_at), COMMAND_EXPIRY_MS[type]);
     assert.equal(fake.state.commit, true);
   }
+});
+
+test("admin creates only canonical T1 manual-gate commands for a compatible running device", async () => {
+  for (const type of ["CONNECT_TINDER", "DISCONNECT_TINDER"]) {
+    const fake = commandPool({ capabilities: T1_DEVICE_CAPABILITIES, tinderState: "DISCONNECTED" });
+    const res = responseRecorder();
+    await createAdminCommandHandler(fake.pool)({ params: { deviceId: DEVICE_ID }, body: { type } }, res);
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.body.command.type, type);
+    assert.deepEqual(res.body.command.payload, {});
+    assert.equal(new Date(res.body.command.expires_at) - new Date(res.body.command.issued_at), COMMAND_EXPIRY_MS[type]);
+    assert.equal(fake.state.commit, true);
+  }
+});
+
+test("admin fails T1 commands closed for capability, online, bridge and unsafe-connect gates", async () => {
+  const cases = [
+    [{ capabilities: CAPABILITIES }, "DEVICE_CAPABILITY_UNSUPPORTED"],
+    [{ capabilities: T1_DEVICE_CAPABILITIES, lastAcceptedHeartbeatAt: new Date(Date.now() - 91_000) }, "DEVICE_OFFLINE"],
+    [{ capabilities: T1_DEVICE_CAPABILITIES, bridgeServiceState: "STOPPED" }, "BRIDGE_NOT_RUNNING"],
+    [{ capabilities: T1_DEVICE_CAPABILITIES, tinderState: "UNKNOWN" }, "TINDER_STATE_UNSAFE"]
+  ];
+  for (const [options, code] of cases) {
+    const fake = commandPool(options);
+    const res = responseRecorder();
+    await createAdminCommandHandler(fake.pool)({ params: { deviceId: DEVICE_ID }, body: { type: "CONNECT_TINDER" } }, res);
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.body.error.code, code);
+    assert.equal(fake.calls.some(call => call.sql.includes("INSERT INTO device_bridge_commands")), false);
+  }
+
+  const disconnect = commandPool({ capabilities: T1_DEVICE_CAPABILITIES, tinderState: "REVIEW_REQUIRED" });
+  const res = responseRecorder();
+  await createAdminCommandHandler(disconnect.pool)({ params: { deviceId: DEVICE_ID }, body: { type: "DISCONNECT_TINDER" } }, res);
+  assert.equal(res.statusCode, 201);
 });
 
 test("admin cannot inject type, payload or expires_at", async () => {

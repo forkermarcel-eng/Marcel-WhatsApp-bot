@@ -4,6 +4,8 @@ import fs from "node:fs";
 import test from "node:test";
 import {
   DeviceBridgeProtocolError,
+  T0_DEVICE_CAPABILITIES,
+  T1_DEVICE_CAPABILITIES,
   canonicalRequest,
   enrollmentCodeDigest,
   sha256Hex
@@ -30,13 +32,7 @@ const ATTEMPT_ID = "7b415e56-ff2d-4ee7-ae39-19962c53de5b";
 const REQUEST_ID = "d2675347-0888-4548-9feb-ae4d71a972cf";
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
-const CAPABILITIES = [
-  "COMMAND_ACK_V1",
-  "COMMAND_PING_V1",
-  "COMMAND_REQUEST_STATUS_V1",
-  "COMMAND_STOP_BRIDGE_V1",
-  "DEVICE_HEARTBEAT_V1"
-];
+const CAPABILITIES = T0_DEVICE_CAPABILITIES;
 
 function keyPair() {
   return crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -164,6 +160,19 @@ test("index protects enrollment-code route with existing dashboard auth and read
 
 test("valid P-256 proof of possession is accepted", () => {
   assert.doesNotThrow(() => parseAndValidateEnrollmentRequest(requestFrom().req, NOW));
+});
+
+test("T1 manual-gate capability profile enrolls additively while unknown profiles fail closed", () => {
+  const t1 = requestFrom({ payloadOverrides: { capabilities: T1_DEVICE_CAPABILITIES } });
+  assert.doesNotThrow(() => parseAndValidateEnrollmentRequest(t1.req, NOW));
+  for (const capabilities of [
+    [...T1_DEVICE_CAPABILITIES].reverse(),
+    [...T1_DEVICE_CAPABILITIES, "TINDER_VISIBLE_CHAT_READ_V1"],
+    [...T0_DEVICE_CAPABILITIES, "TINDER_MANUAL_GATE_V1", "COMMAND_INJECTED_V1"]
+  ]) {
+    const input = requestFrom({ payloadOverrides: { capabilities } });
+    assert.throws(() => parseAndValidateEnrollmentRequest(input.req, NOW), error => error.code === "INVALID_BODY");
+  }
 });
 
 test("malformed enrollment code is rejected before database access", () => {

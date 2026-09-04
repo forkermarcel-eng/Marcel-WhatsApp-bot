@@ -814,6 +814,11 @@
              Gerätestatus wird geladen.
            </span>
          </div>
+         <div class="enrollment-actions" aria-label="Android Tinder Manual Gate">
+           <button class="button primary" id="connectAndroidTinder" type="button" disabled>TINDER VERBINDEN</button>
+           <button class="button warn" id="disconnectAndroidTinder" type="button" disabled>TINDER TRENNEN</button>
+           <span class="enrollment-message">Nur für das ausdrücklich ausgewählte, T1-kompatible Android-Gerät. Diese Befehle öffnen, lesen oder senden nichts in Tinder.</span>
+         </div>
        </div>
      </section>
        </div>
@@ -947,6 +952,8 @@
      deviceSelectionList: document.getElementById("deviceSelectionList"),
      pingDevice: document.getElementById("pingDevice"),
      requestDeviceStatus: document.getElementById("requestDeviceStatus"),
+     connectAndroidTinder: document.getElementById("connectAndroidTinder"),
+     disconnectAndroidTinder: document.getElementById("disconnectAndroidTinder"),
      deviceCommandMessage: document.getElementById("deviceCommandMessage"),
      lastChecked: document.getElementById("lastChecked")
    };
@@ -957,6 +964,7 @@
    let commandBusy = false;
    let commandFeedback = "";
    let commandFeedbackIsError = false;
+   const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
 
    function setDot(element, state) {
      element.className = "dot";
@@ -1101,8 +1109,17 @@
        String(selectedDevice.device_status).toUpperCase() === "ONLINE" &&
        String(selectedDevice.enrollment_state).toUpperCase() === "ACTIVE"
      );
+     const t1Available = Boolean(
+       commandAvailable &&
+       String(selectedDevice.bridge_service_state).toUpperCase() === "RUNNING" &&
+       selectedDevice.tinder_manual_gate_capable === true
+     );
+     const tinderState = String(selectedDevice?.tinder_state || "UNKNOWN").toUpperCase();
      elements.pingDevice.disabled = commandBusy || !commandAvailable;
      elements.requestDeviceStatus.disabled = commandBusy || !commandAvailable;
+     elements.connectAndroidTinder.disabled = commandBusy || !t1Available ||
+       !["DISCONNECTED", "CONNECTED"].includes(tinderState);
+     elements.disconnectAndroidTinder.disabled = commandBusy || !t1Available;
      elements.deviceCommandMessage.className = commandFeedbackIsError
        ? "enrollment-message enrollment-error"
        : "enrollment-message";
@@ -1114,6 +1131,18 @@
      commandFeedback = message;
      commandFeedbackIsError = isError;
      updateCommandControls();
+   }
+
+   function t1CommandAllowedForSelectedDevice(type, device = selectedDevice) {
+     if (!TINDER_MANUAL_GATE_COMMANDS.has(type)) return true;
+     if (!device || String(device.enrollment_state).toUpperCase() !== "ACTIVE" ||
+         String(device.device_status).toUpperCase() !== "ONLINE" ||
+         String(device.bridge_service_state).toUpperCase() !== "RUNNING" ||
+         device.tinder_manual_gate_capable !== true) {
+       return false;
+     }
+     return type !== "CONNECT_TINDER" ||
+       ["DISCONNECTED", "CONNECTED"].includes(String(device.tinder_state || "UNKNOWN").toUpperCase());
    }
 
    function shortDeviceId(value) {
@@ -1313,6 +1342,10 @@
      }
      if (String(device.device_status).toUpperCase() !== "ONLINE") {
        setCommandAvailability(device, "Gerät ist offline. Kein Command wurde gesendet.", true);
+       return;
+     }
+     if (!t1CommandAllowedForSelectedDevice(type, device)) {
+       setCommandAvailability(device, "Tinder-Gate-Command ist für dieses Gerät nicht sicher freigegeben.", true);
        return;
      }
 
@@ -1635,6 +1668,14 @@
 
    elements.requestDeviceStatus.addEventListener("click", () => {
      void createDeviceCommand("REQUEST_STATUS");
+   });
+
+   elements.connectAndroidTinder.addEventListener("click", () => {
+     void createDeviceCommand("CONNECT_TINDER");
+   });
+
+   elements.disconnectAndroidTinder.addEventListener("click", () => {
+     void createDeviceCommand("DISCONNECT_TINDER");
    });
 
    window.addEventListener("focus", () => {

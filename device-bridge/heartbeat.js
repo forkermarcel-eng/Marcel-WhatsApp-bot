@@ -1,6 +1,11 @@
 import {
+  AUTOMATION_STATES,
+  BRIDGE_SERVICE_STATES,
   DEVICE_BRIDGE_PROTOCOL,
   DeviceBridgeProtocolError,
+  deviceBridgeCapabilityProfile,
+  isKnownTinderStateForCapabilities,
+  isTinderManualGateCapable,
   isExactUtcTimestamp,
   isUuidV4,
   protocolErrorBody
@@ -13,15 +18,6 @@ import {
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 HEARTBEAT
 ================================================== */
-
-const REQUIRED_CAPABILITIES = Object.freeze([
-  "COMMAND_ACK_V1",
-  "COMMAND_PING_V1",
-  "COMMAND_REQUEST_STATUS_V1",
-  "COMMAND_STOP_BRIDGE_V1",
-  "DEVICE_HEARTBEAT_V1"
-]);
-const BRIDGE_STATES = new Set(["STOPPED", "STARTING", "RUNNING", "STOPPING", "ERROR"]);
 
 function invalidHeartbeat(message) {
   return new DeviceBridgeProtocolError(400, "INVALID_DEVICE_STATE", message);
@@ -52,10 +48,10 @@ export function parseAndValidateHeartbeat(req) {
   if (body.sent_at !== req.get("x-marcel-timestamp") || !isExactUtcTimestamp(body.sent_at)) throw invalidHeartbeat("Heartbeat sent_at is invalid");
   if (!object(body.app) || !nonEmptyString(body.app.version_name, 64) || !Number.isSafeInteger(body.app.version_code) || body.app.version_code < 0) throw invalidHeartbeat("Heartbeat app metadata is invalid");
   if (!object(body.device) || !isUuidV4(body.device.installation_id) || !nonEmptyString(body.device.manufacturer, 64) || !nonEmptyString(body.device.model, 128) || !Number.isInteger(body.device.android_api) || body.device.android_api < 24 || !Array.isArray(body.device.abis) || body.device.abis.length < 1 || body.device.abis.length > 8 || body.device.abis.some(abi => !nonEmptyString(abi, 64))) throw invalidHeartbeat("Heartbeat device metadata is invalid");
-  if (!object(body.bridge) || !BRIDGE_STATES.has(body.bridge.service_state) || !nullableTimestamp(body.bridge.started_at) || !nullableTimestamp(body.bridge.last_successful_heartbeat_at)) throw invalidHeartbeat("Heartbeat bridge metadata is invalid");
-  if (!Array.isArray(body.capabilities) || body.capabilities.length !== REQUIRED_CAPABILITIES.length || body.capabilities.some((item, index) => item !== REQUIRED_CAPABILITIES[index])) throw invalidHeartbeat("Heartbeat capabilities are invalid");
-  if (body.tinder_state !== "UNKNOWN") throw invalidHeartbeat("T0 tinder_state must be UNKNOWN");
-  if (body.automation_state !== "STOPPED") throw invalidHeartbeat("T0 automation_state must be STOPPED");
+  if (!object(body.bridge) || !BRIDGE_SERVICE_STATES.includes(body.bridge.service_state) || !nullableTimestamp(body.bridge.started_at) || !nullableTimestamp(body.bridge.last_successful_heartbeat_at)) throw invalidHeartbeat("Heartbeat bridge metadata is invalid");
+  if (!deviceBridgeCapabilityProfile(body.capabilities)) throw invalidHeartbeat("Heartbeat capabilities are invalid");
+  if (!isKnownTinderStateForCapabilities(body.tinder_state, body.capabilities)) throw invalidHeartbeat("Heartbeat tinder_state is invalid for this capability profile");
+  if (!AUTOMATION_STATES.includes(body.automation_state)) throw invalidHeartbeat("T1 automation_state must be STOPPED");
   return body;
 }
 
@@ -77,16 +73,25 @@ function commandEnvelope(row) {
   };
 }
 
-async function selectDeliverableCommands(client, deviceId, now) {
+async function selectDeliverableCommands(client, deviceId, capabilities, now) {
+  const t1Capable = isTinderManualGateCapable(capabilities);
+  const commandTypes = t1Capable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
+    : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
+  const payloadPredicate = t1Capable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER') AND payload='{}'::jsonb)`
+    : "";
   const result = await client.query(
     `SELECT command_id, protocol_version, command_type, issued_at, expires_at,
             configuration_revision, payload
      FROM device_bridge_commands
      WHERE device_id=$1 AND terminal_status IS NULL AND expires_at>$2
-       AND command_type IN ('PING','REQUEST_STATUS','STOP_BRIDGE')
+       AND command_type IN (${commandTypes})
        AND (
          (command_type IN ('PING','REQUEST_STATUS') AND payload='{}'::jsonb)
          OR (command_type='STOP_BRIDGE' AND payload='{"reason":"ADMIN_REQUEST"}'::jsonb)
+         ${payloadPredicate}
        )
      ORDER BY issued_at ASC, command_id ASC
      LIMIT $3`,
@@ -148,14 +153,15 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
         `UPDATE device_bridge_devices SET
           app_version_name=$2, app_version_code=$3, manufacturer=$4, model=$5,
           android_api=$6, abis=$7::jsonb, capabilities=$8::jsonb,
-          bridge_service_state=$9, tinder_state='UNKNOWN', automation_state='STOPPED',
-          last_heartbeat_sequence=$10, last_heartbeat_body_sha256=$11,
-          last_accepted_heartbeat_at=$12, updated_at=$12
+          bridge_service_state=$9, tinder_state=$10, automation_state='STOPPED',
+          last_heartbeat_sequence=$11, last_heartbeat_body_sha256=$12,
+          last_accepted_heartbeat_at=$13, updated_at=$13
          WHERE device_id=$1`,
         [auth.deviceId, heartbeat.app.version_name, heartbeat.app.version_code,
           heartbeat.device.manufacturer, heartbeat.device.model, heartbeat.device.android_api,
           JSON.stringify(heartbeat.device.abis), JSON.stringify(heartbeat.capabilities),
-          heartbeat.bridge.service_state, heartbeat.sequence, auth.contentSha256, now]
+          heartbeat.bridge.service_state, heartbeat.tinder_state, heartbeat.sequence,
+          auth.contentSha256, now]
       );
       await client.query(
         `INSERT INTO device_bridge_audit_events
@@ -166,7 +172,7 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
     } else {
       acceptedAt = new Date(device.last_accepted_heartbeat_at);
     }
-    const commands = await selectDeliverableCommands(client, auth.deviceId, now);
+    const commands = await selectDeliverableCommands(client, auth.deviceId, heartbeat.capabilities, now);
     await client.query("COMMIT");
     return heartbeatResponse(now, acceptedAt, commands);
   } catch (error) {

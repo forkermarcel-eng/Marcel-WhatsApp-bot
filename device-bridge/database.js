@@ -3,6 +3,13 @@ import {
   FINAL_ACK_CHECK_EXPRESSION,
   FINAL_ACK_CONSTRAINT_NAME
 } from "./ack-schema.js";
+import {
+  ensureDeviceBridgeT1Schema,
+  T1_COMMAND_TYPE_CHECK_EXPRESSION,
+  T1_COMMAND_TYPE_CONSTRAINT_NAME,
+  T1_TINDER_STATE_CHECK_EXPRESSION,
+  T1_TINDER_STATE_CONSTRAINT_NAME
+} from "./t1-schema.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 DATABASE
@@ -22,7 +29,8 @@ export async function ensureDeviceBridgeTables(pool) {
         bridge_service_state TEXT NOT NULL DEFAULT 'STOPPED'
           CHECK (bridge_service_state IN ('STOPPED', 'STARTING', 'RUNNING', 'STOPPING', 'ERROR')),
         tinder_state TEXT NOT NULL DEFAULT 'UNKNOWN'
-          CHECK (tinder_state IN ('DISCONNECTED', 'CONNECTED', 'AUTH_REQUIRED', 'REVIEW_REQUIRED', 'UNKNOWN')),
+          CONSTRAINT ${T1_TINDER_STATE_CONSTRAINT_NAME}
+          CHECK (${T1_TINDER_STATE_CHECK_EXPRESSION}),
         automation_state TEXT NOT NULL DEFAULT 'STOPPED'
           CHECK (automation_state IN ('STOPPED', 'RUNNING')),
         app_version_name TEXT,
@@ -95,7 +103,9 @@ export async function ensureDeviceBridgeTables(pool) {
         command_id UUID PRIMARY KEY,
         device_id UUID NOT NULL REFERENCES device_bridge_devices(device_id) ON DELETE RESTRICT,
         protocol_version INTEGER NOT NULL DEFAULT 1 CHECK (protocol_version = 1),
-        command_type TEXT NOT NULL CHECK (command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE')),
+        command_type TEXT NOT NULL
+          CONSTRAINT ${T1_COMMAND_TYPE_CONSTRAINT_NAME}
+          CHECK (${T1_COMMAND_TYPE_CHECK_EXPRESSION}),
         payload JSONB NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
         configuration_revision INTEGER NOT NULL CHECK (configuration_revision > 0),
         issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -133,6 +143,7 @@ export async function ensureDeviceBridgeTables(pool) {
           CHECK (${FINAL_ACK_CHECK_EXPRESSION})
       )
     `);
+    await ensureDeviceBridgeT1Schema(client);
     await ensureDeviceBridgeAckSchema(client);
     await client.query(`
       CREATE INDEX IF NOT EXISTS device_bridge_command_acks_device_idx

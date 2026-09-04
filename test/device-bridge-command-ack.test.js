@@ -8,7 +8,12 @@ import {
   parseAndValidateCommandAck,
   processCommandAckTransaction
 } from "../device-bridge/command-ack.js";
-import { canonicalRequest, sha256Hex } from "../device-bridge/protocol-v1.js";
+import {
+  T0_DEVICE_CAPABILITIES,
+  T1_DEVICE_CAPABILITIES,
+  canonicalRequest,
+  sha256Hex
+} from "../device-bridge/protocol-v1.js";
 
 const NOW = new Date("2026-09-01T12:34:56.000Z");
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
@@ -33,6 +38,16 @@ function ackPayload(status, overrides = {}) {
     ...defaults,
     ...overrides
   };
+}
+
+function manualGateAckPayload(type, status, overrides = {}) {
+  const result = type === "CONNECT_TINDER"
+    ? { tinder_state: "CONNECTED" }
+    : { tinder_state: "DISCONNECTED" };
+  return ackPayload(status, {
+    ...(status === "SUCCEEDED" ? { result } : {}),
+    ...overrides
+  });
 }
 
 function ackRequest(payload = ackPayload("RECEIVED"), { requestId = REQUEST_ID, keys, now = NOW } = {}) {
@@ -66,7 +81,7 @@ function historyRow(ack) {
 function ackPool({ request, history = [], terminalStatus = null, commandDeviceId = DEVICE_ID,
   commandType = "PING", revision = 1, deviceRevision = 1, expiresAt = new Date(NOW.valueOf() + 60_000),
   deviceState = "ACTIVE", deviceRevoked = false, keyRevoked = false, missingCommand = false,
-  nonceReplay = false, failAudit = false } = {}) {
+  nonceReplay = false, failAudit = false, capabilities = T0_DEVICE_CAPABILITIES } = {}) {
   const calls = [];
   const state = { nonce: 0, ackInserts: 0, commandUpdates: 0, audits: 0, commits: 0, rollbacks: 0 };
   const authRow = {
@@ -81,7 +96,8 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
       if (sql === "ROLLBACK") { state.rollbacks += 1; return { rows: [] }; }
       if (sql.includes("FROM device_bridge_devices d") && sql.includes("FOR UPDATE")) return { rows: [{
         device_id: DEVICE_ID, enrollment_state: deviceState, revoked_at: deviceRevoked ? NOW : null,
-        configuration_revision: deviceRevision, key_id: KEY_ID, key_revoked_at: keyRevoked ? NOW : null
+        configuration_revision: deviceRevision, capabilities,
+        key_id: KEY_ID, key_revoked_at: keyRevoked ? NOW : null
       }] };
       if (sql.includes("INSERT INTO device_bridge_request_nonces")) {
         if (nonceReplay) { const error = new Error("duplicate"); error.code = "23505"; throw error; }
@@ -135,6 +151,52 @@ test("RECEIVED transitions to SUCCEEDED and FAILED", async () => {
     await processCommandAckTransaction(fake.pool, auth(), ack, NOW);
     assert.equal(fake.state.commandUpdates, 1);
     assert.equal(fake.state.commits, 1);
+  }
+});
+
+test("T1 CONNECT_TINDER and DISCONNECT_TINDER use exact terminal results after RECEIVED", async () => {
+  for (const type of ["CONNECT_TINDER", "DISCONNECT_TINDER"]) {
+    const received = manualGateAckPayload(type, "RECEIVED");
+    const succeeded = manualGateAckPayload(type, "SUCCEEDED");
+    const fake = ackPool({
+      commandType: type,
+      capabilities: T1_DEVICE_CAPABILITIES,
+      history: [historyRow(received)]
+    });
+    const response = await processCommandAckTransaction(fake.pool, auth(), succeeded, NOW);
+    assert.equal(response.status, "SUCCEEDED");
+    assert.equal(fake.state.commandUpdates, 1);
+    assert.equal(fake.state.audits, 1);
+  }
+});
+
+test("T1 command acknowledgement rejects incompatible devices and malformed success results", async () => {
+  await assert.rejects(
+    () => processCommandAckTransaction(
+      ackPool({ commandType: "CONNECT_TINDER", capabilities: T0_DEVICE_CAPABILITIES }).pool,
+      auth(),
+      manualGateAckPayload("CONNECT_TINDER", "RECEIVED"),
+      NOW
+    ),
+    error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
+  );
+
+  assert.doesNotThrow(() => parseAndValidateCommandAck(
+    ackRequest(manualGateAckPayload("CONNECT_TINDER", "SUCCEEDED")).req,
+    "CONNECT_TINDER",
+    T1_DEVICE_CAPABILITIES
+  ));
+  for (const [type, result] of [
+    ["CONNECT_TINDER", null],
+    ["CONNECT_TINDER", { tinder_state: "DISCONNECTED" }],
+    ["DISCONNECT_TINDER", { tinder_state: "CONNECTED" }],
+    ["DISCONNECT_TINDER", { tinder_state: "DISCONNECTED", injected: true }]
+  ]) {
+    assert.throws(() => parseAndValidateCommandAck(
+      ackRequest(manualGateAckPayload(type, "SUCCEEDED", { result })).req,
+      type,
+      T1_DEVICE_CAPABILITIES
+    ), error => error.code === "INVALID_BODY");
   }
 });
 
@@ -234,6 +296,31 @@ test("expired command accepts first EXPIRED but rejects first RECEIVED", async (
   await assert.rejects(() => processCommandAckTransaction(ackPool({ expiresAt: expiry }).pool, auth(), ackPayload("RECEIVED"), NOW), error => error.code === "COMMAND_EXPIRED");
 });
 
+test("T1 command expiry and semantic duplicate acknowledgement retain canonical behavior", async () => {
+  const expired = new Date(NOW.valueOf() - 1);
+  await processCommandAckTransaction(
+    ackPool({ commandType: "CONNECT_TINDER", capabilities: T1_DEVICE_CAPABILITIES, expiresAt: expired }).pool,
+    auth(),
+    manualGateAckPayload("CONNECT_TINDER", "EXPIRED"),
+    NOW
+  );
+  const success = manualGateAckPayload("DISCONNECT_TINDER", "SUCCEEDED");
+  const fake = ackPool({
+    commandType: "DISCONNECT_TINDER",
+    capabilities: T1_DEVICE_CAPABILITIES,
+    terminalStatus: "SUCCEEDED",
+    history: [historyRow(success)]
+  });
+  const response = await processCommandAckTransaction(
+    fake.pool,
+    auth("4dbf2bd9-3d7c-4925-89de-fc0dc62a2fe1"),
+    success,
+    NOW
+  );
+  assert.equal(response.status, "SUCCEEDED");
+  assert.equal(fake.state.ackInserts, 0);
+});
+
 test("RECEIVED command remains deliverable while terminal command is excluded", () => {
   const heartbeat = fs.readFileSync(new URL("../device-bridge/heartbeat.js", import.meta.url), "utf8");
   assert.match(heartbeat, /terminal_status IS NULL/);
@@ -264,6 +351,28 @@ test("SUCCEEDED accepts only small command-specific T0 results or null", () => {
   assert.doesNotThrow(() => parseAndValidateCommandAck(ackRequest(ackPayload("SUCCEEDED", { result: null })).req, "PING"));
   assert.throws(() => parseAndValidateCommandAck(ackRequest(ackPayload("SUCCEEDED", { result: { token: "forbidden" } })).req, "PING"));
   assert.throws(() => parseAndValidateCommandAck(ackRequest(ackPayload("SUCCEEDED", { result: { text: "x".repeat(2000) } })).req, "PING"));
+});
+
+test("REQUEST_STATUS permits T1 state reporting only for the exact T1 capability profile", () => {
+  const status = ackPayload("SUCCEEDED", {
+    result: {
+      device_status: {
+        bridge_service_state: "RUNNING",
+        tinder_state: "AUTH_REQUIRED",
+        automation_state: "STOPPED"
+      }
+    }
+  });
+  assert.throws(() => parseAndValidateCommandAck(
+    ackRequest(status).req,
+    "REQUEST_STATUS",
+    T0_DEVICE_CAPABILITIES
+  ), error => error.code === "INVALID_BODY");
+  assert.doesNotThrow(() => parseAndValidateCommandAck(
+    ackRequest(status).req,
+    "REQUEST_STATUS",
+    T1_DEVICE_CAPABILITIES
+  ));
 });
 
 test("FAILED and REJECTED errors are strictly bounded", () => {

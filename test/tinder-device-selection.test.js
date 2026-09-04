@@ -19,3 +19,15 @@ test("Tinder page polls command status for a full heartbeat interval plus ACK bu
   assert.match(page, /for \(let attempt = 0; attempt < 31; attempt \+= 1\)/);
   assert.match(page, /if \(terminal\) return;/);
 });
+
+test("Android Tinder manual gate controls require a selected compatible device and stay separate from the legacy worker", () => {
+  assert.match(page, /id="connectAndroidTinder"/);
+  assert.match(page, /id="disconnectAndroidTinder"/);
+  assert.match(page, /TINDER_MANUAL_GATE_COMMANDS/);
+  assert.match(page, /tinder_manual_gate_capable === true/);
+  assert.match(page, /String\(selectedDevice\.bridge_service_state\)\.toUpperCase\(\) === "RUNNING"/);
+  assert.match(page, /createDeviceCommand\("CONNECT_TINDER"\)/);
+  assert.match(page, /createDeviceCommand\("DISCONNECT_TINDER"\)/);
+  assert.doesNotMatch(page, /connectAndroidTinder\.addEventListener\([\s\S]{0,200}runControl\(/);
+  assert.doesNotMatch(page, /disconnectAndroidTinder\.addEventListener\([\s\S]{0,200}runControl\(/);
+});

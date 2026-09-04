@@ -4,6 +4,7 @@ import {
   DeviceBridgeProtocolError,
   assertTimestampWithinWindow,
   canonicalRequest,
+  deviceBridgeCapabilityProfile,
   enrollmentCodeDigest,
   isLowercaseSha256,
   isUuidV4,
@@ -20,13 +21,6 @@ DEVICE BRIDGE T0 — PROTOCOL V1 ENROLLMENT
 ================================================== */
 
 const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const REQUIRED_CAPABILITIES = Object.freeze([
-  "COMMAND_ACK_V1",
-  "COMMAND_PING_V1",
-  "COMMAND_REQUEST_STATUS_V1",
-  "COMMAND_STOP_BRIDGE_V1",
-  "DEVICE_HEARTBEAT_V1"
-]);
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;
 const RATE_LIMIT_MAX_SUBJECTS = 4096;
@@ -53,8 +47,7 @@ function assertString(value, name, maximum = 128) {
 }
 
 function assertExactCapabilities(value) {
-  if (!Array.isArray(value) || value.length !== REQUIRED_CAPABILITIES.length ||
-      value.some((item, index) => item !== REQUIRED_CAPABILITIES[index])) {
+  if (!deviceBridgeCapabilityProfile(value)) {
     throw invalidBody("capabilities are invalid");
   }
 }

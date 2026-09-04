@@ -80,7 +80,7 @@ test("unauthenticated command request is rejected", async () => withEnvironment(
   assert.equal(res.statusCode, 401);
 }));
 
-for (const type of ["PING", "REQUEST_STATUS"]) {
+for (const type of ["PING", "REQUEST_STATUS", "CONNECT_TINDER", "DISCONNECT_TINDER"]) {
   test(`${type} is allowed and forwarded as the exact backend contract`, async () => withEnvironment(async () => {
     let call;
     globalThis.fetch = async (url, options) => {

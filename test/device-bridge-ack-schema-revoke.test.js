@@ -5,6 +5,10 @@ import {
   ensureDeviceBridgeAckSchema,
   FINAL_ACK_CONSTRAINT_NAME
 } from "../device-bridge/ack-schema.js";
+import {
+  T1_COMMAND_TYPE_CONSTRAINT_NAME,
+  T1_TINDER_STATE_CONSTRAINT_NAME
+} from "../device-bridge/t1-schema.js";
 import { createAdminDeviceRevokeHandler } from "../device-bridge/admin.js";
 import { ensureDeviceBridgeTables } from "../device-bridge/database.js";
 
@@ -78,6 +82,12 @@ test("ACK migration runs inside the Device Bridge DDL transaction", async () => 
   const client = {
     async query(sql) {
       calls.push(sql);
+      if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_devices")) {
+        return { rows: [{ conname: T1_TINDER_STATE_CONSTRAINT_NAME, convalidated: true, column_names: ["tinder_state"] }] };
+      }
+      if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_commands")) {
+        return { rows: [{ conname: T1_COMMAND_TYPE_CONSTRAINT_NAME, convalidated: true, column_names: ["command_type"] }] };
+      }
       if (sql.includes("FROM pg_constraint")) return { rows: [{ conname: OLD_CONSTRAINT, convalidated: true, column_names: ACK_COLUMNS }] };
       if (sql.includes("AS incompatible")) return { rows: [{ incompatible: false }] };
       return { rows: [] };
@@ -97,6 +107,12 @@ test("incompatible ACK data rolls the complete Device Bridge DDL transaction bac
   const client = {
     async query(sql) {
       calls.push(sql);
+      if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_devices")) {
+        return { rows: [{ conname: T1_TINDER_STATE_CONSTRAINT_NAME, convalidated: true, column_names: ["tinder_state"] }] };
+      }
+      if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_commands")) {
+        return { rows: [{ conname: T1_COMMAND_TYPE_CONSTRAINT_NAME, convalidated: true, column_names: ["command_type"] }] };
+      }
       if (sql.includes("FROM pg_constraint")) return { rows: [{ conname: OLD_CONSTRAINT, convalidated: true, column_names: ACK_COLUMNS }] };
       if (sql.includes("AS incompatible")) return { rows: [{ incompatible: true }] };
       return { rows: [] };

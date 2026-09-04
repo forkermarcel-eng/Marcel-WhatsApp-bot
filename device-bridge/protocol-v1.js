@@ -1,5 +1,57 @@
 import crypto from "crypto";
 
+export const T0_DEVICE_CAPABILITIES = Object.freeze([
+  "COMMAND_ACK_V1",
+  "COMMAND_PING_V1",
+  "COMMAND_REQUEST_STATUS_V1",
+  "COMMAND_STOP_BRIDGE_V1",
+  "DEVICE_HEARTBEAT_V1"
+]);
+
+export const TINDER_MANUAL_GATE_CAPABILITY = "TINDER_MANUAL_GATE_V1";
+
+export const T1_DEVICE_CAPABILITIES = Object.freeze([
+  ...T0_DEVICE_CAPABILITIES,
+  TINDER_MANUAL_GATE_CAPABILITY
+]);
+
+export const T0_DEVICE_BRIDGE_COMMANDS = Object.freeze([
+  "PING",
+  "REQUEST_STATUS",
+  "STOP_BRIDGE"
+]);
+
+export const T1_TINDER_MANUAL_GATE_COMMANDS = Object.freeze([
+  "CONNECT_TINDER",
+  "DISCONNECT_TINDER"
+]);
+
+export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
+  ...T0_DEVICE_BRIDGE_COMMANDS,
+  ...T1_TINDER_MANUAL_GATE_COMMANDS
+]);
+
+export const BRIDGE_SERVICE_STATES = Object.freeze([
+  "STOPPED",
+  "STARTING",
+  "RUNNING",
+  "STOPPING",
+  "ERROR"
+]);
+
+export const T0_TINDER_STATES = Object.freeze(["UNKNOWN"]);
+
+export const T1_TINDER_STATES = Object.freeze([
+  "DISCONNECTED",
+  "CONNECTING",
+  "CONNECTED",
+  "AUTH_REQUIRED",
+  "REVIEW_REQUIRED",
+  "UNKNOWN"
+]);
+
+export const AUTOMATION_STATES = Object.freeze(["STOPPED"]);
+
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1
 ================================================== */
@@ -11,7 +63,7 @@ export const DEVICE_BRIDGE_PROTOCOL = Object.freeze({
   signatureWindowSeconds: 300,
   maximumRequestBytes: 64 * 1024,
   commandBatchLimit: 50,
-  commands: Object.freeze(["PING", "REQUEST_STATUS", "STOP_BRIDGE"])
+  commands: DEVICE_BRIDGE_COMMANDS
 });
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -19,6 +71,28 @@ const RFC3339_UTC_MILLISECONDS = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2
 const LOWERCASE_SHA256 = /^[0-9a-f]{64}$/;
 const BASE64URL_WITHOUT_PADDING = /^[A-Za-z0-9_-]+$/;
 const ENROLLMENT_ALPHABET = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
+
+function exactArray(left, right) {
+  return Array.isArray(left) && left.length === right.length &&
+    left.every((item, index) => item === right[index]);
+}
+
+export function deviceBridgeCapabilityProfile(capabilities) {
+  if (exactArray(capabilities, T0_DEVICE_CAPABILITIES)) return "T0";
+  if (exactArray(capabilities, T1_DEVICE_CAPABILITIES)) return "T1";
+  return null;
+}
+
+export function isTinderManualGateCapable(capabilities) {
+  return deviceBridgeCapabilityProfile(capabilities) === "T1";
+}
+
+export function isKnownTinderStateForCapabilities(state, capabilities) {
+  const allowed = isTinderManualGateCapable(capabilities)
+    ? T1_TINDER_STATES
+    : T0_TINDER_STATES;
+  return allowed.includes(state);
+}
 
 export class DeviceBridgeProtocolError extends Error {
   constructor(status, code, message, retryable = false) {

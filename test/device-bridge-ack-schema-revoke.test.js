@@ -33,6 +33,13 @@ const NONCANONICAL_EQUIVALENT_PAYLOAD = `
   OR (status = 'SUCCEEDED' AND error IS NULL)
   OR (status = 'RECEIVED' AND result IS NULL AND error IS NULL)
 `;
+const POSTGRES_DEPARSED_CANONICAL_PAYLOAD = `
+  CHECK (status = 'RECEIVED'::text AND result IS NULL AND error IS NULL
+    OR status = 'SUCCEEDED'::text AND error IS NULL
+    OR status = 'FAILED'::text AND result IS NULL AND error IS NOT NULL
+    OR status = 'REJECTED'::text AND result IS NULL
+    OR status = 'EXPIRED'::text AND result IS NULL AND error IS NULL)
+`;
 
 function checkDefinition(column, values) {
   return `CHECK (${column} IN (${values.map(value => `'${value}'`).join(", ")}))`;
@@ -202,6 +209,25 @@ test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes th
   });
   assert.equal(runtimeClient.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
   assertNoAckMutation(runtimeClient.calls);
+});
+
+test("PostgreSQL's deparsed canonical ACK payload remains strict after harmless text casts", () => {
+  const specification = ACK_REQUIRED_CHECKS.at(-1);
+  const canonical = {
+    conname: FINAL_ACK_CONSTRAINT_NAME,
+    convalidated: true,
+    condeferrable: false,
+    condeferred: false,
+    constraint_definition: POSTGRES_DEPARSED_CANONICAL_PAYLOAD,
+    column_names: ACK_COLUMNS
+  };
+  assert.equal(hasExpectedAckCheckDefinition(canonical, specification), true);
+
+  const weakened = {
+    ...canonical,
+    constraint_definition: POSTGRES_DEPARSED_CANONICAL_PAYLOAD.replace("result IS NULL AND error IS NULL", "error IS NULL")
+  };
+  assert.equal(hasExpectedAckCheckDefinition(weakened, specification), false);
 });
 
 test("ACK canonicalization preflight fails closed for non-equivalence, incompleteness, and data mismatch", async () => {

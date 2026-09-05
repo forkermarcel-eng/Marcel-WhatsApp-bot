@@ -10,7 +10,11 @@ import {
 } from "../device-bridge/database.js";
 import { migrateDeviceBridgeAckCanonicalization } from "../device-bridge/ack-canonicalization.js";
 import { runDeviceBridgeAckPayloadSemanticClassifierWithClient } from "../device-bridge/ack-payload-semantic-classifier.js";
-import { preflightDeviceBridgeAckSchemaForT1Migration } from "../device-bridge/ack-schema.js";
+import {
+  assertDeviceBridgeAckDataCompatible,
+  FINAL_ACK_CHECK_EXPRESSION,
+  preflightDeviceBridgeAckSchemaForT1Migration
+} from "../device-bridge/ack-schema.js";
 import { preflightDeviceBridgeFoundationForT1, REQUIRED_TABLES, verifyDeviceBridgeSchema } from "../device-bridge/schema-readiness.js";
 import { preflightDeviceBridgeT1SchemaMigration } from "../device-bridge/t1-schema.js";
 import { createDeviceBridgeLegacyRealPostgresFixture } from "./helpers/device-bridge-real-postgres-fixture.js";
@@ -167,6 +171,52 @@ async function upgradeFixtureToFinalT1(pool) {
   assert.deepEqual(await migrateDeviceBridgeSchema(pool), { migrated: true });
 }
 
+async function classifyAckPayload(pool) {
+  const client = await pool.connect();
+  try {
+    return await runDeviceBridgeAckPayloadSemanticClassifierWithClient(client);
+  } finally {
+    client.release();
+  }
+}
+
+async function assertCanonicalizationStopsBeforeDdl(pool) {
+  const trace = makeTracePool(pool);
+  await assert.rejects(() => migrateDeviceBridgeAckCanonicalization(trace));
+  assert.equal(trace.records.some(record => /ALTER TABLE device_bridge_command_acks/i.test(record.sql)), false);
+  assert.equal(countSql(trace.records, sql => sql.trim() === "ROLLBACK"), 1);
+}
+
+async function insertCanonicalizationIncompatibleAckRow(pool) {
+  const deviceId = randomUUID();
+  const commandId = randomUUID();
+  const installationId = randomUUID();
+  await pool.query(`
+    INSERT INTO device_bridge_devices (device_id, installation_id, display_name)
+    VALUES ($1, $2, 'Local Real PG Fixture')
+  `, [deviceId, installationId]);
+  await pool.query(`
+    INSERT INTO device_bridge_commands (
+      command_id, device_id, command_type, payload, configuration_revision, expires_at
+    ) VALUES ($1, $2, 'PING', '{}'::jsonb, 1, NOW() + INTERVAL '1 hour')
+  `, [commandId, deviceId]);
+  await pool.query(`
+    INSERT INTO device_bridge_command_acks (
+      command_id, device_id, status, occurred_at, result, error, body_sha256
+    ) VALUES ($1, $2, 'RECEIVED', NOW(), '{}'::jsonb, '{}'::jsonb, $3)
+  `, [commandId, deviceId, "a".repeat(64)]);
+}
+
+async function createUnsafeAckPayloadFunction(pool) {
+  await pool.query(`
+    CREATE FUNCTION real_pg_ack_payload_unsafe_marker()
+    RETURNS boolean
+    LANGUAGE SQL
+    VOLATILE
+    AS $$ SELECT TRUE $$
+  `);
+}
+
 test("real loopback PostgreSQL validates the full T1 pre-DDL path, timeout, and recovery", { timeout: 30_000 }, async () => {
   await withDisposableLocalDatabase(async pool => {
     await createDeviceBridgeLegacyRealPostgresFixture(pool);
@@ -287,21 +337,70 @@ test("real loopback PostgreSQL canonicalizes only a 20/20 equivalent ACK payload
 
 test("real loopback PostgreSQL ACK canonicalization blocks non-equivalent payloads before DDL", { timeout: 30_000 }, async () => {
   const nonEquivalentExpressions = [
-    "TRUE",
-    "status = 'RECEIVED' AND result IS NULL AND error IS NULL",
-    "(status = 'RECEIVED' AND result IS NULL AND error IS NULL) OR (status = 'FAILED' AND result IS NULL)"
+    {
+      label: "weaker",
+      expression: `(${FINAL_ACK_CHECK_EXPRESSION}) OR (status IS NOT NULL AND result IS NOT NULL AND error IS NOT NULL)`,
+      overall: "PRODUCTION_LEGACY_WEAKER"
+    },
+    {
+      label: "stronger",
+      expression: `(${FINAL_ACK_CHECK_EXPRESSION}) AND NOT (status = 'SUCCEEDED' AND result IS NOT NULL)`,
+      overall: "PRODUCTION_LEGACY_STRONGER"
+    },
+    {
+      label: "drift",
+      expression: "(status = 'RECEIVED' AND result IS NULL AND error IS NULL) OR (status = 'FAILED' AND result IS NULL)",
+      overall: "PRODUCTION_DRIFT"
+    }
   ];
-  for (const expression of nonEquivalentExpressions) {
+  for (const { label, expression, overall } of nonEquivalentExpressions) {
     await withDisposableLocalDatabase(async pool => {
       await createDeviceBridgeLegacyRealPostgresFixture(pool);
       await upgradeFixtureToFinalT1(pool);
       await replaceAckPayloadConstraint(pool, expression);
-      const trace = makeTracePool(pool);
-      await assert.rejects(() => migrateDeviceBridgeAckCanonicalization(trace));
-      assert.equal(trace.records.some(record => /ALTER TABLE device_bridge_command_acks/i.test(record.sql)), false);
-      assert.equal(countSql(trace.records, sql => sql.trim() === "ROLLBACK"), 1);
+      const classification = await classifyAckPayload(pool);
+      assert.equal(classification.classification?.overall_classification, overall, label);
+      await assertCanonicalizationStopsBeforeDdl(pool);
     });
   }
+});
+
+test("real loopback PostgreSQL blocks unsafe and failed ACK evaluators before DDL", { timeout: 30_000 }, async () => {
+  const scenarios = [
+    {
+      label: "unsafe evaluator",
+      expression: `(${FINAL_ACK_CHECK_EXPRESSION}) AND real_pg_ack_payload_unsafe_marker()`,
+      reason: "EVALUATOR_UNSAFE"
+    },
+    {
+      label: "evaluator error",
+      expression: `(${FINAL_ACK_CHECK_EXPRESSION}) AND status::uuid IS NOT NULL`,
+      reason: "EVALUATION_ERROR"
+    }
+  ];
+  for (const { label, expression, reason } of scenarios) {
+    await withDisposableLocalDatabase(async pool => {
+      await createDeviceBridgeLegacyRealPostgresFixture(pool);
+      await upgradeFixtureToFinalT1(pool);
+      if (label === "unsafe evaluator") await createUnsafeAckPayloadFunction(pool);
+      await replaceAckPayloadConstraint(pool, expression);
+      const classification = await classifyAckPayload(pool);
+      assert.equal(classification.reason_code, "SEMANTIC_CLASSIFICATION_UNRESOLVED", label);
+      assert.equal(classification.diagnostic?.reason_code, reason, label);
+      await assertCanonicalizationStopsBeforeDdl(pool);
+    });
+  }
+});
+
+test("real loopback PostgreSQL detects an incompatible existing ACK row without ACK DDL", { timeout: 30_000 }, async () => {
+  await withDisposableLocalDatabase(async pool => {
+    await createDeviceBridgeLegacyRealPostgresFixture(pool);
+    await upgradeFixtureToFinalT1(pool);
+    await replaceAckPayloadConstraint(pool, `(${FINAL_ACK_CHECK_EXPRESSION}) OR (status IS NOT NULL AND result IS NOT NULL AND error IS NOT NULL)`);
+    await insertCanonicalizationIncompatibleAckRow(pool);
+    await assert.rejects(() => assertDeviceBridgeAckDataCompatible(pool), /ACK data is incompatible/);
+    await assertCanonicalizationStopsBeforeDdl(pool);
+  });
 });
 
 test("real loopback PostgreSQL ACK canonicalization rolls back schema drift after its table lock and a failed postcheck", { timeout: 30_000 }, async () => {

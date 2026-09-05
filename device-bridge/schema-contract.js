@@ -2,10 +2,14 @@
 DEVICE BRIDGE — READ-ONLY SCHEMA CONTRACT NORMALIZATION
 ================================================== */
 
-function stripTypeCast(source, start) {
-  let cursor = start + 2;
+function skipWhitespace(source, cursor) {
   while (/\s/.test(source[cursor] || "")) cursor += 1;
+  return cursor;
+}
+
+function readTypeIdentifier(source, cursor) {
   if (source[cursor] === '"') {
+    const start = cursor;
     cursor += 1;
     while (cursor < source.length) {
       if (source[cursor] === '"') {
@@ -13,13 +17,78 @@ function stripTypeCast(source, start) {
         if (source[cursor - 1] === '"') break;
       } else cursor += 1;
     }
-  } else {
-    while (/[A-Za-z0-9_]/.test(source[cursor] || "")) cursor += 1;
-    while (/\s/.test(source[cursor] || "")) cursor += 1;
-    while (/[A-Za-z0-9_]/.test(source[cursor] || "")) cursor += 1;
+    return { cursor, word: source.slice(start, cursor).toLowerCase() };
   }
-  while (/\s/.test(source[cursor] || "")) cursor += 1;
+  const match = source.slice(cursor).match(/^[A-Za-z_][A-Za-z0-9_$]*/);
+  return match ? { cursor: cursor + match[0].length, word: match[0].toLowerCase() } : null;
+}
+
+function consumeWords(source, cursor, words) {
+  const start = cursor;
+  for (const word of words) {
+    cursor = skipWhitespace(source, cursor);
+    const identifier = readTypeIdentifier(source, cursor);
+    if (!identifier || identifier.word !== word) return start;
+    cursor = identifier.cursor;
+  }
+  return cursor;
+}
+
+function consumeBalancedTypeModifier(source, cursor) {
+  if (source[cursor] !== "(") return cursor;
+  let depth = 0;
+  while (cursor < source.length) {
+    const character = source[cursor];
+    if (character === "(") depth += 1;
+    if (character === ")") {
+      depth -= 1;
+      if (depth === 0) return cursor + 1;
+    }
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function stripTypeCast(source, start) {
+  let cursor = skipWhitespace(source, start + 2);
+  const type = readTypeIdentifier(source, cursor);
+  if (!type) return start + 2;
+  cursor = type.cursor;
+
+  // PostgreSQL permits schema-qualified type names. Only consume an
+  // additional identifier after an explicit dot; do not consume a following
+  // boolean operator such as `AND` as though it were part of the type.
+  while (true) {
+    const beforeDot = cursor;
+    cursor = skipWhitespace(source, cursor);
+    if (source[cursor] !== ".") {
+      cursor = beforeDot;
+      break;
+    }
+    cursor = skipWhitespace(source, cursor + 1);
+    const qualified = readTypeIdentifier(source, cursor);
+    if (!qualified) return beforeDot;
+    cursor = qualified.cursor;
+  }
+
+  // These are PostgreSQL's relevant multi-word type names. They are consumed
+  // explicitly so regular SQL words following a simple cast stay tokenized.
+  if (type.word === "double") cursor = consumeWords(source, cursor, ["precision"]);
+  if (type.word === "character" || type.word === "bit") cursor = consumeWords(source, cursor, ["varying"]);
+  if (type.word === "timestamp" || type.word === "time") {
+    const withTimeZone = consumeWords(source, cursor, ["with", "time", "zone"]);
+    const withoutTimeZone = consumeWords(source, cursor, ["without", "time", "zone"]);
+    cursor = withTimeZone !== cursor ? withTimeZone : withoutTimeZone !== cursor ? withoutTimeZone : cursor;
+  }
+
+  const beforeModifier = cursor;
+  cursor = skipWhitespace(source, cursor);
+  if (source[cursor] === "(") cursor = consumeBalancedTypeModifier(source, cursor);
+  else cursor = beforeModifier;
+  const beforeArray = cursor;
+  cursor = skipWhitespace(source, cursor);
   if (source.slice(cursor, cursor + 2) === "[]") cursor += 2;
+  else cursor = beforeArray;
   return cursor;
 }
 

@@ -187,7 +187,7 @@ test("real loopback PostgreSQL rolls back the T2 table creation when a post-DDL 
     let injected = false;
     const trace = makeTracePool(pool, {
       afterQuery: async ({ sql }) => {
-        if (!injected && /^CREATE\s+TABLE\s+tinder_visible_chat_captures/i.test(sql.trim())) {
+        if (!injected && /\bCREATE\s+TABLE\s+tinder_visible_chat_captures/i.test(sql)) {
           injected = true;
           throw new Error("injected T2 post-DDL failure");
         }

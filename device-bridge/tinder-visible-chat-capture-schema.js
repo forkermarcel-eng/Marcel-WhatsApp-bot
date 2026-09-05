@@ -113,11 +113,17 @@ function normalizedCatalogAction(value) {
 }
 
 function constraintMatches(row, specification) {
-  if (row.contype !== specification.type || !sameArray(row.column_names, specification.columns)) return false;
+  // PostgreSQL records every referenced column in conkey for a CHECK. Those
+  // implementation details are not part of a CHECK's semantic contract;
+  // unlike keys/FKs, compare them only for non-CHECK constraints.
+  if (row.contype !== specification.type ||
+      (specification.type !== "c" && !sameArray(row.column_names, specification.columns))) return false;
   if (row.convalidated !== true || row.condeferrable !== false || row.condeferred !== false) return false;
   if (specification.type === "c") return specification.definitions.includes(safeCanonicalCheck(row.constraint_definition));
   return safeCanonicalDefinition(row.constraint_definition) === specification.definition
-    && row.reference_table === specification.referenceTable
+    // pg's LEFT JOIN yields null for PK/UNIQUE rows; the contract's empty
+    // reference value represents that same non-FK state.
+    && String(row.reference_table || "") === specification.referenceTable
     && sameArray(row.reference_column_names, specification.referenceColumns)
     && normalizedCatalogAction(row.confdeltype) === specification.deleteAction
     && normalizedCatalogAction(row.confupdtype) === specification.updateAction
@@ -233,11 +239,11 @@ function hasExactConstraints(rows) {
 /** Read-only table state inspection. It never creates or repairs the table. */
 export async function inspectTinderVisibleChatCaptureSchema(client) {
   if (await inspectCaptureTablePresence(client) === "ABSENT") return { state: "ABSENT" };
-  const [relation, columns, constraints] = await Promise.all([
-    readCaptureRelation(client),
-    readCaptureColumns(client),
-    readCaptureConstraints(client)
-  ]);
+  // A pg Client owns one wire-protocol query stream. Keep the catalog reads
+  // sequential rather than issuing concurrent query calls on that client.
+  const relation = await readCaptureRelation(client);
+  const columns = await readCaptureColumns(client);
+  const constraints = await readCaptureConstraints(client);
   const canonical = relation.rows.length === 1
     && relation.rows[0]?.relkind === "r"
     && hasExactColumns(columns.rows)

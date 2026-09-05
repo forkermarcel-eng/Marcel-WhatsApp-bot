@@ -12,6 +12,7 @@ import {
 import {
   assertTinderVisibleChatCaptureSchemaReady,
   inspectTinderVisibleChatCaptureSchema,
+  TINDER_VISIBLE_CHAT_CAPTURE_COLUMN_CONTRACT,
   TINDER_VISIBLE_CHAT_CAPTURE_CONSTRAINT_CONTRACT
 } from "../device-bridge/tinder-visible-chat-capture-schema.js";
 import { canonicalCheckDefinition } from "../device-bridge/schema-contract.js";
@@ -44,6 +45,83 @@ function preflightFailurePool() {
 
 function ddlCalls(calls) {
   return calls.filter(sql => /\b(?:CREATE|ALTER|DROP|TRUNCATE|INSERT|UPDATE|DELETE)\b/i.test(sql));
+}
+
+function realPostgresCatalogShapeClient() {
+  const columns = Object.entries(TINDER_VISIBLE_CHAT_CAPTURE_COLUMN_CONTRACT).map(([column_name, contract]) => ({
+    column_name,
+    data_type: contract.dataType,
+    not_null: contract.notNull,
+    column_default: contract.defaultExpression,
+    identity_kind: "",
+    generated_kind: ""
+  }));
+  const base = {
+    convalidated: true,
+    condeferrable: false,
+    condeferred: false,
+    confdeltype: " ",
+    confupdtype: " ",
+    confmatchtype: " ",
+    reference_table: null,
+    reference_column_names: []
+  };
+  const constraints = [
+    { ...base, contype: "p", column_names: ["capture_id"], constraint_definition: "PRIMARY KEY (capture_id)" },
+    { ...base, contype: "u", column_names: ["device_id", "runtime_thread_fingerprint", "capture_revision"], constraint_definition: "UNIQUE (device_id, runtime_thread_fingerprint, capture_revision)" },
+    { ...base, contype: "u", column_names: ["device_id", "runtime_thread_fingerprint", "capture_fingerprint"], constraint_definition: "UNIQUE (device_id, runtime_thread_fingerprint, capture_fingerprint)" },
+    {
+      ...base,
+      contype: "f",
+      column_names: ["device_id"],
+      reference_table: "device_bridge_devices",
+      reference_column_names: ["device_id"],
+      confdeltype: "r",
+      confupdtype: "a",
+      confmatchtype: "s",
+      constraint_definition: "FOREIGN KEY (device_id) REFERENCES device_bridge_devices(device_id) ON DELETE RESTRICT"
+    },
+    {
+      ...base,
+      contype: "f",
+      column_names: ["resolved_contact_id"],
+      reference_table: "contacts",
+      reference_column_names: ["id"],
+      confdeltype: "r",
+      confupdtype: "a",
+      confmatchtype: "s",
+      constraint_definition: "FOREIGN KEY (resolved_contact_id) REFERENCES contacts(id) ON DELETE RESTRICT"
+    },
+    ...[
+      ["capture_schema_version", "CHECK (char_length(capture_schema_version) >= 1 AND char_length(capture_schema_version) <= 80)"],
+      ["source_platform", "CHECK (source_platform = 'tinder'::text)"],
+      ["source_package", "CHECK (source_package = 'com.tinder'::text)"],
+      ["capture_safety_status", "CHECK (capture_safety_status = 'SAFE'::text)"],
+      ["runtime_thread_fingerprint", "CHECK (runtime_thread_fingerprint ~ '^[0-9a-f]{64}$'::text)"],
+      ["capture_fingerprint", "CHECK (capture_fingerprint ~ '^[0-9a-f]{64}$'::text)"],
+      ["capture_revision", "CHECK (capture_revision > 0)"],
+      ["visible_thread_metadata", "CHECK (jsonb_typeof(visible_thread_metadata) = 'object'::text)"],
+      ["visible_messages", "CHECK (jsonb_typeof(visible_messages) = 'array'::text)"],
+      ["mapping_status", "CHECK (mapping_status = ANY (ARRAY['NEEDS_HUMAN_MAPPING'::text, 'RESOLVED'::text, 'CONFLICT'::text]))"],
+      ["human_review_status", "CHECK (human_review_status = ANY (ARRAY['PENDING'::text, 'CONFIRMED'::text, 'REJECTED'::text]))"],
+      ["provenance", "CHECK (jsonb_typeof(provenance) = 'object'::text)"],
+      [["mapping_status", "resolved_contact_id"], "CHECK ((mapping_status = 'RESOLVED'::text) = (resolved_contact_id IS NOT NULL))"]
+    ].map(([column_names, constraint_definition]) => ({
+      ...base,
+      contype: "c",
+      column_names: Array.isArray(column_names) ? column_names : [column_names],
+      constraint_definition
+    }))
+  ];
+  return {
+    async query(sql) {
+      if (sql.includes("to_regclass")) return { rows: [{ relation_name: "tinder_visible_chat_captures" }] };
+      if (sql.includes("SELECT c.relkind")) return { rows: [{ relkind: "r" }] };
+      if (sql.includes("SELECT a.attname AS column_name")) return { rows: columns };
+      if (sql.includes("FROM pg_constraint c")) return { rows: constraints };
+      throw new Error(`Unexpected query: ${sql}`);
+    }
+  };
 }
 
 test("the static T2 guard accepts only the single plain CREATE TABLE source", () => {
@@ -115,6 +193,13 @@ test("capture schema accepts PostgreSQL's equivalent BETWEEN deparse", () => {
       "(char_length(capture_schema_version) >= 1) AND (char_length(capture_schema_version) <= 80)"
     )),
     true
+  );
+});
+
+test("capture schema accepts PostgreSQL CHECK conkeys and null non-FK reference metadata", async () => {
+  assert.deepEqual(
+    await inspectTinderVisibleChatCaptureSchema(realPostgresCatalogShapeClient()),
+    { state: "CANONICAL" }
   );
 });
 

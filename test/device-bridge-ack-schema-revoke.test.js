@@ -9,7 +9,8 @@ import {
   hasExpectedAckCheckDefinition,
   inspectDeviceBridgeAckSchema,
   preflightDeviceBridgeAckSchemaForProtectedT1Preflight,
-  preflightDeviceBridgeAckSchemaForT1
+  preflightDeviceBridgeAckSchemaForT1,
+  preflightDeviceBridgeAckSchemaForT1Migration
 } from "../device-bridge/ack-schema.js";
 import { createAdminDeviceRevokeHandler } from "../device-bridge/admin.js";
 import { withDeviceBridgeReadOnlyTransaction } from "../device-bridge/read-only-transaction.js";
@@ -153,19 +154,22 @@ test("standalone ACK migration keeps the named final ACK constraint", () => {
 
 test("T1-only runner never imports or calls ACK mutation", () => {
   const ddl = fs.readFileSync(new URL("../device-bridge/database.js", import.meta.url), "utf8");
-  assert.match(ddl, /preflightDeviceBridgeAckSchemaForT1/);
+  assert.match(ddl, /preflightDeviceBridgeAckSchemaForT1Migration/);
   assert.doesNotMatch(ddl, /preflightDeviceBridgeAckSchemaForProtectedT1Preflight/);
   assert.doesNotMatch(ddl, /migrateDeviceBridgeAckSchema|ALTER TABLE device_bridge_command_acks|CREATE TABLE/);
 });
 
-test("only the protected T1 preflight module enables the semantic ACK fallback", () => {
+test("semantic ACK fallback is limited to the protected preflight and explicit migration runner, never startup", () => {
   const protectedPreflight = fs.readFileSync(new URL("../device-bridge/t1-readonly-preflight.js", import.meta.url), "utf8");
   const startupReadiness = fs.readFileSync(new URL("../device-bridge/schema-readiness.js", import.meta.url), "utf8");
   const initialization = fs.readFileSync(new URL("../device-bridge/initialization.js", import.meta.url), "utf8");
   const migration = fs.readFileSync(new URL("../device-bridge/database.js", import.meta.url), "utf8");
   assert.match(protectedPreflight, /preflightDeviceBridgeAckSchemaForProtectedT1Preflight/);
-  for (const source of [startupReadiness, initialization, migration]) {
+  assert.match(migration, /preflightDeviceBridgeAckSchemaForT1Migration/);
+  for (const source of [startupReadiness, initialization]) {
     assert.doesNotMatch(source, /preflightDeviceBridgeAckSchemaForProtectedT1Preflight/);
+    assert.doesNotMatch(source, /preflightDeviceBridgeAckSchemaForT1Migration/);
+    assert.doesNotMatch(source, /ack-payload-semantic-classifier/);
   }
 });
 
@@ -225,7 +229,7 @@ test("canonical ACK payload passes readiness without invoking the semantic fallb
   assertNoAckMutation(runtimeClient.calls);
 });
 
-test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes only the protected payload fallback", async () => {
+test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes the protected and runner-owned payload fallback", async () => {
   const checks = completeAckChecks({ payloadDefinition: NONCANONICAL_EQUIVALENT_PAYLOAD });
   const payload = checks.find(row => row.conname === FINAL_ACK_CONSTRAINT_NAME);
   assert.equal(hasExpectedAckCheckDefinition(payload, ACK_REQUIRED_CHECKS.at(-1)), false);
@@ -234,6 +238,11 @@ test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes on
   await assert.rejects(() => preflightDeviceBridgeAckSchemaForT1(strictClient), /ACK schema compatibility check failed/);
   assert.equal(strictClient.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
   assertNoAckMutation(strictClient.calls);
+
+  const migrationClient = semanticAckReadinessClient({ checks });
+  assert.deepEqual(await preflightDeviceBridgeAckSchemaForT1Migration(migrationClient), { ready: true });
+  assert.equal(migrationClient.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 1);
+  assertNoAckMutation(migrationClient.calls);
 
   const protectedPreflight = await runProtectedAckPreflight({ checks });
   assert.deepEqual(protectedPreflight.result, { ready: true });

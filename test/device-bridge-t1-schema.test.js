@@ -8,7 +8,12 @@ import {
   T1_TINDER_STATE_CONSTRAINT_NAME,
   inspectDeviceBridgeT1Schema
 } from "../device-bridge/t1-schema.js";
-import { migrateDeviceBridgeSchema } from "../device-bridge/database.js";
+import {
+  migrateDeviceBridgeSchema,
+  T1_MIGRATION_IDLE_TRANSACTION_TIMEOUT,
+  T1_MIGRATION_LOCK_TIMEOUT,
+  T1_MIGRATION_STATEMENT_TIMEOUT
+} from "../device-bridge/database.js";
 import {
   FOUNDATION_COLUMN_CONTRACT,
   FOUNDATION_CONSTRAINT_CONTRACT,
@@ -23,6 +28,20 @@ const FINAL_TINDER = ["DISCONNECTED", "CONNECTING", "CONNECTED", "AUTH_REQUIRED"
 const LEGACY_COMMANDS = ["PING", "REQUEST_STATUS", "STOP_BRIDGE"];
 const FINAL_COMMANDS = ["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER"];
 const ACK_STATUS = ["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"];
+const CANONICAL_ACK_ACCEPTANCE = Object.freeze({
+  RECEIVED: [true, false, false, false],
+  SUCCEEDED: [true, false, true, false],
+  FAILED: [false, true, false, false],
+  REJECTED: [true, true, false, false],
+  EXPIRED: [true, false, false, false]
+});
+const NONCANONICAL_EQUIVALENT_ACK_PAYLOAD = `
+  (status = 'EXPIRED' AND result IS NULL AND error IS NULL)
+  OR (status = 'REJECTED' AND result IS NULL)
+  OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL)
+  OR (status = 'SUCCEEDED' AND error IS NULL)
+  OR (status = 'RECEIVED' AND result IS NULL AND error IS NULL)
+`;
 
 function checkDefinition(expression) {
   return `CHECK (${expression})`;
@@ -30,6 +49,24 @@ function checkDefinition(expression) {
 
 function enumExpression(column, values) {
   return `${column} IN (${values.map(value => `'${value}'`).join(", ")})`;
+}
+
+function semanticMatrix(overrides = {}) {
+  return ACK_STATUS.flatMap((status, statusIndex) => CANONICAL_ACK_ACCEPTANCE[status].map((canonical_accepts, combinationIndex) => ({
+    case_id: statusIndex * 4 + combinationIndex + 1,
+    production_accepts: (overrides[status] || CANONICAL_ACK_ACCEPTANCE[status])[combinationIndex],
+    canonical_accepts
+  })));
+}
+
+function ackSemanticMatrixFor(mode) {
+  if (mode === "UNSAFE") return semanticMatrix({ RECEIVED: [true, true, true, true] });
+  if (mode === "WRONG") return semanticMatrix({ SUCCEEDED: [false, false, false, false] });
+  if (mode === "WEAKER") return semanticMatrix({ RECEIVED: [true, false, true, false] });
+  if (mode === "STRONGER") return semanticMatrix({ SUCCEEDED: [true, false, false, false] });
+  if (mode === "PARTIAL") return semanticMatrix({ FAILED: [false, false, false, false] });
+  if (mode === "DRIFT") return semanticMatrix({ EXPIRED: [false, true, false, false] });
+  return semanticMatrix();
 }
 
 function ackConstraints({ mode = "FINAL", extra = false } = {}) {
@@ -69,7 +106,7 @@ function ackConstraints({ mode = "FINAL", extra = false } = {}) {
     {
       conname: "device_bridge_command_acks_payload_check_v1",
       convalidated: mode !== "UNVALIDATED",
-      constraint_definition: checkDefinition(mode === "WRONG" ? "status = 'RECEIVED'" : mode === "UNSAFE" ? `(${payload}) OR TRUE` : payload),
+      constraint_definition: checkDefinition(mode === "WRONG" ? "status = 'RECEIVED'" : mode === "UNSAFE" ? `(${payload}) OR TRUE` : mode === "FINAL" || mode === "UNVALIDATED" ? payload : NONCANONICAL_EQUIVALENT_ACK_PAYLOAD),
       column_names: ["error", "result", "status"]
     }
   ];
@@ -198,22 +235,69 @@ function migrationClient({
   wrongAckTypes = false,
   postgresCatalogChars = false,
   failOnSecondT1Ddl = false,
-  failPostcheck = false
+  failPostcheck = false,
+  lockTimeout = false,
+  advisoryLockAvailable = true,
+  schemaDriftAfterLocks = false,
+  dataDriftAfterLocks = false,
+  failCommit = false,
+  failRollback = false
 } = {}) {
   const calls = [];
   const present = new Set(foundation === "EMPTY" ? [] : REQUIRED_TABLES);
   if (foundation === "MISSING") present.delete("device_bridge_audit_events");
-  const state = { tinder, command, ack, extraAck, committed: false, rolledBack: false };
+  const state = {
+    tinder,
+    command,
+    ack,
+    extraAck,
+    incompatibleTinder,
+    incompatibleCommand,
+    incompatibleAck,
+    committed: false,
+    rolledBack: false,
+    rollbackCount: 0,
+    lockCount: 0,
+    snapshot: null
+  };
+  function snapshotState() {
+    return {
+      tinder: state.tinder,
+      command: state.command,
+      incompatibleTinder: state.incompatibleTinder,
+      incompatibleCommand: state.incompatibleCommand,
+      incompatibleAck: state.incompatibleAck
+    };
+  }
+  function restoreSnapshot() {
+    if (!state.snapshot) return;
+    Object.assign(state, state.snapshot);
+    state.snapshot = null;
+  }
   const client = {
     calls,
     state,
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (["BEGIN", "COMMIT", "ROLLBACK", "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"].includes(sql)) {
-        if (sql === "COMMIT") state.committed = true;
-        if (sql === "ROLLBACK") state.rolledBack = true;
+      if (sql === "BEGIN") {
+        state.snapshot = snapshotState();
         return { rows: [] };
       }
+      if (sql === "COMMIT") {
+        if (failCommit) throw new Error("injected COMMIT failure");
+        state.committed = true;
+        state.snapshot = null;
+        return { rows: [] };
+      }
+      if (sql === "ROLLBACK") {
+        state.rolledBack = true;
+        state.rollbackCount += 1;
+        if (failRollback) throw new Error("injected ROLLBACK failure");
+        restoreSnapshot();
+        return { rows: [] };
+      }
+      if (sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY" || sql.startsWith("SET LOCAL ")) return { rows: [] };
+      if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ acquired: advisoryLockAvailable }] };
       if (sql.includes("to_regclass")) return { rows: [{ relation_name: present.has(params[0]) ? params[0] : null }] };
       if (sql.includes("FROM pg_class c") && sql.includes("c.relkind")) {
         return { rows: REQUIRED_TABLES.map(table => ({ table_name: table, relkind: foundationFault === "relation" && table === "device_bridge_keys" ? "v" : "r" })) };
@@ -229,13 +313,32 @@ function migrationClient({
           }))
         };
       }
+      if (sql.includes("LIMIT 2") && sql.includes("pg_depend")) {
+        return { rows: ack === "UNRESOLVED" ? [] : [{ constraint_oid: "4242", evaluator_safe: true }] };
+      }
+      if (sql.includes("FROM XMLTABLE") && sql.includes("query_to_xml")) {
+        if (ack === "EVALUATION_ERROR") throw new Error("injected semantic evaluator error");
+        return { rows: ack === "INCOMPLETE" ? semanticMatrix().slice(0, -1) : ackSemanticMatrixFor(ack) };
+      }
       if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_devices")) return { rows: [t1Constraint({ kind: "tinder", mode: state.tinder })] };
       if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_commands")) return { rows: [t1Constraint({ kind: "command", mode: state.command })] };
       if (sql.includes("FROM pg_constraint") && sql.includes("device_bridge_command_acks")) return { rows: ackConstraints({ mode: state.ack, extra: state.extraAck }) };
-      if (sql.includes("FROM device_bridge_devices") && sql.includes("IS NOT TRUE")) return { rows: [{ incompatible: incompatibleTinder }] };
-      if (sql.includes("FROM device_bridge_commands") && sql.includes("IS NOT TRUE")) return { rows: [{ incompatible: incompatibleCommand }] };
-      if (sql.includes("FROM device_bridge_command_acks") && sql.includes("IS NOT TRUE")) return { rows: [{ incompatible: incompatibleAck }] };
-      if (sql.startsWith("LOCK TABLE")) return { rows: [] };
+      if (sql.includes("FROM device_bridge_devices") && sql.includes("IS NOT TRUE")) return { rows: [{ incompatible: state.incompatibleTinder }] };
+      if (sql.includes("FROM device_bridge_commands") && sql.includes("IS NOT TRUE")) return { rows: [{ incompatible: state.incompatibleCommand }] };
+      if (sql.includes("FROM device_bridge_command_acks") && sql.includes("IS NOT TRUE")) return { rows: [{ incompatible: state.incompatibleAck }] };
+      if (sql.startsWith("LOCK TABLE")) {
+        state.lockCount += 1;
+        if (lockTimeout) {
+          const error = new Error("injected lock timeout");
+          error.code = "55P03";
+          throw error;
+        }
+        if (state.lockCount === REQUIRED_TABLES.length) {
+          if (schemaDriftAfterLocks) state.command = "UNSAFE";
+          if (dataDriftAfterLocks) state.incompatibleCommand = true;
+        }
+        return { rows: [] };
+      }
       if (sql.includes("ALTER TABLE") && sql.includes("ADD CONSTRAINT") && sql.includes(T1_TINDER_STATE_CONSTRAINT_NAME)) {
         state.tinder = "FINAL";
         return { rows: [] };
@@ -249,7 +352,7 @@ function migrationClient({
       if (sql.includes("ALTER TABLE") && sql.includes("DROP CONSTRAINT")) return { rows: [] };
       throw new Error(`Unexpected query in migration test: ${sql}`);
     },
-    release() { state.released = true; }
+    release(error) { state.released = true; state.releaseError = error || null; }
   };
   return { client, pool: { async connect() { return client; } } };
 }
@@ -329,6 +432,45 @@ test("missing, weakened, extra, unvalidated, or mistyped ACK state stops before 
   }
 });
 
+test("canonical ACK uses the runner fast path without the semantic evaluator", async () => {
+  const fake = migrationClient({ ack: "FINAL" });
+  assert.deepEqual(await migrateDeviceBridgeSchema(fake.pool), { migrated: true });
+  assert.equal(fake.client.calls.some(call => call.sql.includes("FROM XMLTABLE")), false);
+  assert.equal(fake.client.calls.filter(call => call.sql === "BEGIN").length, 1);
+  assert.equal(fake.client.calls.some(call => call.sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"), false);
+});
+
+test("known semantically equivalent noncanonical ACK passes every runner gate on its one transaction client", async () => {
+  const fake = migrationClient({ ack: "EQUIVALENT" });
+  assert.deepEqual(await migrateDeviceBridgeSchema(fake.pool), { migrated: true });
+  const matrixCalls = fake.client.calls
+    .map((call, index) => ({ call, index }))
+    .filter(item => item.call.sql.includes("FROM XMLTABLE"));
+  const lockCalls = fake.client.calls
+    .map((call, index) => ({ call, index }))
+    .filter(item => item.call.sql.startsWith("LOCK TABLE"));
+  const ddl = ddlCalls(fake.client.calls);
+  const firstDdl = fake.client.calls.indexOf(ddl[0]);
+  const lastDdl = fake.client.calls.lastIndexOf(ddl.at(-1));
+  assert.equal(matrixCalls.length, 3);
+  assert.ok(matrixCalls[0].index < lockCalls[0].index);
+  assert.ok(matrixCalls[1].index > lockCalls.at(-1).index && matrixCalls[1].index < firstDdl);
+  assert.ok(matrixCalls[2].index > lastDdl && matrixCalls[2].index < fake.client.calls.findIndex(call => call.sql === "COMMIT"));
+  assert.equal(fake.client.calls.filter(call => call.sql === "BEGIN").length, 1);
+  assert.equal(fake.client.calls.some(call => call.sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"), false);
+  assert.equal(fake.client.state.committed, true);
+});
+
+test("noncanonical ACK that is weaker, stronger, partial, drifted, unresolved, incomplete, or errored stops before locks and DDL", async () => {
+  for (const ack of ["WEAKER", "STRONGER", "PARTIAL", "DRIFT", "UNRESOLVED", "INCOMPLETE", "EVALUATION_ERROR"]) {
+    const fake = migrationClient({ ack });
+    await assert.rejects(() => migrateDeviceBridgeSchema(fake.pool), /ACK schema compatibility check failed/);
+    assert.equal(fake.client.calls.some(call => call.sql.startsWith("LOCK TABLE")), false, ack);
+    assert.equal(ddlCalls(fake.client.calls).length, 0, ack);
+    assert.equal(fake.client.state.rolledBack, true, ack);
+  }
+});
+
 test("incompatible and NULL-compatible T1 or ACK rows stop before any DDL", async () => {
   for (const options of [{ incompatibleTinder: true }, { incompatibleCommand: true }, { incompatibleAck: true }]) {
     const fake = migrationClient(options);
@@ -341,6 +483,42 @@ test("incompatible and NULL-compatible T1 or ACK rows stop before any DDL", asyn
   assert.match(ack, /\) IS NOT TRUE/);
 });
 
+test("transaction-local migration bounds and a concurrent-runner ambiguity fail closed without retry", async () => {
+  const fake = migrationClient({ advisoryLockAvailable: false });
+  await assert.rejects(() => migrateDeviceBridgeSchema(fake.pool), /already running/);
+  assert.equal(fake.client.calls.some(call => call.sql === `SET LOCAL lock_timeout = '${T1_MIGRATION_LOCK_TIMEOUT}'`), true);
+  assert.equal(fake.client.calls.some(call => call.sql === `SET LOCAL statement_timeout = '${T1_MIGRATION_STATEMENT_TIMEOUT}'`), true);
+  assert.equal(fake.client.calls.some(call => call.sql === `SET LOCAL idle_in_transaction_session_timeout = '${T1_MIGRATION_IDLE_TRANSACTION_TIMEOUT}'`), true);
+  assert.equal(fake.client.calls.filter(call => call.sql.includes("pg_try_advisory_xact_lock")).length, 1);
+  assert.equal(fake.client.calls.some(call => call.sql.startsWith("LOCK TABLE")), false);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
+  assert.equal(fake.client.state.rolledBack, true);
+  assert.equal(fake.client.state.released, true);
+});
+
+test("lock timeout aborts once, rolls back, and a separately initiated recovery run succeeds", async () => {
+  const blocked = migrationClient({ lockTimeout: true });
+  await assert.rejects(() => migrateDeviceBridgeSchema(blocked.pool), /lock timeout/);
+  assert.equal(blocked.client.calls.filter(call => call.sql.startsWith("LOCK TABLE")).length, 1);
+  assert.equal(ddlCalls(blocked.client.calls).length, 0);
+  assert.equal(blocked.client.state.rolledBack, true);
+  assert.equal(blocked.client.state.released, true);
+
+  const recovery = migrationClient();
+  assert.deepEqual(await migrateDeviceBridgeSchema(recovery.pool), { migrated: true });
+  assert.equal(ddlCalls(recovery.client.calls).length, 4);
+});
+
+test("schema or data drift discovered only after the full lock set aborts before DDL", async () => {
+  for (const options of [{ schemaDriftAfterLocks: true }, { dataDriftAfterLocks: true }]) {
+    const fake = migrationClient(options);
+    await assert.rejects(() => migrateDeviceBridgeSchema(fake.pool));
+    assert.equal(fake.client.state.lockCount, REQUIRED_TABLES.length);
+    assert.equal(ddlCalls(fake.client.calls).length, 0);
+    assert.equal(fake.client.state.rolledBack, true);
+  }
+});
+
 test("complete pre-T1 Foundation performs exactly four documented T1 ALTERs after the global preflight", async () => {
   const fake = migrationClient();
   assert.deepEqual(await migrateDeviceBridgeSchema(fake.pool), { migrated: true });
@@ -351,7 +529,9 @@ test("complete pre-T1 Foundation performs exactly four documented T1 ALTERs afte
   assert.equal(ddl.some(call => /\bCREATE\b/i.test(call.sql)), false);
   const firstDdl = fake.client.calls.indexOf(ddl[0]);
   const beforeDdl = fake.client.calls.slice(0, firstDdl);
-  assert.equal(beforeDdl.filter(call => call.sql.startsWith("LOCK TABLE")).length, REQUIRED_TABLES.length);
+  const locks = beforeDdl.filter(call => call.sql.startsWith("LOCK TABLE"));
+  assert.equal(locks.length, REQUIRED_TABLES.length);
+  assert.deepEqual(locks.map(call => call.sql.match(/^LOCK TABLE ([a-z_]+)/)?.[1]), REQUIRED_TABLES);
   assert.equal(beforeDdl.some(call => call.sql.includes("FROM pg_index i")), true);
   assert.equal(beforeDdl.some(call => call.sql.includes("device_bridge_command_acks") && call.sql.includes("IS NOT TRUE")), true);
   assert.equal(fake.client.state.committed, true);
@@ -367,13 +547,49 @@ test("successful migration runs a postcheck and a second final-state run is idem
   assert.equal(ddlCalls(fake.client.calls).length, before);
 });
 
+test("already-T1 is a no-op and partial-T1 state fails closed", async () => {
+  const final = migrationClient({ tinder: "FINAL", command: "FINAL" });
+  assert.deepEqual(await migrateDeviceBridgeSchema(final.pool), { migrated: false });
+  assert.equal(ddlCalls(final.client.calls).length, 0);
+
+  for (const options of [{ tinder: "FINAL", command: "LEGACY" }, { tinder: "LEGACY", command: "FINAL" }]) {
+    const partial = migrationClient(options);
+    await assert.rejects(() => migrateDeviceBridgeSchema(partial.pool), /one unambiguous constraint state/);
+    assert.equal(ddlCalls(partial.client.calls).length, 0);
+    assert.equal(partial.client.state.rolledBack, true);
+  }
+});
+
 test("postcheck failure and a failure during the second allowed ALTER both roll back", async () => {
   for (const options of [{ failPostcheck: true }, { failOnSecondT1Ddl: true }]) {
     const fake = migrationClient(options);
     await assert.rejects(() => migrateDeviceBridgeSchema(fake.pool));
     assert.equal(fake.client.state.committed, false);
     assert.equal(fake.client.state.rolledBack, true);
+    assert.equal(fake.client.state.tinder, "LEGACY");
+    assert.equal(fake.client.state.command, "LEGACY");
+    assert.equal(fake.client.state.released, true);
   }
+});
+
+test("a failed COMMIT never triggers an automatic retry or an ambiguous rollback", async () => {
+  const fake = migrationClient({ failCommit: true });
+  await assert.rejects(() => migrateDeviceBridgeSchema(fake.pool), /COMMIT failure/);
+  assert.equal(fake.client.calls.filter(call => call.sql === "COMMIT").length, 1);
+  assert.equal(fake.client.calls.filter(call => call.sql === "BEGIN").length, 1);
+  assert.equal(fake.client.state.rolledBack, false);
+  assert.equal(fake.client.state.released, true);
+  assert.ok(fake.client.state.releaseError instanceof Error);
+});
+
+test("a rollback failure preserves the primary abort and discards the client without retry", async () => {
+  const fake = migrationClient({ lockTimeout: true, failRollback: true });
+  await assert.rejects(() => migrateDeviceBridgeSchema(fake.pool), /lock timeout/);
+  assert.equal(fake.client.calls.filter(call => call.sql === "ROLLBACK").length, 1);
+  assert.equal(fake.client.calls.filter(call => call.sql === "BEGIN").length, 1);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
+  assert.equal(fake.client.state.released, true);
+  assert.ok(fake.client.state.releaseError instanceof Error);
 });
 
 test("only the global explicit runner retains T1 DDL authority", () => {

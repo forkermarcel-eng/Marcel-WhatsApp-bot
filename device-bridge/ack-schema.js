@@ -194,8 +194,20 @@ export async function preflightDeviceBridgeAckSchemaForT1(client) {
 }
 
 /**
- * The protected T1 read-only diagnostic preflight is the sole semantic
- * fallback consumer. Its caller owns the fixed transaction and rollback.
+ * The explicit T1 migration runner reuses the same bounded semantic
+ * equivalence check as the protected read-only preflight, but owns its
+ * writable transaction itself. The classifier performs only SELECTs through
+ * this already-owned client and never begins, commits, rolls back, or releases
+ * it.
+ */
+export async function preflightDeviceBridgeAckSchemaForT1Migration(client) {
+  return preflightDeviceBridgeAckSchema(client, true);
+}
+
+/**
+ * The protected T1 read-only diagnostic preflight owns a fixed read-only
+ * transaction and may use the same bounded semantic fallback only through its
+ * guarded client.
  */
 export async function preflightDeviceBridgeAckSchemaForProtectedT1Preflight(client) {
   if (!isDeviceBridgeReadOnlyTransactionClient(client)) {

@@ -131,6 +131,9 @@ export async function preflightDeviceBridgeT1SchemaMigration(client) {
   if (inspection.constraints.some(item => item.state === "INVALID")) {
     throw new Error("Device Bridge T1 schema compatibility check failed.");
   }
+  if (new Set(inspection.constraints.map(item => item.state)).size !== 1) {
+    throw new Error("Device Bridge T1 schema migration requires one unambiguous constraint state.");
+  }
 
   const steps = [];
   for (const item of inspection.constraints) {
@@ -151,7 +154,9 @@ export async function preflightDeviceBridgeT1SchemaMigration(client) {
 }
 
 export async function postcheckDeviceBridgeT1SchemaMigration(client) {
-  const postcheck = await inspectDeviceBridgeT1Schema(client);
-  if (!postcheck.ready) throw new Error("Device Bridge T1 schema postcheck failed.");
-  return postcheck;
+  const postcheck = await preflightDeviceBridgeT1SchemaMigration(client);
+  if (postcheck.steps.some(step => step.mutate)) {
+    throw new Error("Device Bridge T1 schema postcheck failed.");
+  }
+  return { ready: true, constraints: postcheck.steps };
 }

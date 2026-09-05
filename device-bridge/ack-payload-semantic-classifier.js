@@ -42,6 +42,33 @@ const OVERALL_CLASSIFICATIONS = new Set([
   "PRODUCTION_DRIFT",
   "UNRESOLVED"
 ]);
+export const ACK_PAYLOAD_DIAGNOSTIC_STAGES = Object.freeze([
+  "CONSTRAINT_DISCOVERY",
+  "CONSTRAINT_IDENTITY",
+  "SAFE_EVALUATOR_PREPARATION",
+  "SYNTHETIC_EVALUATION",
+  "CANDIDATE_RESULT_MAPPING",
+  "STATUS_CLASSIFICATION",
+  "OVERALL_CLASSIFICATION"
+]);
+export const ACK_PAYLOAD_DIAGNOSTIC_REASON_CODES = Object.freeze([
+  "CONSTRAINT_DISCOVERY_INVALID",
+  "CONSTRAINT_NOT_FOUND",
+  "MULTIPLE_CANDIDATES",
+  "CONSTRAINT_IDENTITY_INVALID",
+  "EVALUATOR_UNSAFE",
+  "CANONICAL_TARGET_INVARIANT_INVALID",
+  "EVALUATION_ERROR",
+  "CANDIDATE_MATRIX_NOT_ARRAY",
+  "CANDIDATE_MATRIX_OVERSIZED",
+  "CANDIDATE_MATRIX_INCOMPLETE",
+  "CANDIDATE_RESULT_INVALID",
+  "STATUS_RESULT_AMBIGUOUS",
+  "OVERALL_RESULT_INVALID",
+  "UNKNOWN_SAFE_FAILURE"
+]);
+const DIAGNOSTIC_STAGES = new Set(ACK_PAYLOAD_DIAGNOSTIC_STAGES);
+const DIAGNOSTIC_REASON_CODES = new Set(ACK_PAYLOAD_DIAGNOSTIC_REASON_CODES);
 const EXPECTED_CASES = Object.freeze(
   SUPPORTED_STATUSES.flatMap((status, statusIndex) => RESULT_ERROR_COMBINATIONS.map((combination, combinationIndex) => Object.freeze({
     case_id: statusIndex * RESULT_ERROR_COMBINATIONS.length + combinationIndex + 1,
@@ -155,6 +182,35 @@ const EVALUATE_PAYLOAD_MATRIX_QUERY = `
   ORDER BY observed.case_id
 `;
 
+function canonicalStatusList(statuses) {
+  const selected = new Set(Array.isArray(statuses) || statuses instanceof Set ? statuses : []);
+  return SUPPORTED_STATUSES.filter(status => selected.has(status));
+}
+
+function safeCandidateCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= EXPECTED_CASES.length ? value : null;
+}
+
+function unresolvedDiagnostic({
+  stage,
+  reasonCode,
+  affectedStatuses = SUPPORTED_STATUSES,
+  attempted = 0,
+  completed = 0
+} = {}) {
+  const statuses = canonicalStatusList(affectedStatuses);
+  return {
+    stage: DIAGNOSTIC_STAGES.has(stage) ? stage : "STATUS_CLASSIFICATION",
+    reason_code: DIAGNOSTIC_REASON_CODES.has(reasonCode) ? reasonCode : "UNKNOWN_SAFE_FAILURE",
+    scope: statuses.length === SUPPORTED_STATUSES.length ? "SHARED" : "STATUS_SPECIFIC",
+    affected_statuses: statuses,
+    candidate_evaluations: {
+      attempted: safeCandidateCount(attempted),
+      completed: safeCandidateCount(completed)
+    }
+  };
+}
+
 function unresolvedClassification() {
   return {
     status_rules: Object.fromEntries(SUPPORTED_STATUSES.map(status => [status, "UNRESOLVED"])),
@@ -164,11 +220,22 @@ function unresolvedClassification() {
   };
 }
 
-function unresolvedResult() {
+function normalizedUnresolvedDiagnostic(diagnostic) {
+  return unresolvedDiagnostic({
+    stage: diagnostic?.stage,
+    reasonCode: diagnostic?.reasonCode || diagnostic?.reason_code,
+    affectedStatuses: diagnostic?.affectedStatuses || diagnostic?.affected_statuses,
+    attempted: diagnostic?.attempted ?? diagnostic?.candidate_evaluations?.attempted,
+    completed: diagnostic?.completed ?? diagnostic?.candidate_evaluations?.completed
+  });
+}
+
+function unresolvedResult(diagnostic) {
   return {
     ok: true,
     classification: unresolvedClassification(),
-    reason_code: "SEMANTIC_CLASSIFICATION_UNRESOLVED"
+    reason_code: "SEMANTIC_CLASSIFICATION_UNRESOLVED",
+    diagnostic: normalizedUnresolvedDiagnostic(diagnostic)
   };
 }
 
@@ -181,12 +248,46 @@ function unavailableResult(error) {
   };
 }
 
-function isExpectedTarget(target) {
-  return target
-    && typeof target.constraint_oid === "string"
-    && /^\d+$/.test(target.constraint_oid)
-    && target.evaluator_safe === true
-    && PAYLOAD_COLUMNS.join(",") === "error,result,status";
+function targetDiagnostic(targets) {
+  if (!Array.isArray(targets?.rows)) {
+    return unresolvedDiagnostic({
+      stage: "CONSTRAINT_DISCOVERY",
+      reasonCode: "CONSTRAINT_DISCOVERY_INVALID"
+    });
+  }
+  if (targets.rows.length === 0) {
+    return unresolvedDiagnostic({
+      stage: "CONSTRAINT_DISCOVERY",
+      reasonCode: "CONSTRAINT_NOT_FOUND"
+    });
+  }
+  if (targets.rows.length !== 1) {
+    return unresolvedDiagnostic({
+      stage: "CONSTRAINT_IDENTITY",
+      reasonCode: "MULTIPLE_CANDIDATES"
+    });
+  }
+
+  const target = targets.rows[0];
+  if (!target || typeof target.constraint_oid !== "string" || !/^\d+$/.test(target.constraint_oid)) {
+    return unresolvedDiagnostic({
+      stage: "CONSTRAINT_IDENTITY",
+      reasonCode: "CONSTRAINT_IDENTITY_INVALID"
+    });
+  }
+  if (target.evaluator_safe !== true) {
+    return unresolvedDiagnostic({
+      stage: "SAFE_EVALUATOR_PREPARATION",
+      reasonCode: "EVALUATOR_UNSAFE"
+    });
+  }
+  if (PAYLOAD_COLUMNS.join(",") !== "error,result,status") {
+    return unresolvedDiagnostic({
+      stage: "SAFE_EVALUATOR_PREPARATION",
+      reasonCode: "CANONICAL_TARGET_INVARIANT_INVALID"
+    });
+  }
+  return null;
 }
 
 async function findAckPayloadConstraint(client) {
@@ -197,27 +298,118 @@ async function evaluateAckPayloadMatrix(client, constraintOid) {
   return client.query(EVALUATE_PAYLOAD_MATRIX_QUERY, [constraintOid, FINAL_ACK_CHECK_EXPRESSION]);
 }
 
+function expectedStatusForCase(caseId) {
+  return Number.isSafeInteger(caseId) && caseId >= 1 && caseId <= EXPECTED_CASES.length
+    ? EXPECTED_CASES[caseId - 1].status
+    : null;
+}
+
 function parseMatrix(rows) {
-  if (!Array.isArray(rows) || rows.length !== EXPECTED_CASES.length) return null;
+  if (!Array.isArray(rows)) {
+    return {
+      matrix: null,
+      diagnostic: unresolvedDiagnostic({
+        stage: "CANDIDATE_RESULT_MAPPING",
+        reasonCode: "CANDIDATE_MATRIX_NOT_ARRAY",
+        attempted: EXPECTED_CASES.length,
+        completed: 0
+      })
+    };
+  }
+  if (rows.length > EXPECTED_CASES.length) {
+    return {
+      matrix: null,
+      diagnostic: unresolvedDiagnostic({
+        stage: "CANDIDATE_RESULT_MAPPING",
+        reasonCode: "CANDIDATE_MATRIX_OVERSIZED",
+        attempted: EXPECTED_CASES.length,
+        completed: 0
+      })
+    };
+  }
+
   const byCaseId = new Map();
+  const invalidStatuses = new Set();
+  let hasInvalidResult = false;
 
   for (const row of rows) {
     const caseId = Number(row?.case_id);
-    if (!Number.isSafeInteger(caseId) || byCaseId.has(caseId)) return null;
-    if (typeof row?.production_accepts !== "boolean" || typeof row?.canonical_accepts !== "boolean") return null;
+    const status = expectedStatusForCase(caseId);
+    if (!status || byCaseId.has(caseId) || typeof row?.production_accepts !== "boolean" || typeof row?.canonical_accepts !== "boolean") {
+      hasInvalidResult = true;
+      if (status) invalidStatuses.add(status);
+      continue;
+    }
     byCaseId.set(caseId, {
       production_accepts: row.production_accepts,
       canonical_accepts: row.canonical_accepts
     });
   }
 
+  if (hasInvalidResult) {
+    return {
+      matrix: null,
+      diagnostic: unresolvedDiagnostic({
+        stage: "CANDIDATE_RESULT_MAPPING",
+        reasonCode: "CANDIDATE_RESULT_INVALID",
+        affectedStatuses: invalidStatuses.size ? invalidStatuses : SUPPORTED_STATUSES,
+        attempted: EXPECTED_CASES.length,
+        completed: byCaseId.size
+      })
+    };
+  }
+
   const matrix = [];
+  const missingStatuses = new Set();
   for (const expected of EXPECTED_CASES) {
     const outcome = byCaseId.get(expected.case_id);
-    if (!outcome) return null;
-    matrix.push({ ...expected, ...outcome });
+    if (!outcome) missingStatuses.add(expected.status);
+    else matrix.push({ ...expected, ...outcome });
   }
-  return matrix;
+  if (rows.length !== EXPECTED_CASES.length || missingStatuses.size) {
+    return {
+      matrix: null,
+      diagnostic: unresolvedDiagnostic({
+        stage: "CANDIDATE_RESULT_MAPPING",
+        reasonCode: "CANDIDATE_MATRIX_INCOMPLETE",
+        affectedStatuses: missingStatuses.size ? missingStatuses : SUPPORTED_STATUSES,
+        attempted: EXPECTED_CASES.length,
+        completed: byCaseId.size
+      })
+    };
+  }
+
+  return { matrix, diagnostic: null };
+}
+
+function classificationDiagnostic(classification) {
+  const statusRules = classification?.status_rules;
+  const unresolvedStatuses = SUPPORTED_STATUSES.filter(status =>
+    !STATUS_CLASSIFICATIONS.has(statusRules?.[status]) || statusRules?.[status] === "UNRESOLVED"
+  );
+  if (unresolvedStatuses.length) {
+    return unresolvedDiagnostic({
+      stage: "STATUS_CLASSIFICATION",
+      reasonCode: "STATUS_RESULT_AMBIGUOUS",
+      affectedStatuses: unresolvedStatuses,
+      attempted: EXPECTED_CASES.length,
+      completed: EXPECTED_CASES.length
+    });
+  }
+  if (
+    !OVERALL_CLASSIFICATIONS.has(classification?.overall_classification)
+    || classification.overall_classification === "UNRESOLVED"
+    || typeof classification.production_can_accept_rows_canonical_rejects !== "boolean"
+    || typeof classification.canonical_can_accept_rows_production_rejects !== "boolean"
+  ) {
+    return unresolvedDiagnostic({
+      stage: "OVERALL_CLASSIFICATION",
+      reasonCode: "OVERALL_RESULT_INVALID",
+      attempted: EXPECTED_CASES.length,
+      completed: EXPECTED_CASES.length
+    });
+  }
+  return null;
 }
 
 function classifyStatus(rows) {
@@ -283,12 +475,14 @@ function classifyMatrix(matrix) {
 export async function runDeviceBridgeAckPayloadSemanticClassifier(pool, dependencies = {}) {
   const findConstraint = dependencies.findConstraint || findAckPayloadConstraint;
   const evaluateMatrix = dependencies.evaluateMatrix || evaluateAckPayloadMatrix;
+  const classify = dependencies.classifyMatrix || classifyMatrix;
 
   try {
     return await withDeviceBridgeReadOnlyTransaction(pool, async client => {
       const targets = await findConstraint(client);
-      if (!Array.isArray(targets?.rows) || targets.rows.length !== 1 || !isExpectedTarget(targets.rows[0])) {
-        return unresolvedResult();
+      const targetFailure = targetDiagnostic(targets);
+      if (targetFailure) {
+        return unresolvedResult(targetFailure);
       }
 
       let evaluated;
@@ -296,12 +490,19 @@ export async function runDeviceBridgeAckPayloadSemanticClassifier(pool, dependen
         evaluated = await evaluateMatrix(client, targets.rows[0].constraint_oid);
       } catch (error) {
         if (error?.code === READ_ONLY_GUARD_CODE) throw error;
-        return unresolvedResult();
+        return unresolvedResult({
+          stage: "SYNTHETIC_EVALUATION",
+          reasonCode: "EVALUATION_ERROR",
+          attempted: EXPECTED_CASES.length,
+          completed: 0
+        });
       }
-      const matrix = parseMatrix(evaluated?.rows);
-      if (!matrix) return unresolvedResult();
+      const parsed = parseMatrix(evaluated?.rows);
+      if (!parsed.matrix) return unresolvedResult(parsed.diagnostic);
 
-      const classification = classifyMatrix(matrix);
+      const classification = await classify(parsed.matrix);
+      const classificationFailure = classificationDiagnostic(classification);
+      if (classificationFailure) return unresolvedResult(classificationFailure);
       return {
         ok: true,
         classification,

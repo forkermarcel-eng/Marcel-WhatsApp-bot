@@ -78,6 +78,29 @@ function classification(result) {
   return result.classification;
 }
 
+function assertUnresolvedDiagnostic(result, {
+  stage,
+  reasonCode,
+  scope = "SHARED",
+  affectedStatuses = STATUSES,
+  attempted = 0,
+  completed = 0
+}) {
+  const observed = classification(result);
+  assert.equal(observed.overall_classification, "UNRESOLVED");
+  assert.deepEqual(Object.values(observed.status_rules), ["UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED"]);
+  assert.equal(observed.production_can_accept_rows_canonical_rejects, "UNRESOLVED");
+  assert.equal(observed.canonical_can_accept_rows_production_rejects, "UNRESOLVED");
+  assert.equal(result.reason_code, "SEMANTIC_CLASSIFICATION_UNRESOLVED");
+  assert.deepEqual(result.diagnostic, {
+    stage,
+    reason_code: reasonCode,
+    scope,
+    affected_statuses: affectedStatuses,
+    candidate_evaluations: { attempted, completed }
+  });
+}
+
 test("canonical-equivalent ACK payload matrix is classified in one read-only rolled-back transaction", async () => {
   const fake = semanticPool();
   const result = await runDeviceBridgeAckPayloadSemanticClassifier(fake.pool);
@@ -93,6 +116,7 @@ test("canonical-equivalent ACK payload matrix is classified in one read-only rol
   assert.equal(observed.production_can_accept_rows_canonical_rejects, false);
   assert.equal(observed.canonical_can_accept_rows_production_rejects, false);
   assert.equal(result.reason_code, "SEMANTIC_CLASSIFICATION_COMPLETE");
+  assert.equal(Object.hasOwn(result, "diagnostic"), false);
   assert.match(fake.calls[2].sql, /ARRAY\['error', 'result', 'status'\]::text\[\]/);
   assert.match(fake.calls[3].sql, /query_to_xml/);
   assert.match(fake.calls[3].sql, /XMLTABLE/);
@@ -167,22 +191,138 @@ test("a completely missing supported branch is bounded as a partial rule", async
   assertReadOnlyTransaction(fake);
 });
 
-test("ambiguous, unsafe, malformed, and unparseable production states remain unresolved", async () => {
+test("target discovery failures expose only one bounded shared reason and never run the matrix", async () => {
   const scenarios = [
-    semanticPool({ targets: [] }),
-    semanticPool({ targets: [{ constraint_oid: "1", evaluator_safe: true }, { constraint_oid: "2", evaluator_safe: true }] }),
-    semanticPool({ targets: [{ constraint_oid: "1", evaluator_safe: false }] }),
-    semanticPool({ matrix: semanticMatrix().slice(0, -1) }),
-    semanticPool({ matrixError: true })
+    {
+      fake: semanticPool({ targets: { rows: null } }),
+      stage: "CONSTRAINT_DISCOVERY",
+      reasonCode: "CONSTRAINT_DISCOVERY_INVALID"
+    },
+    {
+      fake: semanticPool({ targets: [] }),
+      stage: "CONSTRAINT_DISCOVERY",
+      reasonCode: "CONSTRAINT_NOT_FOUND"
+    },
+    {
+      fake: semanticPool({ targets: [{ constraint_oid: "1", evaluator_safe: true }, { constraint_oid: "2", evaluator_safe: true }] }),
+      stage: "CONSTRAINT_IDENTITY",
+      reasonCode: "MULTIPLE_CANDIDATES"
+    },
+    {
+      fake: semanticPool({ targets: [{ constraint_oid: "not-an-oid", evaluator_safe: true }] }),
+      stage: "CONSTRAINT_IDENTITY",
+      reasonCode: "CONSTRAINT_IDENTITY_INVALID"
+    },
+    {
+      fake: semanticPool({ targets: [{ constraint_oid: "1", evaluator_safe: false }] }),
+      stage: "SAFE_EVALUATOR_PREPARATION",
+      reasonCode: "EVALUATOR_UNSAFE"
+    }
   ];
-  for (const fake of scenarios) {
-    const result = classification(await runDeviceBridgeAckPayloadSemanticClassifier(fake.pool));
-    assert.equal(result.overall_classification, "UNRESOLVED");
-    assert.deepEqual(Object.values(result.status_rules), ["UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED", "UNRESOLVED"]);
-    assert.equal(result.production_can_accept_rows_canonical_rejects, "UNRESOLVED");
-    assert.equal(result.canonical_can_accept_rows_production_rejects, "UNRESOLVED");
+  for (const { fake, stage, reasonCode } of scenarios) {
+    const result = await runDeviceBridgeAckPayloadSemanticClassifier(fake.pool);
+    assertUnresolvedDiagnostic(result, { stage, reasonCode });
+    assert.equal(fake.calls.some(call => call.sql.includes("FROM XMLTABLE")), false);
     assertReadOnlyTransaction(fake);
   }
+});
+
+test("matrix execution errors return a bounded shared reason without database error details", async () => {
+  const fake = semanticPool({ matrixError: true });
+  const result = await runDeviceBridgeAckPayloadSemanticClassifier(fake.pool);
+  assertUnresolvedDiagnostic(result, {
+    stage: "SYNTHETIC_EVALUATION",
+    reasonCode: "EVALUATION_ERROR",
+    attempted: 20,
+    completed: 0
+  });
+  assert.equal(JSON.stringify(result).includes("XML support unavailable"), false);
+  assertReadOnlyTransaction(fake);
+});
+
+test("matrix mapping identifies bounded status-specific incomplete and invalid results", async () => {
+  const oversized = semanticPool({ matrix: [...semanticMatrix(), semanticMatrix()[0]] });
+  const oversizedResult = await runDeviceBridgeAckPayloadSemanticClassifier(oversized.pool);
+  assertUnresolvedDiagnostic(oversizedResult, {
+    stage: "CANDIDATE_RESULT_MAPPING",
+    reasonCode: "CANDIDATE_MATRIX_OVERSIZED",
+    attempted: 20,
+    completed: 0
+  });
+  assertReadOnlyTransaction(oversized);
+
+  const notArray = semanticPool({ matrix: null });
+  const notArrayResult = await runDeviceBridgeAckPayloadSemanticClassifier(notArray.pool);
+  assertUnresolvedDiagnostic(notArrayResult, {
+    stage: "CANDIDATE_RESULT_MAPPING",
+    reasonCode: "CANDIDATE_MATRIX_NOT_ARRAY",
+    attempted: 20,
+    completed: 0
+  });
+  assertReadOnlyTransaction(notArray);
+
+  const incomplete = semanticPool({ matrix: semanticMatrix().slice(0, -1) });
+  const incompleteResult = await runDeviceBridgeAckPayloadSemanticClassifier(incomplete.pool);
+  assertUnresolvedDiagnostic(incompleteResult, {
+    stage: "CANDIDATE_RESULT_MAPPING",
+    reasonCode: "CANDIDATE_MATRIX_INCOMPLETE",
+    scope: "STATUS_SPECIFIC",
+    affectedStatuses: ["EXPIRED"],
+    attempted: 20,
+    completed: 19
+  });
+  assertReadOnlyTransaction(incomplete);
+
+  const invalidMatrix = semanticMatrix();
+  invalidMatrix[4] = { ...invalidMatrix[4], production_accepts: "not-a-boolean" };
+  const invalid = semanticPool({ matrix: invalidMatrix });
+  const invalidResult = await runDeviceBridgeAckPayloadSemanticClassifier(invalid.pool);
+  assertUnresolvedDiagnostic(invalidResult, {
+    stage: "CANDIDATE_RESULT_MAPPING",
+    reasonCode: "CANDIDATE_RESULT_INVALID",
+    scope: "STATUS_SPECIFIC",
+    affectedStatuses: ["SUCCEEDED"],
+    attempted: 20,
+    completed: 19
+  });
+  assertReadOnlyTransaction(invalid);
+});
+
+test("classification-stage ambiguity remains bounded and fail closed", async () => {
+  const fake = semanticPool();
+  const result = await runDeviceBridgeAckPayloadSemanticClassifier(fake.pool, {
+    classifyMatrix: () => ({
+      status_rules: Object.fromEntries(STATUSES.map(status => [status, "UNRESOLVED"])),
+      overall_classification: "UNRESOLVED",
+      production_can_accept_rows_canonical_rejects: "secret",
+      canonical_can_accept_rows_production_rejects: "secret"
+    })
+  });
+  assertUnresolvedDiagnostic(result, {
+    stage: "STATUS_CLASSIFICATION",
+    reasonCode: "STATUS_RESULT_AMBIGUOUS",
+    attempted: 20,
+    completed: 20
+  });
+  assert.equal(JSON.stringify(result).includes("secret"), false);
+  assertReadOnlyTransaction(fake);
+
+  const overall = semanticPool();
+  const overallResult = await runDeviceBridgeAckPayloadSemanticClassifier(overall.pool, {
+    classifyMatrix: () => ({
+      status_rules: Object.fromEntries(STATUSES.map(status => [status, "MATCH"])),
+      overall_classification: "not-an-allowed-value",
+      production_can_accept_rows_canonical_rejects: false,
+      canonical_can_accept_rows_production_rejects: false
+    })
+  });
+  assertUnresolvedDiagnostic(overallResult, {
+    stage: "OVERALL_CLASSIFICATION",
+    reasonCode: "OVERALL_RESULT_INVALID",
+    attempted: 20,
+    completed: 20
+  });
+  assertReadOnlyTransaction(overall);
 });
 
 test("read-only guard blocks injected schema and row mutation dependencies", async () => {
@@ -258,7 +398,7 @@ test("handler rejects all caller input and serializes only bounded classificatio
           canonical_can_accept_rows_production_rejects: false,
           raw_constraint_definition: "CHECK (private_secret IS NOT NULL)",
           matrix: [{ raw_ack_row: true }],
-          database_url: "postgres://private-user:private-password@private-host/private-db",
+          database_url: "TEST_DATABASE_URL_SENTINEL",
           unrelated_schema: "private_schema"
         }
       };
@@ -286,11 +426,104 @@ test("handler rejects all caller input and serializes only bounded classificatio
     "production_can_accept_rows_canonical_rejects",
     "status_rules"
   ]);
+  assert.equal(Object.hasOwn(accepted.body, "diagnostic"), false);
   const serialized = JSON.stringify(accepted.body);
   assert.equal(serialized.includes("private_secret"), false);
-  assert.equal(serialized.includes("postgres://"), false);
+  assert.equal(serialized.includes("TEST_DATABASE_URL_SENTINEL"), false);
   assert.equal(serialized.includes("raw_ack_row"), false);
   assert.equal(serialized.includes("private_schema"), false);
+});
+
+test("unresolved handler metadata is strictly allowlisted and unavailable responses disclose none", async () => {
+  const handler = createAdminAckPayloadSemanticClassifierHandler({}, {
+    runClassifier: async () => ({
+      ok: true,
+      reason_code: "SEMANTIC_CLASSIFICATION_UNRESOLVED",
+      classification: {
+        status_rules: Object.fromEntries(STATUSES.map(status => [status, "UNRESOLVED"])),
+        overall_classification: "UNRESOLVED",
+        production_can_accept_rows_canonical_rejects: "UNRESOLVED",
+        canonical_can_accept_rows_production_rejects: "UNRESOLVED"
+      },
+      diagnostic: {
+        stage: "SYNTHETIC_EVALUATION",
+        reason_code: "EVALUATION_ERROR",
+        scope: "ATTACKER_CONTROLLED",
+        affected_statuses: ["FAILED", "UNSUPPORTED", "RECEIVED", "FAILED"],
+        candidate_evaluations: { attempted: 20, completed: 19 },
+        raw_constraint_definition: "CHECK (private_secret IS NOT NULL)",
+        raw_database_error: "TEST_DATABASE_URL_SENTINEL",
+        stack: "private stack trace",
+        rows: [{ private: true }]
+      }
+    })
+  });
+  const accepted = responseRecorder();
+  await handler({ query: {} }, accepted);
+  assert.equal(accepted.statusCode, 200);
+  assert.deepEqual(accepted.body.diagnostic, {
+    stage: "SYNTHETIC_EVALUATION",
+    reason_code: "EVALUATION_ERROR",
+    scope: "STATUS_SPECIFIC",
+    affected_statuses: ["RECEIVED", "FAILED"],
+    candidate_evaluations: { attempted: 20, completed: 19 }
+  });
+  const serialized = JSON.stringify(accepted.body);
+  assert.equal(serialized.includes("private_secret"), false);
+  assert.equal(serialized.includes("TEST_DATABASE_URL_SENTINEL"), false);
+  assert.equal(serialized.includes("private stack trace"), false);
+  assert.equal(serialized.includes('"rows"'), false);
+
+  const unavailable = createAdminAckPayloadSemanticClassifierHandler({}, {
+    runClassifier: async () => ({
+      ok: false,
+      reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE",
+      diagnostic: { raw_database_error: "must-not-serialize" }
+    })
+  });
+  const unavailableResponse = responseRecorder();
+  await unavailable({ query: {} }, unavailableResponse);
+  assert.equal(unavailableResponse.statusCode, 503);
+  assert.equal(JSON.stringify(unavailableResponse.body).includes("must-not-serialize"), false);
+
+  const unknownMetadata = createAdminAckPayloadSemanticClassifierHandler({}, {
+    runClassifier: async () => ({
+      ok: true,
+      reason_code: "SEMANTIC_CLASSIFICATION_UNRESOLVED",
+      classification: {
+        status_rules: Object.fromEntries(STATUSES.map(status => [status, "UNRESOLVED"])),
+        overall_classification: "UNRESOLVED",
+        production_can_accept_rows_canonical_rejects: "UNRESOLVED",
+        canonical_can_accept_rows_production_rejects: "UNRESOLVED"
+      },
+      diagnostic: {
+        stage: "not-an-allowed-stage",
+        reason_code: "not-an-allowed-code",
+        affected_statuses: ["UNSUPPORTED"],
+        candidate_evaluations: { attempted: 100, completed: 100 }
+      }
+    })
+  });
+  const unknownResponse = responseRecorder();
+  await unknownMetadata({ query: {} }, unknownResponse);
+  assert.deepEqual(unknownResponse.body.diagnostic, {
+    stage: "STATUS_CLASSIFICATION",
+    reason_code: "UNKNOWN_SAFE_FAILURE",
+    scope: "STATUS_SPECIFIC",
+    affected_statuses: [],
+    candidate_evaluations: { attempted: null, completed: null }
+  });
+});
+
+test("unexpected classifier exceptions stay fail closed without exposing raw errors", async () => {
+  const fake = semanticPool();
+  const safeErrorMessage = "TEST_DATABASE_URL_SENTINEL";
+  const result = await runDeviceBridgeAckPayloadSemanticClassifier(fake.pool, {
+    findConstraint: async () => { throw new Error(safeErrorMessage); }
+  });
+  assert.deepEqual(result, { ok: false, reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE" });
+  assert.equal(JSON.stringify(result).includes(safeErrorMessage), false);
+  assertReadOnlyTransaction(fake);
 });
 
 test("classifier has no migration authority, no caller request seam, and reuses canonical source semantics", () => {
@@ -299,6 +532,7 @@ test("classifier has no migration authority, no caller request seam, and reuses 
   assert.match(source, /withDeviceBridgeReadOnlyTransaction/);
   assert.match(source, /query_to_xml/);
   assert.match(source, /XMLTABLE/);
+  assert.match(source, /PAYLOAD_COLUMNS\.join\(","\) !== "error,result,status"/);
   assert.doesNotMatch(source, /\.\/database\.js/);
   assert.doesNotMatch(source, /req\./);
   assert.doesNotMatch(source, /\b(COMMIT|LOCK|CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\b/);

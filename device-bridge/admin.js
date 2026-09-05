@@ -8,7 +8,11 @@ import {
 import { deriveDeviceStatus } from "./heartbeat.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
-import { runDeviceBridgeAckPayloadSemanticClassifier } from "./ack-payload-semantic-classifier.js";
+import {
+  ACK_PAYLOAD_DIAGNOSTIC_REASON_CODES,
+  ACK_PAYLOAD_DIAGNOSTIC_STAGES,
+  runDeviceBridgeAckPayloadSemanticClassifier
+} from "./ack-payload-semantic-classifier.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 ADMIN READ/COMMANDS
@@ -40,6 +44,9 @@ const ACK_PAYLOAD_OVERALL_CLASSIFICATIONS = new Set([
   "PRODUCTION_DRIFT",
   "UNRESOLVED"
 ]);
+const ACK_PAYLOAD_DIAGNOSTIC_STAGE_SET = new Set(ACK_PAYLOAD_DIAGNOSTIC_STAGES);
+const ACK_PAYLOAD_DIAGNOSTIC_REASON_SET = new Set(ACK_PAYLOAD_DIAGNOSTIC_REASON_CODES);
+const ACK_PAYLOAD_MAX_CANDIDATE_EVALUATIONS = ACK_PAYLOAD_STATUSES.length * 4;
 
 function statusRow(row, now) {
   return {
@@ -336,6 +343,30 @@ function boundedAckPayloadSemanticClassification(classification) {
   };
 }
 
+function boundedCandidateEvaluationCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= ACK_PAYLOAD_MAX_CANDIDATE_EVALUATIONS
+    ? value : null;
+}
+
+function boundedAckPayloadSemanticDiagnostic(diagnostic) {
+  const requestedStatuses = new Set(Array.isArray(diagnostic?.affected_statuses) ? diagnostic.affected_statuses : []);
+  const affectedStatuses = ACK_PAYLOAD_STATUSES.filter(status => requestedStatuses.has(status));
+  const attempted = boundedCandidateEvaluationCount(diagnostic?.candidate_evaluations?.attempted);
+  const completed = boundedCandidateEvaluationCount(diagnostic?.candidate_evaluations?.completed);
+  return {
+    stage: ACK_PAYLOAD_DIAGNOSTIC_STAGE_SET.has(diagnostic?.stage)
+      ? diagnostic.stage : "STATUS_CLASSIFICATION",
+    reason_code: ACK_PAYLOAD_DIAGNOSTIC_REASON_SET.has(diagnostic?.reason_code)
+      ? diagnostic.reason_code : "UNKNOWN_SAFE_FAILURE",
+    scope: affectedStatuses.length === ACK_PAYLOAD_STATUSES.length ? "SHARED" : "STATUS_SPECIFIC",
+    affected_statuses: affectedStatuses,
+    candidate_evaluations: {
+      attempted,
+      completed: attempted !== null && completed !== null && completed <= attempted ? completed : null
+    }
+  };
+}
+
 export function createAdminAckFoundationDiagnosisHandler(pool, { runDiagnosis = runDeviceBridgeAckReadOnlyDiagnosis } = {}) {
   return async function adminAckFoundationDiagnosisHandler(req, res) {
     res.setHeader?.("Cache-Control", "no-store, max-age=0");
@@ -374,13 +405,17 @@ export function createAdminAckPayloadSemanticClassifierHandler(
         return res.status(503).json({ ok: false, reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE" });
       }
       const classification = boundedAckPayloadSemanticClassification(result.classification);
-      return res.status(200).json({
+      const response = {
         ok: true,
         classification,
         reason_code: result.reason_code === "SEMANTIC_CLASSIFICATION_COMPLETE"
           ? "SEMANTIC_CLASSIFICATION_COMPLETE"
           : "SEMANTIC_CLASSIFICATION_UNRESOLVED"
-      });
+      };
+      if (response.reason_code === "SEMANTIC_CLASSIFICATION_UNRESOLVED") {
+        response.diagnostic = boundedAckPayloadSemanticDiagnostic(result.diagnostic);
+      }
+      return res.status(200).json(response);
     } catch {
       console.error("Device Bridge ACK payload semantic classifier failed.");
       return res.status(503).json({ ok: false, reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE" });

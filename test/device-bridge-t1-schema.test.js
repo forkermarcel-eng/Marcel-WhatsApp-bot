@@ -13,7 +13,8 @@ import {
   migrateDeviceBridgeSchema,
   T1_MIGRATION_IDLE_TRANSACTION_TIMEOUT,
   T1_MIGRATION_LOCK_TIMEOUT,
-  T1_MIGRATION_STATEMENT_TIMEOUT
+  T1_MIGRATION_STATEMENT_TIMEOUT,
+  validateDeviceBridgeT1PreDdl
 } from "../device-bridge/database.js";
 import {
   FOUNDATION_COLUMN_CONTRACT,
@@ -522,6 +523,23 @@ test("transaction-local migration bounds and a concurrent-runner ambiguity fail 
   assert.equal(fake.client.calls.filter(call => call.sql.includes("pg_try_advisory_xact_lock")).length, 1);
   assert.equal(fake.client.calls.some(call => call.sql.startsWith("LOCK TABLE")), false);
   assert.equal(ddlCalls(fake.client.calls).length, 0);
+  assert.equal(fake.client.state.rolledBack, true);
+  assert.equal(fake.client.state.released, true);
+});
+
+test("pre-DDL validation shares the runner path and always rolls back before T1 DDL", async () => {
+  const fake = migrationClient({ ack: "EQUIVALENT" });
+  assert.deepEqual(await validateDeviceBridgeT1PreDdl(fake.pool), { validated: true });
+  assert.equal(fake.client.calls.filter(call => call.sql === "BEGIN").length, 1);
+  assert.equal(fake.client.calls.filter(call => call.sql === "ROLLBACK").length, 1);
+  assert.equal(fake.client.calls.some(call => call.sql === "COMMIT"), false);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
+  assert.deepEqual(
+    fake.client.calls.filter(call => call.sql.startsWith("LOCK TABLE"))
+      .map(call => call.sql.match(/^LOCK TABLE ([a-z_]+)/)?.[1]),
+    REQUIRED_TABLES
+  );
+  assert.equal(fake.client.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 2);
   assert.equal(fake.client.state.rolledBack, true);
   assert.equal(fake.client.state.released, true);
 });

@@ -4,6 +4,30 @@ This runbook applies only to the explicit local operator command
 `npm run migrate:device-bridge-t1 -- --apply`. It is not an application
 startup path, deployment hook, or automatic retry mechanism.
 
+## Isolated real-PostgreSQL pre-DDL validation
+
+The explicit real-PostgreSQL regression is deliberately separate from the
+fast test suite. It validates the runner's complete pre-DDL path only:
+transaction settings, advisory lock, global Foundation/ACK/T1 preflight,
+deterministic table locks, and the locked repeat preflight. It always rolls
+back before the first T1 `ALTER`.
+
+Start an isolated local PostgreSQL instance on loopback, then set only the
+dedicated local-test variable and run:
+
+```powershell
+$env:DEVICE_BRIDGE_REAL_PG_TEST_URL = 'postgres://local-user@127.0.0.1:5432/postgres'
+npm run test:device-bridge:real-pg
+```
+
+The test refuses non-loopback URLs, never reads `DATABASE_URL`, creates one
+random disposable database, and drops it during cleanup. Do not point this
+variable at Railway, Production, staging, or any shared database. The test
+also verifies a bounded local lock timeout and rollback/recovery after an
+injected local PostgreSQL statement failure. It never runs the T1 migration
+or T1 DDL. The local test role needs permission to create and drop that one
+disposable local database.
+
 ## Required operator gate
 
 Before one invocation, the operator must independently confirm the intended

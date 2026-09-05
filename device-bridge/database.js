@@ -19,6 +19,7 @@ export const T1_MIGRATION_DIAGNOSTIC_STAGES = Object.freeze([
   "DDL_EXECUTION",
   "POSTCHECK",
   "COMMIT",
+  "ROLLBACK",
   "CLEANUP",
   "UNKNOWN"
 ]);
@@ -117,6 +118,19 @@ async function lockVerifiedDeviceBridgeFoundation(client) {
   }
 }
 
+async function runDeviceBridgeT1PreDdlPath(client, setStage = () => {}) {
+  setStage("TRANSACTION_SETTINGS");
+  await configureT1MigrationTransaction(client);
+  setStage("ADVISORY_LOCK");
+  await acquireT1MigrationAdvisoryLock(client);
+  setStage("GLOBAL_PREFLIGHT");
+  await preflightDeviceBridgeT1Release(client);
+  setStage("TABLE_LOCK_ACQUISITION");
+  await lockVerifiedDeviceBridgeFoundation(client);
+  setStage("LOCKED_PREFLIGHT");
+  return preflightDeviceBridgeT1Release(client);
+}
+
 /**
  * These settings are transaction-local, so the explicit migration cannot
  * alter shared Railway/PostgreSQL defaults. The advisory lock rejects a
@@ -163,6 +177,73 @@ async function applyVerifiedT1SchemaPlan(client, preflight, markDdlAttempt = () 
 }
 
 /**
+ * Runs the exact T1 runner path through its second locked preflight, then
+ * always rolls back before any T1 DDL. It is intentionally un-routed and is
+ * only for explicitly configured local integration validation.
+ */
+export async function validateDeviceBridgeT1PreDdl(pool) {
+  let client;
+  let transactionStarted = false;
+  let discardClient = false;
+  let releaseError;
+  let stage = "DATABASE_CONNECTION";
+  let rollbackAttempted = false;
+  let rollbackCompleted = false;
+  try {
+    stage = "DATABASE_CONNECTION";
+    client = await pool.connect();
+    stage = "TRANSACTION_BEGIN";
+    await client.query("BEGIN");
+    transactionStarted = true;
+    await runDeviceBridgeT1PreDdlPath(client, nextStage => {
+      stage = nextStage;
+    });
+    stage = "ROLLBACK";
+    rollbackAttempted = true;
+    await client.query("ROLLBACK");
+    rollbackCompleted = true;
+    return { validated: true };
+  } catch (error) {
+    releaseError = error;
+    const failedStage = stage;
+    if (transactionStarted && !rollbackAttempted) {
+      rollbackAttempted = true;
+      try {
+        await client.query("ROLLBACK");
+        rollbackCompleted = true;
+      } catch {
+        discardClient = true;
+      }
+    } else {
+      discardClient = true;
+    }
+    throw attachMigrationFailureDiagnostic(error, {
+      stage: failedStage,
+      transactionStarted,
+      commitAttempted: false,
+      commitConfirmed: false,
+      rollbackAttempted,
+      rollbackCompleted,
+      ddlOperationsAttempted: 0
+    });
+  } finally {
+    try {
+      client?.release(discardClient ? releaseError : undefined);
+    } catch (error) {
+      throw attachMigrationFailureDiagnostic(error, {
+        stage: "CLEANUP",
+        transactionStarted,
+        commitAttempted: false,
+        commitConfirmed: false,
+        rollbackAttempted,
+        rollbackCompleted,
+        ddlOperationsAttempted: 0
+      });
+    }
+  }
+}
+
+/**
  * The explicit CLI target. It never bootstraps or repairs the Device Bridge
  * foundation or ACK schema. Before the first ALTER it performs a complete
  * read-only preflight, locks the already-verified foundation, then repeats
@@ -185,16 +266,9 @@ export async function migrateDeviceBridgeSchema(pool) {
     stage = "TRANSACTION_BEGIN";
     await client.query("BEGIN");
     transactionStarted = true;
-    stage = "TRANSACTION_SETTINGS";
-    await configureT1MigrationTransaction(client);
-    stage = "ADVISORY_LOCK";
-    await acquireT1MigrationAdvisoryLock(client);
-    stage = "GLOBAL_PREFLIGHT";
-    await preflightDeviceBridgeT1Release(client);
-    stage = "TABLE_LOCK_ACQUISITION";
-    await lockVerifiedDeviceBridgeFoundation(client);
-    stage = "LOCKED_PREFLIGHT";
-    const lockedPreflight = await preflightDeviceBridgeT1Release(client);
+    const lockedPreflight = await runDeviceBridgeT1PreDdlPath(client, nextStage => {
+      stage = nextStage;
+    });
     stage = "DDL_EXECUTION";
     const result = await applyVerifiedT1SchemaPlan(client, lockedPreflight.t1, () => {
       ddlOperationsAttempted += 1;

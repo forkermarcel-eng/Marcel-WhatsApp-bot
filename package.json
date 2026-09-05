@@ -9,7 +9,7 @@
     "migrate:device-bridge-ack-canonicalization": "node scripts/migrate-device-bridge-ack-canonicalization.js --apply",
     "migrate:device-bridge-t1": "node scripts/migrate-device-bridge-t1.js --apply",
     "migrate:tinder-visible-chat-capture": "node scripts/migrate-tinder-visible-chat-capture.js --apply",
-    "test:device-bridge:real-pg": "node --test test/device-bridge-t1-real-postgres.test.js",
+    "test:device-bridge:real-pg": "node --test test/device-bridge-t1-real-postgres.test.js test/device-bridge-t2-real-postgres.test.js",
     "test:device-bridge": "node --test test/device-bridge-protocol-v1.test.js test/device-bridge-enrollment-auth.test.js test/device-bridge-heartbeat-admin.test.js test/device-bridge-command-ack.test.js test/device-bridge-command-status-admin.test.js test/device-bridge-t1-readonly-preflight.test.js test/device-bridge-ack-readonly-diagnosis.test.js test/device-bridge-ack-payload-semantic-classifier.test.js test/device-bridge-initialization.test.js test/device-bridge-ack-schema-revoke.test.js test/device-bridge-ack-canonicalization.test.js test/device-bridge-t1-schema.test.js test/device-bridge-t1-migration-cli.test.js test/tinder-device-command-proxy.test.js test/tinder-device-command-status-proxy.test.js test/tinder-device-selection.test.js",
     "test:brain-write": "node --test test/marcel-brain-manual-write.test.js",
     "test:web-ui": "node --test test/web-ui-navigation.test.js",

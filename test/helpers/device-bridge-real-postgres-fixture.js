@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { URL } from "node:url";
+import { Pool } from "pg";
+
 /*
  * Disposable local test fixture derived from the pre-T1 canonical bootstrap
  * at commit 17fa84e. It is test-only and deliberately keeps the two T1
@@ -12,6 +16,68 @@ const NONCANONICAL_EQUIVALENT_ACK_PAYLOAD_V1 = `
   OR (status = 'SUCCEEDED' AND error IS NULL)
   OR (status = 'RECEIVED' AND result IS NULL AND error IS NULL)
 `;
+
+export const DEVICE_BRIDGE_REAL_PG_TEST_URL = "DEVICE_BRIDGE_REAL_PG_TEST_URL";
+
+const LOOPBACK_POSTGRES_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
+
+/**
+ * Real-PostgreSQL integration tests are opt-in only.  They deliberately
+ * never read DATABASE_URL and accept only a loopback PostgreSQL URL supplied
+ * through the dedicated test variable.
+ */
+export function localDeviceBridgeRealPostgresTestUrl() {
+  const value = process.env[DEVICE_BRIDGE_REAL_PG_TEST_URL];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${DEVICE_BRIDGE_REAL_PG_TEST_URL} must name an explicitly configured loopback PostgreSQL database.`);
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${DEVICE_BRIDGE_REAL_PG_TEST_URL} must be a valid loopback PostgreSQL URL.`);
+  }
+  if (!/^postgres(?:ql)?:$/i.test(url.protocol) || !LOOPBACK_POSTGRES_HOSTS.has(url.hostname.toLowerCase())) {
+    throw new Error(`${DEVICE_BRIDGE_REAL_PG_TEST_URL} must target only loopback PostgreSQL; Production URLs are refused.`);
+  }
+  return url;
+}
+
+function quoteIdentifier(identifier) {
+  return `"${String(identifier).replaceAll('"', '""')}"`;
+}
+
+/**
+ * Creates and tears down a fresh database for one local integration scenario.
+ * The configured URL contributes only loopback connection parameters; the
+ * temporary database name is generated here and never falls back to runtime
+ * configuration.
+ */
+export async function withDisposableDeviceBridgeRealPostgresDatabase(callback, {
+  prefix = "marcel_device_bridge_real_pg"
+} = {}) {
+  const configuredUrl = localDeviceBridgeRealPostgresTestUrl();
+  const databaseName = `${prefix}_${randomUUID().replaceAll("-", "")}`;
+  const adminUrl = new URL(configuredUrl);
+  adminUrl.pathname = "/postgres";
+  const testUrl = new URL(configuredUrl);
+  testUrl.pathname = `/${databaseName}`;
+  const adminPool = new Pool({ connectionString: adminUrl.toString(), max: 2 });
+  let testPool;
+  let databaseCreated = false;
+  try {
+    await adminPool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
+    databaseCreated = true;
+    testPool = new Pool({ connectionString: testUrl.toString(), max: 4 });
+    return await callback(testPool);
+  } finally {
+    await testPool?.end();
+    if (databaseCreated) {
+      await adminPool.query(`DROP DATABASE IF EXISTS ${quoteIdentifier(databaseName)}`);
+    }
+    await adminPool.end();
+  }
+}
 
 const LEGACY_FOUNDATION_STATEMENTS = Object.freeze([
   `
@@ -175,4 +241,14 @@ export async function createDeviceBridgeLegacyRealPostgresFixture(pool) {
   } finally {
     client.release();
   }
+}
+
+/**
+ * The T2 migration only requires the production contact-reference contract:
+ * a regular contacts table with a non-null integer id.  Keeping this fixture
+ * minimal prevents a test-only contact schema from becoming an accidental
+ * application contract.
+ */
+export async function createT2ContactsRealPostgresFixture(pool) {
+  await pool.query("CREATE TABLE contacts (id INTEGER PRIMARY KEY)");
 }

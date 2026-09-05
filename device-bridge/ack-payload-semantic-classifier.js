@@ -168,7 +168,7 @@ const EVALUATE_PAYLOAD_MATRIX_QUERY = `
           FROM pg_constraint c
           WHERE c.oid = $1::oid
         ),
-        $2
+        $2::text
       ),
       false,
       false,

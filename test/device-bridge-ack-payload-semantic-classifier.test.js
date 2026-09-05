@@ -40,7 +40,10 @@ function semanticPool({
   failRollback = false
 } = {}) {
   const calls = [];
-  const state = { released: false };
+  const state = {
+    released: false,
+    candidateEvaluations: { attempted: 0, completed: 0 }
+  };
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
@@ -53,7 +56,14 @@ function semanticPool({
       }
       if (sql.includes("LIMIT 2") && sql.includes("FROM pg_constraint c")) return { rows: targets };
       if (sql.includes("FROM XMLTABLE") && sql.includes("query_to_xml")) {
+        state.candidateEvaluations.attempted = STATUSES.length * CANONICAL_ACCEPTANCE.RECEIVED.length;
+        if (!/\$2::text\b/.test(sql)) {
+          const error = new Error("could not determine data type of parameter $2");
+          error.code = "42P18";
+          throw error;
+        }
         if (matrixError) throw new Error("XML support unavailable");
+        state.candidateEvaluations.completed = Array.isArray(matrix) ? matrix.length : 0;
         return { rows: matrix };
       }
       throw new Error(`Unexpected semantic classifier query: ${sql}`);
@@ -61,6 +71,11 @@ function semanticPool({
     release() { state.released = true; }
   };
   return { pool: { async connect() { return client; } }, calls, state };
+}
+
+function assertCompletedCandidateEvaluations(fake) {
+  assert.ok(fake.state.candidateEvaluations.attempted > 0);
+  assert.equal(fake.state.candidateEvaluations.completed, fake.state.candidateEvaluations.attempted);
 }
 
 function assertReadOnlyTransaction(fake) {
@@ -120,7 +135,12 @@ test("canonical-equivalent ACK payload matrix is classified in one read-only rol
   assert.match(fake.calls[2].sql, /ARRAY\['error', 'result', 'status'\]::text\[\]/);
   assert.match(fake.calls[3].sql, /query_to_xml/);
   assert.match(fake.calls[3].sql, /XMLTABLE/);
-  assert.deepEqual(fake.calls[3].params.slice(0, 1), ["4242"]);
+  assert.match(fake.calls[3].sql, /\$1::oid/);
+  assert.match(fake.calls[3].sql, /\$2::text\b/);
+  assert.equal(fake.calls[3].params.length, 2);
+  assert.equal(fake.calls[3].params[0], "4242");
+  assert.equal(typeof fake.calls[3].params[1], "string");
+  assertCompletedCandidateEvaluations(fake);
   assertReadOnlyTransaction(fake);
 });
 
@@ -131,6 +151,7 @@ test("weaker RECEIVED and missing FAILED error requirements are detected", async
   assert.equal(receivedResult.overall_classification, "PRODUCTION_LEGACY_WEAKER");
   assert.equal(receivedResult.production_can_accept_rows_canonical_rejects, true);
   assert.equal(receivedResult.canonical_can_accept_rows_production_rejects, false);
+  assertCompletedCandidateEvaluations(received);
   assertReadOnlyTransaction(received);
 
   const failed = semanticPool({ matrix: semanticMatrix({ FAILED: [true, true, false, false] }) });
@@ -139,6 +160,7 @@ test("weaker RECEIVED and missing FAILED error requirements are detected", async
   assert.equal(failedResult.overall_classification, "PRODUCTION_LEGACY_WEAKER");
   assert.equal(failedResult.production_can_accept_rows_canonical_rejects, true);
   assert.equal(failedResult.canonical_can_accept_rows_production_rejects, false);
+  assertCompletedCandidateEvaluations(failed);
   assertReadOnlyTransaction(failed);
 });
 
@@ -149,6 +171,7 @@ test("stronger SUCCEEDED and incorrect REJECTED behavior are detected", async ()
   assert.equal(succeededResult.overall_classification, "PRODUCTION_LEGACY_STRONGER");
   assert.equal(succeededResult.production_can_accept_rows_canonical_rejects, false);
   assert.equal(succeededResult.canonical_can_accept_rows_production_rejects, true);
+  assertCompletedCandidateEvaluations(succeeded);
   assertReadOnlyTransaction(succeeded);
 
   const rejected = semanticPool({ matrix: semanticMatrix({ REJECTED: [true, false, false, false] }) });
@@ -156,6 +179,7 @@ test("stronger SUCCEEDED and incorrect REJECTED behavior are detected", async ()
   assert.equal(rejectedResult.status_rules.REJECTED, "PRODUCTION_STRONGER");
   assert.equal(rejectedResult.overall_classification, "PRODUCTION_LEGACY_STRONGER");
   assert.equal(rejectedResult.canonical_can_accept_rows_production_rejects, true);
+  assertCompletedCandidateEvaluations(rejected);
   assertReadOnlyTransaction(rejected);
 });
 
@@ -166,6 +190,7 @@ test("incorrect EXPIRED behavior and mixed drift are classified without guessing
   assert.equal(expiredResult.overall_classification, "PRODUCTION_DRIFT");
   assert.equal(expiredResult.production_can_accept_rows_canonical_rejects, true);
   assert.equal(expiredResult.canonical_can_accept_rows_production_rejects, true);
+  assertCompletedCandidateEvaluations(expired);
   assertReadOnlyTransaction(expired);
 
   const mixed = semanticPool({ matrix: semanticMatrix({
@@ -178,6 +203,7 @@ test("incorrect EXPIRED behavior and mixed drift are classified without guessing
   assert.equal(mixedResult.overall_classification, "PRODUCTION_DRIFT");
   assert.equal(mixedResult.production_can_accept_rows_canonical_rejects, true);
   assert.equal(mixedResult.canonical_can_accept_rows_production_rejects, true);
+  assertCompletedCandidateEvaluations(mixed);
   assertReadOnlyTransaction(mixed);
 });
 

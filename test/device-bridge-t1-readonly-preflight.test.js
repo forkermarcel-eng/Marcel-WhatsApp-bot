@@ -4,6 +4,7 @@ import test from "node:test";
 import { createAdminT1ReadOnlyPreflightHandler } from "../device-bridge/admin.js";
 import { registerDeviceBridgeBlock3Routes } from "../device-bridge/block3-routes.js";
 import { ACK_REQUIRED_CHECKS } from "../device-bridge/ack-schema.js";
+import { withDeviceBridgeReadOnlyTransaction } from "../device-bridge/read-only-transaction.js";
 import {
   READ_ONLY_GUARD_CODE,
   runDeviceBridgeT1ReadOnlyPreflight
@@ -131,6 +132,22 @@ function assertReadOnlyTransaction(fake) {
   assert.equal(fake.state.released, true);
 }
 
+async function runGuardedQuery(sql) {
+  const fake = readOnlyPool();
+  await withDeviceBridgeReadOnlyTransaction(fake.pool, client => client.query(sql));
+  return fake;
+}
+
+async function assertGuardRejects(sql) {
+  const fake = readOnlyPool();
+  await assert.rejects(
+    () => withDeviceBridgeReadOnlyTransaction(fake.pool, client => client.query(sql)),
+    error => error?.code === READ_ONLY_GUARD_CODE
+  );
+  assert.equal(fake.calls.slice(2, -1).some(call => call.sql === sql), false, sql);
+  assertReadOnlyTransaction(fake);
+}
+
 test("read-only preflight reuses the fixed Foundation, ACK and T1 stages in one rolled-back transaction", async () => {
   const fake = readOnlyPool();
   const result = await runDeviceBridgeT1ReadOnlyPreflight(fake.pool, successfulDependencies());
@@ -158,6 +175,60 @@ test("the read-only query guard prevents a preflight dependency from issuing a w
   assert.equal(result.reason_code, "PREFLIGHT_GUARD_BLOCKED");
   assert.equal(READ_ONLY_GUARD_CODE, "READ_ONLY_QUERY_REJECTED");
   assertReadOnlyTransaction(fake);
+});
+
+test("the shared read-only guard accepts bounded comment and literal semicolons without rewriting SQL", async () => {
+  const safeQueries = [
+    "SELECT 1",
+    "SELECT 1\n-- comment ; only\n",
+    "SELECT 1 -- comment ; only",
+    "SELECT /* comment ; only */ 1",
+    "SELECT /* outer ; /* nested ; */ still comment */ 1",
+    "SELECT 'literal ; only'::text",
+    "SELECT 'doubled '' quote ; only'::text",
+    "SELECT $$dollar literal ; only$$::text",
+    "SELECT $payload$dollar literal ; only$payload$::text",
+    "SELECT \"identifier ; only\""
+  ];
+
+  for (const sql of safeQueries) {
+    const fake = await runGuardedQuery(sql);
+    assert.equal(fake.calls[2]?.sql, sql);
+    assertReadOnlyTransaction(fake);
+  }
+});
+
+test("the shared read-only guard rejects real separators, non-SELECT SQL, and malformed lexical input", async () => {
+  const rejectedQueries = [
+    "SELECT 1;",
+    "SELECT 1; SELECT 2",
+    "SELECT 1 -- comment ; only\n; SELECT 2",
+    "SELECT 1;\nUPDATE device_bridge_devices SET display_name = 'forbidden'",
+    "INSERT INTO device_bridge_devices (display_name) VALUES ('forbidden')",
+    "UPDATE device_bridge_devices SET display_name = 'forbidden'",
+    "DELETE FROM device_bridge_devices",
+    "ALTER TABLE device_bridge_devices ADD COLUMN forbidden text",
+    "CREATE TABLE forbidden (id text)",
+    "DROP TABLE device_bridge_devices",
+    "TRUNCATE device_bridge_devices",
+    "GRANT SELECT ON device_bridge_devices TO public",
+    "REVOKE SELECT ON device_bridge_devices FROM public",
+    "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
+    "COPY device_bridge_devices TO STDOUT",
+    "CALL forbidden()",
+    "DO $$BEGIN END$$",
+    "SELECT /* unterminated",
+    "SELECT /* outer /* nested */",
+    "SELECT 'unterminated",
+    "SELECT \"unterminated",
+    "SELECT $$unterminated",
+    "SELECT $payload$unterminated",
+    "SELECT ä$payload$literal ; only$payload$"
+  ];
+
+  for (const sql of rejectedQueries) await assertGuardRejects(sql);
 });
 
 test("empty Foundation stops without writes and marks a missing ACK table when applicable", async () => {

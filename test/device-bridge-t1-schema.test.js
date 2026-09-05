@@ -12,8 +12,10 @@ import { migrateDeviceBridgeSchema } from "../device-bridge/database.js";
 import {
   FOUNDATION_COLUMN_CONTRACT,
   FOUNDATION_CONSTRAINT_CONTRACT,
-  FOUNDATION_INDEX_CONTRACT
+  FOUNDATION_INDEX_CONTRACT,
+  preflightDeviceBridgeFoundationForT1
 } from "../device-bridge/schema-readiness.js";
+import { withDeviceBridgeReadOnlyTransaction } from "../device-bridge/read-only-transaction.js";
 
 const REQUIRED_TABLES = Object.freeze(Object.keys(FOUNDATION_COLUMN_CONTRACT));
 const LEGACY_TINDER = ["DISCONNECTED", "CONNECTED", "AUTH_REQUIRED", "REVIEW_REQUIRED", "UNKNOWN"];
@@ -207,7 +209,7 @@ function migrationClient({
     state,
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) {
+      if (["BEGIN", "COMMIT", "ROLLBACK", "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"].includes(sql)) {
         if (sql === "COMMIT") state.committed = true;
         if (sql === "ROLLBACK") state.rolledBack = true;
         return { rows: [] };
@@ -299,6 +301,22 @@ test("Foundation preflight accepts PostgreSQL catalog sentinel chars and DESC NU
   assert.equal(ddlCalls(fake.client.calls).length, 4);
   const readiness = fs.readFileSync(new URL("../device-bridge/schema-readiness.js", import.meta.url), "utf8");
   assert.match(readiness, /indoption::int2\[\]\)\[key_number\.position - 1\]/);
+});
+
+test("the exact Foundation index SELECT with a comment semicolon is accepted by the protected read-only wrapper", async () => {
+  const fake = migrationClient();
+  assert.deepEqual(
+    await withDeviceBridgeReadOnlyTransaction(fake.pool, client => preflightDeviceBridgeFoundationForT1(client)),
+    { ready: true }
+  );
+  const indexQuery = fake.client.calls.find(call => call.sql.includes("FROM pg_index i"));
+  assert.ok(indexQuery);
+  assert.match(indexQuery.sql, /-- array cast; pg_get_indexdef above intentionally remains 1-based\./);
+  assert.equal(fake.client.calls[0]?.sql, "BEGIN");
+  assert.equal(fake.client.calls[1]?.sql, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  assert.equal(fake.client.calls.at(-1)?.sql, "ROLLBACK");
+  assert.equal(fake.client.state.released, true);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
 });
 
 test("missing, weakened, extra, unvalidated, or mistyped ACK state stops before any DDL", async () => {

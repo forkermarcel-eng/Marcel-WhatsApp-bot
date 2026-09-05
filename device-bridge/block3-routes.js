@@ -7,6 +7,7 @@ import {
   createAdminDeviceRevokeHandler,
   createAdminDeviceStatusHandler,
   createAdminAckFoundationDiagnosisHandler,
+  createAdminAckPayloadSemanticClassifierHandler,
   createAdminT1ReadOnlyPreflightHandler
 } from "./admin.js";
 
@@ -30,6 +31,7 @@ export function registerDeviceBridgeBlock3Routes({
   const commandStatus = createAdminCommandStatusHandler(pool);
   const t1ReadOnlyPreflight = createAdminT1ReadOnlyPreflightHandler(pool);
   const ackFoundationDiagnosis = createAdminAckFoundationDiagnosisHandler(pool);
+  const ackPayloadSemanticClassifier = createAdminAckPayloadSemanticClassifierHandler(pool);
 
   const admin = handler => async (req, res) => {
     if (!dashboardApiReady(res)) return;
@@ -52,6 +54,7 @@ export function registerDeviceBridgeBlock3Routes({
   app.get("/dashboard-api/device-bridge/devices/:deviceId/status", admin(deviceStatus));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/commands/:commandId", admin(commandStatus));
   app.get("/dashboard-api/device-bridge/ack-schema-diagnosis", diagnostic(ackFoundationDiagnosis));
+  app.get("/dashboard-api/device-bridge/ack-payload-semantics", diagnostic(ackPayloadSemanticClassifier));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/revoke", admin(revokeDevice));
   app.post("/dashboard-api/device-bridge/devices/:deviceId/commands", admin(createCommand));
   app.get("/dashboard-api/device-bridge/t1-schema-preflight", diagnostic(t1ReadOnlyPreflight));

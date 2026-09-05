@@ -8,6 +8,7 @@ import {
 import { deriveDeviceStatus } from "./heartbeat.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
+import { runDeviceBridgeAckPayloadSemanticClassifier } from "./ack-payload-semantic-classifier.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 ADMIN READ/COMMANDS
@@ -23,6 +24,22 @@ const COMMAND_EXPIRY_MS = Object.freeze({
 
 const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
 const CONNECTABLE_TINDER_STATES = new Set(["DISCONNECTED", "CONNECTED"]);
+const ACK_PAYLOAD_STATUSES = Object.freeze(["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"]);
+const ACK_PAYLOAD_STATUS_CLASSIFICATIONS = new Set([
+  "MATCH",
+  "PRODUCTION_STRONGER",
+  "PRODUCTION_WEAKER",
+  "PRODUCTION_DIFFERENT",
+  "UNRESOLVED"
+]);
+const ACK_PAYLOAD_OVERALL_CLASSIFICATIONS = new Set([
+  "SEMANTICALLY_EQUIVALENT",
+  "PRODUCTION_LEGACY_WEAKER",
+  "PRODUCTION_LEGACY_STRONGER",
+  "PRODUCTION_PARTIAL_RULE",
+  "PRODUCTION_DRIFT",
+  "UNRESOLVED"
+]);
 
 function statusRow(row, now) {
   return {
@@ -295,6 +312,30 @@ function boundedAckDiagnosis(diagnosis) {
   };
 }
 
+function boundedSemanticBoolean(value) {
+  return typeof value === "boolean" ? value : "UNRESOLVED";
+}
+
+function boundedAckPayloadSemanticClassification(classification) {
+  const statusRules = Object.fromEntries(ACK_PAYLOAD_STATUSES.map(status => {
+    const value = classification?.status_rules?.[status];
+    return [status, ACK_PAYLOAD_STATUS_CLASSIFICATIONS.has(value) ? value : "UNRESOLVED"];
+  }));
+  const overall = ACK_PAYLOAD_OVERALL_CLASSIFICATIONS.has(classification?.overall_classification)
+    ? classification.overall_classification
+    : "UNRESOLVED";
+  return {
+    status_rules: statusRules,
+    overall_classification: overall,
+    production_can_accept_rows_canonical_rejects: boundedSemanticBoolean(
+      classification?.production_can_accept_rows_canonical_rejects
+    ),
+    canonical_can_accept_rows_production_rejects: boundedSemanticBoolean(
+      classification?.canonical_can_accept_rows_production_rejects
+    )
+  };
+}
+
 export function createAdminAckFoundationDiagnosisHandler(pool, { runDiagnosis = runDeviceBridgeAckReadOnlyDiagnosis } = {}) {
   return async function adminAckFoundationDiagnosisHandler(req, res) {
     res.setHeader?.("Cache-Control", "no-store, max-age=0");
@@ -314,6 +355,35 @@ export function createAdminAckFoundationDiagnosisHandler(pool, { runDiagnosis = 
     } catch {
       console.error("Device Bridge ACK read-only diagnosis failed.");
       return res.status(503).json({ ok: false, reason_code: "DIAGNOSIS_UNAVAILABLE" });
+    }
+  };
+}
+
+export function createAdminAckPayloadSemanticClassifierHandler(
+  pool,
+  { runClassifier = runDeviceBridgeAckPayloadSemanticClassifier } = {}
+) {
+  return async function adminAckPayloadSemanticClassifierHandler(req, res) {
+    res.setHeader?.("Cache-Control", "no-store, max-age=0");
+    if (hasDiagnosticInput(req)) {
+      return res.status(400).json({ ok: false, error: { code: "INVALID_REQUEST" } });
+    }
+    try {
+      const result = await runClassifier(pool);
+      if (!result?.ok) {
+        return res.status(503).json({ ok: false, reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE" });
+      }
+      const classification = boundedAckPayloadSemanticClassification(result.classification);
+      return res.status(200).json({
+        ok: true,
+        classification,
+        reason_code: result.reason_code === "SEMANTIC_CLASSIFICATION_COMPLETE"
+          ? "SEMANTIC_CLASSIFICATION_COMPLETE"
+          : "SEMANTIC_CLASSIFICATION_UNRESOLVED"
+      });
+    } catch {
+      console.error("Device Bridge ACK payload semantic classifier failed.");
+      return res.status(503).json({ ok: false, reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE" });
     }
   };
 }

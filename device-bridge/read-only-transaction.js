@@ -3,6 +3,11 @@ DEVICE BRIDGE — FIXED READ-ONLY DIAGNOSTIC TRANSACTION
 ================================================== */
 
 export const READ_ONLY_GUARD_CODE = "READ_ONLY_QUERY_REJECTED";
+const readOnlyTransactionClients = new WeakSet();
+
+export function isDeviceBridgeReadOnlyTransactionClient(client) {
+  return Boolean(client && readOnlyTransactionClients.has(client));
+}
 
 function queryText(statement) {
   if (typeof statement === "string") return statement;
@@ -46,9 +51,11 @@ export async function withDeviceBridgeReadOnlyTransaction(pool, work) {
       }
       return rawQuery(...args);
     };
+    readOnlyTransactionClients.add(client);
 
     return await work(client);
   } finally {
+    if (client) readOnlyTransactionClients.delete(client);
     if (client && originalQuery) client.query = originalQuery;
     if (transactionStarted) {
       try {

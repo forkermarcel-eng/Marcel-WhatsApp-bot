@@ -3,10 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { createAdminT1ReadOnlyPreflightHandler } from "../device-bridge/admin.js";
 import { registerDeviceBridgeBlock3Routes } from "../device-bridge/block3-routes.js";
-import {
-  ACK_REQUIRED_CHECKS,
-  preflightDeviceBridgeAckSchemaForT1
-} from "../device-bridge/ack-schema.js";
+import { ACK_REQUIRED_CHECKS } from "../device-bridge/ack-schema.js";
 import {
   READ_ONLY_GUARD_CODE,
   runDeviceBridgeT1ReadOnlyPreflight
@@ -213,7 +210,7 @@ test("missing or incompatible ACK state stops without writes", async () => {
 test("a semantically equivalent ACK payload reaches T1 checks without nested transactions or an automatic full pass", async () => {
   const fake = readOnlyPool({ respond: semanticAckResponder() });
   const result = await runDeviceBridgeT1ReadOnlyPreflight(fake.pool, successfulDependencies({
-    preflightAck: preflightDeviceBridgeAckSchemaForT1,
+    preflightAck: undefined,
     preflightT1: async client => {
       await client.query("SELECT t1_constraint_failure");
       throw new Error("Device Bridge T1 schema compatibility check failed.");
@@ -226,6 +223,11 @@ test("a semantically equivalent ACK payload reaches T1 checks without nested tra
   assert.equal(result.preflight_pass, false);
   assert.equal(fake.calls.filter(call => call.sql === "BEGIN").length, 1);
   assert.equal(fake.calls.some(call => call.sql.includes("FROM XMLTABLE")), true);
+  const readOnlySet = fake.calls.findIndex(call => call.sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  const matrix = fake.calls.findIndex(call => call.sql.includes("FROM XMLTABLE"));
+  const t1Failure = fake.calls.findIndex(call => call.sql === "SELECT t1_constraint_failure");
+  const rollback = fake.calls.findIndex(call => call.sql === "ROLLBACK");
+  assert.ok(readOnlySet > -1 && readOnlySet < matrix && matrix < t1Failure && t1Failure < rollback);
   assertReadOnlyTransaction(fake);
 });
 
@@ -338,7 +340,8 @@ test("handler accepts no input and serializes only the bounded result", async ()
 test("read-only preflight module has no migration dependency or mutation authority", () => {
   const source = fs.readFileSync(new URL("../device-bridge/t1-readonly-preflight.js", import.meta.url), "utf8");
   assert.match(source, /preflightDeviceBridgeFoundationForT1/);
-  assert.match(source, /preflightDeviceBridgeAckSchemaForT1/);
+  assert.match(source, /preflightDeviceBridgeAckSchemaForProtectedT1Preflight/);
+  assert.doesNotMatch(source, /preflightDeviceBridgeAckSchemaForT1\s*[,}]/);
   assert.match(source, /preflightDeviceBridgeT1SchemaMigration/);
   assert.doesNotMatch(source, /\.\/database\.js/);
   assert.doesNotMatch(source, /\b(COMMIT|LOCK|CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\b/);

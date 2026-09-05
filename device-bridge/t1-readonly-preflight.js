@@ -2,7 +2,7 @@ import {
   inspectDeviceBridgeFoundationTables,
   preflightDeviceBridgeFoundationForT1
 } from "./schema-readiness.js";
-import { preflightDeviceBridgeAckSchemaForT1 } from "./ack-schema.js";
+import { preflightDeviceBridgeAckSchemaForProtectedT1Preflight } from "./ack-schema.js";
 import {
   inspectDeviceBridgeT1Schema,
   preflightDeviceBridgeT1SchemaMigration
@@ -98,7 +98,7 @@ function markFoundationPresence(result, inspection) {
 export async function runDeviceBridgeT1ReadOnlyPreflight(pool, dependencies = {}) {
   const inspectFoundation = dependencies.inspectFoundation || inspectDeviceBridgeFoundationTables;
   const preflightFoundation = dependencies.preflightFoundation || preflightDeviceBridgeFoundationForT1;
-  const preflightAck = dependencies.preflightAck || preflightDeviceBridgeAckSchemaForT1;
+  const preflightAck = dependencies.preflightAck || preflightDeviceBridgeAckSchemaForProtectedT1Preflight;
   const inspectT1 = dependencies.inspectT1 || inspectDeviceBridgeT1Schema;
   const preflightT1 = dependencies.preflightT1 || preflightDeviceBridgeT1SchemaMigration;
   const result = emptyResult();

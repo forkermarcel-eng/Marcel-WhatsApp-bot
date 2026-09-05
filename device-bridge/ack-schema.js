@@ -3,6 +3,7 @@ DEVICE BRIDGE T0 — ACK SCHEMA COMPATIBILITY
 ================================================== */
 
 import { canonicalCheckDefinition } from "./schema-contract.js";
+import { isDeviceBridgeReadOnlyTransactionClient } from "./read-only-transaction.js";
 
 export const ACK_FOUNDATION_TABLE = "device_bridge_command_acks";
 export const FINAL_ACK_CONSTRAINT_NAME = "device_bridge_command_acks_payload_check_v1";
@@ -100,8 +101,10 @@ async function hasSemanticallyEquivalentPayloadDefinition(client, row, specifica
   }
 }
 
-async function hasCompatibleAckCheckDefinition(client, row, specification) {
-  if (specification?.id !== "ACK_PAYLOAD_V1") return hasExpectedDefinition(row, specification);
+async function hasCompatibleAckCheckDefinition(client, row, specification, allowSemanticFallback) {
+  if (specification?.id !== "ACK_PAYLOAD_V1" || !allowSemanticFallback) {
+    return hasExpectedDefinition(row, specification);
+  }
   return hasSemanticallyEquivalentPayloadDefinition(client, row, specification);
 }
 
@@ -132,7 +135,7 @@ export async function inspectDeviceBridgeAckSchema(client) {
   const constraints = await readDeviceBridgeAckCheckConstraints(client);
   const payload = findPayloadConstraint(constraints.rows);
   const payloadSpecification = ACK_REQUIRED_CHECKS.at(-1);
-  const ready = Boolean(payload && await hasCompatibleAckCheckDefinition(client, payload, payloadSpecification));
+  const ready = Boolean(payload && hasExpectedDefinition(payload, payloadSpecification));
   return { ready, constraintName: ready ? payload.conname : null };
 }
 
@@ -154,25 +157,21 @@ async function inspectAckColumnTypes(client) {
   return Object.entries(ACK_REQUIRED_COLUMN_TYPES).every(([column, type]) => actual.get(column) === type);
 }
 
-/**
- * Read-only T1-runner preflight. ACK must already be canonical; this path
- * never repairs it and scans current rows before the first T1 DDL.
- */
-export async function preflightDeviceBridgeAckSchemaForT1(client) {
+async function preflightDeviceBridgeAckSchema(client, allowSemanticFallback) {
   const constraints = await readDeviceBridgeAckCheckConstraints(client);
+  if (!await inspectAckColumnTypes(client)) {
+    throw new Error("Device Bridge ACK schema compatibility check failed.");
+  }
   let validChecks = constraints.rows.length === ACK_REQUIRED_CHECKS.length;
   for (const specification of ACK_REQUIRED_CHECKS) {
     if (!validChecks) break;
     let matches = 0;
     for (const row of constraints.rows) {
-      if (await hasCompatibleAckCheckDefinition(client, row, specification)) matches += 1;
+      if (await hasCompatibleAckCheckDefinition(client, row, specification, allowSemanticFallback)) matches += 1;
     }
     if (matches !== 1) validChecks = false;
   }
   if (!validChecks) throw new Error("Device Bridge ACK schema compatibility check failed.");
-  if (!await inspectAckColumnTypes(client)) {
-    throw new Error("Device Bridge ACK schema compatibility check failed.");
-  }
   const compatibility = await client.query(`
     SELECT EXISTS (
       SELECT 1
@@ -184,6 +183,25 @@ export async function preflightDeviceBridgeAckSchemaForT1(client) {
     throw new Error("Device Bridge ACK data is incompatible with Protocol V1.");
   }
   return { ready: true };
+}
+
+/**
+ * Strict structural T1-runner preflight. ACK must already be canonical; this
+ * path never repairs it and scans current rows before the first T1 DDL.
+ */
+export async function preflightDeviceBridgeAckSchemaForT1(client) {
+  return preflightDeviceBridgeAckSchema(client, false);
+}
+
+/**
+ * The protected T1 read-only diagnostic preflight is the sole semantic
+ * fallback consumer. Its caller owns the fixed transaction and rollback.
+ */
+export async function preflightDeviceBridgeAckSchemaForProtectedT1Preflight(client) {
+  if (!isDeviceBridgeReadOnlyTransactionClient(client)) {
+    throw new Error("Device Bridge ACK schema compatibility check failed.");
+  }
+  return preflightDeviceBridgeAckSchema(client, true);
 }
 
 /** Separate ACK migration helper; the T1 runner never imports or calls it. */

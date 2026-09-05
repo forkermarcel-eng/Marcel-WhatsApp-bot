@@ -8,9 +8,11 @@ import {
   FINAL_ACK_CONSTRAINT_NAME,
   hasExpectedAckCheckDefinition,
   inspectDeviceBridgeAckSchema,
+  preflightDeviceBridgeAckSchemaForProtectedT1Preflight,
   preflightDeviceBridgeAckSchemaForT1
 } from "../device-bridge/ack-schema.js";
 import { createAdminDeviceRevokeHandler } from "../device-bridge/admin.js";
+import { withDeviceBridgeReadOnlyTransaction } from "../device-bridge/read-only-transaction.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const NOW = new Date("2026-09-01T12:34:56.000Z");
@@ -96,10 +98,15 @@ function semanticAckReadinessClient({
   columnTypes = { status: "text", result: "jsonb", error: "jsonb" }
 } = {}) {
   const calls = [];
+  const state = { released: false };
   return {
     calls,
+    state,
     async query(sql, params = []) {
       calls.push({ sql, params });
+      if (sql === "BEGIN" || sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY" || sql === "ROLLBACK") {
+        return { rows: [] };
+      }
       if (sql.includes("LIMIT 2") && sql.includes("FROM pg_constraint c")) return { rows: targets };
       if (sql.includes("c.conrelid = 'device_bridge_command_acks'::regclass")) return { rows: checks };
       if (sql.includes("information_schema.columns")) {
@@ -113,12 +120,30 @@ function semanticAckReadinessClient({
         return { rows: [{ incompatible: false }] };
       }
       throw new Error(`Unexpected ACK readiness query: ${sql}`);
-    }
+    },
+    release() { state.released = true; }
   };
 }
 
 function assertNoAckMutation(calls) {
   assert.equal(calls.some(call => /\b(COMMIT|LOCK|CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)\b/i.test(call.sql)), false);
+}
+
+async function runProtectedAckPreflight(options) {
+  const client = semanticAckReadinessClient(options);
+  const pool = { async connect() { return client; } };
+  const result = await withDeviceBridgeReadOnlyTransaction(pool, current =>
+    preflightDeviceBridgeAckSchemaForProtectedT1Preflight(current)
+  );
+  return { client, result };
+}
+
+function assertProtectedAckReadOnlyTransaction(client) {
+  assert.equal(client.calls[0]?.sql, "BEGIN");
+  assert.equal(client.calls[1]?.sql, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  assert.equal(client.calls.at(-1)?.sql, "ROLLBACK");
+  assert.equal(client.calls.slice(2, -1).every(call => /^\s*SELECT\b/i.test(call.sql)), true);
+  assert.equal(client.state.released, true);
 }
 
 test("standalone ACK migration keeps the named final ACK constraint", () => {
@@ -129,7 +154,19 @@ test("standalone ACK migration keeps the named final ACK constraint", () => {
 test("T1-only runner never imports or calls ACK mutation", () => {
   const ddl = fs.readFileSync(new URL("../device-bridge/database.js", import.meta.url), "utf8");
   assert.match(ddl, /preflightDeviceBridgeAckSchemaForT1/);
+  assert.doesNotMatch(ddl, /preflightDeviceBridgeAckSchemaForProtectedT1Preflight/);
   assert.doesNotMatch(ddl, /migrateDeviceBridgeAckSchema|ALTER TABLE device_bridge_command_acks|CREATE TABLE/);
+});
+
+test("only the protected T1 preflight module enables the semantic ACK fallback", () => {
+  const protectedPreflight = fs.readFileSync(new URL("../device-bridge/t1-readonly-preflight.js", import.meta.url), "utf8");
+  const startupReadiness = fs.readFileSync(new URL("../device-bridge/schema-readiness.js", import.meta.url), "utf8");
+  const initialization = fs.readFileSync(new URL("../device-bridge/initialization.js", import.meta.url), "utf8");
+  const migration = fs.readFileSync(new URL("../device-bridge/database.js", import.meta.url), "utf8");
+  assert.match(protectedPreflight, /preflightDeviceBridgeAckSchemaForProtectedT1Preflight/);
+  for (const source of [startupReadiness, initialization, migration]) {
+    assert.doesNotMatch(source, /preflightDeviceBridgeAckSchemaForProtectedT1Preflight/);
+  }
 });
 
 test("existing old schema without ACK rows is migrated by constraint identity, not name", async () => {
@@ -188,22 +225,35 @@ test("canonical ACK payload passes readiness without invoking the semantic fallb
   assertNoAckMutation(runtimeClient.calls);
 });
 
-test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes only the payload fallback", async () => {
+test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes only the protected payload fallback", async () => {
   const checks = completeAckChecks({ payloadDefinition: NONCANONICAL_EQUIVALENT_PAYLOAD });
   const payload = checks.find(row => row.conname === FINAL_ACK_CONSTRAINT_NAME);
   assert.equal(hasExpectedAckCheckDefinition(payload, ACK_REQUIRED_CHECKS.at(-1)), false);
 
-  const preflightClient = semanticAckReadinessClient({ checks });
-  assert.deepEqual(await preflightDeviceBridgeAckSchemaForT1(preflightClient), { ready: true });
-  assert.equal(preflightClient.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 1);
-  assertNoAckMutation(preflightClient.calls);
+  const strictClient = semanticAckReadinessClient({ checks });
+  await assert.rejects(() => preflightDeviceBridgeAckSchemaForT1(strictClient), /ACK schema compatibility check failed/);
+  assert.equal(strictClient.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
+  assertNoAckMutation(strictClient.calls);
+
+  const protectedPreflight = await runProtectedAckPreflight({ checks });
+  assert.deepEqual(protectedPreflight.result, { ready: true });
+  assert.equal(protectedPreflight.client.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 1);
+  assertNoAckMutation(protectedPreflight.client.calls);
+  assertProtectedAckReadOnlyTransaction(protectedPreflight.client);
+
+  const unprotectedClient = semanticAckReadinessClient({ checks });
+  await assert.rejects(
+    () => preflightDeviceBridgeAckSchemaForProtectedT1Preflight(unprotectedClient),
+    /ACK schema compatibility check failed/
+  );
+  assert.equal(unprotectedClient.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
 
   const runtimeClient = semanticAckReadinessClient({ checks });
   assert.deepEqual(await inspectDeviceBridgeAckSchema(runtimeClient), {
-    ready: true,
-    constraintName: FINAL_ACK_CONSTRAINT_NAME
+    ready: false,
+    constraintName: null
   });
-  assert.equal(runtimeClient.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 1);
+  assert.equal(runtimeClient.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
   assertNoAckMutation(runtimeClient.calls);
 });
 
@@ -221,8 +271,14 @@ test("noncanonical ACK payload outcomes fail closed unless every bounded semanti
 
   for (const scenario of scenarios) {
     const client = semanticAckReadinessClient({ checks, ...scenario });
-    await assert.rejects(() => preflightDeviceBridgeAckSchemaForT1(client), /ACK schema compatibility check failed/, scenario.label);
+    const pool = { async connect() { return client; } };
+    await assert.rejects(
+      () => withDeviceBridgeReadOnlyTransaction(pool, current => preflightDeviceBridgeAckSchemaForProtectedT1Preflight(current)),
+      /ACK schema compatibility check failed/,
+      scenario.label
+    );
     assertNoAckMutation(client.calls);
+    assertProtectedAckReadOnlyTransaction(client);
   }
 });
 
@@ -230,15 +286,29 @@ test("unrelated ACK checks and required ACK column types remain strict before se
   const unrelatedMismatch = semanticAckReadinessClient({
     checks: completeAckChecks({ payloadDefinition: NONCANONICAL_EQUIVALENT_PAYLOAD, mismatchRule: "ACK_STATUS_VALUES" })
   });
-  await assert.rejects(() => preflightDeviceBridgeAckSchemaForT1(unrelatedMismatch), /ACK schema compatibility check failed/);
+  await assert.rejects(
+    () => withDeviceBridgeReadOnlyTransaction({ async connect() { return unrelatedMismatch; } }, current =>
+      preflightDeviceBridgeAckSchemaForProtectedT1Preflight(current)
+    ),
+    /ACK schema compatibility check failed/
+  );
   assert.equal(unrelatedMismatch.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
   assertNoAckMutation(unrelatedMismatch.calls);
+  assertProtectedAckReadOnlyTransaction(unrelatedMismatch);
 
   const missingRequiredColumnType = semanticAckReadinessClient({
+    checks: completeAckChecks({ payloadDefinition: NONCANONICAL_EQUIVALENT_PAYLOAD }),
     columnTypes: { status: "text", result: "jsonb" }
   });
-  await assert.rejects(() => preflightDeviceBridgeAckSchemaForT1(missingRequiredColumnType), /ACK schema compatibility check failed/);
+  await assert.rejects(
+    () => withDeviceBridgeReadOnlyTransaction({ async connect() { return missingRequiredColumnType; } }, current =>
+      preflightDeviceBridgeAckSchemaForProtectedT1Preflight(current)
+    ),
+    /ACK schema compatibility check failed/
+  );
+  assert.equal(missingRequiredColumnType.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
   assertNoAckMutation(missingRequiredColumnType.calls);
+  assertProtectedAckReadOnlyTransaction(missingRequiredColumnType);
 });
 
 function responseRecorder() {

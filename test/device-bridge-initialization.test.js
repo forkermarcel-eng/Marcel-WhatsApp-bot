@@ -20,6 +20,8 @@ const REQUIRED_TABLES = new Set([
 ]);
 const FINAL_TINDER_STATES = ["DISCONNECTED", "CONNECTING", "CONNECTED", "AUTH_REQUIRED", "REVIEW_REQUIRED", "UNKNOWN"];
 const FINAL_COMMAND_TYPES = ["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER"];
+const CANONICAL_ACK_PAYLOAD_DEFINITION = "CHECK ((status = 'RECEIVED' AND result IS NULL AND error IS NULL) OR (status = 'SUCCEEDED' AND error IS NULL) OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL) OR (status = 'REJECTED' AND result IS NULL) OR (status = 'EXPIRED' AND result IS NULL AND error IS NULL))";
+const NONCANONICAL_EQUIVALENT_ACK_PAYLOAD_DEFINITION = "CHECK ((status = 'EXPIRED' AND result IS NULL AND error IS NULL) OR (status = 'REJECTED' AND result IS NULL) OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL) OR (status = 'SUCCEEDED' AND error IS NULL) OR (status = 'RECEIVED' AND result IS NULL AND error IS NULL))";
 
 function checkDefinition(column, values) {
   return `CHECK (${column} IN (${values.map(value => `'${value}'`).join(", ")}))`;
@@ -36,7 +38,7 @@ function loggerRecorder() {
   };
 }
 
-function schemaPool({ t1Constraint = T1_TINDER_STATE_CONSTRAINT_NAME } = {}) {
+function schemaPool({ t1Constraint = T1_TINDER_STATE_CONSTRAINT_NAME, ackPayloadDefinition = CANONICAL_ACK_PAYLOAD_DEFINITION } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
@@ -70,7 +72,7 @@ function schemaPool({ t1Constraint = T1_TINDER_STATE_CONSTRAINT_NAME } = {}) {
           convalidated: true,
           condeferrable: false,
           condeferred: false,
-          constraint_definition: "CHECK ((status = 'RECEIVED' AND result IS NULL AND error IS NULL) OR (status = 'SUCCEEDED' AND error IS NULL) OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL) OR (status = 'REJECTED' AND result IS NULL) OR (status = 'EXPIRED' AND result IS NULL AND error IS NULL))",
+          constraint_definition: ackPayloadDefinition,
           column_names: ["error", "result", "status"]
         }] };
       }
@@ -118,6 +120,27 @@ test("normal startup with missing T1 schema never mutates and remains not ready"
   assert.equal(ready, false);
   assert.equal(readinessCalls, 0);
   assert.equal(hasMutation(fake.calls), false);
+  assert.deepEqual(logs.entries, [{
+    level: "error",
+    message: "Device Bridge Protocol V1 schema readiness check failed."
+  }]);
+});
+
+test("normal startup remains structural and fails closed without semantic evaluation for an equivalent noncanonical ACK payload", async () => {
+  const fake = schemaPool({ ackPayloadDefinition: NONCANONICAL_EQUIVALENT_ACK_PAYLOAD_DEFINITION });
+  const events = [];
+  const logs = loggerRecorder();
+  const ready = await initializeDeviceBridgeDatabase(fake.pool, {
+    verifySchema: verifyDeviceBridgeSchema,
+    markReady: () => { events.push("ready"); },
+    logger: logs.logger
+  });
+
+  assert.equal(ready, false);
+  assert.deepEqual(events, []);
+  assert.equal(fake.calls.some(call => call.sql.includes("FROM XMLTABLE") || call.sql.includes("LIMIT 2")), false);
+  assert.equal(hasMutation(fake.calls), false);
+  assert.equal(fake.client.released, true);
   assert.deepEqual(logs.entries, [{
     level: "error",
     message: "Device Bridge Protocol V1 schema readiness check failed."

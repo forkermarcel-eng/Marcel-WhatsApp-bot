@@ -9,10 +9,12 @@ const migration = readFileSync(
 
 test("T2 capture migration is explicit-only and isolated from contact identity changes", () => {
   assert.match(migration, /PREPARATION ONLY/);
-  assert.match(migration, /CREATE TABLE IF NOT EXISTS tinder_visible_chat_captures/i);
+  assert.match(migration, /CREATE TABLE tinder_visible_chat_captures/i);
+  assert.doesNotMatch(migration, /CREATE TABLE IF NOT EXISTS/i);
   assert.match(migration, /device_id UUID NOT NULL[\s\S]*REFERENCES device_bridge_devices\(device_id\)/i);
   assert.match(migration, /resolved_contact_id INTEGER[\s\S]*REFERENCES contacts\(id\)[\s\S]*ON DELETE RESTRICT/i);
   assert.match(migration, /UNIQUE \(device_id, runtime_thread_fingerprint, capture_revision\)/i);
+  assert.match(migration, /UNIQUE \(device_id, runtime_thread_fingerprint, capture_fingerprint\)/i);
   assert.doesNotMatch(migration, /ALTER TABLE contacts/i);
   assert.doesNotMatch(migration, /contact_identifiers/i);
   assert.doesNotMatch(migration, /tinder_identity_mapping_audit/i);

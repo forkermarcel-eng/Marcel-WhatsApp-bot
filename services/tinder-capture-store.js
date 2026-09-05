@@ -228,7 +228,7 @@ function createTinderCaptureStore(repository, {
   createCaptureId = () => crypto.randomUUID(),
   now = () => new Date()
 } = {}) {
-  for (const method of ["withTransaction", "nextCaptureRevision", "insertCapture", "findCaptureById"]) {
+  for (const method of ["withTransaction", "nextCaptureRevision", "insertCapture", "findCaptureByFingerprint", "findCaptureById"]) {
     if (typeof repository?.[method] !== "function") {
       throw new TypeError(`repository.${method} must be a function`);
     }
@@ -242,6 +242,11 @@ function createTinderCaptureStore(repository, {
     const receivedAt = exactTimestamp(now()?.toISOString?.() || now(), "Empfangszeit");
 
     return repository.withTransaction(async (transaction) => {
+      // `nextCaptureRevision` takes the PostgreSQL transaction advisory lock
+      // for this exact device/thread before it reads any row. The fingerprint
+      // lookup deliberately happens after that lock: two identical captures
+      // cannot both observe an absent fingerprint and race into a unique
+      // constraint failure. A duplicate performs no insert.
       const captureRevision = Number(await repository.nextCaptureRevision(transaction, {
         deviceId: normalizedDeviceId,
         runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
@@ -249,6 +254,13 @@ function createTinderCaptureStore(repository, {
       if (!Number.isInteger(captureRevision) || captureRevision < 1) {
         throw new TinderCaptureValidationError("Die Capture-Revision ist ungültig.", "INVALID_CAPTURE_REVISION");
       }
+
+      const existing = await repository.findCaptureByFingerprint(transaction, {
+        deviceId: normalizedDeviceId,
+        runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint,
+        captureFingerprint: normalizedCapture.captureFingerprint
+      });
+      if (existing) return existing;
 
       const record = Object.freeze({
         captureId,
@@ -351,6 +363,18 @@ function createPgTinderCaptureRepository(pool) {
           record.capturedAt,
           record.receivedAt
         ]
+      );
+      return result.rows[0] || null;
+    },
+
+    async findCaptureByFingerprint(client, { deviceId, runtimeThreadFingerprint, captureFingerprint }) {
+      const result = await client.query(
+        `SELECT *
+         FROM tinder_visible_chat_captures
+         WHERE device_id = $1
+           AND runtime_thread_fingerprint = $2
+           AND capture_fingerprint = $3`,
+        [deviceId, runtimeThreadFingerprint, captureFingerprint]
       );
       return result.rows[0] || null;
     },

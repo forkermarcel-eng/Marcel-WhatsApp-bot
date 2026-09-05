@@ -158,6 +158,7 @@ test("capture persistence registers replay protection and capture storage in one
   };
   const pool = { async connect() { return client; } };
   const repository = {
+    async findCaptureByFingerprint() { return null; },
     async nextCaptureRevision() { return 1; },
     async insertCapture() { return storedCapture(); },
     async findCaptureById() { return null; }
@@ -225,6 +226,7 @@ test("capture ingress fails closed before replay or persistence when the T1 gate
     now: () => NOW,
     createRepository() {
       return {
+        async findCaptureByFingerprint() { return null; },
         async nextCaptureRevision() { return 1; },
         async insertCapture() { throw new Error("must not persist"); },
         async findCaptureById() { return null; }

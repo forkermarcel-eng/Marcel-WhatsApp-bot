@@ -1,13 +1,11 @@
 -- T2 visible-chat capture storage — PREPARATION ONLY.
 --
--- This file is deliberately NOT imported by index.js, runtime initialization,
--- or any Device Bridge migration runner. Apply it only through a separately
--- reviewed, explicit production migration after an independent schema
--- preflight. Until then, the signed ingress returns a controlled 503.
+-- This file is deliberately NOT imported by index.js or runtime
+-- initialization. The explicit T2 runner owns BEGIN/COMMIT and runs a strict
+-- schema preflight: absent is eligible, canonical is a safe no-op, and every
+-- partial/unknown state fails closed before this statement is executed.
 
-BEGIN;
-
-CREATE TABLE IF NOT EXISTS tinder_visible_chat_captures (
+CREATE TABLE tinder_visible_chat_captures (
   capture_id UUID PRIMARY KEY,
 
   device_id UUID NOT NULL
@@ -66,7 +64,6 @@ CREATE TABLE IF NOT EXISTS tinder_visible_chat_captures (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
   CHECK ((mapping_status = 'RESOLVED') = (resolved_contact_id IS NOT NULL)),
-  UNIQUE (device_id, runtime_thread_fingerprint, capture_revision)
+  UNIQUE (device_id, runtime_thread_fingerprint, capture_revision),
+  UNIQUE (device_id, runtime_thread_fingerprint, capture_fingerprint)
 );
-
-COMMIT;

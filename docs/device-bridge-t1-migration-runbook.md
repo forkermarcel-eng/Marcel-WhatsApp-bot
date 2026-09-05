@@ -56,6 +56,30 @@ An already-final T1 state is a no-op. A mixed legacy/final T1 state is
 ambiguous and fails closed; the runner never silently finishes a partial
 migration.
 
+## Bounded runner diagnostics
+
+Each terminal CLI outcome emits the existing human-readable line followed by
+one fixed-format diagnostic line containing only `stage`, `code`,
+`transaction`, `rollback`, and `ddl_started`. The stage is one of the bounded
+runner boundaries: database connection, `BEGIN`, transaction settings,
+advisory lock, global preflight, table-lock acquisition, locked preflight,
+DDL execution, postcheck, `COMMIT`, or cleanup. CLI argument and environment
+validation use their own bounded stages.
+
+The output never includes a raw PostgreSQL error, connection string, SQL,
+parameters, or database rows. `ddl_started=true` means the runner began at
+least one allowed T1 `ALTER` attempt; it does not claim that the statement or
+transaction committed. A `COMMIT` failure reports an unknown commit outcome;
+it is never reported as a successful migration. A failed `BEGIN` also remains
+transaction-state unresolved because a network-level outcome cannot be
+inferred safely.
+
+For a future failure, `rollback=COMPLETED` documents the runner's successful
+rollback attempt before `COMMIT`; `rollback=FAILED` or an unknown commit
+outcome requires a separate protected read-only snapshot before any new
+operator decision. Diagnostics cannot reconstruct a failure that occurred
+before this observability was added.
+
 ## Scope boundary
 
 The runner never bootstraps Foundation, repairs ACK, performs data backfills,

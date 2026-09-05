@@ -9,6 +9,7 @@ import {
   inspectDeviceBridgeT1Schema
 } from "../device-bridge/t1-schema.js";
 import {
+  getDeviceBridgeT1MigrationFailureDiagnostic,
   migrateDeviceBridgeSchema,
   T1_MIGRATION_IDLE_TRANSACTION_TIMEOUT,
   T1_MIGRATION_LOCK_TIMEOUT,
@@ -241,7 +242,11 @@ function migrationClient({
   schemaDriftAfterLocks = false,
   dataDriftAfterLocks = false,
   failCommit = false,
-  failRollback = false
+  failRollback = false,
+  failConnection = false,
+  failBegin = false,
+  failSettings = false,
+  failRelease = false
 } = {}) {
   const calls = [];
   const present = new Set(foundation === "EMPTY" ? [] : REQUIRED_TABLES);
@@ -280,6 +285,7 @@ function migrationClient({
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (sql === "BEGIN") {
+        if (failBegin) throw new Error("injected BEGIN failure");
         state.snapshot = snapshotState();
         return { rows: [] };
       }
@@ -296,7 +302,10 @@ function migrationClient({
         restoreSnapshot();
         return { rows: [] };
       }
-      if (sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY" || sql.startsWith("SET LOCAL ")) return { rows: [] };
+      if (sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY" || sql.startsWith("SET LOCAL ")) {
+        if (failSettings && sql.startsWith("SET LOCAL ")) throw new Error("injected settings failure");
+        return { rows: [] };
+      }
       if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ acquired: advisoryLockAvailable }] };
       if (sql.includes("to_regclass")) return { rows: [{ relation_name: present.has(params[0]) ? params[0] : null }] };
       if (sql.includes("FROM pg_class c") && sql.includes("c.relkind")) {
@@ -352,13 +361,34 @@ function migrationClient({
       if (sql.includes("ALTER TABLE") && sql.includes("DROP CONSTRAINT")) return { rows: [] };
       throw new Error(`Unexpected query in migration test: ${sql}`);
     },
-    release(error) { state.released = true; state.releaseError = error || null; }
+    release(error) {
+      state.released = true;
+      state.releaseError = error || null;
+      if (failRelease) throw new Error("injected client release failure");
+    }
   };
-  return { client, pool: { async connect() { return client; } } };
+  return {
+    client,
+    pool: {
+      async connect() {
+        if (failConnection) throw new Error("injected database connection failure");
+        return client;
+      }
+    }
+  };
 }
 
 function ddlCalls(calls) {
   return calls.filter(call => /\b(CREATE|ALTER|DROP)\b/i.test(call.sql));
+}
+
+async function captureMigrationFailure(pool) {
+  try {
+    await migrateDeviceBridgeSchema(pool);
+    assert.fail("Expected Device Bridge T1 migration to fail.");
+  } catch (error) {
+    return { error, diagnostic: getDeviceBridgeT1MigrationFailureDiagnostic(error) };
+  }
 }
 
 test("runtime T1 inspection accepts only exact final definitions without mutation", async () => {
@@ -494,6 +524,128 @@ test("transaction-local migration bounds and a concurrent-runner ambiguity fail 
   assert.equal(ddlCalls(fake.client.calls).length, 0);
   assert.equal(fake.client.state.rolledBack, true);
   assert.equal(fake.client.state.released, true);
+});
+
+test("bounded migration diagnostics classify each failure boundary without changing the primary error", async () => {
+  const rawConnectionError = new Error("database error includes TEST-SENSITIVE-MARKER-47d5");
+  const cases = [
+    {
+      name: "connection",
+      factory: () => ({ pool: { async connect() { throw rawConnectionError; } } }),
+      expected: {
+        stage: "DATABASE_CONNECTION", code: "DATABASE_OPERATION_FAILED", transaction: "NOT_STARTED",
+        rollback: "NOT_ATTEMPTED", ddl_started: false
+      },
+      rawError: rawConnectionError
+    },
+    {
+      name: "begin",
+      factory: () => migrationClient({ failBegin: true }),
+      expected: {
+        stage: "TRANSACTION_BEGIN", code: "DATABASE_OPERATION_FAILED", transaction: "UNRESOLVED",
+        rollback: "NOT_ATTEMPTED", ddl_started: false
+      }
+    },
+    {
+      name: "settings",
+      factory: () => migrationClient({ failSettings: true }),
+      expected: {
+        stage: "TRANSACTION_SETTINGS", code: "DATABASE_OPERATION_FAILED", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: false
+      }
+    },
+    {
+      name: "advisory lock",
+      factory: () => migrationClient({ advisoryLockAvailable: false }),
+      expected: {
+        stage: "ADVISORY_LOCK", code: "ADVISORY_LOCK_UNAVAILABLE", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: false
+      }
+    },
+    {
+      name: "global preflight",
+      factory: () => migrationClient({ foundation: "EMPTY" }),
+      expected: {
+        stage: "GLOBAL_PREFLIGHT", code: "DATABASE_OPERATION_FAILED", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: false
+      }
+    },
+    {
+      name: "ACK semantic evaluator",
+      factory: () => migrationClient({ ack: "EVALUATION_ERROR" }),
+      expected: {
+        stage: "GLOBAL_PREFLIGHT", code: "DATABASE_OPERATION_FAILED", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: false
+      }
+    },
+    {
+      name: "table lock",
+      factory: () => migrationClient({ lockTimeout: true }),
+      expected: {
+        stage: "TABLE_LOCK_ACQUISITION", code: "LOCK_TIMEOUT", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: false
+      }
+    },
+    {
+      name: "locked preflight",
+      factory: () => migrationClient({ schemaDriftAfterLocks: true }),
+      expected: {
+        stage: "LOCKED_PREFLIGHT", code: "DATABASE_OPERATION_FAILED", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: false
+      }
+    },
+    {
+      name: "DDL",
+      factory: () => migrationClient({ failOnSecondT1Ddl: true }),
+      expected: {
+        stage: "DDL_EXECUTION", code: "DATABASE_OPERATION_FAILED", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: true
+      }
+    },
+    {
+      name: "postcheck",
+      factory: () => migrationClient({ failPostcheck: true }),
+      expected: {
+        stage: "POSTCHECK", code: "DATABASE_OPERATION_FAILED", transaction: "STARTED",
+        rollback: "COMPLETED", ddl_started: true
+      }
+    },
+    {
+      name: "commit",
+      factory: () => migrationClient({ failCommit: true }),
+      expected: {
+        stage: "COMMIT", code: "COMMIT_OUTCOME_UNRESOLVED", transaction: "COMMIT_OUTCOME_UNKNOWN",
+        rollback: "NOT_ATTEMPTED", ddl_started: true
+      }
+    },
+    {
+      name: "rollback",
+      factory: () => migrationClient({ lockTimeout: true, failRollback: true }),
+      expected: {
+        stage: "TABLE_LOCK_ACQUISITION", code: "LOCK_TIMEOUT", transaction: "STARTED",
+        rollback: "FAILED", ddl_started: false
+      }
+    },
+    {
+      name: "client cleanup",
+      factory: () => migrationClient({ failRelease: true }),
+      expected: {
+        stage: "CLEANUP", code: "CLEANUP_FAILED", transaction: "COMMITTED",
+        rollback: "NOT_ATTEMPTED", ddl_started: true
+      }
+    }
+  ];
+
+  for (const item of cases) {
+    const fake = item.factory();
+    const { error, diagnostic } = await captureMigrationFailure(fake.pool);
+    assert.deepEqual(diagnostic, item.expected, item.name);
+    if (item.rawError) assert.equal(error, item.rawError, item.name);
+    assert.equal(JSON.stringify(diagnostic).includes("TEST-SENSITIVE-MARKER-47d5"), false, item.name);
+    if (fake.client) {
+      assert.equal(ddlCalls(fake.client.calls).length === 0, item.expected.ddl_started === false, item.name);
+    }
+  }
 });
 
 test("lock timeout aborts once, rolls back, and a separately initiated recovery run succeeds", async () => {

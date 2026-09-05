@@ -48,10 +48,6 @@ export const ACK_REQUIRED_CHECKS = Object.freeze([
 ]);
 export const ACK_REQUIRED_COLUMN_TYPES = Object.freeze({ status: "text", result: "jsonb", error: "jsonb" });
 
-function quoteIdentifier(value) {
-  return `"${String(value).replaceAll('"', '""')}"`;
-}
-
 function sameColumns(actual, expected) {
   return Array.isArray(actual) && actual.length === expected.length && actual.every((column, index) => column === expected[index]);
 }
@@ -101,6 +97,28 @@ async function hasSemanticallyEquivalentPayloadDefinition(client, row, specifica
   }
 }
 
+async function completePayloadSemanticClassification(client, row, specification) {
+  if (!isEligiblePayloadConstraint(row, specification)) {
+    throw new Error("Device Bridge ACK schema compatibility check failed.");
+  }
+  try {
+    // Dynamic loading avoids a static cycle because the bounded classifier
+    // imports this module's fixed canonical ACK contract.
+    const {
+      isCompleteAckPayloadSemanticEquivalence,
+      runDeviceBridgeAckPayloadSemanticClassifierWithClient
+    } = await import("./ack-payload-semantic-classifier.js");
+    const classification = await runDeviceBridgeAckPayloadSemanticClassifierWithClient(client);
+    if (!isCompleteAckPayloadSemanticEquivalence(classification)) {
+      throw new Error("Device Bridge ACK schema compatibility check failed.");
+    }
+    return classification;
+  } catch (error) {
+    if (error?.message === "Device Bridge ACK schema compatibility check failed.") throw error;
+    throw new Error("Device Bridge ACK schema compatibility check failed.");
+  }
+}
+
 async function hasCompatibleAckCheckDefinition(client, row, specification, allowSemanticFallback) {
   if (specification?.id !== "ACK_PAYLOAD_V1" || !allowSemanticFallback) {
     return hasExpectedDefinition(row, specification);
@@ -139,6 +157,23 @@ export async function inspectDeviceBridgeAckSchema(client) {
   return { ready, constraintName: ready ? payload.conname : null };
 }
 
+/**
+ * Read-only bounded payload inspection for the explicit ACK
+ * canonicalization runner. It intentionally exposes no catalog definition.
+ */
+export async function inspectDeviceBridgeAckPayloadConstraint(client) {
+  const constraints = await readDeviceBridgeAckCheckConstraints(client);
+  const payload = findPayloadConstraint(constraints.rows);
+  const specification = ACK_REQUIRED_CHECKS.at(-1);
+  if (!payload || !isEligiblePayloadConstraint(payload, specification)) {
+    return { state: "INVALID", constraintName: null };
+  }
+  return {
+    state: hasExpectedDefinition(payload, specification) ? "CANONICAL" : "NONCANONICAL",
+    constraintName: payload.conname
+  };
+}
+
 export async function assertDeviceBridgeAckSchemaReady(client) {
   const inspection = await inspectDeviceBridgeAckSchema(client);
   if (!inspection.ready) throw new Error("Device Bridge ACK schema is not ready.");
@@ -157,6 +192,19 @@ async function inspectAckColumnTypes(client) {
   return Object.entries(ACK_REQUIRED_COLUMN_TYPES).every(([column, type]) => actual.get(column) === type);
 }
 
+export async function assertDeviceBridgeAckDataCompatible(client) {
+  const compatibility = await client.query(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM device_bridge_command_acks
+      WHERE (${FINAL_ACK_CHECK_EXPRESSION}) IS NOT TRUE
+    ) AS incompatible
+  `);
+  if (compatibility.rows[0]?.incompatible !== false) {
+    throw new Error("Device Bridge ACK data is incompatible with Protocol V1.");
+  }
+}
+
 async function preflightDeviceBridgeAckSchema(client, allowSemanticFallback) {
   const constraints = await readDeviceBridgeAckCheckConstraints(client);
   if (!await inspectAckColumnTypes(client)) {
@@ -172,17 +220,54 @@ async function preflightDeviceBridgeAckSchema(client, allowSemanticFallback) {
     if (matches !== 1) validChecks = false;
   }
   if (!validChecks) throw new Error("Device Bridge ACK schema compatibility check failed.");
-  const compatibility = await client.query(`
-    SELECT EXISTS (
-      SELECT 1
-      FROM device_bridge_command_acks
-      WHERE (${FINAL_ACK_CHECK_EXPRESSION}) IS NOT TRUE
-    ) AS incompatible
-  `);
-  if (compatibility.rows[0]?.incompatible !== false) {
-    throw new Error("Device Bridge ACK data is incompatible with Protocol V1.");
-  }
+  await assertDeviceBridgeAckDataCompatible(client);
   return { ready: true };
+}
+
+/**
+ * Read-only preflight for the one explicit ACK canonicalization migration.
+ * All non-payload ACK contract pieces remain strict. A noncanonical payload
+ * is eligible only after the existing complete 20/20 semantic classifier
+ * proves exact equivalence with the fixed canonical rule.
+ */
+export async function preflightDeviceBridgeAckSchemaForCanonicalization(client) {
+  const constraints = await readDeviceBridgeAckCheckConstraints(client);
+  if (!await inspectAckColumnTypes(client) || constraints.rows.length !== ACK_REQUIRED_CHECKS.length) {
+    throw new Error("Device Bridge ACK schema compatibility check failed.");
+  }
+
+  const payloadSpecification = ACK_REQUIRED_CHECKS.at(-1);
+  let payload = null;
+  for (const specification of ACK_REQUIRED_CHECKS) {
+    if (specification.id === "ACK_PAYLOAD_V1") {
+      const matches = constraints.rows.filter(row => sameColumns(row.column_names, specification.columns));
+      if (matches.length !== 1) {
+        throw new Error("Device Bridge ACK schema compatibility check failed.");
+      }
+      payload = matches[0];
+      continue;
+    }
+    if (constraints.rows.filter(row => hasExpectedDefinition(row, specification)).length !== 1) {
+      throw new Error("Device Bridge ACK schema compatibility check failed.");
+    }
+  }
+
+  let state = "CANONICAL";
+  let semanticClassification = null;
+  if (!hasExpectedDefinition(payload, payloadSpecification)) {
+    state = "NONCANONICAL";
+    semanticClassification = await completePayloadSemanticClassification(client, payload, payloadSpecification);
+  }
+
+  await assertDeviceBridgeAckDataCompatible(client);
+  return {
+    ready: true,
+    payload: {
+      state,
+      constraintName: payload.conname,
+      semanticClassification
+    }
+  };
 }
 
 /**
@@ -214,45 +299,4 @@ export async function preflightDeviceBridgeAckSchemaForProtectedT1Preflight(clie
     throw new Error("Device Bridge ACK schema compatibility check failed.");
   }
   return preflightDeviceBridgeAckSchema(client, true);
-}
-
-/** Separate ACK migration helper; the T1 runner never imports or calls it. */
-export async function preflightDeviceBridgeAckSchemaMigration(client) {
-  await client.query("LOCK TABLE device_bridge_command_acks IN ACCESS EXCLUSIVE MODE");
-  const constraints = await readDeviceBridgeAckCheckConstraints(client);
-  const current = findPayloadConstraint(constraints.rows);
-  if (!current || current.convalidated !== true) {
-    throw new Error("Device Bridge ACK schema compatibility check failed.");
-  }
-  if (current.conname === FINAL_ACK_CONSTRAINT_NAME) return { mutate: false, constraintName: current.conname };
-
-  const compatibility = await client.query(`
-    SELECT EXISTS (
-      SELECT 1
-      FROM device_bridge_command_acks
-      WHERE NOT (${FINAL_ACK_CHECK_EXPRESSION})
-    ) AS incompatible
-  `);
-  if (compatibility.rows[0]?.incompatible !== false) {
-    throw new Error("Device Bridge ACK data is incompatible with Protocol V1.");
-  }
-  return { mutate: true, constraintName: current.conname };
-}
-
-/** Separate ACK migration helper; it is intentionally outside the T1 runner. */
-export async function migrateDeviceBridgeAckSchema(client) {
-  const preflight = await preflightDeviceBridgeAckSchemaMigration(client);
-  if (preflight.mutate) {
-    await client.query(
-      `ALTER TABLE device_bridge_command_acks DROP CONSTRAINT ${quoteIdentifier(preflight.constraintName)}`
-    );
-    await client.query(`
-      ALTER TABLE device_bridge_command_acks
-      ADD CONSTRAINT ${FINAL_ACK_CONSTRAINT_NAME}
-      CHECK (${FINAL_ACK_CHECK_EXPRESSION})
-    `);
-  }
-  const postcheck = await inspectDeviceBridgeAckSchema(client);
-  if (!postcheck.ready) throw new Error("Device Bridge ACK schema postcheck failed.");
-  return { migrated: preflight.mutate };
 }

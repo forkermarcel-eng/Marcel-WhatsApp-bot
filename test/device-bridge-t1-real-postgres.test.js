@@ -5,11 +5,13 @@ import { URL } from "node:url";
 import { Pool } from "pg";
 import {
   getDeviceBridgeT1MigrationFailureDiagnostic,
+  migrateDeviceBridgeSchema,
   validateDeviceBridgeT1PreDdl
 } from "../device-bridge/database.js";
+import { migrateDeviceBridgeAckCanonicalization } from "../device-bridge/ack-canonicalization.js";
 import { runDeviceBridgeAckPayloadSemanticClassifierWithClient } from "../device-bridge/ack-payload-semantic-classifier.js";
 import { preflightDeviceBridgeAckSchemaForT1Migration } from "../device-bridge/ack-schema.js";
-import { preflightDeviceBridgeFoundationForT1, REQUIRED_TABLES } from "../device-bridge/schema-readiness.js";
+import { preflightDeviceBridgeFoundationForT1, REQUIRED_TABLES, verifyDeviceBridgeSchema } from "../device-bridge/schema-readiness.js";
 import { preflightDeviceBridgeT1SchemaMigration } from "../device-bridge/t1-schema.js";
 import { createDeviceBridgeLegacyRealPostgresFixture } from "./helpers/device-bridge-real-postgres-fixture.js";
 
@@ -49,7 +51,7 @@ function hasT1Ddl(records) {
   return records.some(record => /\b(?:ALTER|CREATE|DROP|TRUNCATE)\b/i.test(record.sql));
 }
 
-function makeTracePool(pool, { beforeQuery } = {}) {
+function makeTracePool(pool, { beforeQuery, afterQuery } = {}) {
   const records = [];
   const state = { connections: 0, releases: 0 };
   return {
@@ -65,6 +67,7 @@ function makeTracePool(pool, { beforeQuery } = {}) {
           await beforeQuery?.({ sql: record.sql, params: record.params, rawClient, records });
           const result = await rawClient.query(sql, params);
           record.rowCount = Array.isArray(result?.rows) ? result.rows.length : null;
+          await afterQuery?.({ sql: record.sql, params: record.params, rawClient, records, result });
           return result;
         },
         release(error) {
@@ -149,6 +152,19 @@ async function withDisposableLocalDatabase(callback) {
     await adminPool.query(`DROP DATABASE IF EXISTS ${quoteIdentifier(databaseName)}`);
     await adminPool.end();
   }
+}
+
+async function replaceAckPayloadConstraint(pool, expression) {
+  await pool.query("ALTER TABLE device_bridge_command_acks DROP CONSTRAINT device_bridge_command_acks_payload_check_v1");
+  await pool.query(`
+    ALTER TABLE device_bridge_command_acks
+    ADD CONSTRAINT device_bridge_command_acks_payload_check_v1
+    CHECK (${expression})
+  `);
+}
+
+async function upgradeFixtureToFinalT1(pool) {
+  assert.deepEqual(await migrateDeviceBridgeSchema(pool), { migrated: true });
 }
 
 test("real loopback PostgreSQL validates the full T1 pre-DDL path, timeout, and recovery", { timeout: 30_000 }, async () => {
@@ -244,4 +260,82 @@ test("real loopback PostgreSQL validates the full T1 pre-DDL path, timeout, and 
     const healthy = await pool.query("SELECT 1 AS healthy");
     assert.equal(healthy.rows[0]?.healthy, 1);
   });
+});
+
+test("real loopback PostgreSQL canonicalizes only a 20/20 equivalent ACK payload and restores strict startup readiness", { timeout: 30_000 }, async () => {
+  await withDisposableLocalDatabase(async pool => {
+    await createDeviceBridgeLegacyRealPostgresFixture(pool);
+    await upgradeFixtureToFinalT1(pool);
+
+    const canonicalization = makeTracePool(pool);
+    assert.deepEqual(await migrateDeviceBridgeAckCanonicalization(canonicalization), { migrated: true });
+    assert.equal(countSql(canonicalization.records, sql => sql.trim() === "BEGIN"), 1);
+    assert.equal(countSql(canonicalization.records, sql => sql.trim() === "COMMIT"), 1);
+    assert.equal(countSql(canonicalization.records, sql => sql.trim() === "ROLLBACK"), 0);
+    assert.equal(countSql(canonicalization.records, sql => sql.startsWith("LOCK TABLE device_bridge_command_acks")), 1);
+    const ackDdl = canonicalization.records.filter(record => /ALTER TABLE device_bridge_command_acks/i.test(record.sql));
+    assert.equal(ackDdl.length, 2);
+    assert.equal(canonicalization.records.filter(record => sqlContains(record.sql, "FROM XMLTABLE")).length, 2);
+    assert.deepEqual(await verifyDeviceBridgeSchema(pool), { ready: true });
+
+    const second = makeTracePool(pool);
+    assert.deepEqual(await migrateDeviceBridgeAckCanonicalization(second), { migrated: false });
+    assert.equal(second.records.some(record => /ALTER TABLE device_bridge_command_acks/i.test(record.sql)), false);
+    assert.deepEqual(await verifyDeviceBridgeSchema(pool), { ready: true });
+  });
+});
+
+test("real loopback PostgreSQL ACK canonicalization blocks non-equivalent payloads before DDL", { timeout: 30_000 }, async () => {
+  const nonEquivalentExpressions = [
+    "TRUE",
+    "status = 'RECEIVED' AND result IS NULL AND error IS NULL",
+    "(status = 'RECEIVED' AND result IS NULL AND error IS NULL) OR (status = 'FAILED' AND result IS NULL)"
+  ];
+  for (const expression of nonEquivalentExpressions) {
+    await withDisposableLocalDatabase(async pool => {
+      await createDeviceBridgeLegacyRealPostgresFixture(pool);
+      await upgradeFixtureToFinalT1(pool);
+      await replaceAckPayloadConstraint(pool, expression);
+      const trace = makeTracePool(pool);
+      await assert.rejects(() => migrateDeviceBridgeAckCanonicalization(trace));
+      assert.equal(trace.records.some(record => /ALTER TABLE device_bridge_command_acks/i.test(record.sql)), false);
+      assert.equal(countSql(trace.records, sql => sql.trim() === "ROLLBACK"), 1);
+    });
+  }
+});
+
+test("real loopback PostgreSQL ACK canonicalization rolls back schema drift after its table lock and a failed postcheck", { timeout: 30_000 }, async () => {
+  for (const injectionPoint of ["LOCK", "POSTCHECK"]) {
+    await withDisposableLocalDatabase(async pool => {
+      await createDeviceBridgeLegacyRealPostgresFixture(pool);
+      await upgradeFixtureToFinalT1(pool);
+      let injected = false;
+      const trace = makeTracePool(pool, {
+        beforeQuery: injectionPoint === "LOCK" ? async ({ sql, rawClient }) => {
+          if (!injected && sql.startsWith("LOCK TABLE device_bridge_command_acks")) {
+            injected = true;
+            await rawClient.query("ALTER TABLE device_bridge_command_acks DROP CONSTRAINT device_bridge_command_acks_payload_check_v1");
+            await rawClient.query("ALTER TABLE device_bridge_command_acks ADD CONSTRAINT device_bridge_command_acks_payload_check_v1 CHECK (TRUE)");
+          }
+        } : undefined,
+        afterQuery: injectionPoint === "POSTCHECK" ? async ({ sql, rawClient }) => {
+          if (!injected && /ADD CONSTRAINT device_bridge_command_acks_payload_check_v1/i.test(sql)) {
+            injected = true;
+            await rawClient.query("ALTER TABLE device_bridge_command_acks DROP CONSTRAINT device_bridge_command_acks_payload_check_v1");
+            await rawClient.query("ALTER TABLE device_bridge_command_acks ADD CONSTRAINT device_bridge_command_acks_payload_check_v1 CHECK (TRUE)");
+          }
+        } : undefined
+      });
+      await assert.rejects(() => migrateDeviceBridgeAckCanonicalization(trace));
+      assert.equal(injected, true);
+      assert.equal(countSql(trace.records, sql => sql.trim() === "ROLLBACK"), 1);
+      const restored = await pool.query(`
+        SELECT pg_get_constraintdef(c.oid, true) AS definition
+        FROM pg_constraint c
+        WHERE c.conrelid = 'device_bridge_command_acks'::regclass
+          AND c.conname = 'device_bridge_command_acks_payload_check_v1'
+      `);
+      assert.match(restored.rows[0]?.definition || "", /EXPIRED/);
+    });
+  }
 });

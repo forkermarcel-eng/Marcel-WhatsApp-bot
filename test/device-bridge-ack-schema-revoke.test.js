@@ -4,10 +4,10 @@ import test from "node:test";
 import {
   ACK_REQUIRED_CHECKS,
   FINAL_ACK_CHECK_EXPRESSION,
-  migrateDeviceBridgeAckSchema,
   FINAL_ACK_CONSTRAINT_NAME,
   hasExpectedAckCheckDefinition,
   inspectDeviceBridgeAckSchema,
+  preflightDeviceBridgeAckSchemaForCanonicalization,
   preflightDeviceBridgeAckSchemaForProtectedT1Preflight,
   preflightDeviceBridgeAckSchemaForT1,
   preflightDeviceBridgeAckSchemaForT1Migration
@@ -17,7 +17,6 @@ import { withDeviceBridgeReadOnlyTransaction } from "../device-bridge/read-only-
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const NOW = new Date("2026-09-01T12:34:56.000Z");
-const OLD_CONSTRAINT = "device_bridge_command_acks_check3";
 const ACK_COLUMNS = ["error", "result", "status"];
 const ACK_STATUSES = ["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"];
 const CANONICAL_ACK_ACCEPTANCE = Object.freeze({
@@ -37,37 +36,6 @@ const NONCANONICAL_EQUIVALENT_PAYLOAD = `
 
 function checkDefinition(column, values) {
   return `CHECK (${column} IN (${values.map(value => `'${value}'`).join(", ")}))`;
-}
-
-function ackRows({ constraint, validated }) {
-  return [{
-    conname: constraint,
-    convalidated: validated,
-    condeferrable: false,
-    condeferred: false,
-    constraint_definition: constraint === FINAL_ACK_CONSTRAINT_NAME
-      ? "CHECK ((status = 'RECEIVED' AND result IS NULL AND error IS NULL) OR (status = 'SUCCEEDED' AND error IS NULL) OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL) OR (status = 'REJECTED' AND result IS NULL) OR (status = 'EXPIRED' AND result IS NULL AND error IS NULL))"
-      : "CHECK ((status = 'RECEIVED' AND result IS NULL AND error IS NULL))",
-    column_names: ACK_COLUMNS
-  }];
-}
-
-function schemaClient({ constraint = FINAL_ACK_CONSTRAINT_NAME, validated = true, incompatible = false } = {}) {
-  const calls = [];
-  const state = { constraint, validated };
-  return {
-    calls,
-    async query(sql) {
-      calls.push(sql);
-      if (sql.includes(`ADD CONSTRAINT ${FINAL_ACK_CONSTRAINT_NAME}`)) {
-        state.constraint = FINAL_ACK_CONSTRAINT_NAME;
-        state.validated = true;
-      }
-      if (sql.includes("FROM pg_constraint")) return { rows: ackRows(state) };
-      if (sql.includes("AS incompatible")) return { rows: [{ incompatible }] };
-      return { rows: [] };
-    }
-  };
 }
 
 function semanticMatrix(overrides = {}) {
@@ -147,9 +115,12 @@ function assertProtectedAckReadOnlyTransaction(client) {
   assert.equal(client.state.released, true);
 }
 
-test("standalone ACK migration keeps the named final ACK constraint", () => {
-  const source = fs.readFileSync(new URL("../device-bridge/ack-schema.js", import.meta.url), "utf8");
-  assert.match(source, /ADD CONSTRAINT \$\{FINAL_ACK_CONSTRAINT_NAME\}/);
+test("only the explicit ACK canonicalization runner owns ACK payload DDL", () => {
+  const runner = fs.readFileSync(new URL("../device-bridge/ack-canonicalization.js", import.meta.url), "utf8");
+  const schema = fs.readFileSync(new URL("../device-bridge/ack-schema.js", import.meta.url), "utf8");
+  assert.match(runner, /DROP CONSTRAINT \$\{quoteIdentifier\(payload\.constraintName\)\}/);
+  assert.match(runner, /ADD CONSTRAINT \$\{FINAL_ACK_CONSTRAINT_NAME\}/);
+  assert.doesNotMatch(schema, /ALTER TABLE device_bridge_command_acks/);
 });
 
 test("T1-only runner never imports or calls ACK mutation", () => {
@@ -171,47 +142,6 @@ test("semantic ACK fallback is limited to the protected preflight and explicit m
     assert.doesNotMatch(source, /preflightDeviceBridgeAckSchemaForT1Migration/);
     assert.doesNotMatch(source, /ack-payload-semantic-classifier/);
   }
-});
-
-test("existing old schema without ACK rows is migrated by constraint identity, not name", async () => {
-  const client = schemaClient({ constraint: OLD_CONSTRAINT, incompatible: false });
-  const result = await migrateDeviceBridgeAckSchema(client);
-  assert.deepEqual(result, { migrated: true });
-  assert.equal(client.calls.some(sql => sql.includes(`DROP CONSTRAINT \"${OLD_CONSTRAINT}\"`)), true);
-  assert.equal(client.calls.some(sql => sql.includes(`ADD CONSTRAINT ${FINAL_ACK_CONSTRAINT_NAME}`)), true);
-});
-
-test("existing old schema with compatible ACK rows is migrated", async () => {
-  const client = schemaClient({ constraint: "arbitrary_generated_name", incompatible: false });
-  await migrateDeviceBridgeAckSchema(client);
-  const compatibility = client.calls.findIndex(sql => sql.includes("AS incompatible"));
-  const mutation = client.calls.findIndex(sql => sql.includes("ALTER TABLE"));
-  assert.ok(compatibility > -1 && mutation > compatibility);
-});
-
-test("already final schema is unchanged and repeated initialization is idempotent", async () => {
-  const client = schemaClient();
-  assert.deepEqual(await migrateDeviceBridgeAckSchema(client), { migrated: false });
-  assert.deepEqual(await migrateDeviceBridgeAckSchema(client), { migrated: false });
-  assert.equal(client.calls.some(sql => sql.includes("ALTER TABLE")), false);
-  assert.equal(client.calls.some(sql => sql.includes("AS incompatible")), false);
-});
-
-test("incompatible existing ACK data refuses every schema mutation", async () => {
-  const client = schemaClient({ constraint: OLD_CONSTRAINT, incompatible: true });
-  await assert.rejects(() => migrateDeviceBridgeAckSchema(client), /incompatible with Protocol V1/);
-  assert.equal(client.calls.some(sql => sql.includes("ALTER TABLE")), false);
-});
-
-test("missing, ambiguous or unvalidated ACK constraint fails closed", async () => {
-  for (const rows of [[], [
-    ...ackRows({ constraint: OLD_CONSTRAINT, validated: true }),
-    ...ackRows({ constraint: "another", validated: true })
-  ]]) {
-    const client = { async query(sql) { return sql.includes("FROM pg_constraint") ? { rows } : { rows: [] }; } };
-    await assert.rejects(() => migrateDeviceBridgeAckSchema(client), /compatibility check failed/);
-  }
-  await assert.rejects(() => migrateDeviceBridgeAckSchema(schemaClient({ validated: false })), /compatibility check failed/);
 });
 
 test("canonical ACK payload passes readiness without invoking the semantic fallback", async () => {
@@ -244,6 +174,14 @@ test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes th
   assert.equal(migrationClient.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 1);
   assertNoAckMutation(migrationClient.calls);
 
+  const canonicalizationClient = semanticAckReadinessClient({ checks });
+  const canonicalization = await preflightDeviceBridgeAckSchemaForCanonicalization(canonicalizationClient);
+  assert.equal(canonicalization.payload.state, "NONCANONICAL");
+  assert.equal(canonicalization.payload.constraintName, FINAL_ACK_CONSTRAINT_NAME);
+  assert.equal(canonicalization.payload.semanticClassification?.classification?.overall_classification, "SEMANTICALLY_EQUIVALENT");
+  assert.equal(canonicalizationClient.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 1);
+  assertNoAckMutation(canonicalizationClient.calls);
+
   const protectedPreflight = await runProtectedAckPreflight({ checks });
   assert.deepEqual(protectedPreflight.result, { ready: true });
   assert.equal(protectedPreflight.client.calls.filter(call => call.sql.includes("FROM XMLTABLE")).length, 1);
@@ -264,6 +202,33 @@ test("a healthy 20/20 semantically equivalent noncanonical ACK payload passes th
   });
   assert.equal(runtimeClient.calls.some(call => call.sql.includes("LIMIT 2") || call.sql.includes("FROM XMLTABLE")), false);
   assertNoAckMutation(runtimeClient.calls);
+});
+
+test("ACK canonicalization preflight fails closed for non-equivalence, incompleteness, and data mismatch", async () => {
+  const checks = completeAckChecks({ payloadDefinition: NONCANONICAL_EQUIVALENT_PAYLOAD });
+  const scenarios = [
+    { matrix: semanticMatrix({ RECEIVED: [true, false, true, false] }) },
+    { matrix: semanticMatrix().slice(0, -1) },
+    { matrixError: true }
+  ];
+  for (const scenario of scenarios) {
+    const client = semanticAckReadinessClient({ checks, ...scenario });
+    await assert.rejects(
+      () => preflightDeviceBridgeAckSchemaForCanonicalization(client),
+      /ACK schema compatibility check failed/
+    );
+    assertNoAckMutation(client.calls);
+  }
+  const incompatible = semanticAckReadinessClient({ checks });
+  const originalQuery = incompatible.query.bind(incompatible);
+  incompatible.query = async (sql, params) => sql.includes("AS incompatible")
+    ? { rows: [{ incompatible: true }] }
+    : originalQuery(sql, params);
+  await assert.rejects(
+    () => preflightDeviceBridgeAckSchemaForCanonicalization(incompatible),
+    /ACK data is incompatible/
+  );
+  assertNoAckMutation(incompatible.calls);
 });
 
 test("noncanonical ACK payload outcomes fail closed unless every bounded semantic rule matches", async () => {

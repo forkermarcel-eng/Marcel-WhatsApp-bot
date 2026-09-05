@@ -469,48 +469,79 @@ function classifyMatrix(matrix) {
 }
 
 /**
- * Classifies only the one bounded ACK payload CHECK. Test dependencies are
- * private seams; request handlers cannot provide SQL, target names, or data.
+ * Accepts only the complete, bounded result that proves the existing
+ * ACK_PAYLOAD_V1 constraint has exactly the canonical semantics. Callers
+ * cannot widen this predicate with a partial or unresolved classification.
  */
-export async function runDeviceBridgeAckPayloadSemanticClassifier(pool, dependencies = {}) {
+export function isCompleteAckPayloadSemanticEquivalence(result) {
+  const classification = result?.classification;
+  const statusRules = classification?.status_rules;
+  return result?.ok === true
+    && result?.reason_code === "SEMANTIC_CLASSIFICATION_COMPLETE"
+    && !Object.hasOwn(result, "diagnostic")
+    && statusRules
+    && Object.keys(statusRules).length === SUPPORTED_STATUSES.length
+    && SUPPORTED_STATUSES.every(status => statusRules[status] === "MATCH")
+    && classification.overall_classification === "SEMANTICALLY_EQUIVALENT"
+    && classification.production_can_accept_rows_canonical_rejects === false
+    && classification.canonical_can_accept_rows_production_rejects === false;
+}
+
+/**
+ * Client-scoped classifier core for callers which already own a protected
+ * transaction. It deliberately does not begin, commit, or roll back.
+ */
+export async function runDeviceBridgeAckPayloadSemanticClassifierWithClient(client, dependencies = {}) {
   const findConstraint = dependencies.findConstraint || findAckPayloadConstraint;
   const evaluateMatrix = dependencies.evaluateMatrix || evaluateAckPayloadMatrix;
   const classify = dependencies.classifyMatrix || classifyMatrix;
 
   try {
-    return await withDeviceBridgeReadOnlyTransaction(pool, async client => {
-      const targets = await findConstraint(client);
-      const targetFailure = targetDiagnostic(targets);
-      if (targetFailure) {
-        return unresolvedResult(targetFailure);
-      }
+    const targets = await findConstraint(client);
+    const targetFailure = targetDiagnostic(targets);
+    if (targetFailure) {
+      return unresolvedResult(targetFailure);
+    }
 
-      let evaluated;
-      try {
-        evaluated = await evaluateMatrix(client, targets.rows[0].constraint_oid);
-      } catch (error) {
-        if (error?.code === READ_ONLY_GUARD_CODE) throw error;
-        return unresolvedResult({
-          stage: "SYNTHETIC_EVALUATION",
-          reasonCode: "EVALUATION_ERROR",
-          attempted: EXPECTED_CASES.length,
-          completed: 0
-        });
-      }
-      const parsed = parseMatrix(evaluated?.rows);
-      if (!parsed.matrix) return unresolvedResult(parsed.diagnostic);
+    let evaluated;
+    try {
+      evaluated = await evaluateMatrix(client, targets.rows[0].constraint_oid);
+    } catch (error) {
+      if (error?.code === READ_ONLY_GUARD_CODE) throw error;
+      return unresolvedResult({
+        stage: "SYNTHETIC_EVALUATION",
+        reasonCode: "EVALUATION_ERROR",
+        attempted: EXPECTED_CASES.length,
+        completed: 0
+      });
+    }
+    const parsed = parseMatrix(evaluated?.rows);
+    if (!parsed.matrix) return unresolvedResult(parsed.diagnostic);
 
-      const classification = await classify(parsed.matrix);
-      const classificationFailure = classificationDiagnostic(classification);
-      if (classificationFailure) return unresolvedResult(classificationFailure);
-      return {
-        ok: true,
-        classification,
-        reason_code: classification.overall_classification === "UNRESOLVED"
-          ? "SEMANTIC_CLASSIFICATION_UNRESOLVED"
-          : "SEMANTIC_CLASSIFICATION_COMPLETE"
-      };
-    });
+    const classification = await classify(parsed.matrix);
+    const classificationFailure = classificationDiagnostic(classification);
+    if (classificationFailure) return unresolvedResult(classificationFailure);
+    return {
+      ok: true,
+      classification,
+      reason_code: classification.overall_classification === "UNRESOLVED"
+        ? "SEMANTIC_CLASSIFICATION_UNRESOLVED"
+        : "SEMANTIC_CLASSIFICATION_COMPLETE"
+    };
+  } catch (error) {
+    return unavailableResult(error);
+  }
+}
+
+/**
+ * Classifies only the one bounded ACK payload CHECK. Test dependencies are
+ * private seams; request handlers cannot provide SQL, target names, or data.
+ */
+export async function runDeviceBridgeAckPayloadSemanticClassifier(pool, dependencies = {}) {
+  try {
+    return await withDeviceBridgeReadOnlyTransaction(pool, client =>
+      runDeviceBridgeAckPayloadSemanticClassifierWithClient(client, dependencies)
+    );
   } catch (error) {
     return unavailableResult(error);
   }

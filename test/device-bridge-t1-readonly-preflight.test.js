@@ -4,9 +4,29 @@ import test from "node:test";
 import { createAdminT1ReadOnlyPreflightHandler } from "../device-bridge/admin.js";
 import { registerDeviceBridgeBlock3Routes } from "../device-bridge/block3-routes.js";
 import {
+  ACK_REQUIRED_CHECKS,
+  preflightDeviceBridgeAckSchemaForT1
+} from "../device-bridge/ack-schema.js";
+import {
   READ_ONLY_GUARD_CODE,
   runDeviceBridgeT1ReadOnlyPreflight
 } from "../device-bridge/t1-readonly-preflight.js";
+
+const ACK_STATUSES = ["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"];
+const ACK_ACCEPTANCE = Object.freeze({
+  RECEIVED: [true, false, false, false],
+  SUCCEEDED: [true, false, true, false],
+  FAILED: [false, true, false, false],
+  REJECTED: [true, true, false, false],
+  EXPIRED: [true, false, false, false]
+});
+const NONCANONICAL_EQUIVALENT_ACK_PAYLOAD = `
+  (status = 'EXPIRED' AND result IS NULL AND error IS NULL)
+  OR (status = 'REJECTED' AND result IS NULL)
+  OR (status = 'FAILED' AND result IS NULL AND error IS NOT NULL)
+  OR (status = 'SUCCEEDED' AND error IS NULL)
+  OR (status = 'RECEIVED' AND result IS NULL AND error IS NULL)
+`;
 
 function responseRecorder() {
   return {
@@ -19,17 +39,59 @@ function responseRecorder() {
   };
 }
 
-function readOnlyPool() {
+function readOnlyPool({ respond } = {}) {
   const calls = [];
   const state = { released: false };
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      return { rows: [] };
+      const response = respond ? await respond(sql, params) : undefined;
+      return response === undefined ? { rows: [] } : response;
     },
     release() { state.released = true; }
   };
   return { pool: { async connect() { return client; } }, calls, state };
+}
+
+function semanticMatrix() {
+  return ACK_STATUSES.flatMap((status, statusIndex) => ACK_ACCEPTANCE[status].map((canonical_accepts, combinationIndex) => ({
+    case_id: statusIndex * 4 + combinationIndex + 1,
+    production_accepts: canonical_accepts,
+    canonical_accepts
+  })));
+}
+
+function semanticallyEquivalentAckChecks() {
+  return ACK_REQUIRED_CHECKS.map(specification => ({
+    conname: specification.name || `generated_${specification.id.toLowerCase()}`,
+    convalidated: true,
+    condeferrable: false,
+    condeferred: false,
+    constraint_definition: `CHECK (${specification.id === "ACK_PAYLOAD_V1"
+      ? NONCANONICAL_EQUIVALENT_ACK_PAYLOAD : specification.expression})`,
+    column_names: specification.columns
+  }));
+}
+
+function semanticAckResponder(checks = semanticallyEquivalentAckChecks()) {
+  return sql => {
+    if (sql.includes("LIMIT 2") && sql.includes("FROM pg_constraint c")) {
+      return { rows: [{ constraint_oid: "4242", evaluator_safe: true }] };
+    }
+    if (sql.includes("c.conrelid = 'device_bridge_command_acks'::regclass")) return { rows: checks };
+    if (sql.includes("information_schema.columns")) {
+      return { rows: [
+        { column_name: "status", udt_name: "text" },
+        { column_name: "result", udt_name: "jsonb" },
+        { column_name: "error", udt_name: "jsonb" }
+      ] };
+    }
+    if (sql.includes("FROM XMLTABLE") && sql.includes("query_to_xml")) return { rows: semanticMatrix() };
+    if (sql.includes("FROM device_bridge_command_acks") && sql.includes("AS incompatible")) {
+      return { rows: [{ incompatible: false }] };
+    }
+    return undefined;
+  };
 }
 
 function successfulDependencies(overrides = {}) {
@@ -146,6 +208,25 @@ test("missing or incompatible ACK state stops without writes", async () => {
     assert.equal(result.reason_code, message.includes("data") ? "ACK_ROWS_INCOMPATIBLE" : "ACK_INCOMPATIBLE");
     assertReadOnlyTransaction(fake);
   }
+});
+
+test("a semantically equivalent ACK payload reaches T1 checks without nested transactions or an automatic full pass", async () => {
+  const fake = readOnlyPool({ respond: semanticAckResponder() });
+  const result = await runDeviceBridgeT1ReadOnlyPreflight(fake.pool, successfulDependencies({
+    preflightAck: preflightDeviceBridgeAckSchemaForT1,
+    preflightT1: async client => {
+      await client.query("SELECT t1_constraint_failure");
+      throw new Error("Device Bridge T1 schema compatibility check failed.");
+    }
+  }));
+
+  assert.deepEqual(result.foundation, { present: true, compatible: true });
+  assert.deepEqual(result.ack, { present: true, compatible: true });
+  assert.equal(result.reason_code, "T1_CONSTRAINT_INCOMPATIBLE");
+  assert.equal(result.preflight_pass, false);
+  assert.equal(fake.calls.filter(call => call.sql === "BEGIN").length, 1);
+  assert.equal(fake.calls.some(call => call.sql.includes("FROM XMLTABLE")), true);
+  assertReadOnlyTransaction(fake);
 });
 
 test("unexpected T1 constraints and incompatible current rows are reported without writes", async () => {

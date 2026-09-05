@@ -72,6 +72,39 @@ export function hasExpectedAckCheckDefinition(row, specification) {
   return hasExpectedDefinition(row, specification);
 }
 
+function isEligiblePayloadConstraint(row, specification) {
+  return specification?.id === "ACK_PAYLOAD_V1"
+    && sameColumns(row?.column_names, specification.columns)
+    && row?.conname === specification.name
+    && row?.convalidated === true
+    && row?.condeferrable === false
+    && row?.condeferred === false;
+}
+
+async function hasSemanticallyEquivalentPayloadDefinition(client, row, specification) {
+  if (hasExpectedDefinition(row, specification)) return true;
+  if (!isEligiblePayloadConstraint(row, specification)) return false;
+
+  try {
+    // This fallback is only reached after the strict structural comparison
+    // fails. Dynamic loading avoids a static cycle because the bounded
+    // classifier shares this module's canonical ACK contract constants.
+    const {
+      isCompleteAckPayloadSemanticEquivalence,
+      runDeviceBridgeAckPayloadSemanticClassifierWithClient
+    } = await import("./ack-payload-semantic-classifier.js");
+    const classification = await runDeviceBridgeAckPayloadSemanticClassifierWithClient(client);
+    return isCompleteAckPayloadSemanticEquivalence(classification);
+  } catch {
+    return false;
+  }
+}
+
+async function hasCompatibleAckCheckDefinition(client, row, specification) {
+  if (specification?.id !== "ACK_PAYLOAD_V1") return hasExpectedDefinition(row, specification);
+  return hasSemanticallyEquivalentPayloadDefinition(client, row, specification);
+}
+
 export async function readDeviceBridgeAckCheckConstraints(client) {
   return client.query(`
     SELECT c.conname, c.convalidated, c.condeferrable, c.condeferred,
@@ -99,7 +132,7 @@ export async function inspectDeviceBridgeAckSchema(client) {
   const constraints = await readDeviceBridgeAckCheckConstraints(client);
   const payload = findPayloadConstraint(constraints.rows);
   const payloadSpecification = ACK_REQUIRED_CHECKS.at(-1);
-  const ready = Boolean(payload && hasExpectedDefinition(payload, payloadSpecification));
+  const ready = Boolean(payload && await hasCompatibleAckCheckDefinition(client, payload, payloadSpecification));
   return { ready, constraintName: ready ? payload.conname : null };
 }
 
@@ -127,10 +160,15 @@ async function inspectAckColumnTypes(client) {
  */
 export async function preflightDeviceBridgeAckSchemaForT1(client) {
   const constraints = await readDeviceBridgeAckCheckConstraints(client);
-  const validChecks = constraints.rows.length === ACK_REQUIRED_CHECKS.length
-    && ACK_REQUIRED_CHECKS.every(specification =>
-      constraints.rows.filter(row => hasExpectedDefinition(row, specification)).length === 1
-    );
+  let validChecks = constraints.rows.length === ACK_REQUIRED_CHECKS.length;
+  for (const specification of ACK_REQUIRED_CHECKS) {
+    if (!validChecks) break;
+    let matches = 0;
+    for (const row of constraints.rows) {
+      if (await hasCompatibleAckCheckDefinition(client, row, specification)) matches += 1;
+    }
+    if (matches !== 1) validChecks = false;
+  }
   if (!validChecks) throw new Error("Device Bridge ACK schema compatibility check failed.");
   if (!await inspectAckColumnTypes(client)) {
     throw new Error("Device Bridge ACK schema compatibility check failed.");

@@ -15,6 +15,7 @@ import {
   createDeviceEnrollmentHandler
 } from "./device-bridge/enrollment.js";
 import { registerDeviceBridgeBlock3Routes } from "./device-bridge/block3-routes.js";
+import { registerTinderVisibleChatCaptureIngress } from "./device-bridge/tinder-visible-chat-capture-ingress.js";
 import {
   deviceBridgeFoundationMiddleware,
   deviceBridgeRawBodyErrorMiddleware,
@@ -8456,6 +8457,8 @@ registerDeviceBridgeBlock3Routes({
   dashboardApiAuthorized,
   requireDeviceBridgeReady
 });
+
+registerTinderVisibleChatCaptureIngress({ app, pool });
 
 
 /* ==================================================

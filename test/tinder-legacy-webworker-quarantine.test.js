@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import controlHandler from "../api/tinder/control.js";
-import readHandler from "../api/tinder/read.js";
-import statusHandler from "../api/tinder/status.js";
+import legacyHandler, { LEGACY_ROUTES } from "../api/tinder/legacy.js";
 
 const DASHBOARD_PASSWORD = "test-dashboard-password";
 const LEGACY_DISABLED_RESPONSE = Object.freeze({
@@ -13,26 +11,11 @@ const LEGACY_DISABLED_RESPONSE = Object.freeze({
   error: "Der Legacy-Tinder-Webworker ist deaktiviert."
 });
 
-const routes = Object.freeze([
-  {
-    name: "status",
-    method: "GET",
-    handler: statusHandler,
-    source: readFileSync(new URL("../api/tinder/status.js", import.meta.url), "utf8")
-  },
-  {
-    name: "control",
-    method: "POST",
-    handler: controlHandler,
-    source: readFileSync(new URL("../api/tinder/control.js", import.meta.url), "utf8")
-  },
-  {
-    name: "read",
-    method: "GET",
-    handler: readHandler,
-    source: readFileSync(new URL("../api/tinder/read.js", import.meta.url), "utf8")
-  }
-]);
+const routes = Object.freeze(Object.entries(LEGACY_ROUTES).map(([name, method]) => ({ name, method })));
+const legacySource = readFileSync(new URL("../api/tinder/legacy.js", import.meta.url), "utf8");
+const vercelConfiguration = JSON.parse(
+  readFileSync(new URL("../vercel.json", import.meta.url), "utf8")
+);
 
 function validCookie() {
   const token = "test-session";
@@ -40,10 +23,11 @@ function validCookie() {
   return `marcel_dashboard_session=${token}.${signature}`;
 }
 
-function request({ method, authenticated = true } = {}) {
+function request({ method, route, authenticated = true } = {}) {
   return {
     method,
-    headers: { cookie: authenticated ? validCookie() : "" }
+    headers: { cookie: authenticated ? validCookie() : "" },
+    query: route ? { legacyRoute: route } : {}
   };
 }
 
@@ -73,12 +57,12 @@ test("quarantined legacy worker routes retain method and dashboard-auth gates", 
   for (const route of routes) {
     const wrongMethod = route.method === "GET" ? "POST" : "GET";
     const wrongMethodResponse = responseRecorder();
-    await route.handler(request({ method: wrongMethod }), wrongMethodResponse);
+    await legacyHandler(request({ method: wrongMethod, route: route.name }), wrongMethodResponse);
     assert.equal(wrongMethodResponse.statusCode, 405, route.name);
     assert.equal(wrongMethodResponse.headers.Allow, route.method, route.name);
 
     const unauthenticatedResponse = responseRecorder();
-    await route.handler(request({ method: route.method, authenticated: false }), unauthenticatedResponse);
+    await legacyHandler(request({ method: route.method, route: route.name, authenticated: false }), unauthenticatedResponse);
     assert.equal(unauthenticatedResponse.statusCode, 401, route.name);
     assert.deepEqual(unauthenticatedResponse.body, { ok: false, error: "Nicht angemeldet." }, route.name);
   }
@@ -90,7 +74,7 @@ test("valid dashboard auth receives only the bounded legacy-worker-disabled resp
   try {
     for (const route of routes) {
       const response = responseRecorder();
-      await route.handler(request({ method: route.method }), response);
+      await legacyHandler(request({ method: route.method, route: route.name }), response);
       assert.equal(response.statusCode, 410, route.name);
       assert.equal(response.headers["Cache-Control"], "no-store, max-age=0", route.name);
       assert.deepEqual(response.body, LEGACY_DISABLED_RESPONSE, route.name);
@@ -100,13 +84,25 @@ test("valid dashboard auth receives only the bounded legacy-worker-disabled resp
   }
 }));
 
-test("legacy worker compatibility routes contain no worker configuration, fetch, or external target", () => {
-  for (const route of routes) {
-    assert.match(route.source, /LEGACY_TINDER_WEBWORKER_DISABLED/, route.name);
-    assert.doesNotMatch(route.source, /TINDER_RAILWAY_BACKEND_URL|TINDER_API_SECRET|\bfetch\s*\(/, route.name);
-    assert.doesNotMatch(route.source, /\b(?:https?|wss?):\/\//i, route.name);
-  }
+test("legacy worker compatibility function contains no worker configuration, fetch, or external target", () => {
+  assert.match(legacySource, /LEGACY_TINDER_WEBWORKER_DISABLED/);
+  assert.doesNotMatch(legacySource, /TINDER_RAILWAY_BACKEND_URL|TINDER_API_SECRET|\bfetch\s*\(/);
+  assert.doesNotMatch(legacySource, /\b(?:https?|wss?):\/\//i);
 });
+
+test("legacy public paths are bounded Vercel rewrites to the single quarantine function", () => {
+  const rewrites = new Map(vercelConfiguration.rewrites.map(({ source, destination }) => [source, destination]));
+  assert.equal(rewrites.get("/api/tinder/control"), "/api/tinder/legacy?legacyRoute=control");
+  assert.equal(rewrites.get("/api/tinder/read"), "/api/tinder/legacy?legacyRoute=read");
+  assert.equal(rewrites.get("/api/tinder/status"), "/api/tinder/legacy?legacyRoute=status");
+});
+
+test("direct unified legacy route fails closed without a bounded selector", async () => withDashboardPassword(async () => {
+  const response = responseRecorder();
+  await legacyHandler(request({ method: "GET" }), response);
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.body, { ok: false, error: "Nicht gefunden." });
+}));
 
 test("Tinder UI contains no legacy status, control, read, or connect surface", () => {
   const page = readFileSync(new URL("../Tinder/index.html", import.meta.url), "utf8");

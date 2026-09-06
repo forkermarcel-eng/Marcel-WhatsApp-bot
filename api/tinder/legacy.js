@@ -1,5 +1,17 @@
 import crypto from "crypto";
 
+const LEGACY_WORKER_DISABLED = Object.freeze({
+  ok: false,
+  code: "LEGACY_TINDER_WEBWORKER_DISABLED",
+  error: "Der Legacy-Tinder-Webworker ist deaktiviert."
+});
+
+const LEGACY_ROUTES = Object.freeze({
+  control: "POST",
+  read: "GET",
+  status: "GET"
+});
+
 function dashboardSessionIsValid(req) {
   const password = String(process.env.DASHBOARD_PASSWORD || "");
   const session = String(req.headers?.cookie || "")
@@ -17,22 +29,24 @@ function dashboardSessionIsValid(req) {
 }
 
 /*
- * The historical Playwright worker is deliberately quarantined. This route
- * remains only as an authenticated, bounded compatibility response so no
- * dashboard or direct request can wake, query, or control that worker.
+ * The historical Playwright worker stays quarantined. Vercel rewrites the
+ * three former public compatibility URLs to this one bounded function.
  */
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
+  const legacyRoute = typeof req.query?.legacyRoute === "string" ? req.query.legacyRoute : "";
+  const requiredMethod = LEGACY_ROUTES[legacyRoute];
+  if (!requiredMethod) {
+    return res.status(404).json({ ok: false, error: "Nicht gefunden." });
+  }
+  if (req.method !== requiredMethod) {
+    res.setHeader("Allow", requiredMethod);
     return res.status(405).json({ ok: false, error: "Methode nicht erlaubt." });
   }
   if (!dashboardSessionIsValid(req)) {
     return res.status(401).json({ ok: false, error: "Nicht angemeldet." });
   }
   res.setHeader("Cache-Control", "no-store, max-age=0");
-  return res.status(410).json({
-    ok: false,
-    code: "LEGACY_TINDER_WEBWORKER_DISABLED",
-    error: "Der Legacy-Tinder-Webworker ist deaktiviert."
-  });
+  return res.status(410).json(LEGACY_WORKER_DISABLED);
 }
+
+export { LEGACY_ROUTES, LEGACY_WORKER_DISABLED };

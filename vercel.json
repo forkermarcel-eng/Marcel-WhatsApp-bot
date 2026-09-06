@@ -13,6 +13,18 @@
     {
       "source": "/api/dashboard/marcel-brain/live-state",
       "destination": "/api/dashboard/marcel-brain?resource=live-state"
+    },
+    {
+      "source": "/api/tinder/control",
+      "destination": "/api/tinder/legacy?legacyRoute=control"
+    },
+    {
+      "source": "/api/tinder/read",
+      "destination": "/api/tinder/legacy?legacyRoute=read"
+    },
+    {
+      "source": "/api/tinder/status",
+      "destination": "/api/tinder/legacy?legacyRoute=status"
     }
   ]
 }

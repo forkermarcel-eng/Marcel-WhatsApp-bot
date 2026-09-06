@@ -10,6 +10,7 @@ import {
   tinderFoundationCheck,
   tinderFoundationKey
 } from "./tinder-foundation-constraint-contract.js";
+import { compactSchemaSql } from "./schema-contract.js";
 
 /* ==================================================
 T4 — ADDITIVE DRAFT FOUNDATION SCHEMA CONTRACT
@@ -97,7 +98,14 @@ const T4_DRAFT_CONSTRAINT_CONTRACT = Object.freeze([
   tinderFoundationCheck("tinder_reply_drafts", "char_length(model_version) BETWEEN 1 AND 160", "char_length(model_version) >= 1 AND char_length(model_version) <= 160"),
   tinderFoundationCheck("tinder_reply_drafts", "stale_reason IS NULL OR stale_reason IN ('NEWER_CAPTURE_REVISION', 'THREAD_CHANGED', 'IDENTITY_MAPPING_CHANGED', 'HUMAN_TAKEOVER', 'HANDOFF', 'GATE_CLOSED')"),
   tinderFoundationCheck("tinder_reply_drafts", "(status = 'STALE') = (stale_reason IS NOT NULL)"),
-  tinderFoundationCheck("tinder_reply_drafts", "control_draft_de IS NULL OR COALESCE(lower(source_language) IN ('de', 'deutsch', 'german') OR lower(source_language) LIKE 'de-%', FALSE)"),
+  // PostgreSQL may deparse IN and LIKE in this fixed expression as
+  // = ANY (ARRAY[...]) and ~~ respectively. Both forms preserve the exact
+  // reviewed language gate; no general operator equivalence is inferred.
+  tinderFoundationCheck(
+    "tinder_reply_drafts",
+    "control_draft_de IS NULL OR COALESCE(lower(source_language) IN ('de', 'deutsch', 'german') OR lower(source_language) LIKE 'de-%', FALSE)",
+    "control_draft_de IS NULL OR COALESCE((lower(source_language) = ANY (ARRAY['de', 'deutsch', 'german'])) OR lower(source_language) ~~ 'de-%', FALSE)"
+  ),
 
   tinderFoundationKey("tinder_reply_draft_audit", "p", ["draft_audit_id"], "PRIMARY KEY (draft_audit_id)"),
   tinderFoundationKey("tinder_reply_draft_audit", "f", ["draft_id"], "FOREIGN KEY (draft_id) REFERENCES tinder_reply_drafts(draft_id) ON DELETE RESTRICT", {
@@ -115,10 +123,7 @@ const T4_DRAFT_CONSTRAINT_CONTRACT = Object.freeze([
 ]);
 
 function compact(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/::[a-z_][a-z_ ]*/g, "")
-    .replace(/[\s()]/g, "");
+  return compactSchemaSql(value);
 }
 
 function sameArray(actual, expected) {
@@ -197,12 +202,18 @@ function indexesAbsent(rows) {
 function triggerCanonical(rows) {
   if (rows.length !== 1) return false;
   const trigger = rows[0];
-  if (trigger.relation_name !== "tinder_visible_chat_captures"
+  if (trigger.trigger_name !== "t4_tinder_capture_identity_revision"
+      || trigger.relation_name !== "tinder_visible_chat_captures"
       || trigger.function_name !== "t4_bump_tinder_capture_identity_revision"
       || trigger.function_schema !== "public") return false;
   const definition = compact(trigger.trigger_definition);
   const functionDefinition = compact(trigger.function_definition);
-  return definition.includes("beforeupdateofmapping_status,human_review_status,resolved_contact_idonpublic.tinder_visible_chat_capturesforeachrowexecutefunctiont4_bump_tinder_capture_identity_revision")
+  // pg_get_triggerdef(..., true) may omit the current-schema qualification
+  // from the relation. The catalog relation/function fields above bind both
+  // objects exactly, so compare the invariant trigger timing, update set and
+  // execution clause rather than an optional presentation-only prefix.
+  return definition.includes("beforeupdateofmapping_status,human_review_status,resolved_contact_idon")
+    && definition.includes("foreachrowexecutefunctiont4_bump_tinder_capture_identity_revision")
     && functionDefinition.includes("new.identity_revision:=old.identity_revision+1")
     && functionDefinition.includes("old.mapping_statusisdistinctfromnew.mapping_status")
     && functionDefinition.includes("old.human_review_statusisdistinctfromnew.human_review_status")
@@ -318,13 +329,7 @@ async function readT4Constraints(client) {
   return readTinderFoundationConstraints(client, TARGET_RELATIONS);
 }
 
-/**
- * Read-only T4 state inspection.  The explicit runner treats only an entirely
- * absent T4 shape as mutable; any mixed or altered post-state fails closed.
- */
-export async function inspectTinderDraftFoundationSchema(client, {
-  assertIdentityReady = assertTinderIdentityFoundationSchemaReady
-} = {}) {
+async function readTinderDraftFoundationCatalog(client, assertIdentityReady) {
   await assertIdentityReady(client);
   const relations = await readRelations(client);
   const columns = await readColumns(client);
@@ -332,33 +337,52 @@ export async function inspectTinderDraftFoundationSchema(client, {
   const trigger = await readIdentityTrigger(client);
   const identityFunction = await readIdentityFunction(client);
   const constraints = await readT4Constraints(client);
+  return {
+    relations: relations.rows,
+    captureColumns: columnMap(columns.rows, "tinder_visible_chat_captures"),
+    drafts: columnMap(columns.rows, "tinder_reply_drafts"),
+    audit: columnMap(columns.rows, "tinder_reply_draft_audit"),
+    indexes: indexes.rows,
+    trigger: trigger.rows,
+    identityFunction: identityFunction.rows,
+    constraints: constraints.rows
+  };
+}
 
-  const captureColumns = columnMap(columns.rows, "tinder_visible_chat_captures");
-  const drafts = columnMap(columns.rows, "tinder_reply_drafts");
-  const audit = columnMap(columns.rows, "tinder_reply_draft_audit");
-
-  const captureCanonical = exactColumns(captureColumns, CAPTURE_T4_COLUMNS, { exact: false });
-  const captureAbsent = columnsAbsent(captureColumns, CAPTURE_T4_COLUMNS);
-  const draftsCanonical = relationKind(relations.rows, "tinder_reply_drafts") === "r"
-    && exactColumns(drafts, DRAFT_COLUMNS);
-  const draftsAbsent = relationKind(relations.rows, "tinder_reply_drafts") === null && drafts.size === 0;
-  const auditCanonical = relationKind(relations.rows, "tinder_reply_draft_audit") === "r"
-    && exactColumns(audit, AUDIT_COLUMNS);
-  const auditAbsent = relationKind(relations.rows, "tinder_reply_draft_audit") === null && audit.size === 0;
-  const triggerPresent = trigger.rows.length > 0;
-  const functionPresent = identityFunction.rows.length > 0;
+function hasTinderDraftFoundationBase(catalog, { exact = true } = {}) {
+  const captureCanonical = exactColumns(catalog.captureColumns, CAPTURE_T4_COLUMNS, { exact: false });
+  const draftsCanonical = relationKind(catalog.relations, "tinder_reply_drafts") === "r"
+    && exactColumns(catalog.drafts, DRAFT_COLUMNS, { exact });
+  const auditCanonical = relationKind(catalog.relations, "tinder_reply_draft_audit") === "r"
+    && exactColumns(catalog.audit, AUDIT_COLUMNS, { exact });
   const constraintsCanonical = hasExpectedTinderFoundationConstraints(
-    constraints.rows,
+    catalog.constraints,
     T4_DRAFT_CONSTRAINT_CONTRACT,
-    { exactTables: ["tinder_reply_drafts", "tinder_reply_draft_audit"] }
+    { exactTables: exact ? ["tinder_reply_drafts", "tinder_reply_draft_audit"] : [] }
   );
+  return captureCanonical && draftsCanonical && auditCanonical && constraintsCanonical
+    && indexesCanonical(catalog.indexes) && triggerCanonical(catalog.trigger)
+    && identityFunctionCanonical(catalog.identityFunction);
+}
 
-  if (captureCanonical && draftsCanonical && auditCanonical && constraintsCanonical
-      && indexesCanonical(indexes.rows) && triggerCanonical(trigger.rows)
-      && identityFunctionCanonical(identityFunction.rows)) {
+/**
+ * Read-only T4 state inspection.  The explicit runner treats only an entirely
+ * absent T4 shape as mutable; any mixed or altered post-state fails closed.
+ */
+export async function inspectTinderDraftFoundationSchema(client, {
+  assertIdentityReady = assertTinderIdentityFoundationSchemaReady
+} = {}) {
+  const catalog = await readTinderDraftFoundationCatalog(client, assertIdentityReady);
+  const captureAbsent = columnsAbsent(catalog.captureColumns, CAPTURE_T4_COLUMNS);
+  const draftsAbsent = relationKind(catalog.relations, "tinder_reply_drafts") === null && catalog.drafts.size === 0;
+  const auditAbsent = relationKind(catalog.relations, "tinder_reply_draft_audit") === null && catalog.audit.size === 0;
+  const triggerPresent = catalog.trigger.length > 0;
+  const functionPresent = catalog.identityFunction.length > 0;
+
+  if (hasTinderDraftFoundationBase(catalog)) {
     return { state: TINDER_DRAFT_FOUNDATION_STATE.CANONICAL };
   }
-  if (captureAbsent && draftsAbsent && auditAbsent && indexesAbsent(indexes.rows) && !triggerPresent && !functionPresent) {
+  if (captureAbsent && draftsAbsent && auditAbsent && indexesAbsent(catalog.indexes) && !triggerPresent && !functionPresent) {
     return { state: TINDER_DRAFT_FOUNDATION_STATE.ABSENT };
   }
   return { state: TINDER_DRAFT_FOUNDATION_STATE.INVALID };
@@ -378,6 +402,22 @@ export async function assertTinderDraftFoundationSchemaReady(client) {
     throw new Error("T4 Tinder draft foundation schema is not ready.");
   }
   return inspection;
+}
+
+/**
+ * Readiness for later additive foundations. It requires every T4-owned
+ * column, constraint, index, trigger and function exactly, but allows
+ * downstream-owned additive fields such as T5's draft_revision. The explicit
+ * T4 migration preflight remains exact through inspectTinderDraftFoundationSchema.
+ */
+export async function assertTinderDraftFoundationBaseSchemaReady(client, {
+  assertIdentityReady = assertTinderIdentityFoundationSchemaReady
+} = {}) {
+  const catalog = await readTinderDraftFoundationCatalog(client, assertIdentityReady);
+  if (!hasTinderDraftFoundationBase(catalog, { exact: false })) {
+    throw new Error("T4 Tinder draft foundation base schema is not ready.");
+  }
+  return { state: "BASE_COMPATIBLE" };
 }
 
 export { T4_DRAFT_CONSTRAINT_CONTRACT as TINDER_DRAFT_FOUNDATION_CONSTRAINT_CONTRACT };

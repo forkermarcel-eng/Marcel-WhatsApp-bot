@@ -128,6 +128,49 @@ test("T6 recognizes only the complete persisted queue post-state or an untouched
   );
 });
 
+test("T6 accepts PostgreSQL's fixed parenthesized deparse for the collection deadline expression", async () => {
+  const actualPostgresDeparse = "CHECK (eligible_at = (collection_started_at + collection_window_ms::double precision * '00:00:00.001'::interval))";
+  const client = fixtureClient({ canonical: true });
+  const original = client.query.bind(client);
+  client.query = async sql => {
+    const result = await original(sql);
+    if (sql.includes("FROM pg_constraint c")) {
+      return {
+        rows: result.rows.map(row => row.table_name === "tinder_inbound_work_items"
+          && row.contype === "c"
+          && row.constraint_definition.includes("eligible_at =")
+          ? { ...row, constraint_definition: actualPostgresDeparse }
+          : row)
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectTinderInboundQueueFoundationSchema(client, { assertDraftReady: draftReady }),
+    { state: TINDER_INBOUND_QUEUE_FOUNDATION_STATE.CANONICAL }
+  );
+
+  const changedExpression = fixtureClient({ canonical: true });
+  const changedOriginal = changedExpression.query.bind(changedExpression);
+  changedExpression.query = async sql => {
+    const result = await changedOriginal(sql);
+    if (sql.includes("FROM pg_constraint c")) {
+      return {
+        rows: result.rows.map(row => row.table_name === "tinder_inbound_work_items"
+          && row.contype === "c"
+          && row.constraint_definition.includes("eligible_at =")
+          ? { ...row, constraint_definition: actualPostgresDeparse.replace("0.001", "0.002") }
+          : row)
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectTinderInboundQueueFoundationSchema(changedExpression, { assertDraftReady: draftReady }),
+    { state: TINDER_INBOUND_QUEUE_FOUNDATION_STATE.INVALID }
+  );
+});
+
 test("T6 rejects a column-complete queue whose deduplication UNIQUE contract is absent", async () => {
   const client = fixtureClient({ canonical: true });
   const original = client.query.bind(client);

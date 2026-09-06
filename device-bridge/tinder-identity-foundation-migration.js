@@ -2,10 +2,13 @@ import { readFileSync } from "node:fs";
 import { REQUIRED_TABLES } from "./schema-readiness.js";
 import {
   assertTinderIdentityFoundationSchemaReady,
+  inspectTinderIdentityFoundationSchema,
+  TINDER_IDENTITY_FOUNDATION_STATE,
   preflightTinderIdentityFoundationMigration
 } from "./tinder-identity-foundation-schema.js";
 import {
   assertFixedTinderFoundationMigrationSource,
+  createTinderFoundationMigrationDiagnosticError,
   createExplicitTinderFoundationMigrationRunner,
   getTinderFoundationMigrationFailureDiagnostic,
   TINDER_FOUNDATION_MIGRATION_DIAGNOSTIC_STAGES
@@ -16,6 +19,9 @@ T3 — EXPLICIT IDENTITY FOUNDATION MIGRATION
 ================================================== */
 
 export const T3_IDENTITY_MIGRATION_DIAGNOSTIC_STAGES = TINDER_FOUNDATION_MIGRATION_DIAGNOSTIC_STAGES;
+export const T3_IDENTITY_MIGRATION_DIAGNOSTIC_REASONS = Object.freeze([
+  "T3_POSTCHECK_IDENTITY_SCHEMA_INVALID"
+]);
 
 const T3_IDENTITY_MIGRATION_SQL = readFileSync(
   new URL("../migrations/20260904_tinder_identity_foundation.sql", import.meta.url),
@@ -65,12 +71,25 @@ const runner = createExplicitTinderFoundationMigrationRunner({
   validateSource: validateTinderIdentityFoundationMigrationSource,
   preflight: preflightTinderIdentityFoundationMigration,
   postcheck: async (client, { applied }) => {
+    // Inspect before the strict preflight so a completed fixed T3 DDL that
+    // still fails its own target contract produces one bounded, actionable
+    // reason instead of an undifferentiated database-operation failure.
+    // A catalog/query failure still escapes without a fabricated reason.
+    if (applied) {
+      const identity = await inspectTinderIdentityFoundationSchema(client);
+      if (identity.state !== TINDER_IDENTITY_FOUNDATION_STATE.CANONICAL) {
+        throw createTinderFoundationMigrationDiagnosticError(
+          "T3_POSTCHECK_IDENTITY_SCHEMA_INVALID"
+        );
+      }
+    }
     const checked = await preflightTinderIdentityFoundationMigration(client);
     if (applied) await assertTinderIdentityFoundationSchemaReady(client);
     return checked;
   },
   lockRelations: lockedRelations,
-  advisoryLock: { namespace: 7421, key: 30 }
+  advisoryLock: { namespace: 7421, key: 30 },
+  diagnosticReasonCodes: T3_IDENTITY_MIGRATION_DIAGNOSTIC_REASONS
 });
 
 /** Read-only, rollback-only validation of the exact T3 pre-DDL path. */

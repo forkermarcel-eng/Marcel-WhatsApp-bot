@@ -1,5 +1,5 @@
 import {
-  assertTinderDraftFoundationSchemaReady
+  assertTinderDraftFoundationBaseSchemaReady
 } from "./tinder-draft-foundation-schema.js";
 import {
   hasExpectedTinderFoundationConstraints,
@@ -7,6 +7,7 @@ import {
   tinderFoundationCheck,
   tinderFoundationKey
 } from "./tinder-foundation-constraint-contract.js";
+import { canonicalSchemaPredicate, compactSchemaSql } from "./schema-contract.js";
 
 /* ==================================================
 T7 — PERSISTENT AUTOMATION-CONTROL FOUNDATION SCHEMA
@@ -104,10 +105,7 @@ const T7_AUTOMATION_CONTROL_CONSTRAINT_CONTRACT = Object.freeze([
 ]);
 
 function compact(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/::[a-z_][a-z_ ]*/g, "")
-    .replace(/[\s()]/g, "");
+  return compactSchemaSql(value);
 }
 
 function sameArray(actual, expected) {
@@ -150,7 +148,7 @@ function indexMatches(row, { unique, columns, descending, predicate = "" }) {
     && row.indisunique === unique
     && sameArray(row.column_names, columns)
     && sameArray(row.descending, descending)
-    && compact(row.predicate) === compact(predicate);
+    && canonicalSchemaPredicate(row.predicate) === canonicalSchemaPredicate(predicate);
 }
 
 function indexesCanonical(rows) {
@@ -248,7 +246,7 @@ async function readGlobalControlRows(client) {
 
 /** Read-only recognition; it never creates, changes, or activates control. */
 export async function inspectTinderAutomationControlFoundationSchema(client, {
-  assertDraftReady = assertTinderDraftFoundationSchemaReady
+  assertDraftReady = assertTinderDraftFoundationBaseSchemaReady
 } = {}) {
   await assertDraftReady(client);
   const relations = await readRelations(client);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertFixedTinderFoundationMigrationSource,
+  createTinderFoundationMigrationDiagnosticError,
   createExplicitTinderFoundationMigrationRunner,
   getTinderFoundationMigrationFailureDiagnostic,
   splitFixedSqlStatements
@@ -32,7 +33,7 @@ function fixturePool({ onDdl = () => {} } = {}) {
   return { calls, pool: { async connect() { return client; } } };
 }
 
-function createRunner({ preflight, postcheck }) {
+function createRunner({ preflight, postcheck, diagnosticReasonCodes }) {
   return createExplicitTinderFoundationMigrationRunner({
     label: "Fixture",
     migrationSql: FIXED_SOURCE,
@@ -43,7 +44,8 @@ function createRunner({ preflight, postcheck }) {
     preflight,
     postcheck,
     lockRelations: () => ["contacts"],
-    advisoryLock: { namespace: 7421, key: 99 }
+    advisoryLock: { namespace: 7421, key: 99 },
+    diagnosticReasonCodes
   });
 }
 
@@ -112,4 +114,62 @@ test("a blocked global preflight rolls back before any DDL and exposes bounded s
   });
   assert.equal(fixture.calls.some(call => call.sql === FIXED_SOURCE), false);
   assert.equal(fixture.calls.some(call => call.sql === "ROLLBACK"), true);
+});
+
+test("an allowlisted T3-style postcheck reason remains bounded and requires rollback", async () => {
+  const runner = createRunner({
+    preflight: async () => ({ mutate: true }),
+    postcheck: async () => {
+      throw createTinderFoundationMigrationDiagnosticError("FIXTURE_POSTCHECK_SCHEMA_INVALID");
+    },
+    diagnosticReasonCodes: ["FIXTURE_POSTCHECK_SCHEMA_INVALID"]
+  });
+  const fixture = fixturePool();
+  const error = await runner.migrate(fixture.pool).catch(value => value);
+  assert.deepEqual(getTinderFoundationMigrationFailureDiagnostic(error), {
+    stage: "POSTCHECK",
+    code: "DATABASE_OPERATION_FAILED",
+    transaction: "STARTED",
+    rollback: "COMPLETED",
+    ddl_started: true,
+    reason: "FIXTURE_POSTCHECK_SCHEMA_INVALID"
+  });
+  assert.equal(fixture.calls.some(call => call.sql === "COMMIT"), false);
+  assert.equal(fixture.calls.some(call => call.sql === "ROLLBACK"), true);
+});
+
+test("a nonallowlisted postcheck marker never escapes the fixed diagnostic contract", async () => {
+  const runner = createRunner({
+    preflight: async () => ({ mutate: true }),
+    postcheck: async () => {
+      throw createTinderFoundationMigrationDiagnosticError("UNLISTED_POSTCHECK_MARKER");
+    },
+    diagnosticReasonCodes: ["FIXTURE_POSTCHECK_SCHEMA_INVALID"]
+  });
+  const error = await runner.migrate(fixturePool().pool).catch(value => value);
+  assert.deepEqual(getTinderFoundationMigrationFailureDiagnostic(error), {
+    stage: "POSTCHECK",
+    code: "DATABASE_OPERATION_FAILED",
+    transaction: "STARTED",
+    rollback: "COMPLETED",
+    ddl_started: true
+  });
+});
+
+test("an allowlisted marker cannot escape a non-postcheck failure boundary", async () => {
+  const runner = createRunner({
+    preflight: async () => {
+      throw createTinderFoundationMigrationDiagnosticError("FIXTURE_POSTCHECK_SCHEMA_INVALID");
+    },
+    postcheck: async () => ({ mutate: false }),
+    diagnosticReasonCodes: ["FIXTURE_POSTCHECK_SCHEMA_INVALID"]
+  });
+  const error = await runner.migrate(fixturePool().pool).catch(value => value);
+  assert.deepEqual(getTinderFoundationMigrationFailureDiagnostic(error), {
+    stage: "GLOBAL_PREFLIGHT",
+    code: "DATABASE_OPERATION_FAILED",
+    transaction: "STARTED",
+    rollback: "COMPLETED",
+    ddl_started: false
+  });
 });

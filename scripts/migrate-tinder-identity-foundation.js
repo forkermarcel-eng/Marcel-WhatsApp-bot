@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   getTinderIdentityFoundationMigrationFailureDiagnostic,
   migrateTinderIdentityFoundation,
+  T3_IDENTITY_MIGRATION_DIAGNOSTIC_REASONS,
   T3_IDENTITY_MIGRATION_DIAGNOSTIC_STAGES
 } from "../device-bridge/tinder-identity-foundation-migration.js";
 
@@ -29,6 +30,7 @@ const CODES = new Set([
   "CLEANUP_FAILED",
   "DATABASE_OPERATION_FAILED"
 ]);
+const REASONS = new Set(T3_IDENTITY_MIGRATION_DIAGNOSTIC_REASONS);
 
 function boundedDiagnostic(value, fallback = {}) {
   return {
@@ -38,7 +40,8 @@ function boundedDiagnostic(value, fallback = {}) {
       ? value.transaction : fallback.transaction || "UNRESOLVED",
     rollback: ["NOT_ATTEMPTED", "COMPLETED", "FAILED", "UNRESOLVED"].includes(value?.rollback)
       ? value.rollback : fallback.rollback || "UNRESOLVED",
-    ddl_started: typeof value?.ddl_started === "boolean" ? value.ddl_started : fallback.ddl_started ?? "UNRESOLVED"
+    ddl_started: typeof value?.ddl_started === "boolean" ? value.ddl_started : fallback.ddl_started ?? "UNRESOLVED",
+    ...(REASONS.has(value?.reason) ? { reason: value.reason } : {})
   };
 }
 
@@ -47,6 +50,7 @@ function logDiagnostic(logger, diagnostic) {
   logger.error(
     `T3 identity migration diagnostic: stage=${value.stage} code=${value.code} `
       + `transaction=${value.transaction} rollback=${value.rollback} ddl_started=${value.ddl_started}`
+      + (value.reason ? ` reason=${value.reason}` : "")
   );
 }
 
@@ -58,6 +62,7 @@ export async function runTinderIdentityFoundationMigrationCli({
     return new pg.Pool(options);
   },
   migrate = migrateTinderIdentityFoundation,
+  getFailureDiagnostic = getTinderIdentityFoundationMigrationFailureDiagnostic,
   logger = console
 } = {}) {
   if (!argv.includes("--apply")) {
@@ -96,7 +101,7 @@ export async function runTinderIdentityFoundationMigrationCli({
     committed = true;
     ddlStarted = result?.migrated === true;
   } catch (error) {
-    diagnostic = getTinderIdentityFoundationMigrationFailureDiagnostic(error) || (migrationStarted
+    diagnostic = getFailureDiagnostic(error) || (migrationStarted
       ? { stage: "UNKNOWN", code: "DATABASE_OPERATION_FAILED", transaction: "UNRESOLVED", rollback: "UNRESOLVED", ddl_started: "UNRESOLVED" }
       : { stage: "DATABASE_CONNECTION", code: "DATABASE_CONNECTION_FAILED", transaction: "NOT_STARTED", rollback: "NOT_ATTEMPTED", ddl_started: false });
   }

@@ -1,5 +1,5 @@
 import {
-  assertTinderVisibleChatCaptureSchemaReady,
+  assertTinderVisibleChatCaptureBaseSchemaReady,
   preflightTinderVisibleChatCaptureMigration
 } from "./tinder-visible-chat-capture-schema.js";
 import {
@@ -10,6 +10,7 @@ import {
   tinderFoundationCheck,
   tinderFoundationKey
 } from "./tinder-foundation-constraint-contract.js";
+import { canonicalSchemaPredicate } from "./schema-contract.js";
 
 /* ==================================================
 T3 — ADDITIVE IDENTITY FOUNDATION SCHEMA CONTRACT
@@ -119,13 +120,6 @@ function exactArray(left, right) {
   return Array.isArray(left) && left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function compactPredicate(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/::[a-z_][a-z_ ]*/g, "")
-    .replace(/[\s()]/g, "");
-}
-
 function indexMap(rows) {
   return new Map(rows.map(row => [row.index_name, row]));
 }
@@ -137,7 +131,7 @@ function exactIndex(row, { unique, columns, descending, predicate }) {
     && row.indisunique === unique
     && exactArray(row.column_names, columns)
     && exactArray(row.descending, descending)
-    && compactPredicate(row.predicate) === predicate;
+    && canonicalSchemaPredicate(row.predicate) === canonicalSchemaPredicate(predicate);
 }
 
 function indexesAreCanonical(rows) {
@@ -146,7 +140,7 @@ function indexesAreCanonical(rows) {
     unique: true,
     columns: ["identifier_type", "normalized_value"],
     descending: [false, false],
-    predicate: "identifier_type='tinder_profile'andhuman_verified=true"
+    predicate: "identifier_type = 'tinder_profile' AND human_verified = TRUE"
   }) && exactIndex(indexes.get("idx_tinder_visible_chat_captures_mapping_time"), {
     unique: false,
     columns: ["mapping_status", "received_at"],
@@ -239,7 +233,7 @@ async function assertNoDuplicateConfirmedTinderIdentifiers(client) {
 
 /** Read-only structural inspection. It never creates, alters or repairs T3. */
 export async function inspectTinderIdentityFoundationSchema(client) {
-  await assertTinderVisibleChatCaptureSchemaReady(client);
+  await assertTinderVisibleChatCaptureBaseSchemaReady(client);
   // A pg Client owns one query stream. Keep catalog reads sequential so this
   // exact preflight is valid both for mocked tests and the real locked client.
   const columnsResult = await readColumns(client);

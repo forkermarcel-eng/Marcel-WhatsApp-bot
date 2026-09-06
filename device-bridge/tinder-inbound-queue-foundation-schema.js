@@ -1,5 +1,5 @@
 import {
-  assertTinderDraftFoundationSchemaReady
+  assertTinderDraftFoundationBaseSchemaReady
 } from "./tinder-draft-foundation-schema.js";
 import {
   canonicalTinderFoundationDefault,
@@ -10,6 +10,7 @@ import {
   tinderFoundationCheck,
   tinderFoundationKey
 } from "./tinder-foundation-constraint-contract.js";
+import { canonicalSchemaPredicate } from "./schema-contract.js";
 
 /* ==================================================
 T6 — INBOUND QUEUE FOUNDATION SCHEMA CONTRACT
@@ -100,7 +101,10 @@ const T6_INBOUND_QUEUE_CONSTRAINT_CONTRACT = Object.freeze([
   tinderFoundationCheck(
     "tinder_inbound_work_items",
     "eligible_at = collection_started_at + (collection_window_ms * INTERVAL '1 millisecond')",
-    "eligible_at = collection_started_at + (collection_window_ms::double precision * '00:00:00.001'::interval)"
+    "eligible_at = collection_started_at + (collection_window_ms::double precision * '00:00:00.001'::interval)",
+    // PostgreSQL may preserve an extra presentation-only parenthesis around
+    // the arithmetic RHS when deparsing this fixed checked expression.
+    "eligible_at = (collection_started_at + collection_window_ms::double precision * '00:00:00.001'::interval)"
   ),
   tinderFoundationCheck("tinder_inbound_work_items", "(queue_status = 'BLOCKED') = (block_reason IS NOT NULL)"),
   tinderFoundationCheck("tinder_inbound_work_items", "(queue_status = 'CLOSED') = (closed_reason IS NOT NULL)"),
@@ -127,13 +131,6 @@ const T6_INBOUND_QUEUE_CONSTRAINT_CONTRACT = Object.freeze([
   tinderFoundationCheck("tinder_inbound_work_audit", "action IN ('INBOUND_ENQUEUED', 'COLLECTION_WINDOW_RESET', 'WORK_ITEM_BLOCKED', 'WORK_ITEM_ELIGIBLE', 'VERIFIED_OUTBOUND_OBSERVED', 'IDENTITY_CHANGED')"),
   tinderFoundationCheck("tinder_inbound_work_audit", "jsonb_typeof(details) = 'object'")
 ]);
-
-function compact(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/::[a-z_][a-z_ ]*/g, "")
-    .replace(/[\s()]/g, "");
-}
 
 function mapColumns(rows, relation) {
   return new Map(rows.filter(row => row.relation_name === relation).map(row => [row.column_name, {
@@ -173,7 +170,7 @@ function indexMatches(row, { unique, columns, descending, predicate = "" }) {
   return Boolean(row)
     && row.indisvalid === true && row.indisready === true && row.indisunique === unique
     && sameArray(row.column_names, columns) && sameArray(row.descending, descending)
-    && compact(row.predicate) === compact(predicate);
+    && canonicalSchemaPredicate(row.predicate) === canonicalSchemaPredicate(predicate);
 }
 
 function indexesCanonical(rows) {
@@ -248,7 +245,7 @@ async function readT6Constraints(client) {
 
 /** Read-only T6 state inspection; all partial states fail closed. */
 export async function inspectTinderInboundQueueFoundationSchema(client, {
-  assertDraftReady = assertTinderDraftFoundationSchemaReady
+  assertDraftReady = assertTinderDraftFoundationBaseSchemaReady
 } = {}) {
   await assertDraftReady(client);
   const relations = await readRelations(client);

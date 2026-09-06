@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  assertTinderDraftFoundationBaseSchemaReady,
   inspectTinderDraftFoundationSchema,
   TINDER_DRAFT_FOUNDATION_CONSTRAINT_CONTRACT,
   TINDER_DRAFT_FOUNDATION_STATE
@@ -92,7 +93,12 @@ function catalogConstraints(contract) {
   }));
 }
 
-function fixtureClient({ canonical = false, partial = false } = {}) {
+function fixtureClient({
+  canonical = false,
+  partial = false,
+  additiveT5DraftRevision = false,
+  incompatibleBaseColumn = false
+} = {}) {
   const relations = [{ relation_name: "tinder_visible_chat_captures", relkind: "r" }];
   const columns = [];
   let indexes = [];
@@ -109,6 +115,27 @@ function fixtureClient({ canonical = false, partial = false } = {}) {
     trigger = canonicalTrigger();
     identityFunction = canonicalFunction();
     constraints = catalogConstraints(TINDER_DRAFT_FOUNDATION_CONSTRAINT_CONTRACT);
+  }
+  if (additiveT5DraftRevision) {
+    columns.push(...schemaColumns("tinder_reply_drafts", [["draft_revision", "integer", true, "1"]]));
+    constraints.push({
+      table_name: "tinder_reply_drafts",
+      contype: "c",
+      convalidated: true,
+      condeferrable: false,
+      condeferred: false,
+      confdeltype: " ",
+      confupdtype: " ",
+      confmatchtype: " ",
+      reference_table: null,
+      reference_column_names: [],
+      column_names: ["draft_revision"],
+      constraint_definition: "CHECK (draft_revision > 0)"
+    });
+  }
+  if (incompatibleBaseColumn) {
+    columns.find(row => row.relation_name === "tinder_reply_drafts" && row.column_name === "status")
+      .column_default = "'APPROVED'";
   }
   if (partial) {
     columns.push(...schemaColumns("tinder_visible_chat_captures", [CAPTURE_COLUMNS[0]]));
@@ -139,6 +166,111 @@ test("T4 schema inspection accepts only a wholly absent or wholly canonical addi
   );
   assert.deepEqual(
     await inspectTinderDraftFoundationSchema(fixtureClient({ partial: true }), { assertIdentityReady: identityReady }),
+    { state: TINDER_DRAFT_FOUNDATION_STATE.INVALID }
+  );
+});
+
+test("later foundations accept the reviewed T5 draft extension without weakening the strict T4 migration contract", async () => {
+  const t5Extended = fixtureClient({ canonical: true, additiveT5DraftRevision: true });
+  assert.deepEqual(
+    await inspectTinderDraftFoundationSchema(t5Extended, { assertIdentityReady: identityReady }),
+    { state: TINDER_DRAFT_FOUNDATION_STATE.INVALID }
+  );
+  assert.deepEqual(
+    await assertTinderDraftFoundationBaseSchemaReady(t5Extended, { assertIdentityReady: identityReady }),
+    { state: "BASE_COMPATIBLE" }
+  );
+
+  const incompatibleBase = fixtureClient({
+    canonical: true,
+    additiveT5DraftRevision: true,
+    incompatibleBaseColumn: true
+  });
+  await assert.rejects(
+    () => assertTinderDraftFoundationBaseSchemaReady(incompatibleBase, { assertIdentityReady: identityReady }),
+    /base schema is not ready/
+  );
+});
+
+test("T4 accepts PostgreSQL's equivalent current-schema-elided trigger deparse without weakening trigger structure", async () => {
+  const client = fixtureClient({ canonical: true });
+  const original = client.query.bind(client);
+  client.query = async sql => {
+    const result = await original(sql);
+    if (sql.includes("FROM pg_trigger")) {
+      return {
+        rows: result.rows.map(row => ({
+          ...row,
+          trigger_definition: row.trigger_definition.replace("ON public.tinder_visible_chat_captures", "ON tinder_visible_chat_captures")
+        }))
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectTinderDraftFoundationSchema(client, { assertIdentityReady: identityReady }),
+    { state: TINDER_DRAFT_FOUNDATION_STATE.CANONICAL }
+  );
+
+  const wrongUpdateSet = fixtureClient({ canonical: true });
+  const wrongOriginal = wrongUpdateSet.query.bind(wrongUpdateSet);
+  wrongUpdateSet.query = async sql => {
+    const result = await wrongOriginal(sql);
+    if (sql.includes("FROM pg_trigger")) {
+      return {
+        rows: result.rows.map(row => ({
+          ...row,
+          trigger_definition: row.trigger_definition.replace("human_review_status", "unexpected_column")
+        }))
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectTinderDraftFoundationSchema(wrongUpdateSet, { assertIdentityReady: identityReady }),
+    { state: TINDER_DRAFT_FOUNDATION_STATE.INVALID }
+  );
+});
+
+test("T4 accepts only the fixed PostgreSQL deparse equivalence for its German control-draft gate", async () => {
+  const postgresqlDeparse = "CHECK (control_draft_de IS NULL OR COALESCE((lower(source_language) = ANY (ARRAY['de'::text, 'deutsch'::text, 'german'::text])) OR lower(source_language) ~~ 'de-%'::text, false))";
+  const client = fixtureClient({ canonical: true });
+  const original = client.query.bind(client);
+  client.query = async sql => {
+    const result = await original(sql);
+    if (sql.includes("FROM pg_constraint c")) {
+      return {
+        rows: result.rows.map(row => row.table_name === "tinder_reply_drafts"
+          && row.contype === "c"
+          && row.constraint_definition.includes("COALESCE")
+          ? { ...row, constraint_definition: postgresqlDeparse }
+          : row)
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectTinderDraftFoundationSchema(client, { assertIdentityReady: identityReady }),
+    { state: TINDER_DRAFT_FOUNDATION_STATE.CANONICAL }
+  );
+
+  const changedLanguageSet = fixtureClient({ canonical: true });
+  const changedOriginal = changedLanguageSet.query.bind(changedLanguageSet);
+  changedLanguageSet.query = async sql => {
+    const result = await changedOriginal(sql);
+    if (sql.includes("FROM pg_constraint c")) {
+      return {
+        rows: result.rows.map(row => row.table_name === "tinder_reply_drafts"
+          && row.contype === "c"
+          && row.constraint_definition.includes("COALESCE")
+          ? { ...row, constraint_definition: postgresqlDeparse.replace("'german'", "'french'") }
+          : row)
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectTinderDraftFoundationSchema(changedLanguageSet, { assertIdentityReady: identityReady }),
     { state: TINDER_DRAFT_FOUNDATION_STATE.INVALID }
   );
 });

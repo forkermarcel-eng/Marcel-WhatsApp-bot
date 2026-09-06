@@ -9,6 +9,7 @@ import {
   TINDER_VISIBLE_CHAT_CAPTURE_COLUMN_CONTRACT,
   TINDER_VISIBLE_CHAT_CAPTURE_CONSTRAINT_CONTRACT
 } from "../device-bridge/tinder-visible-chat-capture-schema.js";
+import { canonicalSchemaPredicate } from "../device-bridge/schema-contract.js";
 
 function t2CatalogColumns() {
   return Object.entries(TINDER_VISIBLE_CHAT_CAPTURE_COLUMN_CONTRACT).map(([column_name, contract]) => ({
@@ -148,6 +149,46 @@ test("T3 schema inspection requires every additive postcondition before declarin
     await inspectTinderIdentityFoundationSchema(fixtureClient({ partial: true })),
     { state: TINDER_IDENTITY_FOUNDATION_STATE.INVALID }
   );
+});
+
+test("T3 preserves every cast-adjacent boolean term in PostgreSQL index predicates", async () => {
+  const exactPostgresPredicate = "identifier_type = 'tinder_profile'::text AND human_verified = true";
+  const changedPredicate = "identifier_type = 'tinder_profile'::text AND human_verified = false";
+  assert.equal(
+    canonicalSchemaPredicate(exactPostgresPredicate),
+    canonicalSchemaPredicate("identifier_type = 'tinder_profile' AND human_verified = TRUE")
+  );
+  assert.notEqual(
+    canonicalSchemaPredicate(changedPredicate),
+    canonicalSchemaPredicate("identifier_type = 'tinder_profile' AND human_verified = TRUE")
+  );
+  assert.notEqual(
+    canonicalSchemaPredicate("(left_flag OR right_flag) AND guard_flag"),
+    canonicalSchemaPredicate("left_flag OR (right_flag AND guard_flag)")
+  );
+
+  for (const [predicate, expectedState] of [
+    [exactPostgresPredicate, TINDER_IDENTITY_FOUNDATION_STATE.CANONICAL],
+    [changedPredicate, TINDER_IDENTITY_FOUNDATION_STATE.INVALID]
+  ]) {
+    const client = fixtureClient({ canonical: true });
+    const original = client.query.bind(client);
+    client.query = async sql => {
+      const result = await original(sql);
+      if (sql.includes("FROM pg_index i")) {
+        return {
+          rows: result.rows.map(row => row.index_name === "idx_contact_identifiers_tinder_confirmed_unique"
+            ? { ...row, predicate }
+            : row)
+        };
+      }
+      return result;
+    };
+    assert.deepEqual(
+      await inspectTinderIdentityFoundationSchema(client),
+      { state: expectedState }
+    );
+  }
 });
 
 test("T3 rejects an audit table whose visible columns omit a required FK/CHECK contract", async () => {

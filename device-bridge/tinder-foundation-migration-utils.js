@@ -23,9 +23,11 @@ export const TINDER_FOUNDATION_MIGRATION_DIAGNOSTIC_STAGES = Object.freeze([
 ]);
 
 const DIAGNOSTICS = new WeakMap();
+const DIAGNOSTIC_REASON = Symbol("tinderFoundationMigrationDiagnosticReason");
 const STAGES = new Set(TINDER_FOUNDATION_MIGRATION_DIAGNOSTIC_STAGES);
 const SQL_BOUNDARIES = new Set(["(", "[", "{", ",", "=", "<", ">", "+", "-", "*", "/", "%", "|", "&", "^", "~", "!", "?", ":"]);
 const SQL_WHITESPACE = new Set([" ", "\t", "\r", "\n", "\f"]);
+const DIAGNOSTIC_REASON_PATTERN = /^[A-Z][A-Z0-9_]{0,95}$/;
 
 function sourceError(label) {
   return new Error(`${label} migration source is invalid.`);
@@ -174,6 +176,39 @@ function boundedStage(value) {
   return STAGES.has(value) ? value : "UNKNOWN";
 }
 
+function boundedDiagnosticReason(stage, error, allowedReasons) {
+  if (stage !== "POSTCHECK") return undefined;
+  const reason = error?.[DIAGNOSTIC_REASON];
+  return allowedReasons.has(reason) ? reason : undefined;
+}
+
+function fixedDiagnosticReasons(values) {
+  if (values === undefined) return new Set();
+  if (!Array.isArray(values) || values.some(value => !DIAGNOSTIC_REASON_PATTERN.test(value))) {
+    throw new TypeError("Tinder foundation diagnostic reasons must be fixed bounded codes.");
+  }
+  return new Set(values);
+}
+
+/**
+ * Creates a fixed, non-sensitive marker for an expected migration failure
+ * class. The runner exposes it only when the caller has declared the same
+ * code in its source-owned allowlist and only at the POSTCHECK boundary.
+ */
+export function createTinderFoundationMigrationDiagnosticError(reason) {
+  if (!DIAGNOSTIC_REASON_PATTERN.test(reason)) {
+    throw new TypeError("Tinder foundation diagnostic reason must be a bounded code.");
+  }
+  const error = new Error("Tinder foundation migration postcheck reported a bounded incompatibility.");
+  Object.defineProperty(error, DIAGNOSTIC_REASON, {
+    value: reason,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+  return error;
+}
+
 function failureCode(stage, error) {
   if (stage === "MIGRATION_SOURCE_VALIDATION") return "MIGRATION_SOURCE_INVALID";
   if (stage === "ADVISORY_LOCK" && error?.code === "TINDER_FOUNDATION_ADVISORY_LOCK_UNAVAILABLE") return "ADVISORY_LOCK_UNAVAILABLE";
@@ -183,7 +218,8 @@ function failureCode(stage, error) {
   return "DATABASE_OPERATION_FAILED";
 }
 
-function attachDiagnostic(error, state) {
+function attachDiagnostic(error, state, allowedReasons) {
+  const reason = boundedDiagnosticReason(state.stage, error, allowedReasons);
   const diagnostic = Object.freeze({
     stage: boundedStage(state.stage),
     code: failureCode(state.stage, error),
@@ -197,7 +233,8 @@ function attachDiagnostic(error, state) {
             ? "UNRESOLVED"
             : "NOT_STARTED",
     rollback: state.rollbackAttempted ? state.rollbackCompleted ? "COMPLETED" : "FAILED" : "NOT_ATTEMPTED",
-    ddl_started: state.ddlOperationsAttempted > 0
+    ddl_started: state.ddlOperationsAttempted > 0,
+    ...(reason ? { reason } : {})
   });
   if (error && (typeof error === "object" || typeof error === "function")) DIAGNOSTICS.set(error, diagnostic);
   return error;
@@ -254,13 +291,15 @@ export function createExplicitTinderFoundationMigrationRunner({
   preflight,
   postcheck,
   lockRelations: relationsForPreflight,
-  advisoryLock = { namespace: 7421, key: 3 }
+  advisoryLock = { namespace: 7421, key: 3 },
+  diagnosticReasonCodes
 } = {}) {
   if (!label || typeof migrationSql !== "string" || typeof validateSource !== "function"
       || typeof preflight !== "function" || typeof postcheck !== "function"
       || typeof relationsForPreflight !== "function") {
     throw new TypeError("A complete fixed Tinder foundation migration runner contract is required.");
   }
+  const allowedDiagnosticReasons = fixedDiagnosticReasons(diagnosticReasonCodes);
 
   async function runPreDdlPath(client, setStage) {
     setStage("TRANSACTION_SETTINGS");
@@ -332,13 +371,13 @@ export function createExplicitTinderFoundationMigrationRunner({
         discardClient = true;
       }
       state.stage = failedStage;
-      throw attachDiagnostic(error, state);
+      throw attachDiagnostic(error, state, allowedDiagnosticReasons);
     } finally {
       try {
         client?.release(discardClient ? releaseError : undefined);
       } catch (error) {
         state.stage = "CLEANUP";
-        throw attachDiagnostic(error, state);
+        throw attachDiagnostic(error, state, allowedDiagnosticReasons);
       }
     }
   }

@@ -211,43 +211,58 @@ async function assertContactsReferenceCompatible(client) {
   }
 }
 
-function hasExactColumns(rows) {
-  const actual = new Map(rows.map(row => [row.column_name, row]));
-  return actual.size === Object.keys(COLUMN_CONTRACT).length
-    && Object.entries(COLUMN_CONTRACT).every(([column, contract]) => {
-      const row = actual.get(column);
-      return row
-        && row.data_type === contract.dataType
-        && row.not_null === contract.notNull
-        && normalizedCatalogAction(row.identity_kind) === contract.identityKind
-        && normalizedCatalogAction(row.generated_kind) === contract.generatedKind
-        && safeCanonicalDefinition(row.column_default || "") === safeCanonicalDefinition(contract.defaultExpression);
-    });
+function columnMatches(row, contract) {
+  return Boolean(row)
+    && row.data_type === contract.dataType
+    && row.not_null === contract.notNull
+    && normalizedCatalogAction(row.identity_kind) === contract.identityKind
+    && normalizedCatalogAction(row.generated_kind) === contract.generatedKind
+    && safeCanonicalDefinition(row.column_default || "") === safeCanonicalDefinition(contract.defaultExpression);
 }
 
-function hasExactConstraints(rows) {
-  if (rows.length !== CONSTRAINT_CONTRACT.length) return false;
+function hasRequiredColumns(rows) {
+  const actual = new Map(rows.map(row => [row.column_name, row]));
+  return Object.entries(COLUMN_CONTRACT).every(([column, contract]) =>
+    columnMatches(actual.get(column), contract));
+}
+
+function hasExactColumns(rows) {
+  return new Map(rows.map(row => [row.column_name, row])).size === Object.keys(COLUMN_CONTRACT).length
+    && hasRequiredColumns(rows);
+}
+
+function hasRequiredConstraints(rows) {
   const remaining = [...rows];
   for (const specification of CONSTRAINT_CONTRACT) {
     const matches = remaining.filter(row => constraintMatches(row, specification));
     if (matches.length !== 1) return false;
     remaining.splice(remaining.indexOf(matches[0]), 1);
   }
-  return remaining.length === 0;
+  return true;
 }
 
-/** Read-only table state inspection. It never creates or repairs the table. */
-export async function inspectTinderVisibleChatCaptureSchema(client) {
-  if (await inspectCaptureTablePresence(client) === "ABSENT") return { state: "ABSENT" };
+function hasExactConstraints(rows) {
+  return rows.length === CONSTRAINT_CONTRACT.length && hasRequiredConstraints(rows);
+}
+
+async function readCaptureSchemaCatalog(client) {
+  if (await inspectCaptureTablePresence(client) === "ABSENT") return null;
   // A pg Client owns one wire-protocol query stream. Keep the catalog reads
   // sequential rather than issuing concurrent query calls on that client.
   const relation = await readCaptureRelation(client);
   const columns = await readCaptureColumns(client);
   const constraints = await readCaptureConstraints(client);
-  const canonical = relation.rows.length === 1
-    && relation.rows[0]?.relkind === "r"
-    && hasExactColumns(columns.rows)
-    && hasExactConstraints(constraints.rows);
+  return { relation: relation.rows, columns: columns.rows, constraints: constraints.rows };
+}
+
+/** Read-only table state inspection. It never creates or repairs the table. */
+export async function inspectTinderVisibleChatCaptureSchema(client) {
+  const catalog = await readCaptureSchemaCatalog(client);
+  if (!catalog) return { state: "ABSENT" };
+  const canonical = catalog.relation.length === 1
+    && catalog.relation[0]?.relkind === "r"
+    && hasExactColumns(catalog.columns)
+    && hasExactConstraints(catalog.constraints);
   return { state: canonical ? "CANONICAL" : "INVALID" };
 }
 
@@ -277,6 +292,25 @@ export async function assertTinderVisibleChatCaptureSchemaReady(client) {
     throw new Error("Tinder visible-chat capture schema is not ready.");
   }
   return inspection;
+}
+
+/**
+ * Readiness for later additive foundations. It preserves every T2 base
+ * column and constraint exactly, while allowing intentionally additive
+ * downstream columns or constraints. The explicit T2 migration preflight
+ * deliberately remains exact through inspectTinderVisibleChatCaptureSchema.
+ */
+export async function assertTinderVisibleChatCaptureBaseSchemaReady(client) {
+  const catalog = await readCaptureSchemaCatalog(client);
+  const compatible = Boolean(catalog)
+    && catalog.relation.length === 1
+    && catalog.relation[0]?.relkind === "r"
+    && hasRequiredColumns(catalog.columns)
+    && hasRequiredConstraints(catalog.constraints);
+  if (!compatible) {
+    throw new Error("Tinder visible-chat capture base schema is not ready.");
+  }
+  return { state: "BASE_COMPATIBLE" };
 }
 
 export { COLUMN_CONTRACT as TINDER_VISIBLE_CHAT_CAPTURE_COLUMN_CONTRACT, CONSTRAINT_CONTRACT as TINDER_VISIBLE_CHAT_CAPTURE_CONSTRAINT_CONTRACT };

@@ -10,6 +10,7 @@ import {
   validateTinderVisibleChatCapturePreDdl
 } from "../device-bridge/tinder-visible-chat-capture-migration.js";
 import {
+  assertTinderVisibleChatCaptureBaseSchemaReady,
   assertTinderVisibleChatCaptureSchemaReady,
   inspectTinderVisibleChatCaptureSchema,
   TINDER_VISIBLE_CHAT_CAPTURE_COLUMN_CONTRACT,
@@ -47,7 +48,11 @@ function ddlCalls(calls) {
   return calls.filter(sql => /\b(?:CREATE|ALTER|DROP|TRUNCATE|INSERT|UPDATE|DELETE)\b/i.test(sql));
 }
 
-function realPostgresCatalogShapeClient() {
+function realPostgresCatalogShapeClient({
+  additiveDownstreamFields = false,
+  incompatibleBaseColumn = false,
+  incompatibleBaseConstraint = false
+} = {}) {
   const columns = Object.entries(TINDER_VISIBLE_CHAT_CAPTURE_COLUMN_CONTRACT).map(([column_name, contract]) => ({
     column_name,
     data_type: contract.dataType,
@@ -56,6 +61,16 @@ function realPostgresCatalogShapeClient() {
     identity_kind: "",
     generated_kind: ""
   }));
+  if (incompatibleBaseColumn) {
+    columns.find(row => row.column_name === "source_platform").column_default = "'other'";
+  }
+  if (additiveDownstreamFields) {
+    columns.push(
+      { column_name: "identity_revision", data_type: "integer", not_null: true, column_default: "1", identity_kind: "", generated_kind: "" },
+      { column_name: "human_takeover_active", data_type: "boolean", not_null: true, column_default: "false", identity_kind: "", generated_kind: "" },
+      { column_name: "handoff_active", data_type: "boolean", not_null: true, column_default: "false", identity_kind: "", generated_kind: "" }
+    );
+  }
   const base = {
     convalidated: true,
     condeferrable: false,
@@ -113,6 +128,18 @@ function realPostgresCatalogShapeClient() {
       constraint_definition
     }))
   ];
+  if (additiveDownstreamFields) {
+    constraints.push({
+      ...base,
+      contype: "c",
+      column_names: ["identity_revision"],
+      constraint_definition: "CHECK (identity_revision > 0)"
+    });
+  }
+  if (incompatibleBaseConstraint) {
+    constraints.find(row => row.contype === "c" && row.column_names[0] === "source_platform")
+      .constraint_definition = "CHECK (source_platform = 'other'::text)";
+  }
   return {
     async query(sql) {
       if (sql.includes("to_regclass")) return { rows: [{ relation_name: "tinder_visible_chat_captures" }] };
@@ -200,6 +227,30 @@ test("capture schema accepts PostgreSQL CHECK conkeys and null non-FK reference 
   assert.deepEqual(
     await inspectTinderVisibleChatCaptureSchema(realPostgresCatalogShapeClient()),
     { state: "CANONICAL" }
+  );
+});
+
+test("later foundations accept additive T2 extensions without weakening the strict T2 migration contract", async () => {
+  const t4Extended = realPostgresCatalogShapeClient({ additiveDownstreamFields: true });
+  assert.deepEqual(await inspectTinderVisibleChatCaptureSchema(t4Extended), { state: "INVALID" });
+  assert.deepEqual(await assertTinderVisibleChatCaptureBaseSchemaReady(t4Extended), { state: "BASE_COMPATIBLE" });
+
+  const incompatibleBase = realPostgresCatalogShapeClient({
+    additiveDownstreamFields: true,
+    incompatibleBaseColumn: true
+  });
+  await assert.rejects(
+    () => assertTinderVisibleChatCaptureBaseSchemaReady(incompatibleBase),
+    /base schema is not ready/
+  );
+
+  const incompatibleConstraint = realPostgresCatalogShapeClient({
+    additiveDownstreamFields: true,
+    incompatibleBaseConstraint: true
+  });
+  await assert.rejects(
+    () => assertTinderVisibleChatCaptureBaseSchemaReady(incompatibleConstraint),
+    /base schema is not ready/
   );
 });
 

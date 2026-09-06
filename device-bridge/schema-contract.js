@@ -276,6 +276,28 @@ export function canonicalCheckDefinition(value) {
   return serializeBooleanTree(parseBooleanTokens(tokens));
 }
 
+/**
+ * Canonicalizes a fixed index predicate without dropping its boolean
+ * structure. Catalog output can add type casts to literals, but a cast
+ * stripper must never consume the following AND/OR expression.
+ */
+export function canonicalSchemaPredicate(value) {
+  const tokens = withoutCheckWrapper(tokenizeSchemaSql(value));
+  return tokens.length === 0 ? "" : serializeBooleanTree(parseBooleanTokens(tokens));
+}
+
+/**
+ * Compacts fixed catalog SQL for the few structural checks that deliberately
+ * compare source fragments rather than boolean predicates. Type casts are
+ * removed by the shared tokenizer, which preserves neighbouring SQL tokens.
+ */
+export function compactSchemaSql(value) {
+  return tokenizeSchemaSql(value)
+    .filter(token => token !== "(" && token !== ")")
+    .join("")
+    .toLowerCase();
+}
+
 /** Canonicalizes non-CHECK catalog definitions without dropping operators. */
 export function canonicalSchemaDefinition(value) {
   return tokenizeSchemaSql(value).join("");

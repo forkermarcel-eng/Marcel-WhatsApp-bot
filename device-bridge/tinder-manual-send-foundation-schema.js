@@ -1,5 +1,5 @@
 import {
-  assertTinderDraftFoundationSchemaReady
+  assertTinderDraftFoundationBaseSchemaReady
 } from "./tinder-draft-foundation-schema.js";
 import {
   canonicalTinderFoundationDefault,
@@ -10,6 +10,7 @@ import {
   tinderFoundationCheck,
   tinderFoundationKey
 } from "./tinder-foundation-constraint-contract.js";
+import { canonicalSchemaPredicate } from "./schema-contract.js";
 
 /* ==================================================
 T5 — SEALED MANUAL-SEND FOUNDATION SCHEMA CONTRACT
@@ -163,13 +164,6 @@ const T5_MANUAL_SEND_CONSTRAINT_CONTRACT = Object.freeze([
   tinderFoundationCheck("tinder_reply_send_audit", "char_length(COALESCE(reason_code, '')) <= 120")
 ]);
 
-function compact(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/::[a-z_][a-z_ ]*/g, "")
-    .replace(/[\s()]/g, "");
-}
-
 function mapColumns(rows, relation) {
   return new Map(rows.filter(row => row.relation_name === relation).map(row => [row.column_name, {
     dataType: row.data_type,
@@ -223,7 +217,7 @@ function indexMatches(row, { unique, columns, descending, predicate }) {
     && row.indisunique === unique
     && sameArray(row.column_names, columns)
     && sameArray(row.descending, descending)
-    && compact(row.predicate) === compact(predicate);
+    && canonicalSchemaPredicate(row.predicate) === canonicalSchemaPredicate(predicate);
 }
 
 function indexesCanonical(rows) {
@@ -294,7 +288,7 @@ async function readT5Constraints(client) {
 
 /** Read-only T5 state inspection; mixed pre-existing state never receives DDL. */
 export async function inspectTinderManualSendFoundationSchema(client, {
-  assertDraftReady = assertTinderDraftFoundationSchemaReady
+  assertDraftReady = assertTinderDraftFoundationBaseSchemaReady
 } = {}) {
   await assertDraftReady(client);
   const relations = await readRelations(client);

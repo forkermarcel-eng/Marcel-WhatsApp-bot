@@ -52,6 +52,37 @@ test("mapping UI requires a deliberate confirmation and never infers a contact f
   assert.doesNotMatch(mappingCode, /capture\.visible_name.*newContactName\.value|newContactName\.value.*capture\.visible_name/);
 });
 
+test("conversation binding mode is enabled only by the bounded eligible server status", () => {
+  const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
+  assert.match(mappingCode, /function conversationBindingEligible\(capture\)\s*\{\s*return conversationBindingStatus\(capture\) === "ELIGIBLE_FOR_HUMAN_BINDING";/s);
+  assert.match(mappingCode, /status !== "" && status !== "LEGACY_CAPTURE" && !conversationBindingEligible\(capture\)/);
+  assert.match(mappingCode, /elements\.captureTinderIdentifierField\.hidden = conversationBindingMode/);
+  assert.match(mappingCode, /elements\.captureVisibleNameContext\.hidden = conversationBindingMode/);
+  assert.match(mappingCode, /if \(conversationBindingBlocksMapping\(capture\)\) \{\s*elements\.captureMappingForm\.hidden = true;/s);
+  assert.match(mappingCode, /captureMappingStatus\(data\.capture\) === "NEEDS_HUMAN_MAPPING" && !conversationBindingBlocksMapping\(data\.capture\)/);
+});
+
+test("conversation binding sends only the deliberate bounded binding body", () => {
+  const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
+  const branchStart = mappingCode.indexOf("if (isConversationBinding) {");
+  const branchEnd = mappingCode.indexOf("     } else {\n       const identifier", branchStart);
+  assert.notEqual(branchStart, -1);
+  assert.notEqual(branchEnd, -1);
+  const bindingBranch = mappingCode.slice(branchStart, branchEnd);
+  assert.match(bindingBranch, /body = \{ action: "BIND_EXISTING", contact_id: contactId, confirmed: true \}/);
+  assert.match(bindingBranch, /body = \{ action: "BIND_CREATE", new_contact_name: newContactName, confirmed: true \}/);
+  assert.match(bindingBranch, /!confirmed/);
+  assert.doesNotMatch(bindingBranch, /tinder_identifier|visible_name|threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|threadBindingEvidence|uniqueId/i);
+  assert.match(mappingCode, /const expectedStatuses = isConversationBinding \? \["CONFIRMED"\] : \["RESOLVED", "NEW_CONTACT_CONFIRMED"\]/);
+});
+
+test("legacy profile mapping remains separate from the fail-closed conversation binding path", () => {
+  const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
+  assert.match(mappingCode, /status !== "LEGACY_CAPTURE"/);
+  assert.match(mappingCode, /body = \{ action, tinder_identifier: identifier, confirmed: true \}/);
+  assert.doesNotMatch(page, /conversation_binding_status[^\n]*visible_name/);
+});
+
 test("mapping UI reuses the authenticated contacts API and surfaces conflicts without an overwrite", () => {
   const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
   assert.match(mappingCode, /requestJson\("\/api\/dashboard\/contacts"\)/);

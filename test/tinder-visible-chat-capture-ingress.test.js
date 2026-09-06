@@ -247,9 +247,22 @@ test("capture ingress fails closed before replay or persistence when the T1 gate
 });
 
 test("capture record presentation never exposes raw messages or technical fingerprint", () => {
-  const presented = normalizeCaptureRecord(storedCapture());
+  const presented = normalizeCaptureRecord({
+    ...storedCapture(),
+    visible_thread_metadata: {
+      ...storedCapture().visible_thread_metadata,
+      threadBindingEvidence: {
+        kind: "tinder_accessibility_header_unique_id_hmac_v1",
+        role: "HEADER_TITLE",
+        status: "OBSERVED_UNVERIFIED",
+        token: "e".repeat(64)
+      }
+    }
+  });
   assert.equal(Object.hasOwn(presented, "visible_messages"), false);
   assert.equal(Object.hasOwn(presented, "runtime_thread_fingerprint"), false);
+  assert.equal(JSON.stringify(presented).includes("threadBindingEvidence"), false);
+  assert.equal(JSON.stringify(presented).includes("e".repeat(64)), false);
   assert.equal(presented.visible_name, "Sandry");
 });
 

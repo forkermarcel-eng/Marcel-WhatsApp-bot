@@ -9,6 +9,12 @@ import {
   createPgTinderHumanMappingRepository,
   createTinderHumanMappingService
 } from "../services/tinder-human-mapping.js";
+import {
+  CHANNEL_CONVERSATION_BINDING_STATUS,
+  ChannelConversationBindingError,
+  createChannelConversationBindingService,
+  createPgChannelConversationBindingRepository
+} from "../services/channel-conversation-binding.js";
 import { TINDER_IDENTITY_RESOLUTION_STATUS } from "../services/tinder-identity-resolution.js";
 
 /* ==================================================
@@ -27,6 +33,13 @@ const TINDER_CAPTURE_MAPPING_BODY_FIELDS = new Set([
   "tinder_identifier",
   "confirmed"
 ]);
+const TINDER_CAPTURE_CONVERSATION_BINDING_BODY_FIELDS = new Set([
+  "action",
+  "contact_id",
+  "new_contact_name",
+  "confirmed"
+]);
+const PUBLIC_CONVERSATION_BINDING_STATUSES = new Set(Object.values(CHANNEL_CONVERSATION_BINDING_STATUS));
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -66,7 +79,7 @@ function normalizeCaptureId(value) {
   return captureId;
 }
 
-function normalizeCaptureRecord(row) {
+function normalizeCaptureRecord(row, { conversationBindingStatus = null } = {}) {
   const captureId = String(row?.captureId ?? row?.capture_id ?? "").trim();
   const deviceId = String(row?.deviceId ?? row?.device_id ?? "").trim();
   const captureRevision = Number(row?.captureRevision ?? row?.capture_revision);
@@ -101,6 +114,17 @@ function normalizeCaptureRecord(row) {
     return Number.isNaN(date.valueOf()) ? null : date.toISOString();
   };
 
+  const normalizedConversationBindingStatus = conversationBindingStatus === null
+    ? null
+    : String(conversationBindingStatus || "").trim().toUpperCase();
+  if (normalizedConversationBindingStatus !== null
+      && !PUBLIC_CONVERSATION_BINDING_STATUSES.has(normalizedConversationBindingStatus)) {
+    const error = new Error("Invalid conversation binding status.");
+    error.statusCode = 500;
+    error.code = "INVALID_CONVERSATION_BINDING_STATUS";
+    throw error;
+  }
+
   return Object.freeze({
     capture_id: captureId,
     device_id: deviceId,
@@ -110,7 +134,10 @@ function normalizeCaptureRecord(row) {
     visible_name: visibleName,
     source_package: sourcePackage,
     captured_at: timestamp(row?.capturedAt ?? row?.captured_at),
-    received_at: timestamp(row?.receivedAt ?? row?.received_at)
+    received_at: timestamp(row?.receivedAt ?? row?.received_at),
+    ...(normalizedConversationBindingStatus === null
+      ? {}
+      : { conversation_binding_status: normalizedConversationBindingStatus })
   });
 }
 
@@ -170,11 +197,58 @@ function assertMappingBody(body) {
   });
 }
 
+/**
+ * A durable conversation binding deliberately has no client-provided token,
+ * profile identifier, display-name or fingerprint field. The service loads
+ * its candidate solely from the stored signed capture by URL capture ID.
+ */
+function assertConversationBindingBody(body) {
+  if (!plainObject(body) || Object.keys(body).some((key) =>
+    !TINDER_CAPTURE_CONVERSATION_BINDING_BODY_FIELDS.has(key))) {
+    const error = new Error("Ungültige Conversation-Binding-Anfrage.");
+    error.statusCode = 400;
+    error.code = "INVALID_CONVERSATION_BINDING_REQUEST";
+    throw error;
+  }
+  const action = String(body.action || "").trim().toUpperCase();
+  if (!['BIND_EXISTING', 'BIND_CREATE'].includes(action) || body.confirmed !== true) {
+    const error = new Error("Menschliche Bestätigung ist erforderlich.");
+    error.statusCode = 400;
+    error.code = "HUMAN_CONFIRMATION_REQUIRED";
+    throw error;
+  }
+  const required = action === "BIND_EXISTING"
+    ? ["action", "contact_id", "confirmed"]
+    : ["action", "new_contact_name", "confirmed"];
+  if (!exactKeys(body, required)) {
+    const error = new Error("Conversation-Binding-Anfrage enthält nicht erlaubte Felder.");
+    error.statusCode = 400;
+    error.code = "INVALID_CONVERSATION_BINDING_REQUEST";
+    throw error;
+  }
+  return Object.freeze({
+    action,
+    ...(action === "BIND_EXISTING" ? { contactId: body.contact_id } : { newContactName: body.new_contact_name }),
+    confirmed: true
+  });
+}
+
 function createTinderDashboardCaptureReadHandler(pool, {
   createRepository = createPgTinderCaptureRepository,
-  createStore = createTinderCaptureStore
+  createStore = createTinderCaptureStore,
+  createBindingRepository = createPgChannelConversationBindingRepository,
+  createBindingService = createChannelConversationBindingService
 } = {}) {
   const store = createStore(createRepository(pool));
+  // Tests and an older pre-foundation deployment may deliberately provide no
+  // usable binding repository. Capture read stays redacted and operational;
+  // only the new binding status is then absent rather than guessed.
+  let bindingService = null;
+  try {
+    bindingService = createBindingService(createBindingRepository(pool));
+  } catch {
+    bindingService = null;
+  }
   return async function tinderDashboardCaptureReadHandler(req, res) {
     try {
       const capture = await store.getCapture(normalizeCaptureId(req.params.captureId));
@@ -184,7 +258,15 @@ function createTinderDashboardCaptureReadHandler(pool, {
         error.code = "CAPTURE_NOT_FOUND";
         throw error;
       }
-      return res.status(200).json({ ok: true, capture: normalizeCaptureRecord(capture) });
+      const readiness = bindingService
+        ? await bindingService.getReadiness(String(capture.captureId ?? capture.capture_id))
+        : null;
+      return res.status(200).json({
+        ok: true,
+        capture: normalizeCaptureRecord(capture, {
+          conversationBindingStatus: readiness?.status ?? null
+        })
+      });
     } catch (error) {
       if (isFoundationNotReadyError(error)) {
         const notReady = foundationNotReadyError();
@@ -265,6 +347,48 @@ function createTinderDashboardMappingHandler(pool, {
   };
 }
 
+function createTinderDashboardConversationBindingHandler(pool, {
+  createRepository = createPgChannelConversationBindingRepository,
+  createService = createChannelConversationBindingService
+} = {}) {
+  const bindingService = createService(createRepository(pool));
+  return async function tinderDashboardConversationBindingHandler(req, res) {
+    try {
+      const input = assertConversationBindingBody(req.body);
+      const result = await bindingService.confirmBinding({
+        captureId: normalizeCaptureId(req.params.captureId),
+        ...input,
+        actor: "marcel_dashboard"
+      });
+      if (result.status !== CHANNEL_CONVERSATION_BINDING_STATUS.CONFIRMED) {
+        return res.status(409).json({ ok: false, conflict: true, result: { status: result.status } });
+      }
+      return res.status(200).json({
+        ok: true,
+        result: {
+          status: result.status,
+          contactId: result.contactId,
+          idempotent: result.idempotent
+        }
+      });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        const notReady = foundationNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || (error instanceof ChannelConversationBindingError ? error.statusCode : 500);
+      if (status === 500) console.error("Tinder conversation binding failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_CONVERSATION_BINDING_FAILED",
+        error: status === 500
+          ? "Tinder conversation binding could not be saved."
+          : safeMessage(error, "Tinder conversation binding could not be saved.")
+      });
+    }
+  };
+}
+
 function registerTinderCaptureRoutes({
   app,
   pool,
@@ -275,6 +399,7 @@ function registerTinderCaptureRoutes({
   const listPendingCaptures = createTinderDashboardPendingCaptureListHandler(pool);
   const readCapture = createTinderDashboardCaptureReadHandler(pool);
   const mapCapture = createTinderDashboardMappingHandler(pool);
+  const bindCaptureConversation = createTinderDashboardConversationBindingHandler(pool);
   const dashboard = (handler) => async (req, res) => {
     if (!dashboardApiReady(res)) return;
     if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok: false, error: "Not authorized." });
@@ -285,14 +410,18 @@ function registerTinderCaptureRoutes({
   app.get("/dashboard-api/tinder/captures/pending", dashboard(listPendingCaptures));
   app.get("/dashboard-api/tinder/captures/:captureId", dashboard(readCapture));
   app.post("/dashboard-api/tinder/captures/:captureId/mapping", dashboard(mapCapture));
+  app.post("/dashboard-api/tinder/captures/:captureId/conversation-binding", dashboard(bindCaptureConversation));
 }
 
 export {
   TINDER_CAPTURE_MAPPING_BODY_FIELDS,
+  TINDER_CAPTURE_CONVERSATION_BINDING_BODY_FIELDS,
+  assertConversationBindingBody,
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
+  createTinderDashboardConversationBindingHandler,
   isFoundationNotReadyError,
   normalizeCaptureRecord,
   normalizePendingCaptureRecords,

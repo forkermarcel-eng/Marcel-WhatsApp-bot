@@ -935,7 +935,7 @@
        <p id="captureMappingIntro">Dieses sichere sichtbare Capture braucht eine ausdrückliche menschliche Zuordnung. Der sichtbare Tinder-Name ist kein Identifier und wird nicht automatisch zusammengeführt.</p>
 
        <div class="capture-mapping-context" id="captureMappingContext">
-         <div>Sichtbarer Tinder-Name<strong id="captureVisibleName">–</strong></div>
+        <div id="captureVisibleNameContext">Sichtbarer Tinder-Name<strong id="captureVisibleName">–</strong></div>
          <div>Capture-ID<code id="captureMappingId">–</code></div>
          <div>Android-Gerät<code id="captureDeviceId">–</code></div>
          <div>Capture-Revision<strong id="captureRevision">–</strong></div>
@@ -943,13 +943,13 @@
 
        <div id="captureMappingForm">
          <div class="capture-mapping-grid">
-           <label class="capture-mapping-field">
-             Bestehenden Kontakt auswählen
-             <select id="captureContactSelect">
-               <option value="">Kontakte werden erst bei sicherem Capture geladen</option>
-             </select>
-           </label>
-           <label class="capture-mapping-field">
+          <label class="capture-mapping-field">
+            Bestehenden Kontakt auswählen
+            <select id="captureContactSelect">
+              <option value="">Kontakte werden erst bei sicherem Capture geladen</option>
+            </select>
+          </label>
+          <label class="capture-mapping-field" id="captureTinderIdentifierField">
              Human-bestätigter Tinder-Identifier
              <input id="captureTinderIdentifier" type="text" autocomplete="off" maxlength="160" placeholder="Nur manuell bestätigt eingeben">
            </label>
@@ -1089,11 +1089,13 @@
       captureMappingPanel: document.getElementById("captureMappingPanel"),
      captureMappingIntro: document.getElementById("captureMappingIntro"),
      captureMappingId: document.getElementById("captureMappingId"),
+     captureVisibleNameContext: document.getElementById("captureVisibleNameContext"),
      captureVisibleName: document.getElementById("captureVisibleName"),
      captureDeviceId: document.getElementById("captureDeviceId"),
      captureRevision: document.getElementById("captureRevision"),
      captureMappingForm: document.getElementById("captureMappingForm"),
      captureContactSelect: document.getElementById("captureContactSelect"),
+     captureTinderIdentifierField: document.getElementById("captureTinderIdentifierField"),
      captureTinderIdentifier: document.getElementById("captureTinderIdentifier"),
      captureNewContactName: document.getElementById("captureNewContactName"),
      captureMappingConfirmed: document.getElementById("captureMappingConfirmed"),
@@ -1109,6 +1111,7 @@
    let commandFeedbackIsError = false;
    let mappingCapture = null;
    let mappingBusy = false;
+   let conversationBindingMode = false;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
@@ -1256,45 +1259,99 @@
      return `${name || "Unbekannter Kontakt"} · Kontakt #${contact.id}`;
    }
 
-   function updateCaptureMappingControls() {
-     const hasCapture = captureMappingStatus(mappingCapture) === "NEEDS_HUMAN_MAPPING";
-     const confirmed = elements.captureMappingConfirmed.checked === true;
-     const identifier = elements.captureTinderIdentifier.value.trim();
-     const contactId = Number(elements.captureContactSelect.value);
-     const newContactName = elements.captureNewContactName.value.trim();
-     elements.mapCaptureExisting.disabled = mappingBusy || !hasCapture || !confirmed || !identifier ||
-       !Number.isInteger(contactId) || contactId <= 0;
-     elements.mapCaptureNew.disabled = mappingBusy || !hasCapture || !confirmed || !identifier || !newContactName;
-   }
+    function conversationBindingStatus(capture) {
+      return String(capture?.conversation_binding_status || "").trim().toUpperCase();
+    }
 
-   function renderCaptureMapping(capture) {
-     const status = captureMappingStatus(capture);
-     if (!["NEEDS_HUMAN_MAPPING", "CONFLICT"].includes(status)) {
-       mappingCapture = null;
-       elements.captureMappingPanel.hidden = true;
-       return;
-     }
+    function conversationBindingEligible(capture) {
+      return conversationBindingStatus(capture) === "ELIGIBLE_FOR_HUMAN_BINDING";
+    }
 
-     mappingCapture = capture;
-     elements.captureMappingForm.hidden = false;
-     elements.captureMappingPanel.hidden = false;
-     elements.captureVisibleName.textContent = String(capture.visible_name || "Unbekannt");
-     elements.captureMappingId.textContent = String(capture.capture_id || "–");
-     elements.captureDeviceId.textContent = String(capture.device_id || "–");
-     elements.captureRevision.textContent = String(capture.capture_revision || "–");
-     if (status === "CONFLICT") {
-       elements.captureMappingForm.hidden = true;
-       elements.captureMappingIntro.textContent = "Konflikt erkannt: Die bestehende menschliche Zuordnung wurde nicht automatisch überschrieben.";
-       setCaptureMappingMessage("Konflikt blockiert. Bitte die menschlich bestätigte Identität prüfen.", true);
-       elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
-       return;
-     }
-     elements.captureMappingIntro.textContent =
-       "Dieses sichere sichtbare Capture braucht eine ausdrückliche menschliche Zuordnung. Der sichtbare Tinder-Name ist kein Identifier und wird nicht automatisch zusammengeführt.";
-     setCaptureMappingMessage("Bestehenden Kontakt auswählen oder einen neuen Kontakt bewusst bestätigen.");
-     elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
-     updateCaptureMappingControls();
-   }
+    function conversationBindingBlocksMapping(capture) {
+      const status = conversationBindingStatus(capture);
+      return status !== "" && status !== "LEGACY_CAPTURE" && !conversationBindingEligible(capture);
+    }
+
+    function conversationBindingBlockMessage(capture) {
+      switch (conversationBindingStatus(capture)) {
+        case "FOUNDATION_NOT_READY":
+          return "Die geschützte Conversation-Binding-Foundation ist noch nicht bereit. Es wurde keine Zuordnung vorgenommen.";
+        case "AWAITING_STABILITY_EVIDENCE":
+          return "Für diese technische Thread-Evidenz fehlt noch ein unabhängiger zweiter Runtime-Nachweis. Es wurde keine Zuordnung vorgenommen.";
+        case "CONFLICT":
+          return "Konflikt erkannt: Die bestehende menschliche Conversation-Bindung wurde nicht automatisch überschrieben.";
+        case "CONFIRMED":
+          return "Für diese Conversation liegt bereits eine menschlich bestätigte Bindung vor. Es wurde nichts überschrieben.";
+        default:
+          return "Die serverseitige Conversation-Binding-Prüfung ist nicht für eine Zuordnung freigegeben.";
+      }
+    }
+
+    function applyCaptureMappingMode(capture) {
+      conversationBindingMode = conversationBindingEligible(capture);
+      elements.captureTinderIdentifierField.hidden = conversationBindingMode;
+      elements.captureVisibleNameContext.hidden = conversationBindingMode;
+    }
+
+    function updateCaptureMappingControls() {
+      const hasCapture = captureMappingStatus(mappingCapture) === "NEEDS_HUMAN_MAPPING";
+      const confirmed = elements.captureMappingConfirmed.checked === true;
+      const identifier = elements.captureTinderIdentifier.value.trim();
+      const contactId = Number(elements.captureContactSelect.value);
+      const newContactName = elements.captureNewContactName.value.trim();
+      const requiresIdentifier = !conversationBindingMode;
+      elements.mapCaptureExisting.disabled = mappingBusy || !hasCapture || !confirmed || (requiresIdentifier && !identifier) ||
+        !Number.isInteger(contactId) || contactId <= 0;
+      elements.mapCaptureNew.disabled = mappingBusy || !hasCapture || !confirmed || (requiresIdentifier && !identifier) || !newContactName;
+    }
+
+    function renderCaptureMapping(capture) {
+      const status = captureMappingStatus(capture);
+      if (!["NEEDS_HUMAN_MAPPING", "CONFLICT"].includes(status)) {
+        mappingCapture = null;
+        applyCaptureMappingMode(null);
+        elements.captureMappingPanel.hidden = true;
+        return;
+      }
+
+      mappingCapture = capture;
+      applyCaptureMappingMode(capture);
+      elements.captureMappingForm.hidden = false;
+      elements.captureMappingPanel.hidden = false;
+      elements.captureVisibleName.textContent = conversationBindingMode
+        ? "–"
+        : String(capture.visible_name || "Unbekannt");
+      elements.captureMappingId.textContent = String(capture.capture_id || "–");
+      elements.captureDeviceId.textContent = String(capture.device_id || "–");
+      elements.captureRevision.textContent = String(capture.capture_revision || "–");
+      if (status === "CONFLICT") {
+        elements.captureMappingForm.hidden = true;
+        elements.captureMappingIntro.textContent = "Konflikt erkannt: Die bestehende menschliche Zuordnung wurde nicht automatisch überschrieben.";
+        setCaptureMappingMessage("Konflikt blockiert. Bitte die menschlich bestätigte Identität prüfen.", true);
+        elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
+        return;
+      }
+
+      if (conversationBindingBlocksMapping(capture)) {
+        elements.captureMappingForm.hidden = true;
+        elements.captureMappingIntro.textContent = conversationBindingBlockMessage(capture);
+        setCaptureMappingMessage("Kein Identifier wird aus sichtbarem Namen, Inhalt oder Fingerprint abgeleitet.", true);
+        elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
+        return;
+      }
+
+      if (conversationBindingMode) {
+        elements.captureMappingIntro.textContent =
+          "Zwei unabhängige sichere Runtime-Beobachtungen bestätigen dieselbe technische Conversation-Evidenz. Wähle einen Kontakt oder lege bewusst einen neuen an; die Evidenz wird nicht angezeigt und ist kein Profil-Identifier.";
+        setCaptureMappingMessage("Bestehenden Kontakt auswählen oder neuen Kontakt bewusst an diese Conversation binden.");
+      } else {
+        elements.captureMappingIntro.textContent =
+          "Dieses sichere sichtbare Capture braucht eine ausdrückliche menschliche Zuordnung. Der sichtbare Tinder-Name ist kein Identifier und wird nicht automatisch zusammengeführt.";
+        setCaptureMappingMessage("Bestehenden Kontakt auswählen oder einen neuen Kontakt bewusst bestätigen.");
+      }
+      elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
+      updateCaptureMappingControls();
+    }
 
    async function loadCaptureMappingContacts() {
      const data = await requestJson("/api/dashboard/contacts");
@@ -1326,12 +1383,13 @@
          throw new Error("Das Backend hat kein gültiges Tinder-Capture geliefert.");
        }
        renderCaptureMapping(data.capture);
-       if (captureMappingStatus(data.capture) === "NEEDS_HUMAN_MAPPING") {
+       if (captureMappingStatus(data.capture) === "NEEDS_HUMAN_MAPPING" && !conversationBindingBlocksMapping(data.capture)) {
          await loadCaptureMappingContacts();
          updateCaptureMappingControls();
        }
      } catch (error) {
        mappingCapture = null;
+       applyCaptureMappingMode(null);
        elements.captureMappingPanel.hidden = false;
        elements.captureMappingForm.hidden = true;
        elements.captureMappingIntro.textContent = "Tinder-Capture kann nicht sicher zugeordnet werden.";
@@ -1348,16 +1406,53 @@
        return;
      }
 
-     const identifier = elements.captureTinderIdentifier.value.trim();
-     const body = {
-       action,
-       tinder_identifier: identifier,
-       confirmed: elements.captureMappingConfirmed.checked === true
-     };
-     if (action === "MAP_EXISTING") {
-       body.contact_id = Number(elements.captureContactSelect.value);
+     const confirmed = elements.captureMappingConfirmed.checked === true;
+     const isConversationBinding = conversationBindingMode && conversationBindingEligible(mappingCapture);
+     let body;
+     if (isConversationBinding) {
+       if (action === "MAP_EXISTING") {
+         const contactId = Number(elements.captureContactSelect.value);
+         if (!confirmed || !Number.isInteger(contactId) || contactId <= 0) {
+           setCaptureMappingMessage("Bitte bestehenden Kontakt auswählen und die bewusste Zuordnung bestätigen.", true);
+           return;
+         }
+         body = { action: "BIND_EXISTING", contact_id: contactId, confirmed: true };
+       } else if (action === "CREATE_NEW") {
+         const newContactName = elements.captureNewContactName.value.trim();
+         if (!confirmed || !newContactName) {
+           setCaptureMappingMessage("Bitte neuen Kontakt benennen und die bewusste Zuordnung bestätigen.", true);
+           return;
+         }
+         body = { action: "BIND_CREATE", new_contact_name: newContactName, confirmed: true };
+       } else {
+         setCaptureMappingMessage("Die angeforderte Conversation-Bindung ist ungültig.", true);
+         return;
+       }
      } else {
-       body.new_contact_name = elements.captureNewContactName.value.trim();
+       const identifier = elements.captureTinderIdentifier.value.trim();
+       if (!confirmed || !identifier) {
+         setCaptureMappingMessage("Bitte den human-bestätigten Tinder-Identifier eingeben und die Zuordnung bestätigen.", true);
+         return;
+       }
+       body = { action, tinder_identifier: identifier, confirmed: true };
+       if (action === "MAP_EXISTING") {
+         const contactId = Number(elements.captureContactSelect.value);
+         if (!Number.isInteger(contactId) || contactId <= 0) {
+           setCaptureMappingMessage("Bitte einen bestehenden Kontakt auswählen.", true);
+           return;
+         }
+         body.contact_id = contactId;
+       } else if (action === "CREATE_NEW") {
+         const newContactName = elements.captureNewContactName.value.trim();
+         if (!newContactName) {
+           setCaptureMappingMessage("Bitte einen Namen für den neuen Kontakt eingeben.", true);
+           return;
+         }
+         body.new_contact_name = newContactName;
+       } else {
+         setCaptureMappingMessage("Die angeforderte Tinder-Zuordnung ist ungültig.", true);
+         return;
+       }
      }
 
      mappingBusy = true;
@@ -1368,13 +1463,20 @@
          method: "POST",
          body: JSON.stringify(body)
        });
-       if (!data?.result || !["RESOLVED", "NEW_CONTACT_CONFIRMED"].includes(data.result.status)) {
+       const expectedStatuses = isConversationBinding ? ["CONFIRMED"] : ["RESOLVED", "NEW_CONTACT_CONFIRMED"];
+       if (!data?.result || !expectedStatuses.includes(data.result.status)) {
          throw new Error("Das Backend hat keine gültige Mapping-Bestätigung geliefert.");
        }
-       mappingCapture = { ...mappingCapture, mapping_status: "RESOLVED" };
+       mappingCapture = {
+         ...mappingCapture,
+         mapping_status: "RESOLVED",
+         conversation_binding_status: isConversationBinding ? "CONFIRMED" : mappingCapture?.conversation_binding_status
+       };
        elements.captureMappingForm.hidden = true;
-       elements.captureMappingIntro.textContent = "Die menschlich bestätigte Tinder-Zuordnung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt.";
-       setCaptureMappingMessage("Zuordnung sicher gespeichert.");
+       elements.captureMappingIntro.textContent = isConversationBinding
+         ? "Die menschlich bestätigte Conversation-Bindung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt."
+         : "Die menschlich bestätigte Tinder-Zuordnung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt.";
+       setCaptureMappingMessage(isConversationBinding ? "Conversation-Bindung sicher gespeichert." : "Zuordnung sicher gespeichert.");
      } catch (error) {
        const conflict = error?.data?.result?.status === "CONFLICT";
        if (conflict) {

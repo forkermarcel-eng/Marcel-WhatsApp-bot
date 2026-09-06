@@ -37,6 +37,28 @@ function safeCapture(overrides = {}) {
   };
 }
 
+function safeCaptureV2({ token = "e".repeat(64), includeEvidence = true } = {}) {
+  const capture = safeCapture();
+  return {
+    ...capture,
+    captureMetadata: {
+      ...capture.captureMetadata,
+      schemaVersion: "tinder-visible-chat-v2"
+    },
+    visibleThreadMetadata: {
+      ...capture.visibleThreadMetadata,
+      ...(includeEvidence ? {
+        threadBindingEvidence: {
+          kind: "tinder_accessibility_header_unique_id_hmac_v1",
+          role: "HEADER_TITLE",
+          status: "OBSERVED_UNVERIFIED",
+          token
+        }
+      } : {})
+    }
+  };
+}
+
 function safeCaptureWith({
   captureFingerprint = "c".repeat(64),
   runtimeThreadFingerprint = "b".repeat(64)
@@ -132,6 +154,159 @@ test("a safe T2 capture is stored with server-owned state and no contact identit
   assert.equal(Object.hasOwn(stored, "whatsappJid"), false);
   assert.equal(Object.hasOwn(stored, "contactId"), false);
   assert.equal(await store.getCapture(CAPTURE_ID), stored);
+});
+
+test("V2 retains only the exact opaque thread evidence and remains pending", async () => {
+  const repository = fixtureRepository();
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z")
+  });
+
+  const stored = await store.storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2(),
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  });
+
+  assert.deepEqual(stored.visibleThreadMetadata.threadBindingEvidence, {
+    kind: "tinder_accessibility_header_unique_id_hmac_v1",
+    role: "HEADER_TITLE",
+    status: "OBSERVED_UNVERIFIED",
+    token: "e".repeat(64)
+  });
+  assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING);
+  assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.PENDING);
+  assert.equal(stored.resolvedContactId, null);
+  assert.equal(JSON.stringify(stored).includes("contactId"), false);
+  assert.equal(JSON.stringify(stored).includes("tinder_profile"), false);
+});
+
+test("a later V2 capture reuses only a matching human-confirmed conversation binding across a changed runtime", async () => {
+  const repository = fixtureRepository();
+  const bindingRequests = [];
+  repository.findReusableConfirmedConversationBinding = async (_transaction, request) => {
+    bindingRequests.push(request);
+    return {
+      channel: "tinder",
+      reference_kind: "tinder_accessibility_header_unique_id_hmac_v1",
+      reference_hash: "e".repeat(64),
+      device_id: DEVICE_ID,
+      contact_id: REUSED_CONTACT_ID,
+      binding_state: "CONFIRMED",
+      human_verified: true
+    };
+  };
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z")
+  });
+
+  const stored = await store.storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: {
+      ...safeCaptureV2(),
+      visibleThreadMetadata: {
+        ...safeCaptureV2().visibleThreadMetadata,
+        threadFingerprint: "f".repeat(64)
+      }
+    },
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  });
+
+  assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.RESOLVED);
+  assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.CONFIRMED);
+  assert.equal(stored.resolvedContactId, REUSED_CONTACT_ID);
+  assert.deepEqual(bindingRequests, [{
+    deviceId: DEVICE_ID,
+    threadBindingEvidence: {
+      kind: "tinder_accessibility_header_unique_id_hmac_v1",
+      role: "HEADER_TITLE",
+      status: "OBSERVED_UNVERIFIED",
+      token: "e".repeat(64)
+    }
+  }]);
+  assert.equal(JSON.stringify(bindingRequests).includes("Sandry"), false);
+  assert.equal(JSON.stringify(bindingRequests).includes("f".repeat(64)), false);
+});
+
+test("a disagreement between legacy profile reuse and a conversation binding stays fail-closed", async () => {
+  const repository = fixtureRepository({ reusableMapping: confirmedReusableMapping() });
+  repository.findReusableConfirmedConversationBinding = async () => ({
+    channel: "tinder",
+    reference_kind: "tinder_accessibility_header_unique_id_hmac_v1",
+    reference_hash: "e".repeat(64),
+    device_id: DEVICE_ID,
+    contact_id: REUSED_CONTACT_ID + 1,
+    binding_state: "CONFIRMED",
+    human_verified: true
+  });
+  const stored = await createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z")
+  }).storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2(),
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  });
+  assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.CONFLICT);
+  assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.PENDING);
+  assert.equal(stored.resolvedContactId, null);
+});
+
+test("V1 remains compatible while V2 rejects raw or noncanonical thread evidence before persistence", async () => {
+  const v1 = validateSafeVisibleChatCapture(safeCapture());
+  assert.equal(v1.schemaVersion, "tinder-visible-chat-v1");
+  assert.equal(Object.hasOwn(v1.visibleThreadMetadata, "threadBindingEvidence"), false);
+
+  const malformed = [
+    {
+      ...safeCaptureV2(),
+      visibleThreadMetadata: {
+        ...safeCaptureV2().visibleThreadMetadata,
+        threadBindingEvidence: {
+          ...safeCaptureV2().visibleThreadMetadata.threadBindingEvidence,
+          rawUniqueId: "must-never-persist"
+        }
+      }
+    },
+    {
+      ...safeCaptureV2(),
+      visibleThreadMetadata: {
+        ...safeCaptureV2().visibleThreadMetadata,
+        rawUniqueId: "must-never-persist"
+      }
+    },
+    {
+      ...safeCaptureV2(),
+      visibleThreadMetadata: {
+        ...safeCaptureV2().visibleThreadMetadata,
+        threadBindingEvidence: {
+          ...safeCaptureV2().visibleThreadMetadata.threadBindingEvidence,
+          token: "E".repeat(64)
+        }
+      }
+    },
+    {
+      ...safeCapture(),
+      visibleThreadMetadata: {
+        ...safeCapture().visibleThreadMetadata,
+        threadBindingEvidence: safeCaptureV2().visibleThreadMetadata.threadBindingEvidence
+      }
+    }
+  ];
+
+  for (const capture of malformed) {
+    const repository = fixtureRepository();
+    const store = createTinderCaptureStore(repository, { createCaptureId: () => CAPTURE_ID });
+    await assert.rejects(
+      () => store.storeSafeCapture({ deviceId: DEVICE_ID, capture }),
+      (error) => error instanceof TinderCaptureValidationError
+        && error.code === "INVALID_THREAD_BINDING_EVIDENCE"
+    );
+    assert.equal(repository.rows.length, 0);
+    assert.equal(JSON.stringify(repository.rows).includes("must-never-persist"), false);
+  }
 });
 
 test("pending capture discovery is bounded by a repository-owned fixed result set", async () => {

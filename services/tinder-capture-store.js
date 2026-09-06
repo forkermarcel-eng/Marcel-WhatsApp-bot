@@ -1,8 +1,20 @@
 import crypto from "node:crypto";
-
-const TINDER_CAPTURE_SCHEMA_VERSION = "tinder-visible-chat-v1";
+const TINDER_CAPTURE_SCHEMA_VERSION_V1 = "tinder-visible-chat-v1";
+const TINDER_CAPTURE_SCHEMA_VERSION_V2 = "tinder-visible-chat-v2";
+// Retained as the legacy default export for callers that explicitly create
+// V1 captures. New Android clients declare V2 in their signed metadata.
+const TINDER_CAPTURE_SCHEMA_VERSION = TINDER_CAPTURE_SCHEMA_VERSION_V1;
+const TINDER_CAPTURE_SCHEMA_VERSIONS = new Set([
+  TINDER_CAPTURE_SCHEMA_VERSION_V1,
+  TINDER_CAPTURE_SCHEMA_VERSION_V2
+]);
 const TINDER_SOURCE_PACKAGE = "com.tinder";
 const TINDER_IDENTIFIER_TYPE = "tinder_profile";
+const TINDER_THREAD_BINDING_EVIDENCE = Object.freeze({
+  kind: "tinder_accessibility_header_unique_id_hmac_v1",
+  role: "HEADER_TITLE",
+  status: "OBSERVED_UNVERIFIED"
+});
 
 const TINDER_CAPTURE_MAPPING_STATUS = Object.freeze({
   NEEDS_HUMAN_MAPPING: "NEEDS_HUMAN_MAPPING",
@@ -60,6 +72,18 @@ function hash(value, field) {
     throw new TinderCaptureValidationError(`${field} ist ungültig.`, "INVALID_TINDER_CAPTURE");
   }
   return text;
+}
+
+function exactLowercaseHash(value, field, code = "INVALID_TINDER_CAPTURE") {
+  if (typeof value !== "string" || !SHA256_HEX.test(value)) {
+    throw new TinderCaptureValidationError(`${field} ist ungÃ¼ltig.`, code);
+  }
+  return value;
+}
+
+function exactKeys(value, keys) {
+  return plainObject(value)
+    && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
 }
 
 function captureSafetyStatus(capture) {
@@ -125,6 +149,58 @@ function normalizeVisibleMessages(messages) {
 }
 
 /**
+ * V2 carries at most one opaque, app-local HMAC observation. It is signed as
+ * part of the capture body but never becomes a person/profile identifier,
+ * mapping decision, or public dashboard field here.
+ */
+function normalizeThreadBindingEvidence(visibleThreadMetadata, schemaVersion) {
+  const hasEvidence = Object.hasOwn(visibleThreadMetadata, "threadBindingEvidence");
+  if (schemaVersion === TINDER_CAPTURE_SCHEMA_VERSION_V1) {
+    if (hasEvidence) {
+      throw new TinderCaptureValidationError(
+        "Thread-Bindungsevidenz erfordert Capture-Schema V2.",
+        "INVALID_THREAD_BINDING_EVIDENCE"
+      );
+    }
+    return null;
+  }
+
+  if (!exactKeys(visibleThreadMetadata, [
+    "visibleName", "threadFingerprint", "headerClassName", "threadBindingEvidence"
+  ]) && !exactKeys(visibleThreadMetadata, [
+    "visibleName", "threadFingerprint", "headerClassName"
+  ])) {
+    throw new TinderCaptureValidationError(
+      "Capture-Schema V2 enthÃ¤lt nicht erlaubte Thread-Metadaten.",
+      "INVALID_THREAD_BINDING_EVIDENCE"
+    );
+  }
+  if (!hasEvidence) return null;
+
+  const evidence = visibleThreadMetadata.threadBindingEvidence;
+  if (!exactKeys(evidence, ["kind", "role", "status", "token"])
+      || evidence.kind !== TINDER_THREAD_BINDING_EVIDENCE.kind
+      || evidence.role !== TINDER_THREAD_BINDING_EVIDENCE.role
+      || evidence.status !== TINDER_THREAD_BINDING_EVIDENCE.status) {
+    throw new TinderCaptureValidationError(
+      "Die Thread-Bindungsevidenz ist nicht freigegeben.",
+      "INVALID_THREAD_BINDING_EVIDENCE"
+    );
+  }
+
+  return Object.freeze({
+    kind: TINDER_THREAD_BINDING_EVIDENCE.kind,
+    role: TINDER_THREAD_BINDING_EVIDENCE.role,
+    status: TINDER_THREAD_BINDING_EVIDENCE.status,
+    token: exactLowercaseHash(
+      evidence.token,
+      "Thread-Bindungsevidenz",
+      "INVALID_THREAD_BINDING_EVIDENCE"
+    )
+  });
+}
+
+/**
  * Validates the trusted T2 wire shape before it can be persisted.  It accepts
  * no contact identifier and does not infer one from display data.
  */
@@ -154,7 +230,7 @@ function validateSafeVisibleChatCapture(capture) {
     "Quellpaket",
     { minimum: 1, maximum: 160 }
   );
-  if (schemaVersion !== TINDER_CAPTURE_SCHEMA_VERSION || sourcePackage !== TINDER_SOURCE_PACKAGE) {
+  if (!TINDER_CAPTURE_SCHEMA_VERSIONS.has(schemaVersion) || sourcePackage !== TINDER_SOURCE_PACKAGE) {
     throw new TinderCaptureValidationError("Das Tinder-Capture-Schema ist nicht freigegeben.", "UNSUPPORTED_TINDER_CAPTURE_SCHEMA");
   }
 
@@ -162,6 +238,11 @@ function validateSafeVisibleChatCapture(capture) {
   if (!Number.isInteger(visibleNodeCount) || visibleNodeCount < 1 || visibleNodeCount > 512) {
     throw new TinderCaptureValidationError("Die sichtbare Node-Anzahl ist ungültig.", "INVALID_TINDER_CAPTURE");
   }
+
+  const threadBindingEvidence = normalizeThreadBindingEvidence(
+    visibleThreadMetadata,
+    schemaVersion
+  );
 
   return Object.freeze({
     schemaVersion,
@@ -186,7 +267,8 @@ function validateSafeVisibleChatCapture(capture) {
         sourceValue(visibleThreadMetadata, "headerClassName", "header_class_name") || "",
         "Headerklasse",
         { minimum: 0, maximum: 256 }
-      ) || null
+      ) || null,
+      ...(threadBindingEvidence === null ? {} : { threadBindingEvidence })
     }),
     visibleMessages: normalizeVisibleMessages(visibleMessages),
     safetyStatus: "SAFE"
@@ -278,6 +360,35 @@ function normalizeReusableConfirmedMapping(row, { deviceId, runtimeThreadFingerp
   return Object.freeze({ resolvedContactId });
 }
 
+/**
+ * A conversation binding is a later, separate human authority. It is scoped
+ * to the authenticated device and opaque V2 reference only; it deliberately
+ * ignores visible name, message text and runtime/capture fingerprints so a
+ * completed binding can survive a process restart.
+ */
+function normalizeReusableConfirmedConversationBinding(row, {
+  deviceId,
+  threadBindingEvidence
+}) {
+  if (!threadBindingEvidence || !plainObject(row)) return null;
+  const candidateDeviceId = normalizedUuidV4(sourceValue(row, "deviceId", "device_id"));
+  const referenceKind = sourceValue(row, "referenceKind", "reference_kind");
+  const referenceHash = normalizedHash(sourceValue(row, "referenceHash", "reference_hash"));
+  const resolvedContactId = positiveInteger(sourceValue(row, "contactId", "contact_id"));
+  if (
+    candidateDeviceId !== deviceId
+    || sourceValue(row, "channel") !== "tinder"
+    || referenceKind !== threadBindingEvidence.kind
+    || referenceHash !== threadBindingEvidence.token
+    || normalizedStatus(sourceValue(row, "bindingState", "binding_state")) !== "CONFIRMED"
+    || sourceValue(row, "humanVerified", "human_verified") !== true
+    || resolvedContactId === null
+  ) {
+    return null;
+  }
+  return Object.freeze({ resolvedContactId });
+}
+
 function createTinderCaptureStore(repository, {
   createCaptureId = () => crypto.randomUUID(),
   now = () => new Date()
@@ -295,6 +406,10 @@ function createTinderCaptureStore(repository, {
       throw new TypeError(`repository.${method} must be a function`);
     }
   }
+  const findReusableConfirmedConversationBinding =
+    typeof repository.findReusableConfirmedConversationBinding === "function"
+      ? repository.findReusableConfirmedConversationBinding.bind(repository)
+      : async () => null;
 
   async function storeSafeCapture({ deviceId, capture, provenance } = {}) {
     const normalizedDeviceId = normalizeDeviceId(deviceId);
@@ -327,6 +442,16 @@ function createTinderCaptureStore(repository, {
       // A future capture may reuse only a prior explicit human confirmation
       // from this exact authenticated device/thread. No visible display data
       // or client-provided identity participates in this decision.
+      const reusableConversationBinding = normalizeReusableConfirmedConversationBinding(
+        await findReusableConfirmedConversationBinding(transaction, {
+          deviceId: normalizedDeviceId,
+          threadBindingEvidence: normalizedCapture.visibleThreadMetadata.threadBindingEvidence ?? null
+        }),
+        {
+          deviceId: normalizedDeviceId,
+          threadBindingEvidence: normalizedCapture.visibleThreadMetadata.threadBindingEvidence ?? null
+        }
+      );
       const reusableMapping = normalizeReusableConfirmedMapping(
         await repository.findReusableConfirmedMapping(transaction, {
           deviceId: normalizedDeviceId,
@@ -337,6 +462,15 @@ function createTinderCaptureStore(repository, {
           runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
         }
       );
+
+      // A legacy profile mapping and a newer opaque conversation binding must
+      // agree. A disagreement is surfaced as a pending conflict, never an
+      // automatic overwrite or preference for a visible UI value.
+      const reusableContactId = reusableConversationBinding?.resolvedContactId
+        ?? reusableMapping?.resolvedContactId
+        ?? null;
+      const reusableConflict = reusableConversationBinding && reusableMapping
+        && reusableConversationBinding.resolvedContactId !== reusableMapping.resolvedContactId;
 
       const record = Object.freeze({
         captureId,
@@ -349,13 +483,17 @@ function createTinderCaptureStore(repository, {
         captureRevision,
         visibleThreadMetadata: normalizedCapture.visibleThreadMetadata,
         visibleMessages: normalizedCapture.visibleMessages,
-        mappingStatus: reusableMapping
-          ? TINDER_CAPTURE_MAPPING_STATUS.RESOLVED
-          : TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING,
-        humanReviewStatus: reusableMapping
-          ? TINDER_CAPTURE_REVIEW_STATUS.CONFIRMED
-          : TINDER_CAPTURE_REVIEW_STATUS.PENDING,
-        resolvedContactId: reusableMapping?.resolvedContactId ?? null,
+        mappingStatus: reusableConflict
+          ? TINDER_CAPTURE_MAPPING_STATUS.CONFLICT
+          : reusableContactId
+            ? TINDER_CAPTURE_MAPPING_STATUS.RESOLVED
+            : TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING,
+        humanReviewStatus: reusableConflict
+          ? TINDER_CAPTURE_REVIEW_STATUS.PENDING
+          : reusableContactId
+            ? TINDER_CAPTURE_REVIEW_STATUS.CONFIRMED
+            : TINDER_CAPTURE_REVIEW_STATUS.PENDING,
+        resolvedContactId: reusableConflict ? null : reusableContactId,
         provenance: normalizedProvenance,
         capturedAt: normalizedCapture.capturedAt,
         receivedAt
@@ -524,6 +662,41 @@ function createPgTinderCaptureRepository(pool) {
       return result.rows[0] || null;
     },
 
+    async findReusableConfirmedConversationBinding(client, {
+      deviceId,
+      threadBindingEvidence
+    }) {
+      if (!threadBindingEvidence) return null;
+      // T2 remains deployable before the later additive binding foundation.
+      // Do not reference an absent relation until its exact table exists.
+      const readiness = await client.query(
+        `SELECT to_regclass('public.contact_conversation_bindings') IS NOT NULL AS binding_present`
+      );
+      if (readiness.rows[0]?.binding_present !== true) return null;
+      try {
+        const result = await client.query(
+          `SELECT channel, reference_kind, reference_hash, device_id,
+                  contact_id, binding_state, human_verified
+             FROM contact_conversation_bindings
+            WHERE channel = 'tinder'
+              AND reference_kind = $1
+              AND reference_hash = $2
+              AND device_id = $3
+              AND binding_state = 'CONFIRMED'
+              AND human_verified = TRUE
+            ORDER BY binding_id ASC
+            LIMIT 1`,
+          [threadBindingEvidence.kind, threadBindingEvidence.token, deviceId]
+        );
+        return result.rows[0] || null;
+      } catch (error) {
+        // A partial/unavailable future foundation must keep the signed T2
+        // ingress fail-safe and pending; no contact is ever inferred here.
+        if (error?.code === "42P01" || error?.code === "42703") return null;
+        throw error;
+      }
+    },
+
     async findCaptureById(captureId) {
       const result = await pool.query(
         `SELECT *
@@ -560,6 +733,9 @@ function createPgTinderCaptureRepository(pool) {
 }
 
 export {
+  TINDER_CAPTURE_SCHEMA_VERSION_V1,
+  TINDER_CAPTURE_SCHEMA_VERSION_V2,
+  TINDER_THREAD_BINDING_EVIDENCE,
   TINDER_CAPTURE_MAPPING_STATUS,
   TINDER_CAPTURE_REVIEW_STATUS,
   TINDER_PENDING_HUMAN_MAPPING_LIMIT,
@@ -569,5 +745,6 @@ export {
   captureSafetyStatus,
   createPgTinderCaptureRepository,
   createTinderCaptureStore,
+  normalizeThreadBindingEvidence,
   validateSafeVisibleChatCapture
 };

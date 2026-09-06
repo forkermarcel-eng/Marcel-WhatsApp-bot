@@ -8,10 +8,33 @@ const MAPPING_FIELDS = new Set([
   "tinder_identifier",
   "confirmed"
 ]);
+const CONVERSATION_BINDING_FIELDS = new Set([
+  "action",
+  "contact_id",
+  "new_contact_name",
+  "confirmed"
+]);
 const PUBLIC_CAPTURE_MAPPING_STATUSES = new Set(["NEEDS_HUMAN_MAPPING", "RESOLVED", "CONFLICT"]);
 const PUBLIC_CAPTURE_REVIEW_STATUSES = new Set(["PENDING", "CONFIRMED", "REJECTED"]);
 const PUBLIC_MAPPING_SUCCESS_STATUSES = new Set(["RESOLVED", "NEW_CONTACT_CONFIRMED"]);
 const PUBLIC_MAPPING_ERROR_STATUSES = new Set(["CONFLICT", "NEEDS_HUMAN_MAPPING", "UNSAFE"]);
+const PUBLIC_CONVERSATION_BINDING_STATUSES = new Set([
+  "LEGACY_CAPTURE",
+  "FOUNDATION_NOT_READY",
+  "AWAITING_STABILITY_EVIDENCE",
+  "ELIGIBLE_FOR_HUMAN_BINDING",
+  "CONFIRMED",
+  "CONFLICT",
+  "UNSAFE"
+]);
+const PUBLIC_CONVERSATION_BINDING_SUCCESS_STATUSES = new Set(["CONFIRMED"]);
+const PUBLIC_CONVERSATION_BINDING_ERROR_STATUSES = new Set([
+  "LEGACY_CAPTURE",
+  "FOUNDATION_NOT_READY",
+  "AWAITING_STABILITY_EVIDENCE",
+  "CONFLICT",
+  "UNSAFE"
+]);
 const PENDING_CAPTURE_VIEW = "pending";
 const PENDING_CAPTURE_LIMIT = 25;
 
@@ -75,6 +98,11 @@ function normalizePublicCapture(value, captureId) {
   const capturedAt = normalizePublicTimestamp(value.captured_at);
   const receivedAt = normalizePublicTimestamp(value.received_at);
   if (capturedAt === undefined || receivedAt === undefined) return null;
+  const conversationBindingStatus = value.conversation_binding_status === undefined
+    ? null
+    : String(value.conversation_binding_status || "").trim().toUpperCase();
+  if (conversationBindingStatus !== null
+      && !PUBLIC_CONVERSATION_BINDING_STATUSES.has(conversationBindingStatus)) return null;
 
   return Object.freeze({
     capture_id: value.capture_id,
@@ -85,7 +113,10 @@ function normalizePublicCapture(value, captureId) {
     visible_name: value.visible_name.trim(),
     source_package: value.source_package,
     captured_at: capturedAt,
-    received_at: receivedAt
+    received_at: receivedAt,
+    ...(conversationBindingStatus === null
+      ? {}
+      : { conversation_binding_status: conversationBindingStatus })
   });
 }
 
@@ -152,6 +183,43 @@ function validMappingBody(body) {
     return exactKeys(body, ["action", "new_contact_name", "tinder_identifier", "confirmed"]);
   }
   return false;
+}
+
+function validConversationBindingBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some((field) => !CONVERSATION_BINDING_FIELDS.has(field))) {
+    return false;
+  }
+  const action = String(body.action || "").trim().toUpperCase();
+  if (body.confirmed !== true) return false;
+  if (action === "BIND_EXISTING") {
+    return exactKeys(body, ["action", "contact_id", "confirmed"]);
+  }
+  if (action === "BIND_CREATE") {
+    return exactKeys(body, ["action", "new_contact_name", "confirmed"]);
+  }
+  return false;
+}
+
+function normalizePublicConversationBindingResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !PUBLIC_CONVERSATION_BINDING_SUCCESS_STATUSES.has(value.status) ||
+      !validPositiveInteger(value.contactId) || typeof value.idempotent !== "boolean") {
+    return null;
+  }
+  return Object.freeze({
+    status: value.status,
+    contactId: value.contactId,
+    idempotent: value.idempotent
+  });
+}
+
+function normalizePublicConversationBindingErrorResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !PUBLIC_CONVERSATION_BINDING_ERROR_STATUSES.has(value.status)) {
+    return null;
+  }
+  return Object.freeze({ status: value.status });
 }
 
 function backendHeaders(configuration, withBody = false) {
@@ -279,6 +347,48 @@ async function forwardHumanMapping(req, res, configuration, captureId) {
   }
 }
 
+function safeConversationBindingBackendError(data, fallback) {
+  const result = normalizePublicConversationBindingErrorResult(data?.result);
+  return {
+    ok: false,
+    ...(data?.conflict === true && result ? { conflict: true } : {}),
+    ...(result ? { result } : {}),
+    error: fallback
+  };
+}
+
+async function forwardConversationBinding(req, res, configuration, captureId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/${encodeURIComponent(captureId)}/conversation-binding`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        body: JSON.stringify(req.body),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 404, 409, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(safeConversationBindingBackendError(data, "Conversation-Binding konnte nicht gespeichert werden."));
+    }
+    const result = normalizePublicConversationBindingResult(data?.result);
+    if (!result) {
+      return res.status(502).json({ ok: false, error: "Ungültige Binding-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, result });
+  } catch {
+    console.error("Verbindung zum Tinder-Conversation-Binding-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
 export default async function handler(req, res) {
   if (!["GET", "POST"].includes(req.method)) {
     res.setHeader("Allow", "GET, POST");
@@ -292,7 +402,14 @@ export default async function handler(req, res) {
   if (!captureRequest || (req.method === "POST" && captureRequest.type !== "capture")) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
-  if (req.method === "POST" && !validMappingBody(req.body)) {
+  const requestKind = req.method !== "POST"
+    ? null
+    : validMappingBody(req.body)
+      ? "profile_mapping"
+      : validConversationBindingBody(req.body)
+        ? "conversation_binding"
+        : null;
+  if (req.method === "POST" && !requestKind) {
     return res.status(400).json({ ok: false, error: "Ungültige Mapping-Anfrage." });
   }
 
@@ -301,12 +418,16 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "pending") {
     return forwardPendingCaptureRead(res, configuration);
   }
-  return req.method === "GET"
-    ? forwardCaptureRead(res, configuration, captureRequest.captureId)
+  if (req.method === "GET") {
+    return forwardCaptureRead(res, configuration, captureRequest.captureId);
+  }
+  return requestKind === "conversation_binding"
+    ? forwardConversationBinding(req, res, configuration, captureRequest.captureId)
     : forwardHumanMapping(req, res, configuration, captureRequest.captureId);
 }
 
 export {
+  CONVERSATION_BINDING_FIELDS,
   MAPPING_FIELDS,
   PENDING_CAPTURE_LIMIT,
   PENDING_CAPTURE_VIEW,
@@ -314,7 +435,10 @@ export {
   normalizePublicCapture,
   normalizePublicPendingCaptures,
   normalizePublicMappingErrorResult,
+  normalizePublicConversationBindingErrorResult,
+  normalizePublicConversationBindingResult,
   normalizePublicMappingResult,
   validCaptureId,
+  validConversationBindingBody,
   validMappingBody
 };

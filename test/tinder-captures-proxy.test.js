@@ -84,6 +84,14 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
   await handler(request({ authenticated: false }), unauthenticated);
   assert.equal(unauthenticated.statusCode, 401);
 
+  const unauthenticatedBinding = responseRecorder();
+  await handler(request({
+    method: "POST",
+    authenticated: false,
+    body: { action: "BIND_EXISTING", contact_id: 7, confirmed: true }
+  }), unauthenticatedBinding);
+  assert.equal(unauthenticatedBinding.statusCode, 401);
+
   const malformedQuery = responseRecorder();
   await handler(request({ query: { captureId: "bad" } }), malformedQuery);
   assert.equal(malformedQuery.statusCode, 400);
@@ -102,6 +110,17 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
     body: { action: "MAP_EXISTING", contact_id: 7, tinder_identifier: "id", confirmed: true, actor: "client" }
   }), injectedMapping);
   assert.equal(injectedMapping.statusCode, 400);
+
+  for (const body of [
+    { action: "BIND_EXISTING", contact_id: 7, confirmed: true, tinder_identifier: "must-not-pass" },
+    { action: "BIND_EXISTING", contact_id: 7, confirmed: true, thread_fingerprint: "a".repeat(64) },
+    { action: "BIND_CREATE", new_contact_name: "M Tinder Test", confirmed: true, token: "b".repeat(64) },
+    { action: "BIND_CREATE", new_contact_name: "M Tinder Test", confirmed: false }
+  ]) {
+    const invalidBinding = responseRecorder();
+    await handler(request({ method: "POST", body }), invalidBinding);
+    assert.equal(invalidBinding.statusCode, 400);
+  }
 }));
 
 test("capture GET uses only the shared backend route and server-only authorization", async () => withEnvironment(async () => {
@@ -123,23 +142,35 @@ test("capture GET uses only the shared backend route and server-only authorizati
   assert.equal(JSON.stringify(res.body).includes("server-only-secret"), false);
 }));
 
-test("capture GET strips any backend regression that includes raw capture content", async () => withEnvironment(async () => {
+test("capture GET passes only a bounded conversation-binding status and strips backend raw capture fields", async () => withEnvironment(async () => {
   globalThis.fetch = async () => backendResponse({
     ok: true,
     capture: safeCapture({
+      conversation_binding_status: "ELIGIBLE_FOR_HUMAN_BINDING",
       visible_messages: [{ text: "private visible Tinder message" }],
       runtime_thread_fingerprint: "private-thread-fingerprint",
       capture_fingerprint: "private-capture-fingerprint",
+      visible_thread_metadata: {
+        threadBindingEvidence: {
+          kind: "tinder_accessibility_header_unique_id_hmac_v1",
+          role: "HEADER_TITLE",
+          status: "OBSERVED_UNVERIFIED",
+          token: "a".repeat(64)
+        }
+      },
       provenance: { source: "should-not-reach-browser" }
     })
   });
   const res = responseRecorder();
   await handler(request(), res);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body.capture, safeCapture());
+  assert.deepEqual(res.body.capture, safeCapture({
+    conversation_binding_status: "ELIGIBLE_FOR_HUMAN_BINDING"
+  }));
   assert.equal(JSON.stringify(res.body).includes("private visible Tinder message"), false);
   assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
   assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("a".repeat(64)), false);
 }));
 
 test("pending capture GET uses the bounded shared-backend reader and strips every raw capture field", async () => withEnvironment(async () => {
@@ -152,6 +183,14 @@ test("pending capture GET uses the bounded shared-backend reader and strips ever
         visible_messages: [{ text: "private visible Tinder message" }],
         runtime_thread_fingerprint: "private-thread-fingerprint",
         capture_fingerprint: "private-capture-fingerprint",
+        visible_thread_metadata: {
+          threadBindingEvidence: {
+            kind: "tinder_accessibility_header_unique_id_hmac_v1",
+            role: "HEADER_TITLE",
+            status: "OBSERVED_UNVERIFIED",
+            token: "b".repeat(64)
+          }
+        },
         provenance: { source: "should-not-reach-browser" }
       })]
     });
@@ -167,6 +206,7 @@ test("pending capture GET uses the bounded shared-backend reader and strips ever
   assert.equal(JSON.stringify(res.body).includes("private visible Tinder message"), false);
   assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
   assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("b".repeat(64)), false);
 }));
 
 test("pending capture GET rejects a non-pending backend record before it reaches the browser", async () => withEnvironment(async () => {
@@ -213,6 +253,43 @@ test("capture mapping POST forwards the exact human-confirmation contract to the
   assert.equal(JSON.stringify(res.body).includes("backend-regression-field"), false);
 }));
 
+test("conversation-binding POST forwards only the exact minimal binding contract to the existing backend sibling route", async () => withEnvironment(async () => {
+  let call;
+  const body = {
+    action: "BIND_CREATE",
+    new_contact_name: "M Tinder Test",
+    confirmed: true
+  };
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      result: {
+        status: "CONFIRMED",
+        contactId: 7,
+        idempotent: false,
+        bindingId: 91,
+        referenceHash: "c".repeat(64),
+        actor: "backend-regression-field"
+      }
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({ method: "POST", body }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, `https://shared-backend.example/dashboard-api/tinder/captures/${CAPTURE_ID}/conversation-binding`);
+  assert.equal(call.options.method, "POST");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.equal(call.options.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(call.options.body), body);
+  assert.deepEqual(res.body.result, { status: "CONFIRMED", contactId: 7, idempotent: false });
+  assert.equal(JSON.stringify(res.body).includes("bindingId"), false);
+  assert.equal(JSON.stringify(res.body).includes("referenceHash"), false);
+  assert.equal(JSON.stringify(res.body).includes("c".repeat(64)), false);
+  assert.equal(JSON.stringify(res.body).includes("backend-regression-field"), false);
+}));
+
 test("capture proxy preserves a controlled conflict and never leaks backend details", async () => withEnvironment(async () => {
   globalThis.fetch = async () => backendResponse({
     ok: false,
@@ -245,6 +322,37 @@ test("capture proxy preserves a controlled conflict and never leaks backend deta
   assert.equal(JSON.stringify(res.body).includes("private error provenance"), false);
   assert.equal(JSON.stringify(res.body).includes("private backend error detail"), false);
   assert.equal(JSON.stringify(res.body).includes("BACKEND_INTERNAL_DETAIL"), false);
+}));
+
+test("conversation-binding conflict stays bounded and cannot disclose its opaque candidate", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    conflict: true,
+    result: {
+      status: "CONFLICT",
+      referenceHash: "d".repeat(64),
+      preservedContactId: 9,
+      privateReason: "must not reach the browser"
+    },
+    code: "BACKEND_INTERNAL_DETAIL",
+    error: "private backend error detail"
+  }, { ok: false, status: 409 });
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    body: { action: "BIND_EXISTING", contact_id: 7, confirmed: true }
+  }), res);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    ok: false,
+    conflict: true,
+    result: { status: "CONFLICT" },
+    error: "Conversation-Binding konnte nicht gespeichert werden."
+  });
+  assert.equal(JSON.stringify(res.body).includes("referenceHash"), false);
+  assert.equal(JSON.stringify(res.body).includes("d".repeat(64)), false);
+  assert.equal(JSON.stringify(res.body).includes("preservedContactId"), false);
+  assert.equal(JSON.stringify(res.body).includes("private backend error detail"), false);
 }));
 
 test("capture proxy controls malformed backend and network failures", async () => withEnvironment(async () => {

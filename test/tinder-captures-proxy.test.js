@@ -29,11 +29,11 @@ function validCookie() {
   return `marcel_dashboard_session=${token}.${signature}`;
 }
 
-function request({ method = "GET", authenticated = true, captureId = CAPTURE_ID, body, query = { captureId } } = {}) {
+function request({ method = "GET", authenticated = true, captureId = CAPTURE_ID, body, query } = {}) {
   return {
     method,
     headers: { cookie: authenticated ? validCookie() : "" },
-    query,
+    query: query === undefined ? { captureId } : query,
     body
   };
 }
@@ -88,6 +88,14 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
   await handler(request({ query: { captureId: "bad" } }), malformedQuery);
   assert.equal(malformedQuery.statusCode, 400);
 
+  const invalidPending = responseRecorder();
+  await handler(request({ query: { view: "anything" } }), invalidPending);
+  assert.equal(invalidPending.statusCode, 400);
+
+  const ambiguousPending = responseRecorder();
+  await handler(request({ query: { view: "pending", captureId: CAPTURE_ID } }), ambiguousPending);
+  assert.equal(ambiguousPending.statusCode, 400);
+
   const injectedMapping = responseRecorder();
   await handler(request({
     method: "POST",
@@ -132,6 +140,44 @@ test("capture GET strips any backend regression that includes raw capture conten
   assert.equal(JSON.stringify(res.body).includes("private visible Tinder message"), false);
   assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
   assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+}));
+
+test("pending capture GET uses the bounded shared-backend reader and strips every raw capture field", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      captures: [safeCapture({
+        visible_messages: [{ text: "private visible Tinder message" }],
+        runtime_thread_fingerprint: "private-thread-fingerprint",
+        capture_fingerprint: "private-capture-fingerprint",
+        provenance: { source: "should-not-reach-browser" }
+      })]
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({ query: { view: "pending" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, "https://shared-backend.example/dashboard-api/tinder/captures/pending");
+  assert.equal(call.options.method, "GET");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.deepEqual(res.body.captures, [safeCapture()]);
+  assert.equal(JSON.stringify(res.body).includes("private visible Tinder message"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+}));
+
+test("pending capture GET rejects a non-pending backend record before it reaches the browser", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    captures: [safeCapture({ mapping_status: "RESOLVED", human_review_status: "CONFIRMED" })]
+  });
+  const res = responseRecorder();
+  await handler(request({ query: { view: "pending" } }), res);
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.error, "Ungültige Capture-Antwort vom Backend.");
 }));
 
 test("capture mapping POST forwards the exact human-confirmation contract to the shared backend", async () => withEnvironment(async () => {

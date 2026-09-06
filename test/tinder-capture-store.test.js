@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   TINDER_CAPTURE_MAPPING_STATUS,
   TINDER_CAPTURE_REVIEW_STATUS,
+  TINDER_PENDING_HUMAN_MAPPING_LIMIT,
   TinderCaptureValidationError,
   createPgTinderCaptureRepository,
   createTinderCaptureStore,
@@ -78,7 +79,7 @@ function confirmedReusableMapping({
   };
 }
 
-function fixtureRepository({ reusableMapping = null } = {}) {
+function fixtureRepository({ reusableMapping = null, pendingCaptures = [] } = {}) {
   const rows = [];
   const reusableMappingRequests = [];
   let revision = 0;
@@ -102,6 +103,9 @@ function fixtureRepository({ reusableMapping = null } = {}) {
     },
     async findCaptureById(captureId) {
       return rows.find((row) => row.captureId === captureId) || null;
+    },
+    async findPendingHumanMappingCaptures() {
+      return pendingCaptures;
     }
   };
 }
@@ -128,6 +132,21 @@ test("a safe T2 capture is stored with server-owned state and no contact identit
   assert.equal(Object.hasOwn(stored, "whatsappJid"), false);
   assert.equal(Object.hasOwn(stored, "contactId"), false);
   assert.equal(await store.getCapture(CAPTURE_ID), stored);
+});
+
+test("pending capture discovery is bounded by a repository-owned fixed result set", async () => {
+  const pending = Object.freeze([{ capture_id: CAPTURE_ID }]);
+  const store = createTinderCaptureStore(fixtureRepository({ pendingCaptures: pending }));
+
+  assert.deepEqual(await store.listPendingHumanMappingCaptures(), pending);
+
+  const oversized = createTinderCaptureStore(fixtureRepository({
+    pendingCaptures: Array.from({ length: TINDER_PENDING_HUMAN_MAPPING_LIMIT + 1 }, () => ({}))
+  }));
+  await assert.rejects(
+    () => oversized.listPendingHumanMappingCaptures(),
+    (error) => error instanceof TinderCaptureValidationError && error.code === "INVALID_PENDING_TINDER_CAPTURES"
+  );
 });
 
 test("an identical signed-capture fingerprint is idempotent within its device thread", async () => {
@@ -237,7 +256,8 @@ test("fingerprint deduplication occurs only after the existing per-thread lock h
     },
     async findReusableConfirmedMapping() { assert.fail("a duplicate must not try to reuse a mapping"); },
     async insertCapture() { assert.fail("a locked duplicate must not insert"); },
-    async findCaptureById() { return null; }
+    async findCaptureById() { return null; },
+    async findPendingHumanMappingCaptures() { return []; }
   };
   const store = createTinderCaptureStore(repository, {
     createCaptureId: () => CAPTURE_ID,
@@ -450,4 +470,26 @@ test("the PostgreSQL capture adapter writes only the dedicated Tinder capture ta
   assert.ok(insert);
   assert.doesNotMatch(insert.sql, /INSERT INTO messages/i);
   assert.doesNotMatch(insert.sql, /whatsapp_jid/i);
+});
+
+test("the PostgreSQL pending reader selects only bounded redacted mapping context", async () => {
+  let call;
+  const repository = createPgTinderCaptureRepository({
+    async connect() { throw new Error("not used"); },
+    async query(sql, values = []) {
+      call = { sql, values };
+      return { rows: [] };
+    }
+  });
+
+  assert.deepEqual(await repository.findPendingHumanMappingCaptures(), []);
+  assert.deepEqual(call.values, [TINDER_PENDING_HUMAN_MAPPING_LIMIT]);
+  assert.match(call.sql, /capture_safety_status\s*=\s*'SAFE'/i);
+  assert.match(call.sql, /mapping_status\s*=\s*'NEEDS_HUMAN_MAPPING'/i);
+  assert.match(call.sql, /human_review_status\s*=\s*'PENDING'/i);
+  assert.match(call.sql, /resolved_contact_id\s+IS\s+NULL/i);
+  assert.match(call.sql, /ORDER BY received_at DESC, capture_id DESC/i);
+  assert.match(call.sql, /LIMIT \$1/i);
+  assert.doesNotMatch(call.sql, /visible_messages|runtime_thread_fingerprint|capture_fingerprint|provenance/i);
+  assert.doesNotMatch(call.sql, /SELECT\s+\*/i);
 });

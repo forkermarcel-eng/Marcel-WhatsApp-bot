@@ -12,6 +12,8 @@ const PUBLIC_CAPTURE_MAPPING_STATUSES = new Set(["NEEDS_HUMAN_MAPPING", "RESOLVE
 const PUBLIC_CAPTURE_REVIEW_STATUSES = new Set(["PENDING", "CONFIRMED", "REJECTED"]);
 const PUBLIC_MAPPING_SUCCESS_STATUSES = new Set(["RESOLVED", "NEW_CONTACT_CONFIRMED"]);
 const PUBLIC_MAPPING_ERROR_STATUSES = new Set(["CONFLICT", "NEEDS_HUMAN_MAPPING", "UNSAFE"]);
+const PENDING_CAPTURE_VIEW = "pending";
+const PENDING_CAPTURE_LIMIT = 25;
 
 function getCookie(req, name) {
   const cookies = String(req.headers.cookie || "").split(";").map((cookie) => cookie.trim());
@@ -125,10 +127,15 @@ function exactKeys(value, keys) {
     Object.keys(value).sort().join("|") === [...keys].sort().join("|");
 }
 
-function captureIdFromQuery(req) {
+function captureRequestFromQuery(req) {
   const query = req.query || {};
-  if (!exactKeys(query, ["captureId"]) || !validCaptureId(query.captureId)) return null;
-  return query.captureId;
+  if (exactKeys(query, ["captureId"]) && validCaptureId(query.captureId)) {
+    return Object.freeze({ type: "capture", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["view"]) && query.view === PENDING_CAPTURE_VIEW) {
+    return Object.freeze({ type: "pending" });
+  }
+  return null;
 }
 
 function validMappingBody(body) {
@@ -202,6 +209,44 @@ async function forwardCaptureRead(res, configuration, captureId) {
   }
 }
 
+function normalizePublicPendingCaptures(value) {
+  if (!Array.isArray(value) || value.length > PENDING_CAPTURE_LIMIT) return null;
+  const captures = value.map((capture) => normalizePublicCapture(capture, capture?.capture_id));
+  if (captures.some((capture) => !capture
+      || capture.mapping_status !== "NEEDS_HUMAN_MAPPING"
+      || capture.human_review_status !== "PENDING")) {
+    return null;
+  }
+  return Object.freeze(captures);
+}
+
+async function forwardPendingCaptureRead(res, configuration) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/pending`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 409, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(safeBackendError(data, "Ausstehende Tinder-Captures konnten nicht geladen werden."));
+    }
+    const captures = normalizePublicPendingCaptures(data?.captures);
+    if (!captures) {
+      return res.status(502).json({ ok: false, error: "Ungültige Capture-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, captures });
+  } catch {
+    console.error("Verbindung zum Tinder-Capture-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
 async function forwardHumanMapping(req, res, configuration, captureId) {
   try {
     const response = await fetch(
@@ -243,8 +288,8 @@ export default async function handler(req, res) {
     return res.status(401).json({ ok: false, error: "Nicht angemeldet." });
   }
 
-  const captureId = captureIdFromQuery(req);
-  if (!captureId) {
+  const captureRequest = captureRequestFromQuery(req);
+  if (!captureRequest || (req.method === "POST" && captureRequest.type !== "capture")) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
   if (req.method === "POST" && !validMappingBody(req.body)) {
@@ -253,14 +298,21 @@ export default async function handler(req, res) {
 
   const configuration = backendConfiguration(res);
   if (!configuration) return;
+  if (req.method === "GET" && captureRequest.type === "pending") {
+    return forwardPendingCaptureRead(res, configuration);
+  }
   return req.method === "GET"
-    ? forwardCaptureRead(res, configuration, captureId)
-    : forwardHumanMapping(req, res, configuration, captureId);
+    ? forwardCaptureRead(res, configuration, captureRequest.captureId)
+    : forwardHumanMapping(req, res, configuration, captureRequest.captureId);
 }
 
 export {
   MAPPING_FIELDS,
+  PENDING_CAPTURE_LIMIT,
+  PENDING_CAPTURE_VIEW,
+  captureRequestFromQuery,
   normalizePublicCapture,
+  normalizePublicPendingCaptures,
   normalizePublicMappingErrorResult,
   normalizePublicMappingResult,
   validCaptureId,

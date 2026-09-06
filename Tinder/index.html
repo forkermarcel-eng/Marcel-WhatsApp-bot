@@ -304,9 +304,58 @@
      font-size: 15px;
    }
 
-   .capture-mapping-panel {
-     margin-top: 16px;
-   }
+    .capture-mapping-panel {
+      margin-top: 16px;
+    }
+
+    .pending-capture-panel {
+      margin-top: 0;
+    }
+
+    .pending-capture-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .pending-capture-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .pending-capture-copy {
+      min-width: 0;
+    }
+
+    .pending-capture-name {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .pending-capture-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .pending-capture-empty {
+      padding: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
 
    .capture-mapping-context {
      display: grid;
@@ -367,12 +416,17 @@
      line-height: 1.45;
    }
 
-   @media (max-width: 620px) {
-     .capture-mapping-context,
-     .capture-mapping-grid {
-       grid-template-columns: 1fr;
-     }
-   }
+    @media (max-width: 620px) {
+      .capture-mapping-context,
+      .capture-mapping-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .pending-capture-item {
+        align-items: stretch;
+        flex-direction: column;
+      }
+    }
 
    .enrollment-panel p,
    .enrollment-message {
@@ -735,7 +789,7 @@
    .technical{margin:16px 0;border:1px solid var(--border);border-radius:17px;background:var(--panel);overflow:hidden}.technical>summary{cursor:pointer;padding:17px 18px;font-weight:800}.technical-body{padding:0 16px 16px}.technical .control-panel,.technical .notice,.technical .enrollment-panel{box-shadow:none}
    @media(max-width:900px){.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
    @media(max-width:620px){.platform-layout{grid-template-columns:1fr}.platform-rail{height:auto;padding:10px 14px;display:grid;grid-template-columns:1fr auto}.platform-brand{padding:7px;font-size:15px}.platform-toggle{display:block;border:1px solid var(--border);background:#171e24;color:#fff;border-radius:8px;padding:7px 10px}.platform-nav{display:none;grid-column:1/-1;padding-top:8px}.platform-rail.open .platform-nav{display:grid}.platform-nav a{font-size:14px;text-align:left}.platform-secondary{margin-top:8px}.status-grid{grid-template-columns:1fr 1fr}}
-   main{display:flex;flex-direction:column}.shell>header{padding-top:12px;padding-bottom:12px}.content-title{margin:0;font-size:22px}.status-grid{order:1;display:flex;flex-wrap:nowrap;gap:0;margin:0 0 8px;padding:5px 7px;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow-x:auto}.status-card{position:relative;min-height:0;flex:1 0 auto;padding:6px 10px;border:0;border-radius:0;background:transparent;box-shadow:none}.status-card+.status-card{border-left:1px solid var(--border)}.status-top{display:flex;align-items:center;justify-content:flex-start;gap:6px;white-space:nowrap}.status-value{display:inline;font-size:11px;margin-left:2px}.status-name{font-size:10px}.status-sub{display:none;position:absolute;z-index:8;top:calc(100% + 5px);left:8px;width:max-content;max-width:280px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#111820}.status-card:hover .status-sub,.status-card:focus-within .status-sub{display:block}.matches{order:2;margin:6px 0}.workspace{order:3}.technical{order:4;margin-top:10px}.technical>summary{padding:12px 15px}.status-grid .status-card:nth-child(2){display:none}@media(max-width:620px){.status-grid{display:flex;flex-wrap:nowrap}.status-card{border-radius:0}.status-sub{max-width:220px}}
+    main{display:flex;flex-direction:column}.shell>header{padding-top:12px;padding-bottom:12px}.content-title{margin:0;font-size:22px}.status-grid{order:1;display:flex;flex-wrap:nowrap;gap:0;margin:0 0 8px;padding:5px 7px;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow-x:auto}.status-card{position:relative;min-height:0;flex:1 0 auto;padding:6px 10px;border:0;border-radius:0;background:transparent;box-shadow:none}.status-card+.status-card{border-left:1px solid var(--border)}.status-top{display:flex;align-items:center;justify-content:flex-start;gap:6px;white-space:nowrap}.status-value{display:inline;font-size:11px;margin-left:2px}.status-name{font-size:10px}.status-sub{display:none;position:absolute;z-index:8;top:calc(100% + 5px);left:8px;width:max-content;max-width:280px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#111820}.status-card:hover .status-sub,.status-card:focus-within .status-sub{display:block}.pending-capture-panel{order:2;margin:6px 0}.matches{order:2;margin:6px 0}.workspace{order:3}.technical{order:4;margin-top:10px}.technical>summary{padding:12px 15px}.status-grid .status-card:nth-child(2){display:none}@media(max-width:620px){.status-grid{display:flex;flex-wrap:nowrap}.status-card{border-radius:0}.status-sub{max-width:220px}}
  </style>
 </head>
 
@@ -793,9 +847,21 @@
 
        <article class="status-card"><div class="status-top"><div class="status-name">Ruhephase</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht aktiviert</div><div class="status-sub">Eine spätere T7-Steuerung wird separat und auditierbar verbunden.</div></article>
       <article class="status-card"><div class="status-top"><div class="status-name">Queue</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht aktiviert</div><div class="status-sub">Keine T6-Queue oder automatische Chatprüfung ist derzeit aktiv.</div></article>
-     </section>
+      </section>
 
-     <details class="technical">
+      <section class="enrollment-panel pending-capture-panel" id="pendingCapturePanel" aria-labelledby="pendingCaptureHeading">
+        <h2 id="pendingCaptureHeading">Ausstehende Tinder-Zuordnungen</h2>
+        <p>
+          Sichere T2-Captures werden erst nach einer ausdrücklichen menschlichen
+          Auswahl zugeordnet. Der sichtbare Name erzeugt oder verbindet keinen Kontakt.
+        </p>
+        <div class="pending-capture-list" id="pendingCaptureList" aria-live="polite"></div>
+        <span class="enrollment-message" id="pendingCaptureMessage" role="status" aria-live="polite">
+          Ausstehende sichere Captures werden geladen.
+        </span>
+      </section>
+
+      <details class="technical">
        <summary>Technik &amp; Diagnose</summary><div class="technical-body">
      <section class="control-panel" aria-label="Legacy Tinder Worker Status">
        <div class="control-copy">
@@ -1017,8 +1083,10 @@
      requestDeviceStatus: document.getElementById("requestDeviceStatus"),
      connectAndroidTinder: document.getElementById("connectAndroidTinder"),
      disconnectAndroidTinder: document.getElementById("disconnectAndroidTinder"),
-     deviceCommandMessage: document.getElementById("deviceCommandMessage"),
-     captureMappingPanel: document.getElementById("captureMappingPanel"),
+      deviceCommandMessage: document.getElementById("deviceCommandMessage"),
+      pendingCaptureList: document.getElementById("pendingCaptureList"),
+      pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
+      captureMappingPanel: document.getElementById("captureMappingPanel"),
      captureMappingIntro: document.getElementById("captureMappingIntro"),
      captureMappingId: document.getElementById("captureMappingId"),
      captureVisibleName: document.getElementById("captureVisibleName"),
@@ -1103,12 +1171,81 @@
      elements.captureMappingMessage.textContent = message;
    }
 
-   function captureIdFromLocation() {
-     const captureId = new URLSearchParams(window.location.search).get("captureId");
-     return UUID_V4.test(String(captureId || "")) ? captureId : null;
-   }
+    function captureIdFromLocation() {
+      const captureId = new URLSearchParams(window.location.search).get("captureId");
+      return UUID_V4.test(String(captureId || "")) ? captureId : null;
+    }
 
-   function captureMappingStatus(capture) {
+    function pendingCaptureIsSafeForSelection(capture) {
+      return capture && typeof capture === "object" &&
+        UUID_V4.test(String(capture.capture_id || "")) &&
+        UUID_V4.test(String(capture.device_id || "")) &&
+        Number.isInteger(capture.capture_revision) && capture.capture_revision > 0 &&
+        capture.mapping_status === "NEEDS_HUMAN_MAPPING" &&
+        capture.human_review_status === "PENDING" &&
+        typeof capture.visible_name === "string" && capture.visible_name.trim() &&
+        capture.visible_name.trim().length <= 240 && capture.source_package === "com.tinder";
+    }
+
+    function pendingCaptureMappingUrl(captureId) {
+      const destination = new URL(window.location.href);
+      destination.search = new URLSearchParams({ captureId }).toString();
+      return `${destination.pathname}${destination.search}`;
+    }
+
+    function renderPendingCaptureDiscovery(captures) {
+      elements.pendingCaptureList.replaceChildren();
+      if (captures.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "pending-capture-empty";
+        empty.textContent = "Keine sicheren Captures warten derzeit auf eine menschliche Zuordnung.";
+        elements.pendingCaptureList.append(empty);
+        elements.pendingCaptureMessage.textContent = "Keine ausstehende Tinder-Zuordnung.";
+        return;
+      }
+
+      for (const capture of captures) {
+        const item = document.createElement("article");
+        item.className = "pending-capture-item";
+        const copy = document.createElement("div");
+        copy.className = "pending-capture-copy";
+        const name = document.createElement("div");
+        name.className = "pending-capture-name";
+        name.textContent = capture.visible_name.trim();
+        const meta = document.createElement("div");
+        meta.className = "pending-capture-meta";
+        meta.textContent = `Capture ${capture.capture_id} · Gerät ${capture.device_id} · Revision ${capture.capture_revision}`;
+        copy.append(name, meta);
+
+        const open = document.createElement("a");
+        open.className = "button primary";
+        open.href = pendingCaptureMappingUrl(capture.capture_id);
+        open.textContent = "Zuordnung öffnen";
+        item.append(copy, open);
+        elements.pendingCaptureList.append(item);
+      }
+      elements.pendingCaptureMessage.textContent = `${captures.length} sichere Capture${captures.length === 1 ? "" : "s"} wartet auf eine menschliche Zuordnung.`;
+    }
+
+    async function loadPendingCaptureDiscovery() {
+      try {
+        const data = await requestJson("/api/tinder/captures?view=pending");
+        const captures = Array.isArray(data?.captures) ? data.captures : null;
+        if (!captures || captures.length > 25 || captures.some((capture) => !pendingCaptureIsSafeForSelection(capture))) {
+          throw new Error("Das Backend hat keine gültige Liste ausstehender Tinder-Captures geliefert.");
+        }
+        renderPendingCaptureDiscovery(captures);
+      } catch (error) {
+        elements.pendingCaptureList.replaceChildren();
+        const unavailable = document.createElement("div");
+        unavailable.className = "pending-capture-empty";
+        unavailable.textContent = "Ausstehende Tinder-Captures können derzeit nicht sicher geladen werden.";
+        elements.pendingCaptureList.append(unavailable);
+        elements.pendingCaptureMessage.textContent = error?.message || "Ausstehende Tinder-Captures konnten nicht geladen werden.";
+      }
+    }
+
+    function captureMappingStatus(capture) {
      return String(capture?.mapping_status || capture?.mappingStatus || "").toUpperCase();
    }
 
@@ -1662,10 +1799,11 @@
 
    window.addEventListener("focus", () => {
      void refreshAllStatuses();
-   });
+    });
 
-   void refreshAllStatuses();
-   void loadCaptureMappingFromLocation();
+    void refreshAllStatuses();
+    void loadPendingCaptureDiscovery();
+    void loadCaptureMappingFromLocation();
 
    window.setInterval(() => {
      void refreshAllStatuses();

@@ -3,13 +3,15 @@ import test from "node:test";
 import {
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
-  createTinderDashboardMappingHandler
+  createTinderDashboardPendingCaptureListHandler,
+  createTinderDashboardMappingHandler,
+  registerTinderCaptureRoutes
 } from "../device-bridge/tinder-capture-routes.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const CAPTURE_ID = "6c7308cf-5d40-423d-913b-c4424f0e4ee0";
 
-function capture() {
+function capture(overrides = {}) {
   return {
     capture_id: CAPTURE_ID,
     device_id: DEVICE_ID,
@@ -23,7 +25,8 @@ function capture() {
     visible_messages: [{ visible_order: 1, text: "private visible text", direction: "INCOMING" }],
     source_package: "com.tinder",
     captured_at: "2026-09-04T18:00:00.000Z",
-    received_at: "2026-09-04T18:01:00.000Z"
+    received_at: "2026-09-04T18:01:00.000Z",
+    ...overrides
   };
 }
 
@@ -76,6 +79,113 @@ test("dashboard capture read rejects malformed ids and is fail closed when T3 sc
   await missingSchemaHandler({ params: { captureId: CAPTURE_ID } }, missing);
   assert.equal(missing.statusCode, 503);
   assert.equal(missing.body.code, "TINDER_IDENTITY_FOUNDATION_NOT_READY");
+});
+
+test("dashboard pending capture list exposes only redacted safe pending mapping context", async () => {
+  const handler = createTinderDashboardPendingCaptureListHandler({}, {
+    createRepository() { return {}; },
+    createStore() {
+      return {
+        async listPendingHumanMappingCaptures() {
+          return [capture()];
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.captures.length, 1);
+  assert.equal(res.body.captures[0].capture_id, CAPTURE_ID);
+  assert.equal(JSON.stringify(res.body).includes("private visible text"), false);
+  assert.equal(JSON.stringify(res.body).includes("thread_fingerprint"), false);
+});
+
+test("dashboard pending capture list is fail closed for T3 absence or non-pending rows", async () => {
+  const missingSchemaHandler = createTinderDashboardPendingCaptureListHandler({}, {
+    createRepository() { return {}; },
+    createStore() {
+      return {
+        async listPendingHumanMappingCaptures() {
+          const error = new Error("missing table");
+          error.code = "42P01";
+          throw error;
+        }
+      };
+    }
+  });
+  const missing = responseRecorder();
+  await missingSchemaHandler({}, missing);
+  assert.equal(missing.statusCode, 503);
+  assert.equal(missing.body.code, "TINDER_IDENTITY_FOUNDATION_NOT_READY");
+
+  const nonPendingHandler = createTinderDashboardPendingCaptureListHandler({}, {
+    createRepository() { return {}; },
+    createStore() {
+      return {
+        async listPendingHumanMappingCaptures() {
+          return [capture({ mapping_status: "RESOLVED", human_review_status: "CONFIRMED" })];
+        }
+      };
+    }
+  });
+  const nonPending = responseRecorder();
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    await nonPendingHandler({}, nonPending);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(nonPending.statusCode, 500);
+  assert.equal(nonPending.body.code, "INVALID_PENDING_TINDER_CAPTURES");
+  assert.equal(JSON.stringify(nonPending.body).includes("private visible text"), false);
+});
+
+test("dashboard pending capture list fails closed when a store violates the fixed result bound", async () => {
+  const handler = createTinderDashboardPendingCaptureListHandler({}, {
+    createRepository() { return {}; },
+    createStore() {
+      return {
+        async listPendingHumanMappingCaptures() {
+          return Array.from({ length: 26 }, capture);
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    await handler({}, res);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.code, "INVALID_PENDING_TINDER_CAPTURES");
+});
+
+test("pending route remains protected and is registered before the capture-id route", () => {
+  const registrations = [];
+  registerTinderCaptureRoutes({
+    app: {
+      get(path) { registrations.push({ method: "GET", path }); },
+      post(path) { registrations.push({ method: "POST", path }); }
+    },
+    pool: { connect() {}, query() {} },
+    dashboardApiReady() { return true; },
+    dashboardApiAuthorized() { return true; },
+    requireDeviceBridgeReady() { return true; }
+  });
+  const pendingIndex = registrations.findIndex(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/captures/pending"
+  );
+  const captureIndex = registrations.findIndex(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/captures/:captureId"
+  );
+  assert.ok(pendingIndex >= 0);
+  assert.ok(captureIndex > pendingIndex);
 });
 
 test("mapping request permits only a deliberate action-specific human confirmation", () => {

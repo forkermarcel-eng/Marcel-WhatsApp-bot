@@ -20,13 +20,20 @@ test("Tinder inline behavior remains syntactically valid", () => {
   assert.doesNotThrow(() => new Function(scripts.at(-1)[1]));
 });
 
-test("Tinder page shows mapping only from an explicit captureId, with editing limited to NEEDS_HUMAN_MAPPING", () => {
+test("Tinder base page discovers pending captures, but maps only after an explicit capture selection", () => {
+  assert.match(page, /id="pendingCapturePanel"/);
+  assert.match(page, /function loadPendingCaptureDiscovery\(\)/);
+  assert.match(page, /requestJson\("\/api\/tinder\/captures\?view=pending"\)/);
+  assert.match(page, /function pendingCaptureMappingUrl\(captureId\)/);
+  assert.match(page, /open\.href = pendingCaptureMappingUrl\(capture\.capture_id\)/);
+  assert.doesNotMatch(page, /window\.location(?:\.href)?\s*=/);
   assert.match(page, /id="captureMappingPanel" hidden/);
   assert.match(page, /function captureIdFromLocation\(\)/);
   assert.match(page, /new URLSearchParams\(window\.location\.search\)\.get\("captureId"\)/);
   assert.match(page, /\["NEEDS_HUMAN_MAPPING", "CONFLICT"\]\.includes\(status\)/);
   assert.match(page, /const hasCapture = captureMappingStatus\(mappingCapture\) === "NEEDS_HUMAN_MAPPING"/);
   assert.match(page, /Konflikt blockiert/);
+  assert.match(page, /void loadPendingCaptureDiscovery\(\)/);
   assert.match(page, /void loadCaptureMappingFromLocation\(\)/);
   assert.match(page, /\/api\/tinder\/captures\?captureId=\$\{encodeURIComponent\(captureId\)\}/);
 });
@@ -57,6 +64,16 @@ test("capture mapping refreshes only Android Device Bridge status, never the fro
   assert.match(page, /async function refreshAllStatuses\(\)\s*\{\s*elements\.refreshStatus\.disabled = true;\s*await loadDeviceStatus\(\);/s);
   assert.doesNotMatch(page, /loadStatus\(/);
   assert.doesNotMatch(page, /\/api\/tinder\/status/);
+});
+
+test("pending capture discovery displays only bounded mapping context and keeps empty state deliberate", () => {
+  const discoveryCode = sourceBetween("function pendingCaptureIsSafeForSelection", "function captureMappingStatus");
+  assert.match(discoveryCode, /mapping_status === "NEEDS_HUMAN_MAPPING"/);
+  assert.match(discoveryCode, /human_review_status === "PENDING"/);
+  assert.match(discoveryCode, /Keine sicheren Captures warten derzeit auf eine menschliche Zuordnung/);
+  assert.match(discoveryCode, /Capture \$\{capture\.capture_id\}/);
+  assert.doesNotMatch(discoveryCode, /visible_messages|thread_fingerprint|capture_fingerprint|provenance/);
+  assert.doesNotMatch(discoveryCode, /newContactName\.value\s*=/);
 });
 
 test("channel-native T3 contacts remain visible in the existing contacts list while persona tests stay hidden", () => {

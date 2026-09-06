@@ -1,7 +1,8 @@
 import { isUuidV4 } from "./protocol-v1.js";
 import {
   createPgTinderCaptureRepository,
-  createTinderCaptureStore
+  createTinderCaptureStore,
+  TINDER_PENDING_HUMAN_MAPPING_LIMIT
 } from "../services/tinder-capture-store.js";
 import {
   TinderHumanMappingError,
@@ -113,6 +114,28 @@ function normalizeCaptureRecord(row) {
   });
 }
 
+function normalizePendingCaptureRecords(rows) {
+  if (!Array.isArray(rows) || rows.length > TINDER_PENDING_HUMAN_MAPPING_LIMIT) {
+    const error = new Error("Invalid pending capture records.");
+    error.statusCode = 500;
+    error.code = "INVALID_PENDING_TINDER_CAPTURES";
+    throw error;
+  }
+  return Object.freeze(rows.map((row) => {
+    const capture = normalizeCaptureRecord(row);
+    if (
+      capture.mapping_status !== "NEEDS_HUMAN_MAPPING"
+      || capture.human_review_status !== "PENDING"
+    ) {
+      const error = new Error("Invalid pending capture record.");
+      error.statusCode = 500;
+      error.code = "INVALID_PENDING_TINDER_CAPTURES";
+      throw error;
+    }
+    return capture;
+  }));
+}
+
 function assertMappingBody(body) {
   if (!plainObject(body) || Object.keys(body).some((key) => !TINDER_CAPTURE_MAPPING_BODY_FIELDS.has(key))) {
     const error = new Error("Ungültige Mapping-Anfrage.");
@@ -178,6 +201,33 @@ function createTinderDashboardCaptureReadHandler(pool, {
   };
 }
 
+function createTinderDashboardPendingCaptureListHandler(pool, {
+  createRepository = createPgTinderCaptureRepository,
+  createStore = createTinderCaptureStore
+} = {}) {
+  const store = createStore(createRepository(pool));
+  return async function tinderDashboardPendingCaptureListHandler(_req, res) {
+    try {
+      const captures = normalizePendingCaptureRecords(
+        await store.listPendingHumanMappingCaptures()
+      );
+      return res.status(200).json({ ok: true, captures });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        const notReady = foundationNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder dashboard pending capture list failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_PENDING_CAPTURE_LIST_FAILED",
+        error: status === 500 ? "Tinder captures could not be loaded." : safeMessage(error, "Tinder captures could not be loaded.")
+      });
+    }
+  };
+}
+
 function createTinderDashboardMappingHandler(pool, {
   createRepository = createPgTinderHumanMappingRepository,
   createService = createTinderHumanMappingService
@@ -222,6 +272,7 @@ function registerTinderCaptureRoutes({
   dashboardApiAuthorized,
   requireDeviceBridgeReady
 }) {
+  const listPendingCaptures = createTinderDashboardPendingCaptureListHandler(pool);
   const readCapture = createTinderDashboardCaptureReadHandler(pool);
   const mapCapture = createTinderDashboardMappingHandler(pool);
   const dashboard = (handler) => async (req, res) => {
@@ -231,6 +282,7 @@ function registerTinderCaptureRoutes({
     return handler(req, res);
   };
 
+  app.get("/dashboard-api/tinder/captures/pending", dashboard(listPendingCaptures));
   app.get("/dashboard-api/tinder/captures/:captureId", dashboard(readCapture));
   app.post("/dashboard-api/tinder/captures/:captureId/mapping", dashboard(mapCapture));
 }
@@ -239,8 +291,10 @@ export {
   TINDER_CAPTURE_MAPPING_BODY_FIELDS,
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
+  createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
   isFoundationNotReadyError,
   normalizeCaptureRecord,
+  normalizePendingCaptureRecords,
   registerTinderCaptureRoutes
 };

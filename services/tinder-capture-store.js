@@ -15,6 +15,7 @@ const TINDER_CAPTURE_REVIEW_STATUS = Object.freeze({
   CONFIRMED: "CONFIRMED",
   REJECTED: "REJECTED"
 });
+const TINDER_PENDING_HUMAN_MAPPING_LIMIT = 25;
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -287,7 +288,8 @@ function createTinderCaptureStore(repository, {
     "insertCapture",
     "findCaptureByFingerprint",
     "findReusableConfirmedMapping",
-    "findCaptureById"
+    "findCaptureById",
+    "findPendingHumanMappingCaptures"
   ]) {
     if (typeof repository?.[method] !== "function") {
       throw new TypeError(`repository.${method} must be a function`);
@@ -368,7 +370,18 @@ function createTinderCaptureStore(repository, {
     return repository.findCaptureById(normalizeCaptureId(captureId));
   }
 
-  return Object.freeze({ getCapture, storeSafeCapture });
+  async function listPendingHumanMappingCaptures() {
+    const captures = await repository.findPendingHumanMappingCaptures();
+    if (!Array.isArray(captures) || captures.length > TINDER_PENDING_HUMAN_MAPPING_LIMIT) {
+      throw new TinderCaptureValidationError(
+        "Die ausstehenden Tinder-Captures sind ungültig.",
+        "INVALID_PENDING_TINDER_CAPTURES"
+      );
+    }
+    return Object.freeze([...captures]);
+  }
+
+  return Object.freeze({ getCapture, listPendingHumanMappingCaptures, storeSafeCapture });
 }
 
 /**
@@ -519,6 +532,29 @@ function createPgTinderCaptureRepository(pool) {
         [captureId]
       );
       return result.rows[0] || null;
+    },
+
+    async findPendingHumanMappingCaptures() {
+      const result = await pool.query(
+        `SELECT capture_id,
+                device_id,
+                capture_revision,
+                mapping_status,
+                human_review_status,
+                visible_thread_metadata,
+                source_package,
+                captured_at,
+                received_at
+         FROM tinder_visible_chat_captures
+         WHERE capture_safety_status = 'SAFE'
+           AND mapping_status = 'NEEDS_HUMAN_MAPPING'
+           AND human_review_status = 'PENDING'
+           AND resolved_contact_id IS NULL
+         ORDER BY received_at DESC, capture_id DESC
+         LIMIT $1`,
+        [TINDER_PENDING_HUMAN_MAPPING_LIMIT]
+      );
+      return result.rows;
     }
   });
 }
@@ -526,6 +562,7 @@ function createPgTinderCaptureRepository(pool) {
 export {
   TINDER_CAPTURE_MAPPING_STATUS,
   TINDER_CAPTURE_REVIEW_STATUS,
+  TINDER_PENDING_HUMAN_MAPPING_LIMIT,
   TINDER_CAPTURE_SCHEMA_VERSION,
   TINDER_SOURCE_PACKAGE,
   TinderCaptureValidationError,

@@ -36,6 +36,20 @@ test("manual identity insert remains on the selected contact and is human verifi
   assert.ok(db.calls.some(call => /VALUES \(\$1,\$2,\$3,\$4,\$5,FALSE,TRUE/.test(call.sql)));
 });
 
+test("generic identity mutations cannot bypass the audited Tinder mapping boundary", async () => {
+  const db = database();
+  const service = createContactIdentityService(db.pool);
+  await assert.rejects(
+    service.upsertContactIdentity(5, { channel: "tinder", value: "stable-match-42" }),
+    error => error.statusCode === 409
+  );
+  await assert.rejects(
+    service.removeContactIdentity(5, "tinder"),
+    error => error.statusCode === 409
+  );
+  assert.equal(db.calls.length, 0);
+});
+
 test("same identifier on the same contact is idempotent", async () => {
   const db = database({ id: 3, contact_id: 5, identifier_type: "x_username", identifier_value: "sandry", human_verified: true });
   const result = await createContactIdentityService(db.pool).upsertContactIdentity(5, { channel: "x", value: "sandry" });

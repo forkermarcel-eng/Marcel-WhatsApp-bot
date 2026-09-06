@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 const TINDER_CAPTURE_SCHEMA_VERSION = "tinder-visible-chat-v1";
 const TINDER_SOURCE_PACKAGE = "com.tinder";
+const TINDER_IDENTIFIER_TYPE = "tinder_profile";
 
 const TINDER_CAPTURE_MAPPING_STATUS = Object.freeze({
   NEEDS_HUMAN_MAPPING: "NEEDS_HUMAN_MAPPING",
@@ -224,11 +225,70 @@ function normalizeCaptureId(captureId) {
   return value;
 }
 
+function normalizedStatus(value) {
+  return typeof value === "string" ? value.trim().toUpperCase() : "";
+}
+
+function normalizedUuidV4(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return UUID_V4.test(normalized) ? normalized : null;
+}
+
+function normalizedHash(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return SHA256_HEX.test(normalized) ? normalized : null;
+}
+
+function positiveInteger(value) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * A reuse candidate is accepted only when the repository proves every
+ * server-owned condition again.  This deliberately accepts neither a display
+ * name nor any client-supplied identity value as evidence.
+ */
+function normalizeReusableConfirmedMapping(row, { deviceId, runtimeThreadFingerprint }) {
+  if (!plainObject(row)) return null;
+
+  const candidateDeviceId = normalizedUuidV4(sourceValue(row, "deviceId", "device_id"));
+  const candidateThreadFingerprint = normalizedHash(
+    sourceValue(row, "runtimeThreadFingerprint", "runtime_thread_fingerprint")
+  );
+  const resolvedContactId = positiveInteger(sourceValue(row, "resolvedContactId", "resolved_contact_id"));
+  const identifierContactId = positiveInteger(sourceValue(row, "contactId", "contact_id"));
+  const identifierType = sourceValue(row, "identifierType", "identifier_type");
+  const humanVerified = sourceValue(row, "humanVerified", "human_verified");
+
+  if (
+    candidateDeviceId !== deviceId
+    || candidateThreadFingerprint !== runtimeThreadFingerprint
+    || normalizedStatus(sourceValue(row, "captureSafetyStatus", "capture_safety_status")) !== "SAFE"
+    || normalizedStatus(sourceValue(row, "mappingStatus", "mapping_status")) !== TINDER_CAPTURE_MAPPING_STATUS.RESOLVED
+    || normalizedStatus(sourceValue(row, "humanReviewStatus", "human_review_status")) !== TINDER_CAPTURE_REVIEW_STATUS.CONFIRMED
+    || resolvedContactId === null
+    || identifierContactId !== resolvedContactId
+    || identifierType !== TINDER_IDENTIFIER_TYPE
+    || humanVerified !== true
+  ) {
+    return null;
+  }
+
+  return Object.freeze({ resolvedContactId });
+}
+
 function createTinderCaptureStore(repository, {
   createCaptureId = () => crypto.randomUUID(),
   now = () => new Date()
 } = {}) {
-  for (const method of ["withTransaction", "nextCaptureRevision", "insertCapture", "findCaptureByFingerprint", "findCaptureById"]) {
+  for (const method of [
+    "withTransaction",
+    "nextCaptureRevision",
+    "insertCapture",
+    "findCaptureByFingerprint",
+    "findReusableConfirmedMapping",
+    "findCaptureById"
+  ]) {
     if (typeof repository?.[method] !== "function") {
       throw new TypeError(`repository.${method} must be a function`);
     }
@@ -262,6 +322,20 @@ function createTinderCaptureStore(repository, {
       });
       if (existing) return existing;
 
+      // A future capture may reuse only a prior explicit human confirmation
+      // from this exact authenticated device/thread. No visible display data
+      // or client-provided identity participates in this decision.
+      const reusableMapping = normalizeReusableConfirmedMapping(
+        await repository.findReusableConfirmedMapping(transaction, {
+          deviceId: normalizedDeviceId,
+          runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
+        }),
+        {
+          deviceId: normalizedDeviceId,
+          runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
+        }
+      );
+
       const record = Object.freeze({
         captureId,
         deviceId: normalizedDeviceId,
@@ -273,9 +347,13 @@ function createTinderCaptureStore(repository, {
         captureRevision,
         visibleThreadMetadata: normalizedCapture.visibleThreadMetadata,
         visibleMessages: normalizedCapture.visibleMessages,
-        mappingStatus: TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING,
-        humanReviewStatus: TINDER_CAPTURE_REVIEW_STATUS.PENDING,
-        resolvedContactId: null,
+        mappingStatus: reusableMapping
+          ? TINDER_CAPTURE_MAPPING_STATUS.RESOLVED
+          : TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING,
+        humanReviewStatus: reusableMapping
+          ? TINDER_CAPTURE_REVIEW_STATUS.CONFIRMED
+          : TINDER_CAPTURE_REVIEW_STATUS.PENDING,
+        resolvedContactId: reusableMapping?.resolvedContactId ?? null,
         provenance: normalizedProvenance,
         capturedAt: normalizedCapture.capturedAt,
         receivedAt
@@ -375,6 +453,60 @@ function createPgTinderCaptureRepository(pool) {
            AND runtime_thread_fingerprint = $2
            AND capture_fingerprint = $3`,
         [deviceId, runtimeThreadFingerprint, captureFingerprint]
+      );
+      return result.rows[0] || null;
+    },
+
+    async findReusableConfirmedMapping(client, { deviceId, runtimeThreadFingerprint }) {
+      // T2's deliberately minimal foundation does not require the T3 contact
+      // identifier relation. Check the optional T3 prerequisites without a
+      // static reference first; absent or partial T3 must keep ingress alive
+      // and simply yield no reusable mapping.
+      const readiness = await client.query(
+        `SELECT
+           to_regclass('public.tinder_identity_mapping_audit') IS NOT NULL AS t3_audit_present,
+           to_regclass('public.contact_identifiers') IS NOT NULL AS contact_identifiers_present,
+           COUNT(*) FILTER (
+             WHERE column_name IN ('id', 'contact_id', 'identifier_type', 'human_verified')
+           ) = 4 AS required_identifier_columns_present
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'contact_identifiers'`
+      );
+      const prerequisite = readiness.rows[0];
+      if (
+        prerequisite?.t3_audit_present !== true
+        || prerequisite?.contact_identifiers_present !== true
+        || prerequisite?.required_identifier_columns_present !== true
+      ) {
+        return null;
+      }
+
+      const result = await client.query(
+        `SELECT c.device_id,
+                c.runtime_thread_fingerprint,
+                c.capture_safety_status,
+                c.mapping_status,
+                c.human_review_status,
+                c.resolved_contact_id,
+                i.contact_id,
+                i.identifier_type,
+                i.human_verified
+           FROM tinder_visible_chat_captures c
+           JOIN contact_identifiers i
+             ON i.contact_id = c.resolved_contact_id
+          WHERE to_regclass('public.tinder_identity_mapping_audit') IS NOT NULL
+            AND c.device_id = $1
+            AND c.runtime_thread_fingerprint = $2
+            AND c.capture_safety_status = 'SAFE'
+            AND c.mapping_status = 'RESOLVED'
+            AND c.human_review_status = 'CONFIRMED'
+            AND c.resolved_contact_id IS NOT NULL
+            AND i.identifier_type = $3
+            AND i.human_verified = TRUE
+          ORDER BY c.received_at DESC, c.capture_id DESC, i.id ASC
+          LIMIT 1`,
+        [deviceId, runtimeThreadFingerprint, TINDER_IDENTIFIER_TYPE]
       );
       return result.rows[0] || null;
     },

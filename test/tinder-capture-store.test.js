@@ -11,6 +11,7 @@ import {
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const CAPTURE_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
+const REUSED_CONTACT_ID = 17;
 
 function safeCapture(overrides = {}) {
   return {
@@ -35,11 +36,55 @@ function safeCapture(overrides = {}) {
   };
 }
 
-function fixtureRepository() {
+function safeCaptureWith({
+  captureFingerprint = "c".repeat(64),
+  runtimeThreadFingerprint = "b".repeat(64)
+} = {}) {
+  const capture = safeCapture();
+  return {
+    ...capture,
+    captureMetadata: {
+      ...capture.captureMetadata,
+      captureFingerprint
+    },
+    visibleThreadMetadata: {
+      ...capture.visibleThreadMetadata,
+      threadFingerprint: runtimeThreadFingerprint
+    }
+  };
+}
+
+function confirmedReusableMapping({
+  deviceId = DEVICE_ID,
+  runtimeThreadFingerprint = "b".repeat(64),
+  captureSafetyStatus = "SAFE",
+  mappingStatus = "RESOLVED",
+  humanReviewStatus = "CONFIRMED",
+  resolvedContactId = REUSED_CONTACT_ID,
+  contactId = REUSED_CONTACT_ID,
+  identifierType = "tinder_profile",
+  humanVerified = true
+} = {}) {
+  return {
+    device_id: deviceId,
+    runtime_thread_fingerprint: runtimeThreadFingerprint,
+    capture_safety_status: captureSafetyStatus,
+    mapping_status: mappingStatus,
+    human_review_status: humanReviewStatus,
+    resolved_contact_id: resolvedContactId,
+    contact_id: contactId,
+    identifier_type: identifierType,
+    human_verified: humanVerified
+  };
+}
+
+function fixtureRepository({ reusableMapping = null } = {}) {
   const rows = [];
+  const reusableMappingRequests = [];
   let revision = 0;
   return {
     rows,
+    reusableMappingRequests,
     async withTransaction(work) { return work({}); },
     async nextCaptureRevision() { revision += 1; return revision; },
     async insertCapture(_transaction, record) {
@@ -50,6 +95,10 @@ function fixtureRepository() {
       return rows.find((row) => row.deviceId === deviceId
         && row.runtimeThreadFingerprint === runtimeThreadFingerprint
         && row.captureFingerprint === captureFingerprint) || null;
+    },
+    async findReusableConfirmedMapping(_transaction, binding) {
+      reusableMappingRequests.push(binding);
+      return reusableMapping;
     },
     async findCaptureById(captureId) {
       return rows.find((row) => row.captureId === captureId) || null;
@@ -95,6 +144,83 @@ test("an identical signed-capture fingerprint is idempotent within its device th
   assert.equal(first.captureRevision, 1);
 });
 
+test("a later safe capture reuses only a complete prior human-confirmed mapping for its exact device thread", async () => {
+  const repository = fixtureRepository({ reusableMapping: confirmedReusableMapping() });
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z")
+  });
+
+  const stored = await store.storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureWith(),
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  });
+
+  assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.RESOLVED);
+  assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.CONFIRMED);
+  assert.equal(stored.resolvedContactId, REUSED_CONTACT_ID);
+  assert.deepEqual(repository.reusableMappingRequests, [{
+    deviceId: DEVICE_ID,
+    runtimeThreadFingerprint: "b".repeat(64)
+  }]);
+  assert.equal(JSON.stringify(repository.reusableMappingRequests).includes("Sandry"), false);
+});
+
+test("a reuse candidate for another device or runtime thread fails closed to pending human mapping", async () => {
+  for (const candidate of [
+    confirmedReusableMapping({ deviceId: "f880455d-325c-4f35-9914-823dcb0e0d18" }),
+    confirmedReusableMapping({ runtimeThreadFingerprint: "d".repeat(64) })
+  ]) {
+    const repository = fixtureRepository({ reusableMapping: candidate });
+    const store = createTinderCaptureStore(repository, {
+      createCaptureId: () => CAPTURE_ID,
+      now: () => new Date("2026-09-04T18:01:00.000Z")
+    });
+
+    const stored = await store.storeSafeCapture({
+      deviceId: DEVICE_ID,
+      capture: safeCaptureWith(),
+      provenance: { source: "android_visible_chat", protocolVersion: 1 }
+    });
+
+    assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING);
+    assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.PENDING);
+    assert.equal(stored.resolvedContactId, null);
+  }
+});
+
+test("unconfirmed or malformed reuse candidates never resolve a new capture", async () => {
+  for (const candidate of [
+    confirmedReusableMapping({ captureSafetyStatus: "UNSAFE" }),
+    confirmedReusableMapping({ mappingStatus: "NEEDS_HUMAN_MAPPING" }),
+    confirmedReusableMapping({ humanReviewStatus: "PENDING" }),
+    confirmedReusableMapping({ resolvedContactId: null }),
+    confirmedReusableMapping({ contactId: REUSED_CONTACT_ID + 1 }),
+    confirmedReusableMapping({ identifierType: "instagram" }),
+    confirmedReusableMapping({ humanVerified: false }),
+    confirmedReusableMapping({ contactId: String(REUSED_CONTACT_ID) }),
+    Object.freeze({}),
+    null
+  ]) {
+    const repository = fixtureRepository({ reusableMapping: candidate });
+    const store = createTinderCaptureStore(repository, {
+      createCaptureId: () => CAPTURE_ID,
+      now: () => new Date("2026-09-04T18:01:00.000Z")
+    });
+
+    const stored = await store.storeSafeCapture({
+      deviceId: DEVICE_ID,
+      capture: safeCaptureWith(),
+      provenance: { source: "android_visible_chat", protocolVersion: 1 }
+    });
+
+    assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING);
+    assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.PENDING);
+    assert.equal(stored.resolvedContactId, null);
+  }
+});
+
 test("fingerprint deduplication occurs only after the existing per-thread lock hook", async () => {
   const events = [];
   const existing = Object.freeze({ captureId: CAPTURE_ID, captureRevision: 1 });
@@ -109,6 +235,7 @@ test("fingerprint deduplication occurs only after the existing per-thread lock h
       assert.deepEqual(events, ["thread-lock-and-revision", "fingerprint-lookup"]);
       return existing;
     },
+    async findReusableConfirmedMapping() { assert.fail("a duplicate must not try to reuse a mapping"); },
     async insertCapture() { assert.fail("a locked duplicate must not insert"); },
     async findCaptureById() { return null; }
   };
@@ -166,6 +293,85 @@ test("the PostgreSQL adapter locks a thread before duplicate lookup and never in
   assert.ok(lockIndex >= 0);
   assert.ok(fingerprintIndex > lockIndex);
   assert.equal(calls.some(call => call.sql.includes("INSERT INTO tinder_visible_chat_captures")), false);
+});
+
+test("the PostgreSQL reuse lookup treats absent T3 prerequisites as no mapping without touching the optional relation", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, values = []) {
+      calls.push({ sql, values });
+      return {
+        rows: [{
+          t3_audit_present: false,
+          contact_identifiers_present: false,
+          required_identifier_columns_present: false
+        }]
+      };
+    },
+    release() {}
+  };
+  const repository = createPgTinderCaptureRepository({
+    async connect() { return client; },
+    async query() { return { rows: [] }; }
+  });
+
+  const result = await repository.findReusableConfirmedMapping(client, {
+    deviceId: DEVICE_ID,
+    runtimeThreadFingerprint: "b".repeat(64)
+  });
+
+  assert.equal(result, null);
+  assert.equal(calls.length, 1);
+  const { sql, values } = calls[0];
+  assert.deepEqual(values, []);
+  assert.match(sql, /to_regclass\('public\.tinder_identity_mapping_audit'\) IS NOT NULL/i);
+  assert.match(sql, /to_regclass\('public\.contact_identifiers'\) IS NOT NULL/i);
+  assert.match(sql, /information_schema\.columns/i);
+  assert.doesNotMatch(sql, /JOIN\s+contact_identifiers/i);
+});
+
+test("the PostgreSQL reuse lookup binds only device/thread and never uses display data", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, values = []) {
+      calls.push({ sql, values });
+      if (calls.length === 1) {
+        return {
+          rows: [{
+            t3_audit_present: true,
+            contact_identifiers_present: true,
+            required_identifier_columns_present: true
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    release() {}
+  };
+  const repository = createPgTinderCaptureRepository({
+    async connect() { return client; },
+    async query() { return { rows: [] }; }
+  });
+
+  const result = await repository.findReusableConfirmedMapping(client, {
+    deviceId: DEVICE_ID,
+    runtimeThreadFingerprint: "b".repeat(64)
+  });
+
+  assert.equal(result, null);
+  assert.equal(calls.length, 2);
+  const { sql, values } = calls[1];
+  assert.deepEqual(values, [DEVICE_ID, "b".repeat(64), "tinder_profile"]);
+  assert.match(sql, /to_regclass\('public\.tinder_identity_mapping_audit'\) IS NOT NULL/i);
+  assert.match(sql, /c\.device_id = \$1/i);
+  assert.match(sql, /c\.runtime_thread_fingerprint = \$2/i);
+  assert.match(sql, /i\.identifier_type = \$3/i);
+  assert.match(sql, /i\.human_verified = TRUE/i);
+  assert.match(sql, /c\.capture_safety_status = 'SAFE'/i);
+  assert.match(sql, /c\.mapping_status = 'RESOLVED'/i);
+  assert.match(sql, /c\.human_review_status = 'CONFIRMED'/i);
+  assert.doesNotMatch(sql, /visible_thread_metadata|visible_name|display|whatsapp/i);
+  assert.doesNotMatch(sql, /FROM\s+tinder_identity_mapping_audit/i);
 });
 
 test("unsafe or injected captures fail before a persistence transaction", async () => {

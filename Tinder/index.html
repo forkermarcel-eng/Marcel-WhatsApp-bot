@@ -304,6 +304,76 @@
      font-size: 15px;
    }
 
+   .capture-mapping-panel {
+     margin-top: 16px;
+   }
+
+   .capture-mapping-context {
+     display: grid;
+     grid-template-columns: repeat(2, minmax(0, 1fr));
+     gap: 8px;
+     margin: 14px 0;
+     padding: 12px;
+     border: 1px solid var(--border);
+     border-radius: 12px;
+     background: rgba(255, 255, 255, 0.02);
+     color: var(--muted);
+     font-size: 12px;
+     line-height: 1.45;
+   }
+
+   .capture-mapping-context strong,
+   .capture-mapping-context code {
+     display: block;
+     margin-top: 2px;
+     color: var(--text);
+     font: inherit;
+     font-weight: 800;
+     overflow-wrap: anywhere;
+   }
+
+   .capture-mapping-grid {
+     display: grid;
+     grid-template-columns: repeat(2, minmax(0, 1fr));
+     gap: 12px;
+   }
+
+   .capture-mapping-field {
+     display: grid;
+     gap: 6px;
+     color: var(--muted);
+     font-size: 12px;
+   }
+
+   .capture-mapping-field input,
+   .capture-mapping-field select {
+     width: 100%;
+     min-height: 40px;
+     padding: 9px 10px;
+     border: 1px solid var(--border);
+     border-radius: 10px;
+     background: rgba(255, 255, 255, 0.035);
+     color: var(--text);
+     font: inherit;
+   }
+
+   .capture-mapping-confirmation {
+     display: flex;
+     align-items: flex-start;
+     gap: 8px;
+     margin-top: 14px;
+     color: var(--muted);
+     font-size: 12px;
+     line-height: 1.45;
+   }
+
+   @media (max-width: 620px) {
+     .capture-mapping-context,
+     .capture-mapping-grid {
+       grid-template-columns: 1fr;
+     }
+   }
+
    .enrollment-panel p,
    .enrollment-message {
      color: var(--muted);
@@ -673,7 +743,7 @@
  <div class="shell">
    <header>
      <div class="brand-wrap">
-       <div class="module-label"><h1 class="content-title">Tinder</h1><span>Manuell gesteuerter Sicherheitsmodus</span></div>
+       <div class="module-label"><h1 class="content-title">Tinder</h1><span>Android Device Bridge · kontrollierter T2/T3-Modus</span></div>
      </div>
 
      <div class="header-actions">
@@ -721,63 +791,35 @@
          <div class="status-sub" id="deviceAutomationSub">Automation-Status wird geladen</div>
        </article>
 
-       <article class="status-card"><div class="status-top"><div class="status-name">Ruhephase</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht gemeldet</div><div class="status-sub">Keine produktiven Ruhephasen-Daten</div></article>
-      <article class="status-card"><div class="status-top"><div class="status-name">Queue</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht verbunden</div><div class="status-sub">Noch keine Nachrichten-Queue verbunden</div></article>
+       <article class="status-card"><div class="status-top"><div class="status-name">Ruhephase</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht aktiviert</div><div class="status-sub">Eine spätere T7-Steuerung wird separat und auditierbar verbunden.</div></article>
+      <article class="status-card"><div class="status-top"><div class="status-name">Queue</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht aktiviert</div><div class="status-sub">Keine T6-Queue oder automatische Chatprüfung ist derzeit aktiv.</div></article>
      </section>
 
      <details class="technical">
        <summary>Technik &amp; Diagnose</summary><div class="technical-body">
-     <section class="control-panel" aria-label="Tinder Steuerung">
+     <section class="control-panel" aria-label="Legacy Tinder Worker Status">
        <div class="control-copy">
-         <h2>Manuelle Tinder-Steuerung</h2>
+         <h2>Legacy-Webworker bleibt eingefroren</h2>
          <p>
-           Railway darf online sein, ohne Tinder zu öffnen. Erst „Tinder verbinden“ startet
-           Chromium und öffnet Tinder. Die Automation benötigt danach eine zweite, separate
-           Freigabe. Ein Worker-Neustart setzt alles wieder auf getrennt und gestoppt.
+           Die frühere Playwright-/Chromium-Steuerung ist nicht Teil des aktiven Tinder-Pfads.
+           Diese Seite steuert ausschließlich die Android Device Bridge und den späteren
+           human-bestätigten T3-Mapping-Pfad.
          </p>
-         <div class="control-lock">🔒 Safe default: getrennt + gestoppt</div>
-       </div>
-
-       <div class="control-actions">
-         <button class="button primary" id="connectButton" type="button">
-           Tinder verbinden
-         </button>
-
-         <button class="button danger" id="disconnectButton" type="button" disabled>
-           Tinder trennen
-         </button>
-
-         <button class="button primary" id="automationStartButton" type="button" disabled>
-           Automation starten
-         </button>
-
-         <button class="button warn" id="automationStopButton" type="button" disabled>
-           Automation stoppen
-         </button>
+         <div class="control-lock">🔒 Legacy-Webworker: OFFLINE · keine Browser-, Read- oder Send-Aktion</div>
        </div>
      </section>
 
-     <section class="notice" id="statusNotice" aria-live="polite">
+     <section class="notice warn" aria-live="polite">
        <div class="notice-copy">
-         <div class="notice-title" id="noticeTitle">Tinder-Status wird geprüft</div>
-         <div class="notice-text" id="noticeText">
-           Die Verbindung zum Tinder-Worker wird gerade abgefragt.
+         <div class="notice-title">Aktiver Pfad: Android Device Bridge</div>
+         <div class="notice-text">
+           T2-Captures, T3-Human-Mapping und der Android Tinder Manual Gate werden getrennt
+           angezeigt. Es wird kein Legacy-Webworker abgefragt oder gestartet.
          </div>
        </div>
 
        <div class="notice-actions">
-         <a
-           class="button warn"
-           id="manualLoginButton"
-           href="https://marcel-tinder-bot-production-44f3.up.railway.app/vnc.html"
-           target="_blank"
-           rel="noopener noreferrer"
-           hidden
-         >
-           Tinder-Anmeldung öffnen ↗
-         </a>
-
-         <div class="notice-badge" id="noticeBadge">PRÜFUNG</div>
+         <div class="notice-badge">ANDROID</div>
        </div>
      </section>
 
@@ -818,6 +860,48 @@
            <button class="button primary" id="connectAndroidTinder" type="button" disabled>TINDER VERBINDEN</button>
            <button class="button warn" id="disconnectAndroidTinder" type="button" disabled>TINDER TRENNEN</button>
            <span class="enrollment-message">Nur für das ausdrücklich ausgewählte, T1-kompatible Android-Gerät. Diese Befehle öffnen, lesen oder senden nichts in Tinder.</span>
+         </div>
+       </div>
+     </section>
+
+     <section class="enrollment-panel capture-mapping-panel" id="captureMappingPanel" hidden aria-labelledby="captureMappingHeading">
+       <h2 id="captureMappingHeading">Tinder-Kontakt zuordnen</h2>
+       <p id="captureMappingIntro">Dieses sichere sichtbare Capture braucht eine ausdrückliche menschliche Zuordnung. Der sichtbare Tinder-Name ist kein Identifier und wird nicht automatisch zusammengeführt.</p>
+
+       <div class="capture-mapping-context" id="captureMappingContext">
+         <div>Sichtbarer Tinder-Name<strong id="captureVisibleName">–</strong></div>
+         <div>Capture-ID<code id="captureMappingId">–</code></div>
+         <div>Android-Gerät<code id="captureDeviceId">–</code></div>
+         <div>Capture-Revision<strong id="captureRevision">–</strong></div>
+       </div>
+
+       <div id="captureMappingForm">
+         <div class="capture-mapping-grid">
+           <label class="capture-mapping-field">
+             Bestehenden Kontakt auswählen
+             <select id="captureContactSelect">
+               <option value="">Kontakte werden erst bei sicherem Capture geladen</option>
+             </select>
+           </label>
+           <label class="capture-mapping-field">
+             Human-bestätigter Tinder-Identifier
+             <input id="captureTinderIdentifier" type="text" autocomplete="off" maxlength="160" placeholder="Nur manuell bestätigt eingeben">
+           </label>
+           <label class="capture-mapping-field">
+             Neuer Kontaktname
+             <input id="captureNewContactName" type="text" autocomplete="off" maxlength="160" placeholder="Nur für neuen Kontakt">
+           </label>
+         </div>
+
+         <label class="capture-mapping-confirmation">
+           <input id="captureMappingConfirmed" type="checkbox">
+           <span>Ich bestätige die Zuordnung bewusst. Es wird weder aus dem Anzeigenamen noch aus einem technischen Fingerprint automatisch ein Kontakt erzeugt.</span>
+         </label>
+
+         <div class="enrollment-actions">
+           <button class="button primary" id="mapCaptureExisting" type="button" disabled>Mit bestehendem Kontakt verbinden</button>
+           <button class="button warn" id="mapCaptureNew" type="button" disabled>Neuen Kontakt anlegen</button>
+           <span class="enrollment-message" id="captureMappingMessage" role="status" aria-live="polite"></span>
          </div>
        </div>
      </section>
@@ -863,9 +947,9 @@
              <div class="empty-icon" aria-hidden="true">💬</div>
              <h3>Automation ist ein separates Gate</h3>
              <p>
-               „Automation starten“ gibt den späteren Nachrichtenbetrieb nur frei.
-               In dieser Version existiert noch kein Tinder-Lese- oder Sendeloop und
-               es werden keine Nachrichten automatisch verschickt.
+               Der Nachrichtenbetrieb ist noch nicht aktiviert. Es existiert kein
+               automatischer Tinder-Lese- oder Sendeloop und es werden keine
+               Nachrichten automatisch verschickt.
              </p>
            </div>
          </div>
@@ -921,27 +1005,6 @@
      deviceAutomationDot: document.getElementById("deviceAutomationDot"),
      deviceAutomationValue: document.getElementById("deviceAutomationValue"),
      deviceAutomationSub: document.getElementById("deviceAutomationSub"),
-     workerDot: document.createElement("span"),
-     workerValue: document.createElement("span"),
-     workerSub: document.createElement("span"),
-     browserDot: document.createElement("span"),
-     browserValue: document.createElement("span"),
-     browserSub: document.createElement("span"),
-     sessionDot: document.createElement("span"),
-     sessionValue: document.createElement("span"),
-     sessionSub: document.createElement("span"),
-     automationDot: document.createElement("span"),
-     automationValue: document.createElement("span"),
-     automationSub: document.createElement("span"),
-     statusNotice: document.getElementById("statusNotice"),
-     noticeTitle: document.getElementById("noticeTitle"),
-     noticeText: document.getElementById("noticeText"),
-     noticeBadge: document.getElementById("noticeBadge"),
-     manualLoginButton: document.getElementById("manualLoginButton"),
-     connectButton: document.getElementById("connectButton"),
-     disconnectButton: document.getElementById("disconnectButton"),
-     automationStartButton: document.getElementById("automationStartButton"),
-     automationStopButton: document.getElementById("automationStopButton"),
      createEnrollmentCode: document.getElementById("createEnrollmentCode"),
      copyEnrollmentCode: document.getElementById("copyEnrollmentCode"),
      enrollmentResult: document.getElementById("enrollmentResult"),
@@ -955,35 +1018,37 @@
      connectAndroidTinder: document.getElementById("connectAndroidTinder"),
      disconnectAndroidTinder: document.getElementById("disconnectAndroidTinder"),
      deviceCommandMessage: document.getElementById("deviceCommandMessage"),
+     captureMappingPanel: document.getElementById("captureMappingPanel"),
+     captureMappingIntro: document.getElementById("captureMappingIntro"),
+     captureMappingId: document.getElementById("captureMappingId"),
+     captureVisibleName: document.getElementById("captureVisibleName"),
+     captureDeviceId: document.getElementById("captureDeviceId"),
+     captureRevision: document.getElementById("captureRevision"),
+     captureMappingForm: document.getElementById("captureMappingForm"),
+     captureContactSelect: document.getElementById("captureContactSelect"),
+     captureTinderIdentifier: document.getElementById("captureTinderIdentifier"),
+     captureNewContactName: document.getElementById("captureNewContactName"),
+     captureMappingConfirmed: document.getElementById("captureMappingConfirmed"),
+     mapCaptureExisting: document.getElementById("mapCaptureExisting"),
+     mapCaptureNew: document.getElementById("mapCaptureNew"),
+     captureMappingMessage: document.getElementById("captureMappingMessage"),
      lastChecked: document.getElementById("lastChecked")
    };
 
-   let requestBusy = false;
-   let latestStatus = null;
    let selectedDevice = null;
    let commandBusy = false;
    let commandFeedback = "";
    let commandFeedbackIsError = false;
+   let mappingCapture = null;
+   let mappingBusy = false;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
-
+   const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
      element.className = "dot";
 
      if (state) {
        element.classList.add(state);
      }
-   }
-
-   function setNotice(type, title, text, badge) {
-     elements.statusNotice.className = "notice";
-
-     if (type) {
-       elements.statusNotice.classList.add(type);
-     }
-
-     elements.noticeTitle.textContent = title;
-     elements.noticeText.textContent = text;
-     elements.noticeBadge.textContent = badge;
    }
 
    function formatNow() {
@@ -1029,6 +1094,162 @@
      }
 
      return data;
+   }
+
+   function setCaptureMappingMessage(message, isError = false) {
+     elements.captureMappingMessage.className = isError
+       ? "enrollment-message enrollment-error"
+       : "enrollment-message";
+     elements.captureMappingMessage.textContent = message;
+   }
+
+   function captureIdFromLocation() {
+     const captureId = new URLSearchParams(window.location.search).get("captureId");
+     return UUID_V4.test(String(captureId || "")) ? captureId : null;
+   }
+
+   function captureMappingStatus(capture) {
+     return String(capture?.mapping_status || capture?.mappingStatus || "").toUpperCase();
+   }
+
+   function mappingContactLabel(contact) {
+     const name = String(
+       contact?.name || contact?.displayName || contact?.canonicalName || "Unbekannter Kontakt"
+     ).trim();
+     return `${name || "Unbekannter Kontakt"} · Kontakt #${contact.id}`;
+   }
+
+   function updateCaptureMappingControls() {
+     const hasCapture = captureMappingStatus(mappingCapture) === "NEEDS_HUMAN_MAPPING";
+     const confirmed = elements.captureMappingConfirmed.checked === true;
+     const identifier = elements.captureTinderIdentifier.value.trim();
+     const contactId = Number(elements.captureContactSelect.value);
+     const newContactName = elements.captureNewContactName.value.trim();
+     elements.mapCaptureExisting.disabled = mappingBusy || !hasCapture || !confirmed || !identifier ||
+       !Number.isInteger(contactId) || contactId <= 0;
+     elements.mapCaptureNew.disabled = mappingBusy || !hasCapture || !confirmed || !identifier || !newContactName;
+   }
+
+   function renderCaptureMapping(capture) {
+     const status = captureMappingStatus(capture);
+     if (!["NEEDS_HUMAN_MAPPING", "CONFLICT"].includes(status)) {
+       mappingCapture = null;
+       elements.captureMappingPanel.hidden = true;
+       return;
+     }
+
+     mappingCapture = capture;
+     elements.captureMappingForm.hidden = false;
+     elements.captureMappingPanel.hidden = false;
+     elements.captureVisibleName.textContent = String(capture.visible_name || "Unbekannt");
+     elements.captureMappingId.textContent = String(capture.capture_id || "–");
+     elements.captureDeviceId.textContent = String(capture.device_id || "–");
+     elements.captureRevision.textContent = String(capture.capture_revision || "–");
+     if (status === "CONFLICT") {
+       elements.captureMappingForm.hidden = true;
+       elements.captureMappingIntro.textContent = "Konflikt erkannt: Die bestehende menschliche Zuordnung wurde nicht automatisch überschrieben.";
+       setCaptureMappingMessage("Konflikt blockiert. Bitte die menschlich bestätigte Identität prüfen.", true);
+       elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
+       return;
+     }
+     elements.captureMappingIntro.textContent =
+       "Dieses sichere sichtbare Capture braucht eine ausdrückliche menschliche Zuordnung. Der sichtbare Tinder-Name ist kein Identifier und wird nicht automatisch zusammengeführt.";
+     setCaptureMappingMessage("Bestehenden Kontakt auswählen oder einen neuen Kontakt bewusst bestätigen.");
+     elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
+     updateCaptureMappingControls();
+   }
+
+   async function loadCaptureMappingContacts() {
+     const data = await requestJson("/api/dashboard/contacts");
+     const contacts = Array.isArray(data?.contacts) ? data.contacts : [];
+     const validContacts = contacts
+       .filter((contact) => Number.isInteger(Number(contact?.id)) && Number(contact.id) > 0)
+       .sort((left, right) => mappingContactLabel(left).localeCompare(mappingContactLabel(right), "de"));
+     const placeholder = document.createElement("option");
+     placeholder.value = "";
+     placeholder.textContent = "Bestehenden Kontakt bewusst auswählen";
+     elements.captureContactSelect.replaceChildren(
+       placeholder,
+       ...validContacts.map((contact) => {
+         const option = document.createElement("option");
+         option.value = String(contact.id);
+         option.textContent = mappingContactLabel(contact);
+         return option;
+       })
+     );
+   }
+
+   async function loadCaptureMappingFromLocation() {
+     const captureId = captureIdFromLocation();
+     if (!captureId) return;
+
+     try {
+       const data = await requestJson(`/api/tinder/captures?captureId=${encodeURIComponent(captureId)}`);
+       if (!data?.capture || data.capture.capture_id !== captureId) {
+         throw new Error("Das Backend hat kein gültiges Tinder-Capture geliefert.");
+       }
+       renderCaptureMapping(data.capture);
+       if (captureMappingStatus(data.capture) === "NEEDS_HUMAN_MAPPING") {
+         await loadCaptureMappingContacts();
+         updateCaptureMappingControls();
+       }
+     } catch (error) {
+       mappingCapture = null;
+       elements.captureMappingPanel.hidden = false;
+       elements.captureMappingForm.hidden = true;
+       elements.captureMappingIntro.textContent = "Tinder-Capture kann nicht sicher zugeordnet werden.";
+       setCaptureMappingMessage(error?.message || "Tinder-Capture konnte nicht geladen werden.", true);
+       elements.captureMappingPanel.closest("details")?.setAttribute("open", "");
+     }
+   }
+
+   async function submitCaptureMapping(action) {
+     if (mappingBusy || captureMappingStatus(mappingCapture) !== "NEEDS_HUMAN_MAPPING") return;
+     const captureId = String(mappingCapture?.capture_id || "");
+     if (!UUID_V4.test(captureId)) {
+       setCaptureMappingMessage("Die aktuelle Capture-ID ist ungültig.", true);
+       return;
+     }
+
+     const identifier = elements.captureTinderIdentifier.value.trim();
+     const body = {
+       action,
+       tinder_identifier: identifier,
+       confirmed: elements.captureMappingConfirmed.checked === true
+     };
+     if (action === "MAP_EXISTING") {
+       body.contact_id = Number(elements.captureContactSelect.value);
+     } else {
+       body.new_contact_name = elements.captureNewContactName.value.trim();
+     }
+
+     mappingBusy = true;
+     setCaptureMappingMessage("Menschliche Zuordnung wird gespeichert …");
+     updateCaptureMappingControls();
+     try {
+       const data = await requestJson(`/api/tinder/captures?captureId=${encodeURIComponent(captureId)}`, {
+         method: "POST",
+         body: JSON.stringify(body)
+       });
+       if (!data?.result || !["RESOLVED", "NEW_CONTACT_CONFIRMED"].includes(data.result.status)) {
+         throw new Error("Das Backend hat keine gültige Mapping-Bestätigung geliefert.");
+       }
+       mappingCapture = { ...mappingCapture, mapping_status: "RESOLVED" };
+       elements.captureMappingForm.hidden = true;
+       elements.captureMappingIntro.textContent = "Die menschlich bestätigte Tinder-Zuordnung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt.";
+       setCaptureMappingMessage("Zuordnung sicher gespeichert.");
+     } catch (error) {
+       const conflict = error?.data?.result?.status === "CONFLICT";
+       if (conflict) {
+         elements.captureMappingIntro.textContent = "Konflikt erkannt: Die Zuordnung wurde nicht automatisch überschrieben. Bitte die bestehende menschliche Identität prüfen.";
+         setCaptureMappingMessage("Konflikt blockiert: keine automatische Zusammenführung wurde vorgenommen.", true);
+       } else {
+         setCaptureMappingMessage(error?.message || "Tinder-Zuordnung konnte nicht gespeichert werden.", true);
+       }
+     } finally {
+       mappingBusy = false;
+       updateCaptureMappingControls();
+     }
    }
 
    async function createEnrollmentCode() {
@@ -1387,271 +1608,14 @@
      }
    }
 
-   function applyDisconnectedState() {
-     setDot(elements.browserDot, "info");
-     elements.browserValue.textContent = "Getrennt";
-     elements.browserSub.textContent = "Chromium ist nicht mit Tinder verbunden";
-
-     setDot(elements.sessionDot, "info");
-     elements.sessionValue.textContent = "Nicht geprüft";
-     elements.sessionSub.textContent = "Tinder wird im getrennten Zustand nicht geöffnet";
-
-     setDot(elements.automationDot, "warn");
-     elements.automationValue.textContent = "Gestoppt";
-     elements.automationSub.textContent = "Manuelle Freigabe erforderlich";
-
-     setNotice(
-       "",
-       "Tinder ist sicher getrennt",
-       "Railway kann online bleiben. Der Worker startet Chromium nicht automatisch und führt im getrennten Zustand keine Tinder-Aufrufe aus.",
-       "GETRENNT"
-     );
-   }
-
-   function renderStatus(data) {
-     latestStatus = data;
-
-     const workerOnline = Boolean(data?.ok);
-     const control = data?.control || {};
-     const connectionRequested = Boolean(control.connectionRequested);
-     const browserRunning = Boolean(data?.browser?.running);
-     const sessionStatus = String(data?.session?.status || "UNKNOWN");
-     const sessionReason = String(data?.session?.reason || "");
-     const automationEnabled = Boolean(control.automationEnabled);
-
-     setDot(elements.workerDot, workerOnline ? "good" : "bad");
-     elements.workerValue.textContent = workerOnline ? "Online" : "Offline";
-     elements.workerSub.textContent = workerOnline
-       ? "Railway-Worker erreichbar"
-       : "Railway-Worker nicht erreichbar";
-
-     if (!connectionRequested) {
-       applyDisconnectedState();
-     } else if (!browserRunning) {
-       setDot(elements.browserDot, "bad");
-       elements.browserValue.textContent = "Fehler";
-       elements.browserSub.textContent = "Verbindung angefordert, Chromium läuft aber nicht";
-
-       setDot(elements.sessionDot, "warn");
-       elements.sessionValue.textContent = "Unbekannt";
-       elements.sessionSub.textContent = sessionReason || "Browser nicht bereit";
-
-       setDot(elements.automationDot, "warn");
-       elements.automationValue.textContent = "Gestoppt";
-       elements.automationSub.textContent = "Sicherheitsstopp";
-
-       setNotice(
-         "bad",
-         "Tinder-Browser ist nicht bereit",
-         "Die manuelle Verbindung wurde angefordert, aber Chromium ist nicht verfügbar. Es läuft keine automatische Recovery-Schleife.",
-         "STOPP"
-       );
-     } else {
-       setDot(elements.browserDot, "good");
-       elements.browserValue.textContent = "Verbunden";
-       elements.browserSub.textContent = "Chromium wurde manuell gestartet";
-
-       if (sessionStatus === "CONNECTED") {
-         setDot(elements.sessionDot, "good");
-         elements.sessionValue.textContent = "Angemeldet";
-         elements.sessionSub.textContent = sessionReason || "Tinder-Sitzung verbunden";
-
-         if (automationEnabled) {
-           setDot(elements.automationDot, "good");
-           elements.automationValue.textContent = "Freigegeben";
-           elements.automationSub.textContent = "Noch kein Lese-/Sendeloop in diesem Block";
-
-           setNotice(
-             "good",
-             "Tinder ist verbunden · Automation freigegeben",
-             "Die manuelle Freigabe ist gesetzt. Dieser Sicherheitsblock führt trotzdem noch keinen automatischen Chat-Import und keinen Nachrichtenversand aus.",
-             "FREIGEGEBEN"
-           );
-         } else {
-           setDot(elements.automationDot, "warn");
-           elements.automationValue.textContent = "Gestoppt";
-           elements.automationSub.textContent = "Wartet auf deine manuelle Freigabe";
-
-           setNotice(
-             "warn",
-             "Tinder ist verbunden · Automation bleibt gestoppt",
-             "Die Sitzung ist angemeldet. Erst mit „Automation starten“ gibst du den späteren Nachrichtenbetrieb separat frei.",
-             "BEREIT"
-           );
-         }
-       } else if (sessionStatus === "AUTH_REQUIRED") {
-         setDot(elements.sessionDot, "warn");
-         elements.sessionValue.textContent = "Anmeldung nötig";
-         elements.sessionSub.textContent = sessionReason || "Manuelle Anmeldung/Verifizierung erforderlich";
-
-         setDot(elements.automationDot, "warn");
-         elements.automationValue.textContent = "Gestoppt";
-         elements.automationSub.textContent = "Bis zur manuellen Anmeldung gesperrt";
-
-         setNotice(
-           "warn",
-           "Tinder-Anmeldung erforderlich",
-           "Öffne den sichtbaren Remote-Browser und führe Anmeldung oder Verifizierung selbst durch. Der Bot kennt keine Zugangsdaten und versucht nichts automatisch.",
-           "AUTH"
-         );
-       } else {
-         setDot(elements.sessionDot, "warn");
-         elements.sessionValue.textContent = "Unklar";
-         elements.sessionSub.textContent = sessionReason || "Sitzung nicht sicher bestätigt";
-
-         setDot(elements.automationDot, "warn");
-         elements.automationValue.textContent = "Gestoppt";
-         elements.automationSub.textContent = "Sicherheitsstopp bei unklarer Session";
-
-         setNotice(
-           "warn",
-           "Tinder-Sitzung noch nicht bestätigt",
-           "Die Automation bleibt gesperrt. Prüfe den sichtbaren Tinder-Browser manuell.",
-           "PRÜFEN"
-         );
-       }
-     }
-
-     elements.manualLoginButton.hidden = !(
-       connectionRequested &&
-       browserRunning &&
-       sessionStatus !== "CONNECTED"
-     );
-
-     elements.connectButton.disabled =
-       requestBusy || connectionRequested;
-     elements.disconnectButton.disabled =
-       requestBusy || !connectionRequested;
-     elements.automationStartButton.disabled =
-       requestBusy ||
-       !connectionRequested ||
-       !browserRunning ||
-       sessionStatus !== "CONNECTED" ||
-       automationEnabled;
-     elements.automationStopButton.disabled =
-       requestBusy || !automationEnabled;
-
-     elements.lastChecked.textContent = formatNow();
-   }
-
-   function renderBackendOffline(error) {
-     latestStatus = null;
-
-     setDot(elements.workerDot, "bad");
-     elements.workerValue.textContent = "Offline";
-     elements.workerSub.textContent = "Railway-Worker nicht erreichbar";
-
-     setDot(elements.browserDot, "info");
-     elements.browserValue.textContent = "Unbekannt";
-     elements.browserSub.textContent = "Kein Worker-Status verfügbar";
-
-     setDot(elements.sessionDot, "info");
-     elements.sessionValue.textContent = "Unbekannt";
-     elements.sessionSub.textContent = "Kein Worker-Status verfügbar";
-
-     setDot(elements.automationDot, "warn");
-     elements.automationValue.textContent = "Gestoppt";
-     elements.automationSub.textContent = "Ohne Worker keine Freigabe";
-
-     setNotice(
-       "bad",
-       "Tinder-Worker ist nicht erreichbar",
-       error?.message || "Der Tinder-Worker antwortet momentan nicht.",
-       "OFFLINE"
-     );
-
-     elements.manualLoginButton.hidden = true;
-     elements.connectButton.disabled = true;
-     elements.disconnectButton.disabled = true;
-     elements.automationStartButton.disabled = true;
-     elements.automationStopButton.disabled = true;
-     elements.lastChecked.textContent = formatNow();
-   }
-
-   async function loadStatus({ force = false } = {}) {
-     if (requestBusy && !force) {
-       return latestStatus;
-     }
-
-     elements.refreshStatus.disabled = true;
-
-     try {
-       const data = await requestJson("/api/tinder/status");
-       renderStatus(data);
-       return data;
-     } catch (error) {
-       renderBackendOffline(error);
-       return null;
-     } finally {
-       elements.refreshStatus.disabled = false;
-     }
-   }
-
-   async function runControl(action) {
-     if (requestBusy) {
-       return;
-     }
-
-     requestBusy = true;
-     elements.refreshStatus.disabled = true;
-
-     if (latestStatus) {
-       renderStatus(latestStatus);
-     }
-
-     try {
-       const data = await requestJson(
-         "/api/tinder/control",
-         {
-           method: "POST",
-           body: JSON.stringify({ action })
-         }
-       );
-
-       renderStatus(data);
-     } catch (error) {
-       setNotice(
-         "bad",
-         "Tinder-Steuerung nicht ausgeführt",
-         error?.message || "Die Aktion ist fehlgeschlagen.",
-         error?.code || "FEHLER"
-       );
-
-       await loadStatus({ force: true });
-     } finally {
-       requestBusy = false;
-       elements.refreshStatus.disabled = false;
-
-       if (latestStatus) {
-         renderStatus(latestStatus);
-       }
-     }
-   }
-
    async function refreshAllStatuses() {
      elements.refreshStatus.disabled = true;
-     await Promise.all([loadDeviceStatus(), loadStatus()]);
+     await loadDeviceStatus();
      elements.refreshStatus.disabled = false;
    }
 
    elements.refreshStatus.addEventListener("click", () => {
      void refreshAllStatuses();
-   });
-
-   elements.connectButton.addEventListener("click", () => {
-     void runControl("connect");
-   });
-
-   elements.disconnectButton.addEventListener("click", () => {
-     void runControl("disconnect");
-   });
-
-   elements.automationStartButton.addEventListener("click", () => {
-     void runControl("automation-start");
-   });
-
-   elements.automationStopButton.addEventListener("click", () => {
-     void runControl("automation-stop");
    });
 
    elements.createEnrollmentCode.addEventListener("click", () => {
@@ -1678,11 +1642,30 @@
      void createDeviceCommand("DISCONNECT_TINDER");
    });
 
+   for (const element of [
+     elements.captureContactSelect,
+     elements.captureTinderIdentifier,
+     elements.captureNewContactName,
+     elements.captureMappingConfirmed
+   ]) {
+     element.addEventListener("input", updateCaptureMappingControls);
+     element.addEventListener("change", updateCaptureMappingControls);
+   }
+
+   elements.mapCaptureExisting.addEventListener("click", () => {
+     void submitCaptureMapping("MAP_EXISTING");
+   });
+
+   elements.mapCaptureNew.addEventListener("click", () => {
+     void submitCaptureMapping("CREATE_NEW");
+   });
+
    window.addEventListener("focus", () => {
      void refreshAllStatuses();
    });
 
    void refreshAllStatuses();
+   void loadCaptureMappingFromLocation();
 
    window.setInterval(() => {
      void refreshAllStatuses();

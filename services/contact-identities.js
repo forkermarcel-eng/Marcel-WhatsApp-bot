@@ -3,6 +3,7 @@ const CHANNEL_TYPES = Object.freeze({
   x: "x_username",
   tinder: "tinder_profile"
 });
+const TINDER_IDENTITY_CHANNEL = "tinder";
 
 function identityError(message, statusCode = 400) {
   const error = new Error(message);
@@ -13,6 +14,16 @@ function identityError(message, statusCode = 400) {
 function normalizeChannel(value) {
   const channel = String(value || "").trim().toLowerCase();
   if (!CHANNEL_TYPES[channel]) throw identityError("Nicht unterstützter Kanal.");
+  return channel;
+}
+
+function assertGenericChannelMutationAllowed(channel) {
+  if (channel === TINDER_IDENTITY_CHANNEL) {
+    throw identityError(
+      "Tinder-Identifier duerfen nur ueber die ausdruecklich bestaetigte Tinder-Zuordnung geaendert werden.",
+      409
+    );
+  }
   return channel;
 }
 
@@ -78,7 +89,7 @@ function createContactIdentityService(pool) {
   }
 
   async function upsertContactIdentity(contactId, input) {
-    const channel = normalizeChannel(input?.channel);
+    const channel = assertGenericChannelMutationAllowed(normalizeChannel(input?.channel));
     const value = normalizeIdentifierValue(channel, input?.value);
     const type = CHANNEL_TYPES[channel];
     const normalized = value.toLowerCase();
@@ -119,7 +130,7 @@ function createContactIdentityService(pool) {
   }
 
   async function removeContactIdentity(contactId, channelValue) {
-    const channel = normalizeChannel(channelValue);
+    const channel = assertGenericChannelMutationAllowed(normalizeChannel(channelValue));
     const result = await pool.query(
       `DELETE FROM contact_identifiers WHERE contact_id = $1 AND identifier_type = $2 RETURNING id`,
       [contactId, CHANNEL_TYPES[channel]]

@@ -208,7 +208,8 @@ test("Brain write routes reuse one Vercel function and remain below the function
   const apiRoot = new URL("../api/", import.meta.url);
   const functionFiles = readdirSync(apiRoot, { recursive: true })
     .filter(file => String(file).endsWith(".js"));
-  assert.equal(functionFiles.length, 12);
+  assert.equal(functionFiles.length, 13);
+  assert.equal(functionFiles.includes("tinder\\captures.js"), true);
   assert.equal(functionFiles.includes("dashboard\\marcel-brain\\facts.js"), false);
   assert.equal(functionFiles.includes("dashboard\\marcel-brain\\live-state.js"), false);
   assert.equal(functionFiles.includes("dashboard\\_brain-write-proxy.js"), false);

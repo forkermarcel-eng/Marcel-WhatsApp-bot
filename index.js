@@ -16,6 +16,9 @@ import {
 } from "./device-bridge/enrollment.js";
 import { registerDeviceBridgeBlock3Routes } from "./device-bridge/block3-routes.js";
 import { registerTinderVisibleChatCaptureIngress } from "./device-bridge/tinder-visible-chat-capture-ingress.js";
+import { registerTinderCaptureRoutes } from "./device-bridge/tinder-capture-routes.js";
+import { registerTinderDraftRoutes } from "./device-bridge/tinder-draft-routes.js";
+import { registerTinderManualSendRoutes } from "./device-bridge/tinder-manual-send-routes.js";
 import {
   deviceBridgeFoundationMiddleware,
   deviceBridgeRawBodyErrorMiddleware,
@@ -23,6 +26,14 @@ import {
 } from "./device-bridge/readiness.js";
 import { createContactMediaService } from "./services/contact-media.js";
 import { createContactIdentityService } from "./services/contact-identities.js";
+import {
+  createPgTinderDraftRepository,
+  createTinderDraftFoundationService
+} from "./services/tinder-draft-foundation.js";
+import {
+  createPgTinderManualSendRepository,
+  createTinderManualSendService
+} from "./services/tinder-manual-send.js";
 
 const { Pool } = pg;
 
@@ -8460,6 +8471,50 @@ registerDeviceBridgeBlock3Routes({
 
 registerTinderVisibleChatCaptureIngress({ app, pool });
 
+registerTinderCaptureRoutes({
+  app,
+  pool,
+  dashboardApiReady,
+  dashboardApiAuthorized,
+  requireDeviceBridgeReady
+});
+
+const tinderDraftService = createTinderDraftFoundationService({
+  repository: createPgTinderDraftRepository(pool),
+  getContactById,
+  getContactMemoryProfile,
+  getRelevantMemoryItems,
+  getRelevantMemoryEvents,
+  getMarcelMemory,
+  getMarcelLiveState,
+  buildMemoryContext,
+  resolveReplyLanguage,
+  generateSharedReply
+});
+
+registerTinderDraftRoutes({
+  app,
+  dashboardApiReady,
+  dashboardApiAuthorized,
+  requireDeviceBridgeReady,
+  draftService: tinderDraftService
+});
+
+// T5 is deliberately a sealed approval/intent contract only.  Its default
+// delivery-policy adapter fails closed because no verified Android writer or
+// shared Delivery Policy exists in this release line.
+const tinderManualSendService = createTinderManualSendService({
+  repository: createPgTinderManualSendRepository(pool)
+});
+
+registerTinderManualSendRoutes({
+  app,
+  dashboardApiReady,
+  dashboardApiAuthorized,
+  requireDeviceBridgeReady,
+  service: tinderManualSendService
+});
+
 
 /* ==================================================
 DASHBOARD KONTAKT-STAMMDATEN
@@ -11829,8 +11884,10 @@ try {
           ON TRUE
 
 
-        WHERE c.whatsapp_jid
-          NOT LIKE '%@persona.test'
+        WHERE (
+          c.whatsapp_jid IS NULL
+          OR c.whatsapp_jid NOT LIKE '%@persona.test'
+        )
 
 
         ORDER BY

@@ -6,6 +6,8 @@ import {
   T1_COMMAND_TYPE_CONSTRAINT_NAME,
   T1_TINDER_STATE_CHECK_EXPRESSION,
   T1_TINDER_STATE_CONSTRAINT_NAME,
+  T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION,
+  T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
   inspectDeviceBridgeT1Schema
 } from "../device-bridge/t1-schema.js";
 import {
@@ -129,10 +131,17 @@ function t1Constraint({ kind, mode }) {
   const finalValues = tinder ? FINAL_TINDER : FINAL_COMMANDS;
   const legacyValues = tinder ? LEGACY_TINDER : LEGACY_COMMANDS;
   const finalExpression = tinder ? T1_TINDER_STATE_CHECK_EXPRESSION : T1_COMMAND_TYPE_CHECK_EXPRESSION;
-  const isFinal = mode === "FINAL";
-  const base = isFinal ? finalExpression : enumExpression(column, legacyValues);
+  const isT2CommandConstraint = !tinder && mode === "T2";
+  const isFinal = mode === "FINAL" || isT2CommandConstraint;
+  const base = isT2CommandConstraint
+    ? T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION
+    : isFinal ? finalExpression : enumExpression(column, legacyValues);
   return {
-    conname: mode === "WRONG" ? finalName : isFinal ? finalName : legacyName,
+    conname: mode === "WRONG"
+      ? finalName
+      : isT2CommandConstraint
+        ? T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME
+        : isFinal ? finalName : legacyName,
     convalidated: mode !== "UNVALIDATED",
     condeferrable: false,
     condeferred: false,
@@ -397,6 +406,16 @@ test("runtime T1 inspection accepts only exact final definitions without mutatio
   const inspection = await inspectDeviceBridgeT1Schema(fake.client);
   assert.equal(inspection.ready, true);
   assert.equal(fake.client.calls.some(call => /\b(LOCK|ALTER|CREATE|DROP|UPDATE)\b/i.test(call.sql)), false);
+});
+
+test("runtime T1 inspection accepts only the exact named forward-compatible T2 command constraint", async () => {
+  const fake = migrationClient({ tinder: "FINAL", command: "T2" });
+  const inspection = await inspectDeviceBridgeT1Schema(fake.client);
+  assert.equal(inspection.ready, true);
+  const command = inspection.constraints.find(item => item.specification.column === "command_type");
+  assert.equal(command.constraintName, T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME);
+  assert.equal(await migrateDeviceBridgeSchema(fake.pool).then(result => result.migrated), false);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
 });
 
 test("semantic T1 check changes stop before any DDL", async () => {

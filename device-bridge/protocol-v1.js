@@ -9,10 +9,21 @@ export const T0_DEVICE_CAPABILITIES = Object.freeze([
 ]);
 
 export const TINDER_MANUAL_GATE_CAPABILITY = "TINDER_MANUAL_GATE_V1";
+export const TINDER_HUMAN_ARMED_CONVERSATION_BINDING_CAPABILITY =
+  "TINDER_HUMAN_ARMED_CONVERSATION_BINDING_V1";
 
 export const T1_DEVICE_CAPABILITIES = Object.freeze([
   ...T0_DEVICE_CAPABILITIES,
   TINDER_MANUAL_GATE_CAPABILITY
+]);
+
+// T2 is an exact additive capability profile.  It does not make a Tinder
+// conversation identifiable: it only permits a separately human-authorized,
+// one-shot association command to be delivered to the already-connected
+// local bridge.
+export const T2_DEVICE_CAPABILITIES = Object.freeze([
+  ...T1_DEVICE_CAPABILITIES,
+  TINDER_HUMAN_ARMED_CONVERSATION_BINDING_CAPABILITY
 ]);
 
 export const T0_DEVICE_BRIDGE_COMMANDS = Object.freeze([
@@ -26,9 +37,14 @@ export const T1_TINDER_MANUAL_GATE_COMMANDS = Object.freeze([
   "DISCONNECT_TINDER"
 ]);
 
+export const T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS = Object.freeze([
+  "ARM_TINDER_CONVERSATION_BINDING"
+]);
+
 export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
   ...T0_DEVICE_BRIDGE_COMMANDS,
-  ...T1_TINDER_MANUAL_GATE_COMMANDS
+  ...T1_TINDER_MANUAL_GATE_COMMANDS,
+  ...T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS
 ]);
 
 export const BRIDGE_SERVICE_STATES = Object.freeze([
@@ -80,11 +96,17 @@ function exactArray(left, right) {
 export function deviceBridgeCapabilityProfile(capabilities) {
   if (exactArray(capabilities, T0_DEVICE_CAPABILITIES)) return "T0";
   if (exactArray(capabilities, T1_DEVICE_CAPABILITIES)) return "T1";
+  if (exactArray(capabilities, T2_DEVICE_CAPABILITIES)) return "T2";
   return null;
 }
 
 export function isTinderManualGateCapable(capabilities) {
-  return deviceBridgeCapabilityProfile(capabilities) === "T1";
+  const profile = deviceBridgeCapabilityProfile(capabilities);
+  return profile === "T1" || profile === "T2";
+}
+
+export function isTinderHumanArmedConversationBindingCapable(capabilities) {
+  return deviceBridgeCapabilityProfile(capabilities) === "T2";
 }
 
 export function isKnownTinderStateForCapabilities(state, capabilities) {

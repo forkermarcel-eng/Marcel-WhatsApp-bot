@@ -13,6 +13,7 @@ import {
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const CAPTURE_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
 const REUSED_CONTACT_ID = 17;
+const ARM_COMMAND_ID = "d565e8a7-ef60-42d0-b19d-26e7904390fa";
 
 function safeCapture(overrides = {}) {
   return {
@@ -55,6 +56,18 @@ function safeCaptureV2({ token = "e".repeat(64), includeEvidence = true } = {}) 
           token
         }
       } : {})
+    }
+  };
+}
+
+function safeCaptureV3({ commandId = ARM_COMMAND_ID } = {}) {
+  const capture = safeCapture();
+  return {
+    ...capture,
+    captureMetadata: {
+      ...capture.captureMetadata,
+      schemaVersion: "tinder-visible-chat-v3",
+      humanBindingPermit: { command_id: commandId }
     }
   };
 }
@@ -180,6 +193,124 @@ test("V2 retains only the exact opaque thread evidence and remains pending", asy
   assert.equal(stored.resolvedContactId, null);
   assert.equal(JSON.stringify(stored).includes("contactId"), false);
   assert.equal(JSON.stringify(stored).includes("tinder_profile"), false);
+});
+
+test("V3 resolves only through a same-transaction human-armed permit and never persists it", async () => {
+  const repository = fixtureRepository();
+  const calls = [];
+  const gateway = {
+    async authorizeIncomingCapturePermit(transaction, input) {
+      calls.push({ type: "authorize", transaction, input });
+      return {
+        status: "AUTHORIZED",
+        authorization: Object.freeze({ private: true, contactId: 77 })
+      };
+    },
+    async consumeAuthorizedIncomingPermit(transaction, input) {
+      calls.push({ type: "consume", transaction, input });
+      return { status: "CONSUMED", contactId: 77 };
+    }
+  };
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z"),
+    humanBindingPermitGateway: gateway
+  });
+
+  const stored = await store.storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV3(),
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  });
+
+  assert.equal(stored.schemaVersion, "tinder-visible-chat-v3");
+  assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.RESOLVED);
+  assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.CONFIRMED);
+  assert.equal(stored.resolvedContactId, 77);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].type, "authorize");
+  assert.deepEqual(calls[0].input, {
+    commandId: ARM_COMMAND_ID,
+    deviceId: DEVICE_ID,
+    captureId: CAPTURE_ID
+  });
+  assert.equal(calls[1].type, "consume");
+  assert.equal(calls[0].transaction, calls[1].transaction);
+  assert.equal(JSON.stringify(stored).includes(ARM_COMMAND_ID), false);
+  assert.equal(Object.hasOwn(stored.visibleThreadMetadata, "humanBindingPermit"), false);
+  assert.equal(repository.reusableMappingRequests.length, 0);
+});
+
+test("V3 rejects missing, injected or unavailable permit gateways before capture insertion", async () => {
+  const noGateway = fixtureRepository();
+  const storeWithoutGateway = createTinderCaptureStore(noGateway, { createCaptureId: () => CAPTURE_ID });
+  await assert.rejects(
+    () => storeWithoutGateway.storeSafeCapture({
+      deviceId: DEVICE_ID, capture: safeCaptureV3(), provenance: { source: "android_visible_chat" }
+    }),
+    error => error instanceof TinderCaptureValidationError && error.code === "HUMAN_BINDING_PERMIT_NOT_AVAILABLE"
+  );
+  assert.equal(noGateway.rows.length, 0);
+
+  for (const invalidCapture of [
+    safeCaptureV3({ commandId: "not-a-uuid" }),
+    {
+      ...safeCaptureV3(),
+      captureMetadata: {
+        ...safeCaptureV3().captureMetadata,
+        unexpected: true
+      }
+    },
+    {
+      ...safeCapture(),
+      captureMetadata: {
+        ...safeCapture().captureMetadata,
+        humanBindingPermit: { command_id: ARM_COMMAND_ID }
+      }
+    }
+  ]) {
+    assert.throws(
+      () => validateSafeVisibleChatCapture(invalidCapture),
+      error => error instanceof TinderCaptureValidationError && error.code === "INVALID_HUMAN_BINDING_PERMIT"
+    );
+  }
+});
+
+test("V3 validates its permit but refuses a duplicate legacy observation without consuming it", async () => {
+  const repository = fixtureRepository();
+  repository.rows.push(Object.freeze({
+    captureId: "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+    deviceId: DEVICE_ID,
+    runtimeThreadFingerprint: "b".repeat(64),
+    captureFingerprint: "a".repeat(64),
+    schemaVersion: "tinder-visible-chat-v2"
+  }));
+  const calls = [];
+  const gateway = {
+    async authorizeIncomingCapturePermit(transaction, input) {
+      calls.push({ type: "authorize", transaction, input });
+      return { status: "AUTHORIZED", authorization: Object.freeze({ contactId: 77 }) };
+    },
+    async consumeAuthorizedIncomingPermit() {
+      assert.fail("a non-fresh V3 observation must not consume its permit");
+    }
+  };
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    humanBindingPermitGateway: gateway
+  });
+
+  await assert.rejects(
+    () => store.storeSafeCapture({
+      deviceId: DEVICE_ID,
+      capture: safeCaptureV3(),
+      provenance: { source: "android_visible_chat", protocolVersion: 1 }
+    }),
+    error => error instanceof TinderCaptureValidationError
+      && error.code === "HUMAN_BINDING_CAPTURE_NOT_FRESH"
+  );
+  assert.deepEqual(calls.map(call => call.type), ["authorize"]);
+  assert.equal(repository.rows.length, 1);
 });
 
 test("a later V2 capture reuses only a matching human-confirmed conversation binding across a changed runtime", async () => {

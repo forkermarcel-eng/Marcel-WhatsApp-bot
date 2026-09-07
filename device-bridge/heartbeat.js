@@ -5,6 +5,7 @@ import {
   DeviceBridgeProtocolError,
   deviceBridgeCapabilityProfile,
   isKnownTinderStateForCapabilities,
+  isTinderHumanArmedConversationBindingCapable,
   isTinderManualGateCapable,
   isExactUtcTimestamp,
   isUuidV4,
@@ -75,10 +76,16 @@ function commandEnvelope(row) {
 
 async function selectDeliverableCommands(client, deviceId, capabilities, now) {
   const t1Capable = isTinderManualGateCapable(capabilities);
-  const commandTypes = t1Capable
+  const humanArmedBindingCapable = isTinderHumanArmedConversationBindingCapable(capabilities);
+  const commandTypes = humanArmedBindingCapable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING'"
+    : t1Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
     : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
-  const payloadPredicate = t1Capable
+  const payloadPredicate = humanArmedBindingCapable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING') AND payload='{}'::jsonb)`
+    : t1Capable
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER') AND payload='{}'::jsonb)`
     : "";

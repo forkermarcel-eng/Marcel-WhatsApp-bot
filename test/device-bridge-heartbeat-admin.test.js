@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   T0_DEVICE_CAPABILITIES,
   T1_DEVICE_CAPABILITIES,
+  T2_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
 } from "../device-bridge/protocol-v1.js";
@@ -112,9 +113,12 @@ function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt =
       if (sql.includes("INSERT INTO device_bridge_audit_events")) { state.audits += 1; return { rowCount: 1, rows: [] }; }
       if (sql.includes("FROM device_bridge_commands")) {
         const deliversT1 = sql.includes("CONNECT_TINDER") && sql.includes("DISCONNECT_TINDER");
+        const deliversT2 = deliversT1 && sql.includes("ARM_TINDER_CONVERSATION_BINDING");
         return {
           rows: commands.filter(command =>
-            deliversT1 || !["CONNECT_TINDER", "DISCONNECT_TINDER"].includes(command.command_type)
+            deliversT2
+              || (deliversT1 && command.command_type !== "ARM_TINDER_CONVERSATION_BINDING")
+              || !["CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING"].includes(command.command_type)
           )
         };
       }
@@ -272,6 +276,39 @@ test("T1 command delivery is capability-gated against the current heartbeat prof
   assert.match(t1Query.sql, /CONNECT_TINDER/);
   assert.equal(response.commands[0].type, "CONNECT_TINDER");
   assert.deepEqual(response.commands[0].payload, {});
+});
+
+test("T2 human-armed conversation command is delivered only to the exact T2 profile", async () => {
+  const command = commandRow(
+    "ARM_TINDER_CONVERSATION_BINDING",
+    new Date(NOW.valueOf() - 1000),
+    "44444444-4444-4444-8444-444444444444"
+  );
+  const t1Payload = heartbeatPayload({ capabilities: T1_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const t1Request = heartbeatRequest(t1Payload);
+  const t1 = heartbeatPool({ request: t1Request, commands: [command] });
+  const t1Response = await processHeartbeatTransaction(
+    t1.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t1Request.hash },
+    t1Payload,
+    NOW
+  );
+  assert.deepEqual(t1Response.commands, []);
+  assert.doesNotMatch(t1.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /ARM_TINDER_CONVERSATION_BINDING/);
+
+  const t2Payload = heartbeatPayload({ capabilities: T2_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const t2Request = heartbeatRequest(t2Payload);
+  const t2 = heartbeatPool({ request: t2Request, commands: [command] });
+  const t2Response = await processHeartbeatTransaction(
+    t2.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t2Request.hash },
+    t2Payload,
+    NOW
+  );
+  assert.equal(t2Response.commands.length, 1);
+  assert.equal(t2Response.commands[0].type, "ARM_TINDER_CONVERSATION_BINDING");
+  assert.deepEqual(t2Response.commands[0].payload, {});
+  assert.match(t2.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /ARM_TINDER_CONVERSATION_BINDING/);
 });
 
 function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN") {

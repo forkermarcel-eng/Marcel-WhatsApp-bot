@@ -7,6 +7,7 @@ import {
   DeviceBridgeProtocolError,
   T0_DEVICE_CAPABILITIES,
   T1_DEVICE_CAPABILITIES,
+  T2_DEVICE_CAPABILITIES,
   assertTimestampWithinWindow,
   canonicalRequest,
   deviceBridgeCapabilityProfile,
@@ -15,6 +16,7 @@ import {
   isExactUtcTimestamp,
   isKnownTinderStateForCapabilities,
   isTinderManualGateCapable,
+  isTinderHumanArmedConversationBindingCapable,
   isUuidV4,
   normalizeEnrollmentCode,
   parseP256Spki,
@@ -54,16 +56,21 @@ test("Protocol V1 constants are fixed", () => {
     signatureWindowSeconds: 300,
     maximumRequestBytes: 65536,
     commandBatchLimit: 50,
-    commands: ["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER"]
+    commands: ["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING"]
   });
 });
 
-test("T1 manual-gate capability extension is exact, ordered and fail closed", () => {
+test("T1/T2 manual-gate capability extensions are exact, ordered and fail closed", () => {
   assert.equal(deviceBridgeCapabilityProfile(T0_DEVICE_CAPABILITIES), "T0");
   assert.equal(deviceBridgeCapabilityProfile(T1_DEVICE_CAPABILITIES), "T1");
+  assert.equal(deviceBridgeCapabilityProfile(T2_DEVICE_CAPABILITIES), "T2");
   assert.equal(isTinderManualGateCapable(T0_DEVICE_CAPABILITIES), false);
   assert.equal(isTinderManualGateCapable(T1_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderManualGateCapable(T2_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderHumanArmedConversationBindingCapable(T1_DEVICE_CAPABILITIES), false);
+  assert.equal(isTinderHumanArmedConversationBindingCapable(T2_DEVICE_CAPABILITIES), true);
   assert.equal(deviceBridgeCapabilityProfile([...T1_DEVICE_CAPABILITIES].reverse()), null);
+  assert.equal(deviceBridgeCapabilityProfile([...T2_DEVICE_CAPABILITIES, "UNKNOWN_CAPABILITY_V1"]), null);
   assert.equal(deviceBridgeCapabilityProfile([...T1_DEVICE_CAPABILITIES, "UNKNOWN_CAPABILITY_V1"]), null);
   assert.equal(isKnownTinderStateForCapabilities("UNKNOWN", T0_DEVICE_CAPABILITIES), true);
   assert.equal(isKnownTinderStateForCapabilities("CONNECTED", T0_DEVICE_CAPABILITIES), false);

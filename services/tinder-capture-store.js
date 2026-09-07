@@ -1,12 +1,14 @@
 import crypto from "node:crypto";
 const TINDER_CAPTURE_SCHEMA_VERSION_V1 = "tinder-visible-chat-v1";
 const TINDER_CAPTURE_SCHEMA_VERSION_V2 = "tinder-visible-chat-v2";
+const TINDER_CAPTURE_SCHEMA_VERSION_V3 = "tinder-visible-chat-v3";
 // Retained as the legacy default export for callers that explicitly create
 // V1 captures. New Android clients declare V2 in their signed metadata.
 const TINDER_CAPTURE_SCHEMA_VERSION = TINDER_CAPTURE_SCHEMA_VERSION_V1;
 const TINDER_CAPTURE_SCHEMA_VERSIONS = new Set([
   TINDER_CAPTURE_SCHEMA_VERSION_V1,
-  TINDER_CAPTURE_SCHEMA_VERSION_V2
+  TINDER_CAPTURE_SCHEMA_VERSION_V2,
+  TINDER_CAPTURE_SCHEMA_VERSION_V3
 ]);
 const TINDER_SOURCE_PACKAGE = "com.tinder";
 const TINDER_IDENTIFIER_TYPE = "tinder_profile";
@@ -14,6 +16,10 @@ const TINDER_THREAD_BINDING_EVIDENCE = Object.freeze({
   kind: "tinder_accessibility_header_unique_id_hmac_v1",
   role: "HEADER_TITLE",
   status: "OBSERVED_UNVERIFIED"
+});
+const TINDER_HUMAN_ARMED_PERMIT = Object.freeze({
+  field: "humanBindingPermit",
+  commandField: "command_id"
 });
 
 const TINDER_CAPTURE_MAPPING_STATUS = Object.freeze({
@@ -201,6 +207,50 @@ function normalizeThreadBindingEvidence(visibleThreadMetadata, schemaVersion) {
 }
 
 /**
+ * V3 does not contain an identity. It contains only the opaque command UUID
+ * delivered after a separate human decision. This UUID is validated for the
+ * in-transaction permit check and is intentionally never persisted in the
+ * capture record or returned through a dashboard response.
+ */
+function normalizeHumanArmedBindingPermit(captureMetadata, schemaVersion) {
+  const hasPermit = Object.hasOwn(captureMetadata, TINDER_HUMAN_ARMED_PERMIT.field);
+  if (schemaVersion !== TINDER_CAPTURE_SCHEMA_VERSION_V3) {
+    if (hasPermit) {
+      throw new TinderCaptureValidationError(
+        "Eine Human-Binding-Freigabe erfordert Capture-Schema V3.",
+        "INVALID_HUMAN_BINDING_PERMIT"
+      );
+    }
+    return null;
+  }
+
+  if (!exactKeys(captureMetadata, [
+    "schemaVersion", "sourcePackage", "capturedAt", "visibleNodeCount",
+    "captureFingerprint", TINDER_HUMAN_ARMED_PERMIT.field
+  ])) {
+    throw new TinderCaptureValidationError(
+      "Capture-Schema V3 enthÃ¤lt nicht erlaubte Metadaten.",
+      "INVALID_HUMAN_BINDING_PERMIT"
+    );
+  }
+  const permit = captureMetadata[TINDER_HUMAN_ARMED_PERMIT.field];
+  if (!exactKeys(permit, [TINDER_HUMAN_ARMED_PERMIT.commandField])) {
+    throw new TinderCaptureValidationError(
+      "Die Human-Binding-Freigabe ist ungÃ¼ltig.",
+      "INVALID_HUMAN_BINDING_PERMIT"
+    );
+  }
+  const commandId = normalizedUuidV4(permit[TINDER_HUMAN_ARMED_PERMIT.commandField]);
+  if (!commandId) {
+    throw new TinderCaptureValidationError(
+      "Die Human-Binding-Freigabe ist ungÃ¼ltig.",
+      "INVALID_HUMAN_BINDING_PERMIT"
+    );
+  }
+  return commandId;
+}
+
+/**
  * Validates the trusted T2 wire shape before it can be persisted.  It accepts
  * no contact identifier and does not infer one from display data.
  */
@@ -243,6 +293,10 @@ function validateSafeVisibleChatCapture(capture) {
     visibleThreadMetadata,
     schemaVersion
   );
+  const humanBindingPermitCommandId = normalizeHumanArmedBindingPermit(
+    captureMetadata,
+    schemaVersion
+  );
 
   return Object.freeze({
     schemaVersion,
@@ -271,7 +325,8 @@ function validateSafeVisibleChatCapture(capture) {
       ...(threadBindingEvidence === null ? {} : { threadBindingEvidence })
     }),
     visibleMessages: normalizeVisibleMessages(visibleMessages),
-    safetyStatus: "SAFE"
+    safetyStatus: "SAFE",
+    ...(humanBindingPermitCommandId === null ? {} : { humanBindingPermitCommandId })
   });
 }
 
@@ -389,9 +444,43 @@ function normalizeReusableConfirmedConversationBinding(row, {
   return Object.freeze({ resolvedContactId });
 }
 
+function requireHumanBindingPermitGateway(gateway) {
+  if (!gateway
+      || typeof gateway.authorizeIncomingCapturePermit !== "function"
+      || typeof gateway.consumeAuthorizedIncomingPermit !== "function") {
+    throw new TinderCaptureValidationError(
+      "Die Human-Binding-Freigabe ist nicht verfÃ¼gbar.",
+      "HUMAN_BINDING_PERMIT_NOT_AVAILABLE"
+    );
+  }
+  return gateway;
+}
+
+function authorizedHumanBindingContact(result) {
+  const contactId = positiveInteger(result?.authorization?.contactId);
+  if (result?.status !== "AUTHORIZED" || contactId === null) {
+    throw new TinderCaptureValidationError(
+      "Die Human-Binding-Freigabe ist nicht verfÃ¼gbar.",
+      "HUMAN_BINDING_PERMIT_NOT_AVAILABLE"
+    );
+  }
+  return Object.freeze({ authorization: result.authorization, contactId });
+}
+
+function consumedHumanBindingContact(result, expectedContactId) {
+  if (result?.status !== "CONSUMED"
+      || positiveInteger(result?.contactId) !== expectedContactId) {
+    throw new TinderCaptureValidationError(
+      "Die Human-Binding-Freigabe konnte nicht verbraucht werden.",
+      "HUMAN_BINDING_PERMIT_NOT_AVAILABLE"
+    );
+  }
+}
+
 function createTinderCaptureStore(repository, {
   createCaptureId = () => crypto.randomUUID(),
-  now = () => new Date()
+  now = () => new Date(),
+  humanBindingPermitGateway = null
 } = {}) {
   for (const method of [
     "withTransaction",
@@ -432,41 +521,70 @@ function createTinderCaptureStore(repository, {
         throw new TinderCaptureValidationError("Die Capture-Revision ist ungültig.", "INVALID_CAPTURE_REVISION");
       }
 
+      let humanBindingAuthorization = null;
+      if (normalizedCapture.schemaVersion === TINDER_CAPTURE_SCHEMA_VERSION_V3) {
+        const gateway = requireHumanBindingPermitGateway(humanBindingPermitGateway);
+        humanBindingAuthorization = authorizedHumanBindingContact(
+          await gateway.authorizeIncomingCapturePermit(transaction, {
+            commandId: normalizedCapture.humanBindingPermitCommandId,
+            deviceId: normalizedDeviceId,
+            captureId
+          })
+        );
+      }
+
       const existing = await repository.findCaptureByFingerprint(transaction, {
         deviceId: normalizedDeviceId,
         runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint,
         captureFingerprint: normalizedCapture.captureFingerprint
       });
-      if (existing) return existing;
+      if (existing) {
+        // A human-armed V3 permit authorizes exactly one fresh observation.
+        // Returning a prior V1/V2 row here would silently skip both its
+        // explicit permit verification and one-use consumption.  Abort the
+        // whole transaction instead, leaving the verified permit unconsumed.
+        if (humanBindingAuthorization) {
+          throw new TinderCaptureValidationError(
+            "Die Human-Binding-Capture ist nicht neu.",
+            "HUMAN_BINDING_CAPTURE_NOT_FRESH"
+          );
+        }
+        return existing;
+      }
 
-      // A future capture may reuse only a prior explicit human confirmation
-      // from this exact authenticated device/thread. No visible display data
-      // or client-provided identity participates in this decision.
-      const reusableConversationBinding = normalizeReusableConfirmedConversationBinding(
-        await findReusableConfirmedConversationBinding(transaction, {
-          deviceId: normalizedDeviceId,
-          threadBindingEvidence: normalizedCapture.visibleThreadMetadata.threadBindingEvidence ?? null
-        }),
-        {
-          deviceId: normalizedDeviceId,
-          threadBindingEvidence: normalizedCapture.visibleThreadMetadata.threadBindingEvidence ?? null
-        }
-      );
-      const reusableMapping = normalizeReusableConfirmedMapping(
-        await repository.findReusableConfirmedMapping(transaction, {
-          deviceId: normalizedDeviceId,
-          runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
-        }),
-        {
-          deviceId: normalizedDeviceId,
-          runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
-        }
-      );
+      // V1/V2 may reuse only separately verified source evidence. V3 is the
+      // distinct human-armed path: it never falls back to a fingerprint,
+      // display name, legacy profile mapping or a prior permit.
+      const reusableConversationBinding = humanBindingAuthorization
+        ? null
+        : normalizeReusableConfirmedConversationBinding(
+          await findReusableConfirmedConversationBinding(transaction, {
+            deviceId: normalizedDeviceId,
+            threadBindingEvidence: normalizedCapture.visibleThreadMetadata.threadBindingEvidence ?? null
+          }),
+          {
+            deviceId: normalizedDeviceId,
+            threadBindingEvidence: normalizedCapture.visibleThreadMetadata.threadBindingEvidence ?? null
+          }
+        );
+      const reusableMapping = humanBindingAuthorization
+        ? null
+        : normalizeReusableConfirmedMapping(
+          await repository.findReusableConfirmedMapping(transaction, {
+            deviceId: normalizedDeviceId,
+            runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
+          }),
+          {
+            deviceId: normalizedDeviceId,
+            runtimeThreadFingerprint: normalizedCapture.visibleThreadMetadata.threadFingerprint
+          }
+        );
 
       // A legacy profile mapping and a newer opaque conversation binding must
       // agree. A disagreement is surfaced as a pending conflict, never an
       // automatic overwrite or preference for a visible UI value.
-      const reusableContactId = reusableConversationBinding?.resolvedContactId
+      const reusableContactId = humanBindingAuthorization?.contactId
+        ?? reusableConversationBinding?.resolvedContactId
         ?? reusableMapping?.resolvedContactId
         ?? null;
       const reusableConflict = reusableConversationBinding && reusableMapping
@@ -500,6 +618,14 @@ function createTinderCaptureStore(repository, {
       });
 
       const persisted = await repository.insertCapture(transaction, record);
+      if (humanBindingAuthorization) {
+        const gateway = requireHumanBindingPermitGateway(humanBindingPermitGateway);
+        const consumed = await gateway.consumeAuthorizedIncomingPermit(transaction, {
+          authorization: humanBindingAuthorization.authorization,
+          captureId
+        });
+        consumedHumanBindingContact(consumed, humanBindingAuthorization.contactId);
+      }
       return persisted || record;
     });
   }
@@ -735,7 +861,9 @@ function createPgTinderCaptureRepository(pool) {
 export {
   TINDER_CAPTURE_SCHEMA_VERSION_V1,
   TINDER_CAPTURE_SCHEMA_VERSION_V2,
+  TINDER_CAPTURE_SCHEMA_VERSION_V3,
   TINDER_THREAD_BINDING_EVIDENCE,
+  TINDER_HUMAN_ARMED_PERMIT,
   TINDER_CAPTURE_MAPPING_STATUS,
   TINDER_CAPTURE_REVIEW_STATUS,
   TINDER_PENDING_HUMAN_MAPPING_LIMIT,
@@ -745,6 +873,7 @@ export {
   captureSafetyStatus,
   createPgTinderCaptureRepository,
   createTinderCaptureStore,
+  normalizeHumanArmedBindingPermit,
   normalizeThreadBindingEvidence,
   validateSafeVisibleChatCapture
 };

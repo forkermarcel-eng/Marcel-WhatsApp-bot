@@ -2,8 +2,10 @@ import {
   BRIDGE_SERVICE_STATES,
   DEVICE_BRIDGE_COMMANDS,
   DeviceBridgeProtocolError,
+  T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS,
   T1_TINDER_MANUAL_GATE_COMMANDS,
   isKnownTinderStateForCapabilities,
+  isTinderHumanArmedConversationBindingCapable,
   isTinderManualGateCapable,
   isExactUtcTimestamp,
   isUuidV4,
@@ -23,6 +25,7 @@ const ACK_STATUSES = new Set(["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EX
 const TERMINAL_STATUSES = new Set(["SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"]);
 const SUPPORTED_COMMANDS = new Set(DEVICE_BRIDGE_COMMANDS);
 const TINDER_MANUAL_GATE_COMMANDS = new Set(T1_TINDER_MANUAL_GATE_COMMANDS);
+const TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS = new Set(T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS);
 const BRIDGE_STATES = new Set(BRIDGE_SERVICE_STATES);
 const MAX_RESULT_BYTES = 1024;
 const MAX_ERROR_BYTES = 1024;
@@ -53,8 +56,9 @@ function jsonBytes(value) {
 
 function validateSucceededResult(commandType, result, capabilities = null) {
   if (result === null) {
-    if (!TINDER_MANUAL_GATE_COMMANDS.has(commandType)) return;
-    throw invalidAck("Ack result is required for this Tinder manual gate command");
+    if (!TINDER_MANUAL_GATE_COMMANDS.has(commandType)
+        && !TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS.has(commandType)) return;
+    throw invalidAck("Ack result is required for this Tinder command");
   }
   if (jsonBytes(result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
   if (commandType === "PING" && exactKeys(result, ["pong"]) && result.pong === true) return;
@@ -66,6 +70,9 @@ function validateSucceededResult(commandType, result, capabilities = null) {
       result.device_status.automation_state === "STOPPED") return;
   if (commandType === "CONNECT_TINDER" && exactKeys(result, ["tinder_state"]) && result.tinder_state === "CONNECTED") return;
   if (commandType === "DISCONNECT_TINDER" && exactKeys(result, ["tinder_state"]) && result.tinder_state === "DISCONNECTED") return;
+  if (commandType === "ARM_TINDER_CONVERSATION_BINDING"
+      && exactKeys(result, ["conversation_binding_permit"])
+      && result.conversation_binding_permit === "ARMED") return;
   throw invalidAck("Ack result is not allowed for this T0 command");
 }
 
@@ -164,6 +171,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     if (!SUPPORTED_COMMANDS.has(command.command_type)) throw new DeviceBridgeProtocolError(400, "COMMAND_TYPE_UNSUPPORTED", "Command type is not supported");
     if (TINDER_MANUAL_GATE_COMMANDS.has(command.command_type) && !isTinderManualGateCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual gate");
+    }
+    if (TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS.has(command.command_type)
+        && !isTinderHumanArmedConversationBindingCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support human-armed conversation binding");
     }
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
 

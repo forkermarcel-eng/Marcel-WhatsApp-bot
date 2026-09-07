@@ -6,6 +6,11 @@ import { canonicalCheckDefinition } from "./schema-contract.js";
 
 export const T1_TINDER_STATE_CONSTRAINT_NAME = "device_bridge_devices_tinder_state_check_v1";
 export const T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_type_check_v1";
+// A later exact command-type superset remains T1-compatible for all existing
+// runtime/readiness callers.  It is named separately so only its own explicit
+// human-armed migration may create it.
+export const T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME =
+  "device_bridge_commands_command_type_check_v2";
 
 const LEGACY_T1_TINDER_STATE_CONSTRAINT_NAME = "device_bridge_devices_tinder_state_check";
 const LEGACY_T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_type_check";
@@ -33,6 +38,10 @@ const FINAL_COMMAND_TYPES = Object.freeze([
   "CONNECT_TINDER",
   "DISCONNECT_TINDER"
 ]);
+const T2_HUMAN_ARMED_COMMAND_TYPES = Object.freeze([
+  ...FINAL_COMMAND_TYPES,
+  "ARM_TINDER_CONVERSATION_BINDING"
+]);
 
 export const T1_TINDER_STATE_CHECK_EXPRESSION = `
   tinder_state IN ('DISCONNECTED', 'CONNECTING', 'CONNECTED', 'AUTH_REQUIRED', 'REVIEW_REQUIRED', 'UNKNOWN')
@@ -40,6 +49,10 @@ export const T1_TINDER_STATE_CHECK_EXPRESSION = `
 
 export const T1_COMMAND_TYPE_CHECK_EXPRESSION = `
   command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER')
+`;
+
+export const T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION = `
+  command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING')
 `;
 
 export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
@@ -59,7 +72,10 @@ export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
     legacyName: LEGACY_T1_COMMAND_TYPE_CONSTRAINT_NAME,
     expression: T1_COMMAND_TYPE_CHECK_EXPRESSION,
     legacyValues: LEGACY_COMMAND_TYPES,
-    finalValues: FINAL_COMMAND_TYPES
+    finalValues: FINAL_COMMAND_TYPES,
+    forwardCompatibleName: T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
+    forwardCompatibleExpression: T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION,
+    forwardCompatibleValues: T2_HUMAN_ARMED_COMMAND_TYPES
   })
 ]);
 
@@ -98,11 +114,30 @@ async function inspectColumnConstraint(client, specification) {
 
   const current = matches[0];
   if (current.conname === specification.name && hasExactCheckDefinition(current.constraint_definition, specification.expression)) {
-    return { specification, state: "FINAL", constraintName: current.conname };
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.expression
+    };
+  }
+  if (current.conname === specification.forwardCompatibleName
+      && hasExactCheckDefinition(current.constraint_definition, specification.forwardCompatibleExpression)) {
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.forwardCompatibleExpression
+    };
   }
   const legacyExpression = `${specification.column} IN (${specification.legacyValues.map(value => `'${value}'`).join(", ")})`;
   if (current.conname === specification.legacyName && hasExactCheckDefinition(current.constraint_definition, legacyExpression)) {
-    return { specification, state: "LEGACY", constraintName: current.conname };
+    return {
+      specification,
+      state: "LEGACY",
+      constraintName: current.conname,
+      compatibilityExpression: legacyExpression
+    };
   }
   return { specification, state: "INVALID", constraintName: null };
 }
@@ -141,7 +176,7 @@ export async function preflightDeviceBridgeT1SchemaMigration(client) {
       SELECT EXISTS (
         SELECT 1
         FROM ${item.specification.table}
-        WHERE (${item.specification.expression}) IS NOT TRUE
+        WHERE (${item.compatibilityExpression ?? item.specification.expression}) IS NOT TRUE
       ) AS incompatible
     `);
     if (compatibility.rows[0]?.incompatible !== false) {

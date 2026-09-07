@@ -15,6 +15,10 @@ import {
   createPgTinderCaptureRepository,
   createTinderCaptureStore
 } from "../services/tinder-capture-store.js";
+import {
+  createPgTinderHumanArmedConversationBindingRepository,
+  createTinderHumanArmedConversationBindingService
+} from "../services/tinder-human-armed-conversation-binding.js";
 
 /* ==================================================
 T2 TINDER VISIBLE-CHAT CAPTURE INGRESS
@@ -162,9 +166,21 @@ async function assertCaptureDeviceGates(client, auth, now) {
 function createAuthenticatedCaptureStore(pool, auth, {
   now = () => new Date(),
   createRepository = createPgTinderCaptureRepository,
-  createStore = createTinderCaptureStore
+  createStore = createTinderCaptureStore,
+  createHumanArmedRepository = createPgTinderHumanArmedConversationBindingRepository,
+  createHumanArmedService = createTinderHumanArmedConversationBindingService
 } = {}) {
   const repository = createRepository(pool);
+  let humanArmedService = null;
+  const currentHumanArmedService = () => {
+    if (!humanArmedService) {
+      humanArmedService = createHumanArmedService(
+        createHumanArmedRepository(pool),
+        { now }
+      );
+    }
+    return humanArmedService;
+  };
   const transactionRepository = Object.freeze({
     ...repository,
     async withTransaction(work) {
@@ -185,7 +201,15 @@ function createAuthenticatedCaptureStore(pool, auth, {
       }
     }
   });
-  return createStore(transactionRepository, { now });
+  return createStore(transactionRepository, {
+    now,
+    humanBindingPermitGateway: Object.freeze({
+      authorizeIncomingCapturePermit: (...args) =>
+        currentHumanArmedService().authorizeIncomingCapturePermit(...args),
+      consumeAuthorizedIncomingPermit: (...args) =>
+        currentHumanArmedService().consumeAuthorizedIncomingPermit(...args)
+    })
+  });
 }
 
 function createTinderCaptureIngressHandler(pool, {

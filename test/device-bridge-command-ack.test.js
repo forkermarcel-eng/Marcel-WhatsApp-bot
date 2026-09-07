@@ -11,6 +11,7 @@ import {
 import {
   T0_DEVICE_CAPABILITIES,
   T1_DEVICE_CAPABILITIES,
+  T2_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
 } from "../device-bridge/protocol-v1.js";
@@ -43,7 +44,9 @@ function ackPayload(status, overrides = {}) {
 function manualGateAckPayload(type, status, overrides = {}) {
   const result = type === "CONNECT_TINDER"
     ? { tinder_state: "CONNECTED" }
-    : { tinder_state: "DISCONNECTED" };
+    : type === "DISCONNECT_TINDER"
+    ? { tinder_state: "DISCONNECTED" }
+    : { conversation_binding_permit: "ARMED" };
   return ackPayload(status, {
     ...(status === "SUCCEEDED" ? { result } : {}),
     ...overrides
@@ -196,6 +199,50 @@ test("T1 command acknowledgement rejects incompatible devices and malformed succ
       ackRequest(manualGateAckPayload(type, "SUCCEEDED", { result })).req,
       type,
       T1_DEVICE_CAPABILITIES
+    ), error => error.code === "INVALID_BODY");
+  }
+});
+
+test("T2 human-armed conversation acknowledgement is exact and capability-gated", async () => {
+  const received = manualGateAckPayload("ARM_TINDER_CONVERSATION_BINDING", "RECEIVED");
+  const succeeded = manualGateAckPayload("ARM_TINDER_CONVERSATION_BINDING", "SUCCEEDED");
+  const fake = ackPool({
+    commandType: "ARM_TINDER_CONVERSATION_BINDING",
+    capabilities: T2_DEVICE_CAPABILITIES,
+    history: [historyRow(received)]
+  });
+  const response = await processCommandAckTransaction(fake.pool, auth(), succeeded, NOW);
+  assert.equal(response.status, "SUCCEEDED");
+  assert.equal(fake.state.commandUpdates, 1);
+
+  await assert.rejects(
+    () => processCommandAckTransaction(
+      ackPool({
+        commandType: "ARM_TINDER_CONVERSATION_BINDING",
+        capabilities: T1_DEVICE_CAPABILITIES
+      }).pool,
+      auth(),
+      received,
+      NOW
+    ),
+    error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
+  );
+
+  assert.doesNotThrow(() => parseAndValidateCommandAck(
+    ackRequest(succeeded).req,
+    "ARM_TINDER_CONVERSATION_BINDING",
+    T2_DEVICE_CAPABILITIES
+  ));
+  for (const result of [
+    null,
+    { conversation_binding_permit: "UNARMED" },
+    { conversation_binding_permit: "ARMED", injected: true },
+    { tinder_state: "CONNECTED" }
+  ]) {
+    assert.throws(() => parseAndValidateCommandAck(
+      ackRequest(manualGateAckPayload("ARM_TINDER_CONVERSATION_BINDING", "SUCCEEDED", { result })).req,
+      "ARM_TINDER_CONVERSATION_BINDING",
+      T2_DEVICE_CAPABILITIES
     ), error => error.code === "INVALID_BODY");
   }
 });

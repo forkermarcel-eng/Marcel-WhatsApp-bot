@@ -211,7 +211,7 @@ test("initial human-confirmed existing-contact arm creates opaque binding, empty
     deviceId: DEVICE_ID,
     commandType: HUMAN_ARMED_CONVERSATION_COMMAND_TYPE,
     payload: {},
-    expiresAt: "2026-09-07T12:05:00.000Z"
+    expiresAt: "2026-09-07T12:10:00.000Z"
   });
   assert.equal(Object.keys(command.payload).length, 0);
   assert.equal(repository.state.createdContacts.length, 0);
@@ -295,7 +295,7 @@ test("rearm loads only a human-confirmed persisted binding and never accepts a c
     deviceId: DEVICE_ID,
     commandType: HUMAN_ARMED_CONVERSATION_COMMAND_TYPE,
     payload: {},
-    expiresAt: "2026-09-07T12:05:00.000Z"
+    expiresAt: "2026-09-07T12:10:00.000Z"
   }]);
 
   await assert.rejects(
@@ -318,26 +318,25 @@ test("rearm blocks a revoked/non-human/WhatsApp binding and never queues a Tinde
   }
 });
 
-test("the fixed server-owned arm window covers a manual hand-off, consumes once, and expires at its exact boundary", async () => {
+test("the fixed server-owned arm window covers the measured manual hand-off, consumes once, and expires at its exact boundary", async () => {
   let currentTime = NOW;
   const repository = fixtureRepository({ bindings: [binding()] });
   const bindingService = service(repository, { now: () => currentTime });
 
   await bindingService.rearmExistingBinding({ bindingId: BINDING_ID, confirmed: true });
-  assert.equal(HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS, 5 * 60_000);
-  assert.equal(repository.state.commands[0].expiresAt, "2026-09-07T12:05:00.000Z");
-  assert.equal(repository.state.permits.get(PERMIT_ID).expires_at, "2026-09-07T12:05:00.000Z");
+  assert.equal(HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS, 10 * 60_000);
+  assert.equal(repository.state.commands[0].expiresAt, "2026-09-07T12:10:00.000Z");
+  assert.equal(repository.state.permits.get(PERMIT_ID).expires_at, "2026-09-07T12:10:00.000Z");
 
-  // Model a normal 30-second command poll/terminal ACK, followed by the
-  // existing bounded 60-second local one-shot window and a manual app switch.
-  // The command and permit remain exact, single-use server authority; only
-  // the fixed expiry changed.
+  // Model the measured 501-second dashboard-to-device/capture flow. The
+  // command and permit remain exact, single-use server authority; only the
+  // fixed expiry changed.
   Object.assign(repository.state.permits.get(PERMIT_ID), {
     terminal_status: "SUCCEEDED",
     ack_status: "SUCCEEDED",
     ack_result: { conversation_binding_permit: "ARMED" }
   });
-  currentTime = new Date("2026-09-07T12:04:30.000Z");
+  currentTime = new Date("2026-09-07T12:08:21.000Z");
   const duringManualFlow = await bindingService.authorizeIncomingCapturePermit({}, {
     commandId: PERMIT_ID,
     deviceId: DEVICE_ID,
@@ -364,7 +363,7 @@ test("the fixed server-owned arm window covers a manual hand-off, consumes once,
     ack_status: "SUCCEEDED",
     ack_result: { conversation_binding_permit: "ARMED" }
   });
-  currentTime = new Date("2026-09-07T12:05:00.000Z");
+  currentTime = new Date("2026-09-07T12:10:00.000Z");
   assert.deepEqual(await expiredService.authorizeIncomingCapturePermit({}, {
     commandId: PERMIT_ID,
     deviceId: DEVICE_ID,
@@ -502,6 +501,13 @@ test("constructor and input validation fail closed", async () => {
   assert.throws(
     () => createTinderHumanArmedConversationBindingService({}, {}),
     /repository\.withTransaction/
+  );
+  assert.doesNotThrow(
+    () => service(fixtureRepository(), { armTtlMs: 15 * 60_000 })
+  );
+  assert.throws(
+    () => service(fixtureRepository(), { armTtlMs: 15 * 60_000 + 1 }),
+    /safe bounded duration/
   );
   const repository = fixtureRepository();
   await assert.rejects(

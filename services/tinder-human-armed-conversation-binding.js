@@ -45,10 +45,10 @@ export const HUMAN_ARMED_CONVERSATION_PERMIT_ENVELOPE_FIELD =
 export const HUMAN_ARMED_CONVERSATION_PERMIT_COMMAND_FIELD = "command_id";
 // This is a server-owned, finite execution window. It starts with the
 // deliberate human arm and is shared by the queued command and its one-shot
-// permit; an ACK never extends it. Five minutes covers a normal dashboard to
-// device hand-off plus the bounded local one-shot window without turning the
-// authorization into a persistent gate.
-export const HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS = 5 * 60_000;
+// permit; an ACK never extends it. Ten minutes covers the measured manual
+// dashboard-to-device hand-off, bounded local one-shot, and immediate signed
+// capture submission without turning the authorization into a persistent gate.
+export const HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS = 10 * 60_000;
 
 export const HUMAN_ARMED_CONVERSATION_ACTION = Object.freeze({
   BIND_EXISTING: "BIND_EXISTING",

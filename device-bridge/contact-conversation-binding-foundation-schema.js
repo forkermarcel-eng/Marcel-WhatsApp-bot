@@ -137,7 +137,11 @@ export const CONTACT_CONVERSATION_BINDING_CONSTRAINT_CONTRACT = Object.freeze([
   tinderFoundationCheck(AUDIT_TABLE, "new_binding_revision IS NULL OR new_binding_revision > 0"),
   tinderFoundationCheck(AUDIT_TABLE, "jsonb_typeof(details) = 'object'"),
   tinderFoundationCheck(AUDIT_TABLE,
-    "NOT (details ?| ARRAY['reference_hash', 'reference_token', 'raw_unique_id', 'visible_name', 'message_text', 'capture_fingerprint', 'runtime_thread_fingerprint'])"
+    "NOT (details ?| ARRAY['reference_hash', 'reference_token', 'raw_unique_id', 'visible_name', 'message_text', 'capture_fingerprint', 'runtime_thread_fingerprint'])",
+    // PostgreSQL's catalog deparser may elide the parentheses immediately
+    // after unary NOT here. This fixed equivalent preserves the exact
+    // prohibited-key set; it does not accept a broader JSONB predicate.
+    "NOT details ?| ARRAY['reference_hash', 'reference_token', 'raw_unique_id', 'visible_name', 'message_text', 'capture_fingerprint', 'runtime_thread_fingerprint']"
   )
 ]);
 

@@ -142,6 +142,49 @@ test("conversation-binding contract rejects weakened active-owner uniqueness and
   );
 });
 
+test("conversation-binding accepts PostgreSQL's fixed unary-NOT audit-check deparse only", async () => {
+  const postgresqlDeparse = "CHECK (NOT details ?| ARRAY['reference_hash'::text, 'reference_token'::text, 'raw_unique_id'::text, 'visible_name'::text, 'message_text'::text, 'capture_fingerprint'::text, 'runtime_thread_fingerprint'::text])";
+  const client = fixtureClient({ canonical: true });
+  const original = client.query.bind(client);
+  client.query = async sql => {
+    const result = await original(sql);
+    if (sql.includes("FROM pg_constraint c")) {
+      return {
+        rows: result.rows.map(row => row.table_name === "contact_conversation_binding_audit"
+          && row.contype === "c"
+          && row.constraint_definition.includes("reference_hash")
+          ? { ...row, constraint_definition: postgresqlDeparse }
+          : row)
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectContactConversationBindingFoundationSchema(client, { assertIdentityReady: identityReady }),
+    { state: CONTACT_CONVERSATION_BINDING_FOUNDATION_STATE.CANONICAL }
+  );
+
+  const weakened = fixtureClient({ canonical: true });
+  const originalWeakened = weakened.query.bind(weakened);
+  weakened.query = async sql => {
+    const result = await originalWeakened(sql);
+    if (sql.includes("FROM pg_constraint c")) {
+      return {
+        rows: result.rows.map(row => row.table_name === "contact_conversation_binding_audit"
+          && row.contype === "c"
+          && row.constraint_definition.includes("reference_hash")
+          ? { ...row, constraint_definition: postgresqlDeparse.replace("'visible_name'", "'unreviewed_key'") }
+          : row)
+      };
+    }
+    return result;
+  };
+  assert.deepEqual(
+    await inspectContactConversationBindingFoundationSchema(weakened, { assertIdentityReady: identityReady }),
+    { state: CONTACT_CONVERSATION_BINDING_FOUNDATION_STATE.INVALID }
+  );
+});
+
 test("fixed source is explicit-only, channel-neutral and rejects appended DDL", () => {
   const source = readFileSync(
     new URL("../migrations/20260907_contact_conversation_binding_foundation.sql", import.meta.url),

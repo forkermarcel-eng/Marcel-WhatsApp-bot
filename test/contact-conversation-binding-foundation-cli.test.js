@@ -33,13 +33,15 @@ test("binding migration CLI emits bounded failure only and always closes its poo
     migrate: async () => { throw failure; },
     getFailureDiagnostic: error => error === failure ? {
       stage: "POSTCHECK", code: "DATABASE_OPERATION_FAILED", transaction: "STARTED",
-      rollback: "COMPLETED", ddl_started: true
+      rollback: "COMPLETED", ddl_started: true,
+      reason: "CONVERSATION_BINDING_POSTCHECK_SCHEMA_INVALID"
     } : null,
     logger: output
   });
   assert.equal(result, false);
   assert.equal(ended, true);
   assert.match(output.entries.join("\n"), /stage=POSTCHECK/);
+  assert.match(output.entries.join("\n"), /reason=CONVERSATION_BINDING_POSTCHECK_SCHEMA_INVALID/);
   assert.equal(output.entries.join("\n").includes(rawDetail), false);
   assert.equal(output.entries.join("\n").includes("private-not-logged"), false);
 });

@@ -2,10 +2,13 @@ import { readFileSync } from "node:fs";
 import { REQUIRED_TABLES } from "./schema-readiness.js";
 import {
   assertContactConversationBindingFoundationSchemaReady,
+  CONTACT_CONVERSATION_BINDING_FOUNDATION_STATE,
+  inspectContactConversationBindingFoundationSchema,
   preflightContactConversationBindingFoundationMigration
 } from "./contact-conversation-binding-foundation-schema.js";
 import {
   assertFixedTinderFoundationMigrationSource,
+  createTinderFoundationMigrationDiagnosticError,
   createExplicitTinderFoundationMigrationRunner,
   getTinderFoundationMigrationFailureDiagnostic,
   TINDER_FOUNDATION_MIGRATION_DIAGNOSTIC_STAGES
@@ -21,6 +24,9 @@ reviewed, released and invoked with --apply.
 
 export const CONTACT_CONVERSATION_BINDING_MIGRATION_DIAGNOSTIC_STAGES =
   TINDER_FOUNDATION_MIGRATION_DIAGNOSTIC_STAGES;
+export const CONTACT_CONVERSATION_BINDING_MIGRATION_DIAGNOSTIC_REASONS = Object.freeze([
+  "CONVERSATION_BINDING_POSTCHECK_SCHEMA_INVALID"
+]);
 
 const MIGRATION_SQL = readFileSync(
   new URL("../migrations/20260907_contact_conversation_binding_foundation.sql", import.meta.url),
@@ -72,12 +78,24 @@ const runner = createExplicitTinderFoundationMigrationRunner({
   validateSource: validateContactConversationBindingFoundationMigrationSource,
   preflight: preflightContactConversationBindingFoundationMigration,
   postcheck: async (client, { applied }) => {
+    // Preserve a bounded distinction between a fixed DDL that is visible but
+    // structurally noncanonical and an unexpected catalog/query failure.
+    // The latter deliberately remains generic and never leaks database data.
+    if (applied) {
+      const binding = await inspectContactConversationBindingFoundationSchema(client);
+      if (binding.state !== CONTACT_CONVERSATION_BINDING_FOUNDATION_STATE.CANONICAL) {
+        throw createTinderFoundationMigrationDiagnosticError(
+          "CONVERSATION_BINDING_POSTCHECK_SCHEMA_INVALID"
+        );
+      }
+    }
     const checked = await preflightContactConversationBindingFoundationMigration(client);
     if (applied) await assertContactConversationBindingFoundationSchemaReady(client);
     return checked;
   },
   lockRelations: lockedRelations,
-  advisoryLock: { namespace: 7421, key: 31 }
+  advisoryLock: { namespace: 7421, key: 31 },
+  diagnosticReasonCodes: CONTACT_CONVERSATION_BINDING_MIGRATION_DIAGNOSTIC_REASONS
 });
 
 export const validateContactConversationBindingFoundationPreDdl = runner.validatePreDdl;

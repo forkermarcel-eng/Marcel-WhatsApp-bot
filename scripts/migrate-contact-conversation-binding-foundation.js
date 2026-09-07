@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  CONTACT_CONVERSATION_BINDING_MIGRATION_DIAGNOSTIC_REASONS,
   CONTACT_CONVERSATION_BINDING_MIGRATION_DIAGNOSTIC_STAGES,
   getContactConversationBindingFoundationMigrationFailureDiagnostic,
   migrateContactConversationBindingFoundation
@@ -27,6 +28,7 @@ const CODES = new Set([
   "CLEANUP_FAILED",
   "DATABASE_OPERATION_FAILED"
 ]);
+const REASONS = new Set(CONTACT_CONVERSATION_BINDING_MIGRATION_DIAGNOSTIC_REASONS);
 const TRANSACTIONS = new Set(["NOT_STARTED", "STARTED", "COMMITTED", "COMMIT_OUTCOME_UNKNOWN", "UNRESOLVED"]);
 const ROLLBACKS = new Set(["NOT_ATTEMPTED", "COMPLETED", "FAILED", "UNRESOLVED"]);
 
@@ -39,7 +41,8 @@ function boundedDiagnostic(value, fallback = {}) {
     rollback: ROLLBACKS.has(value?.rollback)
       ? value.rollback : fallback.rollback || "UNRESOLVED",
     ddl_started: typeof value?.ddl_started === "boolean"
-      ? value.ddl_started : fallback.ddl_started ?? "UNRESOLVED"
+      ? value.ddl_started : fallback.ddl_started ?? "UNRESOLVED",
+    ...(REASONS.has(value?.reason) ? { reason: value.reason } : {})
   };
 }
 
@@ -48,6 +51,7 @@ function logDiagnostic(logger, diagnostic) {
   logger.error(
     `Conversation binding migration diagnostic: stage=${value.stage} code=${value.code} `
       + `transaction=${value.transaction} rollback=${value.rollback} ddl_started=${value.ddl_started}`
+      + (value.reason ? ` reason=${value.reason}` : "")
   );
 }
 

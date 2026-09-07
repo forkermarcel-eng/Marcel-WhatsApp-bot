@@ -74,16 +74,30 @@ function fixtureRepository({
     staleRequests: [],
     insertCalls: []
   };
+  const currentDraft = (captureId, captureRevision, identityRevision) => state.drafts.find((draft) =>
+    String(draft.captureId ?? draft.capture_id) === captureId &&
+    Number(draft.captureRevision ?? draft.capture_revision) === captureRevision &&
+    Number(draft.identityRevision ?? draft.identity_revision) === identityRevision &&
+    String(draft.status).toUpperCase() === TINDER_DRAFT_STATUS.DRAFT
+  );
   const repository = {
     state,
     async getCapture(captureId) {
       return captureId === CAPTURE_ID ? copy(state.capture) : null;
+    },
+    async findCurrentDraft(captureId, captureRevision, identityRevision) {
+      const draft = currentDraft(captureId, captureRevision, identityRevision);
+      return draft ? copy(draft) : null;
     },
     async withTransaction(work) {
       return work(repository);
     },
     async getCaptureForUpdate(_transaction, captureId) {
       return captureId === CAPTURE_ID ? copy(state.captureForUpdate) : null;
+    },
+    async findCurrentDraftForUpdate(_transaction, captureId, captureRevision, identityRevision) {
+      const draft = currentDraft(captureId, captureRevision, identityRevision);
+      return draft ? copy(draft) : null;
     },
     async insertDraft(_transaction, record) {
       state.insertCalls.push(copy(record));
@@ -215,6 +229,45 @@ test("an eligible resolved central identity creates exactly one Tinder DRAFT thr
   assert.equal(repository.state.insertCalls[0].status, "DRAFT");
   assert.equal(repository.state.staleRequests[0].reason, "NEWER_CAPTURE_REVISION");
   assert.equal(repository.state.staleRequests[0].newerCaptureRevision, 2);
+});
+
+test("a current capture and revision return the existing DRAFT without a second shared-core call", async () => {
+  const { service, state, repository } = fixtureService();
+  const first = await service.createDraft({ captureId: CAPTURE_ID });
+  const repeated = await service.createDraft({ captureId: CAPTURE_ID });
+
+  assert.deepEqual(repeated, first);
+  assert.equal(state.sharedReplyCalls.length, 1);
+  assert.equal(repository.state.insertCalls.length, 1);
+  assert.equal(repository.state.staleRequests.length, 1);
+});
+
+test("a DRAFT discovered after the capture lock prevents concurrent duplicate persistence", async () => {
+  const { service, state, repository } = fixtureService();
+  const concurrent = {
+    draftId: DRAFT_ID,
+    contactId: 7,
+    captureId: CAPTURE_ID,
+    runtimeThreadFingerprint: THREAD_A,
+    captureRevision: 2,
+    identityRevision: 4,
+    status: "DRAFT",
+    originalDraft: "Bereits vorhandener Entwurf.",
+    controlDraftDe: "Bereits vorhandener Entwurf.",
+    sourceLanguage: "de",
+    modelVersion: "shared-reply-core-v1",
+    createdAt: "2026-09-04T19:00:00.000Z"
+  };
+  repository.findCurrentDraft = async () => null;
+  repository.findCurrentDraftForUpdate = async () => copy(concurrent);
+
+  const result = await service.createDraft({ captureId: CAPTURE_ID });
+
+  assert.equal(result.draftId, DRAFT_ID);
+  assert.equal(result.originalDraft, "Bereits vorhandener Entwurf.");
+  assert.equal(state.sharedReplyCalls.length, 1);
+  assert.equal(repository.state.insertCalls.length, 0);
+  assert.equal(repository.state.staleRequests.length, 0);
 });
 
 test("the German control draft is null without a German source language and no translation call is added", async () => {
@@ -389,6 +442,38 @@ test("the PostgreSQL stale query has distinct typed placeholders for equality an
   assert.match(calls[0].sql, /stale_reason = \$7/);
   assert.match(calls[0].sql, /'DRAFT_STALE', \$8/);
   assert.match(calls[0].sql, /\$9::jsonb/);
+});
+
+test("the PostgreSQL current-DRAFT lookup is scoped to the capture and both revisions, with a locked recheck", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, values = []) {
+      calls.push({ sql, values });
+      return { rows: [] };
+    },
+    release() {}
+  };
+  const repository = createPgTinderDraftRepository({
+    async query(sql, values = []) {
+      calls.push({ sql, values });
+      return { rows: [] };
+    },
+    async connect() { return client; }
+  });
+
+  await repository.findCurrentDraft(CAPTURE_ID, 2, 4);
+  await repository.findCurrentDraftForUpdate(client, CAPTURE_ID, 2, 4);
+
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.deepEqual(call.values, [CAPTURE_ID, 2, 4]);
+    assert.match(call.sql, /WHERE capture_id = \$1/);
+    assert.match(call.sql, /capture_revision = \$2/);
+    assert.match(call.sql, /identity_revision = \$3/);
+    assert.match(call.sql, /status = 'DRAFT'/);
+  }
+  assert.doesNotMatch(calls[0].sql, /FOR UPDATE/);
+  assert.match(calls[1].sql, /FOR UPDATE\s*$/);
 });
 
 test("the standalone T4 migration binds revisions, draft status, audit, and no runtime initializer", () => {

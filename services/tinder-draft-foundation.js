@@ -328,8 +328,10 @@ function normalizeDraftRow(row, fallback) {
 function requireRepository(repository) {
   for (const method of [
     "getCapture",
+    "findCurrentDraft",
     "withTransaction",
     "getCaptureForUpdate",
+    "findCurrentDraftForUpdate",
     "insertDraft",
     "markDraftsStale"
   ]) {
@@ -459,6 +461,14 @@ function createTinderDraftFoundationService({
   async function createDraft({ captureId } = {}) {
     const normalizedCaptureId = normalizedUuid(captureId, "Capture-ID");
     const initial = await loadEligibleDraftInput(normalizedCaptureId);
+    const existingInitial = await repository.findCurrentDraft(
+      normalizedCaptureId,
+      initial.capture.captureRevision,
+      initial.capture.identityRevision
+    );
+    if (existingInitial) {
+      return normalizeDraftRow(existingInitial);
+    }
     const incoming = terminalIncomingMessage(initial.capture);
 
     const [profile, memoryItems, memoryEvents, marcelMemory, liveState] = await Promise.all([
@@ -503,6 +513,16 @@ function createTinderDraftFoundationService({
         await adapters.getContactById(currentCapture.contactId),
         currentCapture.contactId
       );
+
+      const existingLocked = await repository.findCurrentDraftForUpdate(
+        transaction,
+        currentCapture.captureId,
+        currentCapture.captureRevision,
+        currentCapture.identityRevision
+      );
+      if (existingLocked) {
+        return normalizeDraftRow(existingLocked);
+      }
 
       await repository.markDraftsStale(transaction, {
         reason: TINDER_DRAFT_STALE_REASON.NEWER_CAPTURE_REVISION,
@@ -583,6 +603,27 @@ function createPgTinderDraftRepository(pool) {
       ON d.device_id = c.device_id
     WHERE c.capture_id = $1`;
 
+  const selectCurrentDraft = `
+    SELECT
+      draft_id,
+      contact_id,
+      capture_id,
+      capture_revision,
+      identity_revision,
+      status,
+      original_draft,
+      control_draft_de,
+      source_language,
+      model_version,
+      created_at
+    FROM tinder_reply_drafts
+    WHERE capture_id = $1
+      AND capture_revision = $2
+      AND identity_revision = $3
+      AND status = 'DRAFT'
+    ORDER BY created_at DESC, draft_id DESC
+    LIMIT 1`;
+
   function singleRow(result) {
     return result.rows[0] || null;
   }
@@ -590,6 +631,13 @@ function createPgTinderDraftRepository(pool) {
   return Object.freeze({
     async getCapture(captureId) {
       return singleRow(await pool.query(selectCapture, [captureId]));
+    },
+
+    async findCurrentDraft(captureId, captureRevision, identityRevision) {
+      return singleRow(await pool.query(
+        selectCurrentDraft,
+        [captureId, captureRevision, identityRevision]
+      ));
     },
 
     async withTransaction(work) {
@@ -610,6 +658,13 @@ function createPgTinderDraftRepository(pool) {
     async getCaptureForUpdate(client, captureId) {
       const result = await client.query(`${selectCapture}\nFOR UPDATE OF c, d`, [captureId]);
       return singleRow(result);
+    },
+
+    async findCurrentDraftForUpdate(client, captureId, captureRevision, identityRevision) {
+      return singleRow(await client.query(
+        `${selectCurrentDraft}\nFOR UPDATE`,
+        [captureId, captureRevision, identityRevision]
+      ));
     },
 
     async insertDraft(client, record) {

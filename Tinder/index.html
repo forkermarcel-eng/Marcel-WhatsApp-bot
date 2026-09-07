@@ -891,6 +891,11 @@
           <div class="tinder-draft-copy" id="captureDraftControl" hidden></div>
           <div class="tinder-draft-meta" id="captureDraftMeta"></div>
         </div>
+        <div class="enrollment-actions" id="captureDraftReviewActions" hidden>
+          <button class="button primary" id="approveCaptureDraft" type="button" hidden>Entwurf freigeben</button>
+          <button class="button danger" id="rejectCaptureDraft" type="button" hidden>Entwurf verwerfen</button>
+          <button class="button warn" id="cancelCaptureDraftApproval" type="button" hidden>Freigabe widerrufen</button>
+        </div>
       </section>
 
       <details class="technical">
@@ -1132,6 +1137,10 @@
        captureDraftOriginal: document.getElementById("captureDraftOriginal"),
        captureDraftControl: document.getElementById("captureDraftControl"),
        captureDraftMeta: document.getElementById("captureDraftMeta"),
+       captureDraftReviewActions: document.getElementById("captureDraftReviewActions"),
+       approveCaptureDraft: document.getElementById("approveCaptureDraft"),
+       rejectCaptureDraft: document.getElementById("rejectCaptureDraft"),
+       cancelCaptureDraftApproval: document.getElementById("cancelCaptureDraftApproval"),
        captureMappingPanel: document.getElementById("captureMappingPanel"),
       captureMappingIntro: document.getElementById("captureMappingIntro"),
       captureVisibleNameContext: document.getElementById("captureVisibleNameContext"),
@@ -1161,6 +1170,9 @@
     let draftCapture = null;
     let draftBusy = false;
     let draftCompleted = false;
+    let draftReview = null;
+    let draftReviewBusy = false;
+    let draftReviewLoadState = "idle";
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
@@ -1413,10 +1425,26 @@
       elements.captureDraftMessage.textContent = message;
     }
 
+    function resetCaptureDraftReview() {
+      draftReview = null;
+      draftReviewBusy = false;
+      draftReviewLoadState = "idle";
+      elements.captureDraftReviewActions.hidden = true;
+      for (const button of [
+        elements.approveCaptureDraft,
+        elements.rejectCaptureDraft,
+        elements.cancelCaptureDraftApproval
+      ]) {
+        button.hidden = true;
+        button.disabled = true;
+      }
+    }
+
     function clearCaptureDraft() {
       draftCapture = null;
       draftBusy = false;
       draftCompleted = false;
+      resetCaptureDraftReview();
       elements.captureDraftPanel.hidden = true;
       elements.createCaptureDraft.disabled = true;
       elements.captureDraftResult.hidden = true;
@@ -1445,6 +1473,72 @@
         !Number.isNaN(new Date(draft.created_at).valueOf());
     }
 
+    function validPublicDraftReview(review, captureId) {
+      return review && typeof review === "object" &&
+        UUID_V4.test(String(review.draft_id || "")) &&
+        String(review.capture_id || "") === captureId &&
+        Number.isInteger(review.draft_revision) && review.draft_revision > 0 &&
+        Number.isInteger(review.capture_revision) && review.capture_revision > 0 &&
+        Number.isInteger(review.identity_revision) && review.identity_revision > 0 &&
+        ["DRAFT", "APPROVED", "REJECTED", "STALE"].includes(review.status) &&
+        (review.approval_state === null || ["ACTIVE", "INVALIDATED", "CANCELLED"].includes(review.approval_state)) &&
+        (review.intent_state === null || [
+          "PENDING_T5_WRITER", "DISPATCHING", "SENT", "FAILED", "STALE", "CANCELLED", "SEND_RESULT_UNKNOWN"
+        ].includes(review.intent_state)) &&
+        typeof review.original_draft === "string" && review.original_draft.trim() && review.original_draft.trim().length <= 8000 &&
+        (review.control_draft_de === null ||
+          (typeof review.control_draft_de === "string" && review.control_draft_de.trim() && review.control_draft_de.trim().length <= 8000)) &&
+        (review.source_language === null ||
+          (typeof review.source_language === "string" && review.source_language.trim().length <= 32)) &&
+        typeof review.model_version === "string" && review.model_version.trim() && review.model_version.trim().length <= 160 &&
+        !Number.isNaN(new Date(review.created_at).valueOf());
+    }
+
+    function updateCaptureDraftControls() {
+      const eligible = captureIsDraftEligible(draftCapture);
+      const busy = draftBusy || draftReviewBusy;
+      const review = draftReview;
+      elements.createCaptureDraft.disabled = !eligible || busy || draftReviewLoadState !== "none";
+      const canApproveOrReject = !busy && review?.status === "DRAFT" && review.approval_state === null;
+      // A remapped capture may expose an older active approval as STALE.
+      // The only possible action there is an explicit cancellation; it can
+      // never revive the draft or make it dispatchable.
+      const canCancel = !busy && ["APPROVED", "STALE"].includes(review?.status) &&
+        review.approval_state === "ACTIVE";
+      elements.captureDraftReviewActions.hidden = !(canApproveOrReject || canCancel);
+      elements.approveCaptureDraft.hidden = !canApproveOrReject;
+      elements.approveCaptureDraft.disabled = !canApproveOrReject;
+      elements.rejectCaptureDraft.hidden = !canApproveOrReject;
+      elements.rejectCaptureDraft.disabled = !canApproveOrReject;
+      elements.cancelCaptureDraftApproval.hidden = !canCancel;
+      elements.cancelCaptureDraftApproval.disabled = !canCancel;
+    }
+
+    function renderCaptureDraftReview(review) {
+      draftReview = review;
+      draftReviewLoadState = "loaded";
+      draftCompleted = true;
+      elements.captureDraftOriginal.textContent = review.original_draft.trim();
+      if (typeof review.control_draft_de === "string" && review.control_draft_de.trim()) {
+        elements.captureDraftControl.textContent = `Kontrollfassung DE: ${review.control_draft_de.trim()}`;
+        elements.captureDraftControl.hidden = false;
+      } else {
+        elements.captureDraftControl.textContent = "";
+        elements.captureDraftControl.hidden = true;
+      }
+      const state = review.status === "DRAFT" && review.approval_state === null
+        ? "liegt zur bewussten menschlichen Entscheidung vor"
+        : review.status === "APPROVED" && review.approval_state === "ACTIVE"
+          ? "ist freigegeben und kann nur noch widerrufen werden"
+          : review.status === "STALE" && review.approval_state === "ACTIVE"
+            ? "ist durch eine neuere Identitätsbindung veraltet und kann nur noch widerrufen werden"
+          : "hat einen terminalen oder blockierten Review-Status";
+      elements.captureDraftMeta.textContent =
+        `Entwurf gespeichert · Modell ${review.model_version.trim()} · ${state} · keine Nachricht wurde gesendet.`;
+      elements.captureDraftResult.hidden = false;
+      updateCaptureDraftControls();
+    }
+
     function renderCaptureDraft(capture) {
       if (!captureIsDraftEligible(capture) || !UUID_V4.test(String(capture?.capture_id || ""))) {
         clearCaptureDraft();
@@ -1452,6 +1546,8 @@
       }
       if (draftCapture?.capture_id !== capture.capture_id) {
         draftCompleted = false;
+        resetCaptureDraftReview();
+        draftReviewLoadState = "loading";
         elements.captureDraftResult.hidden = true;
         elements.captureDraftOriginal.textContent = "";
         elements.captureDraftControl.textContent = "";
@@ -1460,17 +1556,48 @@
       }
       draftCapture = capture;
       elements.captureDraftPanel.hidden = false;
-      elements.createCaptureDraft.disabled = draftBusy || draftCompleted;
-      if (!draftBusy && !draftCompleted) {
-        setCaptureDraftMessage("Bereit fuer einen einzelnen, nicht versendenden Entwurf.");
+      updateCaptureDraftControls();
+    }
+
+    async function loadCaptureDraftReview(capture) {
+      const captureId = String(capture?.capture_id || "");
+      if (!captureIsDraftEligible(capture) || !UUID_V4.test(captureId) || draftCapture?.capture_id !== captureId) return;
+      draftReviewBusy = true;
+      draftReviewLoadState = "loading";
+      updateCaptureDraftControls();
+      try {
+        const data = await requestJson(
+          `/api/tinder/captures?captureId=${encodeURIComponent(captureId)}&view=draft-review`
+        );
+        if (!validPublicDraftReview(data?.review, captureId)) {
+          throw new Error("Das Backend hat keine gültige Tinder-Draft-Prüfung geliefert.");
+        }
+        renderCaptureDraftReview(data.review);
+        setCaptureDraftMessage("Entwurf liegt zur menschlichen Prüfung vor. Es wurde nichts gesendet.");
+      } catch (error) {
+        if (error?.status === 404) {
+          draftReview = null;
+          draftCompleted = false;
+          draftReviewLoadState = "none";
+          setCaptureDraftMessage("Bereit für einen einzelnen, nicht versendenden Entwurf.");
+        } else {
+          draftReview = null;
+          draftCompleted = false;
+          draftReviewLoadState = "error";
+          setCaptureDraftMessage(error?.message || "Bestehender Tinder-Draft konnte nicht sicher geprüft werden.", true);
+        }
+      } finally {
+        draftReviewBusy = false;
+        updateCaptureDraftControls();
       }
     }
 
     async function createCaptureDraft() {
       const captureId = String(draftCapture?.capture_id || "");
-      if (draftBusy || draftCompleted || !captureIsDraftEligible(draftCapture) || !UUID_V4.test(captureId)) return;
+      if (draftBusy || draftReviewBusy || draftReviewLoadState !== "none" ||
+          !captureIsDraftEligible(draftCapture) || !UUID_V4.test(captureId)) return;
       draftBusy = true;
-      elements.createCaptureDraft.disabled = true;
+      updateCaptureDraftControls();
       setCaptureDraftMessage("Entwurf wird serverseitig vorbereitet ...");
       try {
         const data = await requestJson(
@@ -1480,24 +1607,41 @@
         if (!validPublicDraft(data?.draft, captureId)) {
           throw new Error("Das Backend hat keinen gueltigen Tinder-Draft geliefert.");
         }
-        const draft = data.draft;
-        elements.captureDraftOriginal.textContent = draft.original_draft.trim();
-        if (typeof draft.control_draft_de === "string" && draft.control_draft_de.trim()) {
-          elements.captureDraftControl.textContent = `Kontrollfassung DE: ${draft.control_draft_de.trim()}`;
-          elements.captureDraftControl.hidden = false;
-        } else {
-          elements.captureDraftControl.textContent = "";
-          elements.captureDraftControl.hidden = true;
-        }
-        elements.captureDraftMeta.textContent = `Entwurf gespeichert · Modell ${draft.model_version.trim()} · keine Nachricht wurde gesendet.`;
-        elements.captureDraftResult.hidden = false;
-        draftCompleted = true;
-        setCaptureDraftMessage("Entwurf liegt zur menschlichen Pruefung vor. Es wurde nichts gesendet.");
+        await loadCaptureDraftReview(draftCapture);
       } catch (error) {
         setCaptureDraftMessage(error?.message || "Tinder-Draft konnte nicht erstellt werden.", true);
       } finally {
         draftBusy = false;
-        elements.createCaptureDraft.disabled = !captureIsDraftEligible(draftCapture) || draftCompleted;
+        updateCaptureDraftControls();
+      }
+    }
+
+    async function decideCaptureDraft(operation) {
+      const captureId = String(draftCapture?.capture_id || "");
+      if (draftBusy || draftReviewBusy || !UUID_V4.test(captureId) || !draftReview) return;
+      const canApproveOrReject = draftReview.status === "DRAFT" && draftReview.approval_state === null;
+      const canCancel = ["APPROVED", "STALE"].includes(draftReview.status) &&
+        draftReview.approval_state === "ACTIVE";
+      if ((operation !== "draft-approve" && operation !== "draft-reject" && operation !== "draft-cancel") ||
+          ((operation === "draft-cancel") !== canCancel) ||
+          (operation !== "draft-cancel" && !canApproveOrReject)) return;
+      draftBusy = true;
+      updateCaptureDraftControls();
+      setCaptureDraftMessage("Bewusste Draft-Entscheidung wird gespeichert ...");
+      try {
+        const data = await requestJson(
+          `/api/tinder/captures?captureId=${encodeURIComponent(captureId)}&operation=${encodeURIComponent(operation)}`,
+          { method: "POST", body: JSON.stringify({}) }
+        );
+        if (!data?.result || typeof data.result.state !== "string" || typeof data.result.idempotent !== "boolean") {
+          throw new Error("Das Backend hat keine gültige Tinder-Draft-Entscheidung bestätigt.");
+        }
+        await loadCaptureDraftReview(draftCapture);
+      } catch (error) {
+        setCaptureDraftMessage(error?.message || "Tinder-Draft-Entscheidung konnte nicht gespeichert werden.", true);
+      } finally {
+        draftBusy = false;
+        updateCaptureDraftControls();
       }
     }
 
@@ -1655,6 +1799,7 @@
        }
        renderCaptureMapping(data.capture);
        renderCaptureDraft(data.capture);
+       await loadCaptureDraftReview(data.capture);
        if (captureMappingStatus(data.capture) === "NEEDS_HUMAN_MAPPING" && !conversationBindingBlocksMapping(data.capture)) {
          await loadCaptureMappingContacts();
          updateCaptureMappingControls();
@@ -2191,6 +2336,15 @@
 
    elements.createCaptureDraft.addEventListener("click", () => {
      void createCaptureDraft();
+   });
+   elements.approveCaptureDraft.addEventListener("click", () => {
+     void decideCaptureDraft("draft-approve");
+   });
+   elements.rejectCaptureDraft.addEventListener("click", () => {
+     void decideCaptureDraft("draft-reject");
+   });
+   elements.cancelCaptureDraftApproval.addEventListener("click", () => {
+     void decideCaptureDraft("draft-cancel");
    });
 
    window.addEventListener("focus", () => {

@@ -234,7 +234,18 @@ function normalizeDraftSnapshot(row) {
     ),
     captureFingerprint: normalizedHash(sourceValue(row, "captureFingerprint", "capture_fingerprint"), "Capture-Fingerprint"),
     runtimeThreadFingerprint: normalizedHash(sourceValue(row, "runtimeThreadFingerprint", "runtime_thread_fingerprint"), "Thread-Fingerprint"),
-    identityRevision: positiveInteger(sourceValue(row, "identityRevision", "identity_revision"), "Identitäts-Revision"),
+    // A draft is bound to the identity revision observed at creation.  The
+    // capture can subsequently be remapped/re-reviewed without changing the
+    // draft row, so its current revision must be loaded separately and checked
+    // before an approval or future intent is allowed.
+    identityRevision: positiveInteger(
+      sourceValue(row, "draftIdentityRevision", "draft_identity_revision"),
+      "Draft-Identitäts-Revision"
+    ),
+    currentIdentityRevision: positiveInteger(
+      sourceValue(row, "currentIdentityRevision", "current_identity_revision"),
+      "Aktuelle Identitäts-Revision"
+    ),
     originalDraft: normalizedText(sourceValue(row, "originalDraft", "original_draft"), "Draft"),
     captureSafetyStatus: normalizedState(sourceValue(row, "captureSafetyStatus", "capture_safety_status")),
     mappingStatus: normalizedState(sourceValue(row, "mappingStatus", "mapping_status")),
@@ -321,6 +332,62 @@ function normalizeIntent(row) {
   });
 }
 
+/*
+ * This is deliberately a dashboard-review projection, not a capture reader.
+ * It contains the draft Marcel must review, but never contact/device
+ * identifiers, capture/thread fingerprints, hashes, payloads, approval IDs,
+ * intent IDs, or raw captured Tinder content.
+ */
+function normalizeDraftReview(row, expectedCaptureId) {
+  if (!plainObject(row)) {
+    throw new TinderManualSendError("Für dieses Capture liegt kein aktueller Tinder-Draft vor.", "DRAFT_REVIEW_NOT_FOUND", 404);
+  }
+  const review = {
+    draftId: normalizedUuid(sourceValue(row, "draftId", "draft_id"), "Draft-ID", 500),
+    captureId: normalizedUuid(sourceValue(row, "captureId", "capture_id"), "Capture-ID", 500),
+    draftRevision: positiveInteger(sourceValue(row, "draftRevision", "draft_revision"), "Draft-Revision", 500),
+    captureRevision: positiveInteger(sourceValue(row, "captureRevision", "capture_revision"), "Capture-Revision", 500),
+    identityRevision: positiveInteger(sourceValue(row, "draftIdentityRevision", "draft_identity_revision"), "Identitäts-Revision", 500),
+    status: normalizedState(sourceValue(row, "draftStatus", "draft_status") ?? row.status),
+    approvalState: (() => {
+      const value = sourceValue(row, "approvalState", "approval_state");
+      return value === null || value === undefined ? null : normalizedState(value);
+    })(),
+    intentState: (() => {
+      const value = sourceValue(row, "intentState", "intent_state");
+      return value === null || value === undefined ? null : normalizedState(value);
+    })(),
+    originalDraft: normalizedText(sourceValue(row, "originalDraft", "original_draft"), "Draft", 500),
+    controlDraftDe: (() => {
+      const value = sourceValue(row, "controlDraftDe", "control_draft_de");
+      return value === null || value === undefined ? null : normalizedText(value, "Kontroll-Draft", 500);
+    })(),
+    sourceLanguage: (() => {
+      const value = sourceValue(row, "sourceLanguage", "source_language");
+      if (value === null || value === undefined) return null;
+      const language = String(value).trim();
+      if (!/^[A-Za-z-]{2,32}$/.test(language)) {
+        throw new TinderManualSendError("Der gespeicherte Tinder-Draft ist ungültig.", "INVALID_DRAFT_REVIEW", 500);
+      }
+      return language;
+    })(),
+    modelVersion: (() => {
+      const value = String(sourceValue(row, "modelVersion", "model_version") || "").trim();
+      if (!value || value.length > 160) {
+        throw new TinderManualSendError("Der gespeicherte Tinder-Draft ist ungültig.", "INVALID_DRAFT_REVIEW", 500);
+      }
+      return value;
+    })(),
+    createdAt: normalizedTimestamp(sourceValue(row, "createdAt", "created_at"), "Draft-Zeit", 500)
+  };
+  if (review.captureId !== expectedCaptureId || !DRAFT_STATUSES.has(review.status) ||
+      (review.approvalState !== null && !APPROVAL_STATES.has(review.approvalState)) ||
+      (review.intentState !== null && !INTENT_STATES.has(review.intentState))) {
+    throw new TinderManualSendError("Der gespeicherte Tinder-Draft ist ungültig.", "INVALID_DRAFT_REVIEW", 500);
+  }
+  return Object.freeze(review);
+}
+
 function approvalFromSnapshot(snapshot, { approvalId, actor, approvedAt }) {
   const approvedTextSha256 = sha256Text(snapshot.originalDraft);
   const approval = {
@@ -368,6 +435,9 @@ function assertIdentityAndCaptureReady(snapshot) {
   if (snapshot.mappingStatus !== "RESOLVED" || snapshot.humanReviewStatus !== "CONFIRMED" ||
       snapshot.resolvedContactId !== snapshot.contactId) {
     throw new TinderManualSendError("Die zentrale Kontaktzuordnung ist nicht bestätigt.", "IDENTITY_NOT_CONFIRMED");
+  }
+  if (snapshot.identityRevision !== snapshot.currentIdentityRevision) {
+    throw new TinderManualSendError("Die Identitätsbindung des Captures hat sich geändert.", "IDENTITY_REVISION_CHANGED");
   }
   if (snapshot.captureRevision !== snapshot.latestCaptureRevision) {
     throw new TinderManualSendError("Ein neueres Capture macht den Draft ungültig.", "NEWER_CAPTURE_REVISION");
@@ -494,6 +564,7 @@ function requireRepository(repository) {
   for (const method of [
     "withTransaction",
     "lockDraftSnapshot",
+    "findCurrentDraftReviewByCapture",
     "findApprovalForDraftRevision",
     "findActiveApprovalForDraft",
     "insertApproval",
@@ -532,6 +603,7 @@ function shouldInvalidateFor(error) {
   return new Set([
     "NEWER_CAPTURE_REVISION",
     "IDENTITY_NOT_CONFIRMED",
+    "IDENTITY_REVISION_CHANGED",
     "HUMAN_TAKEOVER_ACTIVE",
     "HANDOFF_ACTIVE",
     "APPROVAL_BINDING_CHANGED"
@@ -663,10 +735,30 @@ function createTinderManualSendService({
     const timestamp = nowIso(now);
     return repository.withTransaction(async (transaction) => {
       const snapshot = normalizeDraftSnapshot(await repository.lockDraftSnapshot(transaction, normalizedDraftId));
-      assertIdentityAndCaptureReady(snapshot);
       const existing = normalizeApproval(
         await repository.findApprovalForDraftRevision(transaction, snapshot.draftId, snapshot.draftRevision)
       );
+      // Load any active approval before validating the live capture snapshot.
+      // A later human remap can advance capture.identity_revision while the
+      // older approval is still ACTIVE.  The approval must then be closed and
+      // audited atomically instead of becoming an invisible stale authority.
+      const activeApproval = existing?.state === TINDER_APPROVAL_STATE.ACTIVE
+        ? existing
+        : normalizeApproval(await repository.findActiveApprovalForDraft(transaction, snapshot.draftId));
+      try {
+        assertIdentityAndCaptureReady(snapshot);
+      } catch (error) {
+        if (activeApproval?.state === TINDER_APPROVAL_STATE.ACTIVE) {
+          await invalidateForChangedSnapshot(
+            transaction,
+            activeApproval,
+            error,
+            normalizedActorValue,
+            timestamp
+          );
+        }
+        throw error;
+      }
       if (existing) {
         if (existing.state === TINDER_APPROVAL_STATE.ACTIVE && sameApprovalBinding(existing, snapshot) &&
             snapshot.draftStatus === "APPROVED") {
@@ -693,9 +785,7 @@ function createTinderManualSendService({
       if (snapshot.draftStatus !== "DRAFT") {
         throw new TinderManualSendError("Nur ein aktueller DRAFT kann freigegeben werden.", "DRAFT_NOT_APPROVABLE");
       }
-      const priorActiveApproval = normalizeApproval(
-        await repository.findActiveApprovalForDraft(transaction, snapshot.draftId)
-      );
+      const priorActiveApproval = activeApproval;
       if (priorActiveApproval) {
         await repository.invalidateApproval(transaction, priorActiveApproval.approvalId, {
           state: TINDER_APPROVAL_STATE.INVALIDATED,
@@ -734,6 +824,14 @@ function createTinderManualSendService({
       });
       return presentApproval(approval, false);
     });
+  }
+
+  async function getDraftReviewForCapture({ captureId } = {}) {
+    const normalizedCaptureId = normalizedUuid(captureId, "Capture-ID");
+    return normalizeDraftReview(
+      await repository.findCurrentDraftReviewByCapture(normalizedCaptureId),
+      normalizedCaptureId
+    );
   }
 
   async function reserveApprovedSend({ draftId, actor = "marcel_dashboard" } = {}) {
@@ -1000,6 +1098,7 @@ function createTinderManualSendService({
 
   return Object.freeze({
     approveDraft,
+    getDraftReviewForCapture,
     reserveApprovedSend,
     rejectDraft,
     cancelApprovedSend,
@@ -1019,7 +1118,8 @@ function createPgTinderManualSendRepository(pool) {
     SELECT
       draft.draft_id, draft.status AS draft_status, draft.draft_revision,
       draft.contact_id, draft.capture_id, draft.runtime_thread_fingerprint,
-      draft.capture_revision, draft.identity_revision, draft.original_draft,
+      draft.capture_revision, draft.identity_revision AS draft_identity_revision, draft.original_draft,
+      capture.identity_revision AS current_identity_revision,
       capture.capture_fingerprint, capture.capture_safety_status,
       capture.mapping_status, capture.human_review_status,
       capture.resolved_contact_id, capture.device_id,
@@ -1038,6 +1138,57 @@ function createPgTinderManualSendRepository(pool) {
     JOIN tinder_visible_chat_captures capture ON capture.capture_id = draft.capture_id
     JOIN device_bridge_devices device ON device.device_id = capture.device_id
     WHERE draft.draft_id = $1`;
+  // A review returns the current capture-bound draft.  If a remap made an
+  // already-approved older draft stale, return that single outstanding
+  // approval as STALE solely so the human can explicitly cancel it.  It can
+  // never be approved again or dispatched through this reader.
+  const draftReviewSql = `
+    SELECT
+      draft.draft_id, draft.capture_id, draft.draft_revision,
+      draft.capture_revision, draft.identity_revision AS draft_identity_revision,
+      CASE
+        WHEN draft.capture_revision = capture.capture_revision
+         AND draft.identity_revision = capture.identity_revision
+          THEN draft.status
+        ELSE 'STALE'
+      END AS draft_status,
+      draft.original_draft, draft.control_draft_de,
+      draft.source_language, draft.model_version, draft.created_at,
+      approval.state AS approval_state,
+      intent.state AS intent_state
+    FROM tinder_reply_drafts draft
+    JOIN tinder_visible_chat_captures capture ON capture.capture_id = draft.capture_id
+    LEFT JOIN LATERAL (
+      SELECT approval_record.approval_id, approval_record.state
+      FROM tinder_reply_send_approvals approval_record
+      WHERE approval_record.draft_id = draft.draft_id
+        AND approval_record.draft_revision = draft.draft_revision
+      ORDER BY approval_record.approved_at DESC, approval_record.approval_id DESC
+      LIMIT 1
+    ) approval ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT intent_record.state
+      FROM tinder_reply_send_intents intent_record
+      WHERE intent_record.approval_id = approval.approval_id
+      ORDER BY intent_record.created_at DESC, intent_record.intent_id DESC
+      LIMIT 1
+    ) intent ON TRUE
+    WHERE draft.capture_id = $1
+      AND (
+        (draft.capture_revision = capture.capture_revision
+          AND draft.identity_revision = capture.identity_revision)
+        OR (draft.status = 'APPROVED' AND approval.state = 'ACTIVE')
+      )
+    ORDER BY
+      CASE
+        WHEN draft.capture_revision = capture.capture_revision
+         AND draft.identity_revision = capture.identity_revision
+          THEN 0
+        ELSE 1
+      END,
+      draft.created_at DESC,
+      draft.draft_id DESC
+    LIMIT 1`;
 
   return Object.freeze({
     async withTransaction(work) {
@@ -1057,6 +1208,10 @@ function createPgTinderManualSendRepository(pool) {
 
     async lockDraftSnapshot(client, draftId) {
       return singleRow(await client.query(`${snapshotSql} FOR UPDATE OF draft, capture, device`, [draftId]));
+    },
+
+    async findCurrentDraftReviewByCapture(captureId) {
+      return singleRow(await pool.query(draftReviewSql, [captureId]));
     },
 
     async findApprovalForDraftRevision(client, draftId, draftRevision) {

@@ -9,6 +9,7 @@ import {
   TinderManualSendError,
   assertFutureTinderSendPayload,
   createTinderManualSendService,
+  createPgTinderManualSendRepository,
   sha256Text
 } from "../services/tinder-manual-send.js";
 import { DEVICE_BRIDGE_COMMANDS, T1_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
@@ -40,7 +41,8 @@ function readySnapshot(overrides = {}) {
     latest_capture_revision: 3,
     capture_fingerprint: CAPTURE_HASH_A,
     runtime_thread_fingerprint: THREAD_A,
-    identity_revision: 4,
+    draft_identity_revision: 4,
+    current_identity_revision: 4,
     original_draft: "Das klingt schön. Ich freue mich darauf.",
     capture_safety_status: "SAFE",
     mapping_status: "RESOLVED",
@@ -59,9 +61,29 @@ function readySnapshot(overrides = {}) {
   };
 }
 
-function fixtureRepository({ snapshot = readySnapshot(), approvals = [], intents = [] } = {}) {
+function readyDraftReview(overrides = {}) {
+  return {
+    draft_id: DRAFT_ID,
+    capture_id: CAPTURE_ID,
+    draft_revision: 1,
+    capture_revision: 3,
+    draft_identity_revision: 4,
+    draft_status: "DRAFT",
+    approval_state: null,
+    intent_state: null,
+    original_draft: "Das klingt schön. Ich freue mich darauf.",
+    control_draft_de: "Das klingt schön. Ich freue mich darauf.",
+    source_language: "de",
+    model_version: "shared-reply-core-v1",
+    created_at: NOW,
+    ...overrides
+  };
+}
+
+function fixtureRepository({ snapshot = readySnapshot(), review = readyDraftReview(), approvals = [], intents = [] } = {}) {
   const state = {
     snapshot: copy(snapshot),
+    review: copy(review),
     approvals: copy(approvals),
     intents: copy(intents),
     audits: [],
@@ -72,6 +94,9 @@ function fixtureRepository({ snapshot = readySnapshot(), approvals = [], intents
     async withTransaction(work) { return work(repository); },
     async lockDraftSnapshot(_transaction, draftId) {
       return draftId === state.snapshot.draft_id ? copy(state.snapshot) : null;
+    },
+    async findCurrentDraftReviewByCapture(captureId) {
+      return captureId === state.snapshot.capture_id ? copy(state.review) : null;
     },
     async findApprovalForDraftRevision(_transaction, draftId, revision) {
       return copy(state.approvals.find(item => item.draft_id === draftId && Number(item.draft_revision) === Number(revision)) || null);
@@ -276,13 +301,106 @@ test("a changed revision invalidates the old approval and cannot reuse it", asyn
   assert.equal(repository.state.intents.length, 0);
 });
 
+test("a durable T5 review returns only the bounded current draft projection", async () => {
+  const repository = fixtureRepository({
+    review: readyDraftReview({
+      contact_id: 7,
+      device_id: DEVICE_ID,
+      runtime_thread_fingerprint: THREAD_A,
+      capture_fingerprint: CAPTURE_HASH_A,
+      approval_id: APPROVAL_ID,
+      intent_id: INTENT_ID,
+      payload: { approved_text: "must not leave service" }
+    })
+  });
+  const { service } = fixtureService({ repository });
+  const review = await service.getDraftReviewForCapture({ captureId: CAPTURE_ID });
+  assert.deepEqual(review, {
+    draftId: DRAFT_ID,
+    captureId: CAPTURE_ID,
+    draftRevision: 1,
+    captureRevision: 3,
+    identityRevision: 4,
+    status: "DRAFT",
+    approvalState: null,
+    intentState: null,
+    originalDraft: "Das klingt schön. Ich freue mich darauf.",
+    controlDraftDe: "Das klingt schön. Ich freue mich darauf.",
+    sourceLanguage: "de",
+    modelVersion: "shared-reply-core-v1",
+    createdAt: NOW
+  });
+  assert.equal(JSON.stringify(review).includes(THREAD_A), false);
+  assert.equal(JSON.stringify(review).includes(CAPTURE_HASH_A), false);
+  assert.equal(JSON.stringify(review).includes(APPROVAL_ID), false);
+  assert.equal(JSON.stringify(review).includes(INTENT_ID), false);
+  assert.equal(JSON.stringify(review).includes("must not leave service"), false);
+});
+
+test("a durable T5 review preserves terminal approval state but never makes a send decision", async () => {
+  const repository = fixtureRepository({
+    review: readyDraftReview({ draft_status: "APPROVED", approval_state: "CANCELLED", intent_state: null })
+  });
+  const { service } = fixtureService({ repository });
+  const review = await service.getDraftReviewForCapture({ captureId: CAPTURE_ID });
+  assert.equal(review.status, "APPROVED");
+  assert.equal(review.approvalState, "CANCELLED");
+  assert.equal(review.intentState, null);
+  assert.equal(repository.state.operations.length, 0);
+  assert.equal(repository.state.approvals.length, 0);
+  assert.equal(repository.state.intents.length, 0);
+});
+
+test("a missing or stale current draft review fails closed without creating a draft", async () => {
+  const repository = fixtureRepository({ review: null });
+  const { service } = fixtureService({ repository });
+  await assert.rejects(
+    () => service.getDraftReviewForCapture({ captureId: CAPTURE_ID }),
+    (error) => error instanceof TinderManualSendError && error.code === "DRAFT_REVIEW_NOT_FOUND"
+  );
+  assert.equal(repository.state.operations.length, 0);
+  assert.equal(repository.state.approvals.length, 0);
+  assert.equal(repository.state.intents.length, 0);
+});
+
+test("a changed current capture identity revision blocks a fresh approval before any T5 write", async () => {
+  const repository = fixtureRepository({
+    snapshot: readySnapshot({ current_identity_revision: 5 })
+  });
+  const { service } = fixtureService({ repository });
+  await assert.rejects(
+    () => service.approveDraft({ draftId: DRAFT_ID }),
+    (error) => error instanceof TinderManualSendError && error.code === "IDENTITY_REVISION_CHANGED"
+  );
+  assert.equal(repository.state.approvals.length, 0);
+  assert.equal(repository.state.intents.length, 0);
+  assert.deepEqual(repository.state.operations, []);
+});
+
+test("a changed current identity revision atomically invalidates an existing approval", async () => {
+  const { service, repository } = fixtureService();
+  await service.approveDraft({ draftId: DRAFT_ID });
+  repository.state.snapshot.current_identity_revision = 5;
+
+  await assert.rejects(
+    () => service.approveDraft({ draftId: DRAFT_ID }),
+    (error) => error instanceof TinderManualSendError && error.code === "IDENTITY_REVISION_CHANGED"
+  );
+
+  assert.equal(repository.state.approvals[0].state, TINDER_APPROVAL_STATE.INVALIDATED);
+  assert.equal(repository.state.approvals[0].invalidated_reason, "IDENTITY_REVISION_CHANGED");
+  assert.equal(repository.state.intents.length, 0);
+  assert.equal(repository.state.audits.at(-1).action, "APPROVAL_INVALIDATED");
+  assert.equal(repository.state.audits.at(-1).reasonCode, "IDENTITY_REVISION_CHANGED");
+});
+
 test("changed thread, capture fingerprint, contact, capture revision, identity, or stale source fail closed", async () => {
   const cases = [
     ["APPROVAL_BINDING_CHANGED", { runtime_thread_fingerprint: THREAD_B }],
     ["APPROVAL_BINDING_CHANGED", { capture_fingerprint: CAPTURE_HASH_B }],
     ["IDENTITY_NOT_CONFIRMED", { resolved_contact_id: 8 }],
     ["NEWER_CAPTURE_REVISION", { latest_capture_revision: 4 }],
-    ["APPROVAL_BINDING_CHANGED", { identity_revision: 5 }],
+    ["IDENTITY_REVISION_CHANGED", { current_identity_revision: 5 }],
     ["CAPTURE_NOT_SAFE", { capture_safety_status: "UNSAFE" }],
     ["IDENTITY_NOT_CONFIRMED", { mapping_status: "CONFLICT" }],
     ["HUMAN_TAKEOVER_ACTIVE", { human_takeover_active: true }],
@@ -300,6 +418,34 @@ test("changed thread, capture fingerprint, contact, capture revision, identity, 
     );
     assert.equal(repository.state.intents.length, 0, code);
   }
+});
+
+test("the production T5 snapshot query projects draft and current capture identity revisions separately", async () => {
+  const queries = [];
+  const client = {
+    async query(sql) {
+      queries.push(String(sql));
+      return { rows: /FOR UPDATE OF draft, capture, device/.test(String(sql)) ? [readySnapshot()] : [] };
+    },
+    release() {}
+  };
+  const repository = createPgTinderManualSendRepository({
+    async query(sql) {
+      queries.push(String(sql));
+      return { rows: [] };
+    },
+    async connect() { return client; }
+  });
+  await repository.withTransaction(async (transaction) => repository.lockDraftSnapshot(transaction, DRAFT_ID));
+  const snapshotQuery = queries.find((sql) => /FROM tinder_reply_drafts draft/.test(sql));
+  assert.ok(snapshotQuery);
+  assert.match(snapshotQuery, /draft\.identity_revision\s+AS\s+draft_identity_revision/i);
+  assert.match(snapshotQuery, /capture\.identity_revision\s+AS\s+current_identity_revision/i);
+  await repository.findCurrentDraftReviewByCapture(CAPTURE_ID);
+  const reviewQuery = queries.find((sql) => /LEFT JOIN LATERAL/.test(sql));
+  assert.ok(reviewQuery);
+  assert.match(reviewQuery, /ELSE 'STALE'/);
+  assert.match(reviewQuery, /draft\.status = 'APPROVED' AND approval\.state = 'ACTIVE'/);
 });
 
 test("all runtime gate blockers deny reservation before an intent is inserted", async () => {

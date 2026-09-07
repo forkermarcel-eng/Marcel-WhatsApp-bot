@@ -59,6 +59,15 @@ const HUMAN_ARM_OPERATION = "human-arm";
 const HUMAN_REARM_OPERATION = "human-rearm";
 const DRAFT_OPERATION = "draft";
 const PUBLIC_DRAFT_STATUS = "DRAFT";
+const DRAFT_REVIEW_VIEW = "draft-review";
+const DRAFT_APPROVE_OPERATION = "draft-approve";
+const DRAFT_REJECT_OPERATION = "draft-reject";
+const DRAFT_CANCEL_OPERATION = "draft-cancel";
+const PUBLIC_DRAFT_REVIEW_STATUSES = new Set(["DRAFT", "APPROVED", "REJECTED", "STALE"]);
+const PUBLIC_DRAFT_APPROVAL_STATES = new Set(["ACTIVE", "INVALIDATED", "CANCELLED"]);
+const PUBLIC_DRAFT_INTENT_STATES = new Set([
+  "PENDING_T5_WRITER", "DISPATCHING", "SENT", "FAILED", "STALE", "CANCELLED", "SEND_RESULT_UNKNOWN"
+]);
 
 function getCookie(req, name) {
   const cookies = String(req.headers.cookie || "").split(";").map((cookie) => cookie.trim());
@@ -182,6 +191,43 @@ function normalizePublicDraft(value, captureId) {
   });
 }
 
+function normalizePublicDraftReview(value, captureId) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      value.captureId !== captureId || !validCaptureId(value.captureId) ||
+      !validCaptureId(value.draftId) || !validPositiveInteger(value.draftRevision) ||
+      !validPositiveInteger(value.captureRevision) || !validPositiveInteger(value.identityRevision) ||
+      !PUBLIC_DRAFT_REVIEW_STATUSES.has(value.status) ||
+      !(value.approvalState === null || value.approvalState === undefined || PUBLIC_DRAFT_APPROVAL_STATES.has(value.approvalState)) ||
+      !(value.intentState === null || value.intentState === undefined || PUBLIC_DRAFT_INTENT_STATES.has(value.intentState)) ||
+      !validBoundedText(value.originalDraft, 8000) ||
+      !validBoundedText(value.modelVersion, 160)) {
+    return null;
+  }
+  const createdAt = normalizePublicTimestamp(value.createdAt);
+  const sourceLanguage = value.sourceLanguage === null || value.sourceLanguage === undefined
+    ? null
+    : validBoundedText(value.sourceLanguage, 32) ? value.sourceLanguage.trim() : undefined;
+  const controlDraftDe = value.controlDraftDe === null || value.controlDraftDe === undefined
+    ? null
+    : validBoundedText(value.controlDraftDe, 8000) ? value.controlDraftDe.trim() : undefined;
+  if (createdAt === undefined || sourceLanguage === undefined || controlDraftDe === undefined) return null;
+  return Object.freeze({
+    draft_id: value.draftId,
+    capture_id: value.captureId,
+    draft_revision: value.draftRevision,
+    capture_revision: value.captureRevision,
+    identity_revision: value.identityRevision,
+    status: value.status,
+    approval_state: value.approvalState ?? null,
+    intent_state: value.intentState ?? null,
+    original_draft: value.originalDraft.trim(),
+    control_draft_de: controlDraftDe,
+    source_language: sourceLanguage,
+    model_version: value.modelVersion.trim(),
+    created_at: createdAt
+  });
+}
+
 function normalizePublicMappingResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       !PUBLIC_MAPPING_SUCCESS_STATUSES.has(value.status) ||
@@ -218,9 +264,25 @@ function exactKeys(value, keys) {
 
 function captureRequestFromQuery(req) {
   const query = req.query || {};
+  if (exactKeys(query, ["captureId", "view"]) && validCaptureId(query.captureId)
+      && query.view === DRAFT_REVIEW_VIEW) {
+    return Object.freeze({ type: "draft_review", captureId: query.captureId });
+  }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === DRAFT_OPERATION) {
     return Object.freeze({ type: "draft", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
+      && query.operation === DRAFT_APPROVE_OPERATION) {
+    return Object.freeze({ type: "draft_approve", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
+      && query.operation === DRAFT_REJECT_OPERATION) {
+    return Object.freeze({ type: "draft_reject", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
+      && query.operation === DRAFT_CANCEL_OPERATION) {
+    return Object.freeze({ type: "draft_cancel", captureId: query.captureId });
   }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === HUMAN_ARM_OPERATION) {
@@ -301,6 +363,22 @@ function validHumanArmedRearmBody(body) {
 
 function validEmptyDraftBody(body) {
   return body === undefined || body === null || exactKeys(body, []);
+}
+
+function normalizePublicDraftActionResult(value, action) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      typeof value.state !== "string" || typeof value.idempotent !== "boolean") {
+    return null;
+  }
+  const state = value.state.trim().toUpperCase();
+  const allowedStates = action === "APPROVE"
+    ? new Set(["ACTIVE"])
+    : action === "REJECT"
+      ? new Set(["REJECTED"])
+      : new Set(["CANCELLED", "SEND_RESULT_UNKNOWN"]);
+  return allowedStates.has(state)
+    ? Object.freeze({ state, idempotent: value.idempotent })
+    : null;
 }
 
 function normalizePublicConversationBindingResult(value) {
@@ -647,6 +725,96 @@ async function forwardDraftCreation(res, configuration, captureId) {
   }
 }
 
+function safeDraftReviewBackendError(data, fallback) {
+  if (data?.code === "TINDER_SEND_FOUNDATION_NOT_READY") {
+    return {
+      ok: false,
+      code: "TINDER_SEND_FOUNDATION_NOT_READY",
+      error: "Tinder Send Foundation ist noch nicht bereit."
+    };
+  }
+  return { ok: false, error: fallback };
+}
+
+async function loadDraftReview(res, configuration, captureId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/${encodeURIComponent(captureId)}/draft-review`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return null;
+    if (!response.ok) {
+      if (response.status === 401) {
+        res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+        return null;
+      }
+      const status = [400, 404, 409, 422, 503].includes(response.status) ? response.status : 502;
+      res.status(status).json(safeDraftReviewBackendError(data, "Tinder-Draft kann derzeit nicht geprüft werden."));
+      return null;
+    }
+    const review = normalizePublicDraftReview(data?.review, captureId);
+    if (!review) {
+      res.status(502).json({ ok: false, error: "Ungültige Tinder-Draft-Prüfung vom Backend." });
+      return null;
+    }
+    return review;
+  } catch {
+    console.error("Verbindung zur Tinder-Draft-Prüfung fehlgeschlagen.");
+    res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+    return null;
+  }
+}
+
+async function forwardDraftReview(res, configuration, captureId) {
+  const review = await loadDraftReview(res, configuration, captureId);
+  if (!review) return;
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  return res.status(200).json({ ok: true, review });
+}
+
+async function forwardDraftReviewAction(res, configuration, captureId, action) {
+  const review = await loadDraftReview(res, configuration, captureId);
+  if (!review) return;
+  const endpoint = action === "APPROVE"
+    ? "approval"
+    : action === "REJECT"
+      ? "reject"
+      : "cancel";
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/drafts/${encodeURIComponent(review.draft_id)}/${endpoint}`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        // The browser can express only the fixed action.  The backend reloads
+        // and locks every binding field from the verified draft snapshot.
+        body: JSON.stringify({ action }),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 404, 409, 422, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(safeDraftReviewBackendError(data, "Tinder-Draft-Entscheidung konnte nicht gespeichert werden."));
+    }
+    const source = action === "APPROVE" ? data?.approval : action === "REJECT" ? data?.draft : data?.result;
+    const result = normalizePublicDraftActionResult(source, action);
+    if (!result) {
+      return res.status(502).json({ ok: false, error: "Ungültige Tinder-Draft-Entscheidung vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, result });
+  } catch {
+    console.error("Verbindung zur Tinder-Draft-Entscheidung fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
 async function forwardHumanArmedBindingList(res, configuration) {
   try {
     const response = await fetch(
@@ -684,7 +852,9 @@ export default async function handler(req, res) {
   }
 
   const captureRequest = captureRequestFromQuery(req);
-  if (!captureRequest || (req.method === "POST" && !["capture", "human_arm", "human_rearm", "draft"].includes(captureRequest.type))) {
+  if (!captureRequest || (req.method === "POST" && ![
+    "capture", "human_arm", "human_rearm", "draft", "draft_approve", "draft_reject", "draft_cancel"
+  ].includes(captureRequest.type))) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
   const requestKind = req.method !== "POST" ? null
@@ -694,6 +864,12 @@ export default async function handler(req, res) {
       ? "human_rearm"
       : captureRequest.type === "draft" && validEmptyDraftBody(req.body)
         ? "draft"
+      : captureRequest.type === "draft_approve" && validEmptyDraftBody(req.body)
+        ? "draft_approve"
+      : captureRequest.type === "draft_reject" && validEmptyDraftBody(req.body)
+        ? "draft_reject"
+      : captureRequest.type === "draft_cancel" && validEmptyDraftBody(req.body)
+        ? "draft_cancel"
       : captureRequest.type === "capture" && validMappingBody(req.body)
           ? "profile_mapping"
           : captureRequest.type === "capture" && validConversationBindingBody(req.body)
@@ -711,6 +887,9 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "human_armed_bindings") {
     return forwardHumanArmedBindingList(res, configuration);
   }
+  if (req.method === "GET" && captureRequest.type === "draft_review") {
+    return forwardDraftReview(res, configuration, captureRequest.captureId);
+  }
   if (req.method === "GET") {
     return forwardCaptureRead(res, configuration, captureRequest.captureId);
   }
@@ -722,6 +901,15 @@ export default async function handler(req, res) {
   }
   if (requestKind === "draft") {
     return forwardDraftCreation(res, configuration, captureRequest.captureId);
+  }
+  if (requestKind === "draft_approve") {
+    return forwardDraftReviewAction(res, configuration, captureRequest.captureId, "APPROVE");
+  }
+  if (requestKind === "draft_reject") {
+    return forwardDraftReviewAction(res, configuration, captureRequest.captureId, "REJECT");
+  }
+  if (requestKind === "draft_cancel") {
+    return forwardDraftReviewAction(res, configuration, captureRequest.captureId, "CANCEL");
   }
   return requestKind === "conversation_binding"
     ? forwardConversationBinding(req, res, configuration, captureRequest.captureId)
@@ -736,6 +924,10 @@ export {
   HUMAN_ARM_OPERATION,
   HUMAN_REARM_OPERATION,
   DRAFT_OPERATION,
+  DRAFT_REVIEW_VIEW,
+  DRAFT_APPROVE_OPERATION,
+  DRAFT_REJECT_OPERATION,
+  DRAFT_CANCEL_OPERATION,
   MAPPING_FIELDS,
   PENDING_CAPTURE_LIMIT,
   PENDING_CAPTURE_VIEW,
@@ -749,6 +941,8 @@ export {
   normalizePublicHumanArmedBindingResult,
   normalizePublicHumanArmedBindings,
   normalizePublicDraft,
+  normalizePublicDraftReview,
+  normalizePublicDraftActionResult,
   normalizePublicMappingResult,
   validCaptureId,
   validConversationBindingBody,

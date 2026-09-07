@@ -6,6 +6,7 @@ import handler from "../api/tinder/captures.js";
 
 const CAPTURE_ID = "6c7308cf-5d40-423d-913b-c4424f0e4ee0";
 const DEVICE_ID = "36761d7f-2ac3-4da9-9ad4-7fd381665f1e";
+const DRAFT_ID = "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d";
 const PASSWORD = "test-dashboard-password";
 
 function safeCapture(overrides = {}) {
@@ -19,6 +20,25 @@ function safeCapture(overrides = {}) {
     source_package: "com.tinder",
     captured_at: "2026-09-04T14:00:00.000Z",
     received_at: "2026-09-04T14:00:01.000Z",
+    ...overrides
+  };
+}
+
+function safeDraftReview(overrides = {}) {
+  return {
+    draftId: DRAFT_ID,
+    captureId: CAPTURE_ID,
+    draftRevision: 1,
+    captureRevision: 1,
+    identityRevision: 1,
+    status: "DRAFT",
+    approvalState: null,
+    intentState: null,
+    originalDraft: "Hallo, schön von dir zu hören.",
+    controlDraftDe: "Hallo, schön von dir zu hören.",
+    sourceLanguage: "de",
+    modelVersion: "shared-reply-core-v1",
+    createdAt: "2026-09-07T13:00:00.000Z",
     ...overrides
   };
 }
@@ -142,6 +162,18 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
     {
       query: { captureId: CAPTURE_ID, operation: "draft" },
       body: { extra_context: "must-not-pass" }
+    },
+    {
+      query: { captureId: CAPTURE_ID, operation: "draft-approve" },
+      body: { action: "APPROVE" }
+    },
+    {
+      query: { captureId: CAPTURE_ID, operation: "draft-reject", draftId: DRAFT_ID },
+      body: {}
+    },
+    {
+      query: { captureId: CAPTURE_ID, operation: "draft-cancel" },
+      body: { draft_id: DRAFT_ID }
     }
   ]) {
     const invalidHumanArm = responseRecorder();
@@ -149,6 +181,95 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
     assert.equal(invalidHumanArm.statusCode, 400);
   }
 }));
+
+test("T5 durable draft-review GET uses the shared backend and redacts all non-review fields", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      review: safeDraftReview({
+        contactId: 7,
+        deviceId: DEVICE_ID,
+        runtimeThreadFingerprint: "private-thread-fingerprint",
+        captureFingerprint: "private-capture-fingerprint",
+        approvalId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5",
+        intentId: "832d0663-8bb1-4947-ae8a-14a6d9de8924",
+        payload: { approved_text: "must not reach dashboard" }
+      })
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({ query: { captureId: CAPTURE_ID, view: "draft-review" } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, `https://shared-backend.example/dashboard-api/tinder/captures/${CAPTURE_ID}/draft-review`);
+  assert.equal(call.options.method, "GET");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.deepEqual(res.body, {
+    ok: true,
+    review: {
+      draft_id: DRAFT_ID,
+      capture_id: CAPTURE_ID,
+      draft_revision: 1,
+      capture_revision: 1,
+      identity_revision: 1,
+      status: "DRAFT",
+      approval_state: null,
+      intent_state: null,
+      original_draft: "Hallo, schön von dir zu hören.",
+      control_draft_de: "Hallo, schön von dir zu hören.",
+      source_language: "de",
+      model_version: "shared-reply-core-v1",
+      created_at: "2026-09-07T13:00:00.000Z"
+    }
+  });
+  assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("must not reach dashboard"), false);
+  assert.equal(JSON.stringify(res.body).includes("0a3699ca-2b77-48bf-8563-2022f8a3e2a5"), false);
+}));
+
+test("T5 review actions derive the draft server-side and forward only fixed human decisions", async () => withEnvironment(async () => {
+  const cases = [
+    ["draft-approve", "APPROVE", "approval", { state: "ACTIVE", idempotent: false }],
+    ["draft-reject", "REJECT", "reject", { state: "REJECTED", idempotent: false }],
+    ["draft-cancel", "CANCEL", "cancel", { state: "CANCELLED", idempotent: false }]
+  ];
+  for (const [operation, action, endpoint, result] of cases) {
+    const calls = [];
+    globalThis.fetch = async (url, options) => {
+      calls.push({ url, options });
+      if (options.method === "GET") return backendResponse({ ok: true, review: safeDraftReview() });
+      return backendResponse({
+        ok: true,
+        [action === "APPROVE" ? "approval" : action === "REJECT" ? "draft" : "result"]: {
+          draftId: DRAFT_ID,
+          draftRevision: 1,
+          ...result,
+          approvalId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5",
+          intentId: "832d0663-8bb1-4947-ae8a-14a6d9de8924",
+          commandId: "8a74bf1a-1ca4-43e6-b0fa-52667778f21c",
+          payload: { approved_text: "must not reach dashboard" }
+        }
+      }, { status: action === "APPROVE" ? 201 : 200 });
+    };
+    const res = responseRecorder();
+    await handler(request({ method: "POST", query: { captureId: CAPTURE_ID, operation }, body: {} }), res);
+    assert.equal(res.statusCode, 200, action);
+    assert.equal(calls.length, 2, action);
+    assert.equal(calls[0].url, `https://shared-backend.example/dashboard-api/tinder/captures/${CAPTURE_ID}/draft-review`, action);
+    assert.equal(calls[1].url, `https://shared-backend.example/dashboard-api/tinder/drafts/${DRAFT_ID}/${endpoint}`, action);
+    assert.deepEqual(JSON.parse(calls[1].options.body), { action }, action);
+    assert.deepEqual(res.body, { ok: true, result }, action);
+    assert.equal(JSON.stringify(res.body).includes("must not reach dashboard"), false, action);
+    assert.equal(JSON.stringify(res.body).includes("0a3699ca-2b77-48bf-8563-2022f8a3e2a5"), false, action);
+  }
+}));
+
+test("T5 proxy has no browser dispatch operation or device command surface", () => {
+  const source = readFileSync(new URL("../api/tinder/captures.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /action:\s*["']DISPATCH["']|\/dispatch|device-bridge\/v1|SEND_TINDER_DRAFT|playwright|chromium|accessibility/i);
+});
 
 test("T4 draft POST forwards only an empty browser body and returns a bounded draft", async () => withEnvironment(async () => {
   let call;

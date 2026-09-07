@@ -144,6 +144,29 @@ test("T4 draft UI is opt-in for a resolved confirmed capture and never sends bro
   assert.doesNotMatch(draftCode, /window\.location(?:\.href)?\s*=/);
 });
 
+test("T5 draft review is durable, explicitly human-controlled, and has no browser dispatch or send path", () => {
+  const draftCode = sourceBetween("function captureReviewStatus", "function mappingContactLabel");
+  assert.match(page, /id="captureDraftReviewActions" hidden/);
+  assert.match(page, /id="approveCaptureDraft"/);
+  assert.match(page, /id="rejectCaptureDraft"/);
+  assert.match(page, /id="cancelCaptureDraftApproval"/);
+  assert.match(draftCode, /function loadCaptureDraftReview\(capture\)/);
+  assert.match(draftCode, /view=draft-review/);
+  assert.match(page, /await loadCaptureDraftReview\(data\.capture\)/);
+  assert.match(draftCode, /function decideCaptureDraft\(operation\)/);
+  assert.match(draftCode, /operation !== "draft-approve" && operation !== "draft-reject" && operation !== "draft-cancel"/);
+  assert.match(draftCode, /body: JSON\.stringify\(\{\}\)/);
+  assert.match(draftCode, /review\.status === "DRAFT" && review\.approval_state === null/);
+  assert.match(draftCode, /review\.status === "APPROVED" && review\.approval_state === "ACTIVE"/);
+  assert.match(draftCode, /\["APPROVED", "STALE"\]\.includes\(review\?\.status\)/);
+  assert.match(draftCode, /durch eine neuere Identitätsbindung veraltet/);
+  assert.match(page, /elements\.approveCaptureDraft\.addEventListener\("click"/);
+  assert.match(page, /elements\.rejectCaptureDraft\.addEventListener\("click"/);
+  assert.match(page, /elements\.cancelCaptureDraftApproval\.addEventListener\("click"/);
+  assert.doesNotMatch(draftCode, /operation=dispatch|SEND_TINDER_DRAFT|device-bridge\/v1|playwright|chromium|accessibility/i);
+  assert.doesNotMatch(draftCode, /textContent\s*=\s*review\.(?:draft_id|capture_id)|review\.(?:contact_id|device_id|thread_fingerprint|capture_fingerprint|approval_id|intent_id)/);
+});
+
 test("channel-native T3 contacts remain visible in the existing contacts list while persona tests stay hidden", () => {
   assert.match(backend, /WHERE \(\s*c\.whatsapp_jid IS NULL\s*OR c\.whatsapp_jid NOT LIKE '%@persona\.test'\s*\)/);
   assert.match(backend, /FROM messages m\s+\s*WHERE m\.whatsapp_jid =\s+c\.whatsapp_jid/s);

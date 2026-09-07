@@ -5,6 +5,7 @@ import {
   assertExactAction,
   createTinderDashboardApproveHandler,
   createTinderDashboardCancelHandler,
+  createTinderDashboardDraftReviewHandler,
   createTinderDashboardDispatchHandler,
   createTinderDashboardRejectHandler,
   registerTinderManualSendRoutes
@@ -54,6 +55,31 @@ function safeIntent(overrides = {}) {
   };
 }
 
+function safeReview(overrides = {}) {
+  return {
+    draftId: DRAFT_ID,
+    captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0",
+    draftRevision: 1,
+    captureRevision: 3,
+    identityRevision: 4,
+    status: "DRAFT",
+    approvalState: null,
+    intentState: null,
+    originalDraft: "Ein menschlich zu prüfender Draft.",
+    controlDraftDe: "Eine Kontrollfassung.",
+    sourceLanguage: "de",
+    modelVersion: "shared-reply-core-v1",
+    createdAt: "2026-09-05T19:00:00.000Z",
+    runtimeThreadFingerprint: "private-thread-value",
+    contactId: 7,
+    deviceId: "e880455d-325c-4f35-9914-823dcb0e0b18",
+    approvalId: APPROVAL_ID,
+    intentId: INTENT_ID,
+    payload: { approved_text: "must not reach dashboard" },
+    ...overrides
+  };
+}
+
 test("T5 routes pass only a path Draft ID plus fixed server actor into the domain service", async () => {
   const received = [];
   const approve = createTinderDashboardApproveHandler({
@@ -88,6 +114,42 @@ test("T5 routes pass only a path Draft ID plus fixed server actor into the domai
     ["reject", { draftId: DRAFT_ID, actor: "marcel_dashboard" }],
     ["cancel", { draftId: DRAFT_ID, actor: "marcel_dashboard" }]
   ]);
+});
+
+test("T5 draft-review route loads only a capture ID and returns a bounded human-review projection", async () => {
+  const received = [];
+  const handler = createTinderDashboardDraftReviewHandler({
+    async getDraftReviewForCapture(input) {
+      received.push(input);
+      return safeReview();
+    }
+  });
+  const res = responseRecorder();
+  await handler({ params: { captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0" } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(received, [{ captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0" }]);
+  assert.deepEqual(res.body, {
+    ok: true,
+    review: {
+      draftId: DRAFT_ID,
+      captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0",
+      draftRevision: 1,
+      captureRevision: 3,
+      identityRevision: 4,
+      status: "DRAFT",
+      approvalState: null,
+      intentState: null,
+      originalDraft: "Ein menschlich zu prüfender Draft.",
+      controlDraftDe: "Eine Kontrollfassung.",
+      sourceLanguage: "de",
+      modelVersion: "shared-reply-core-v1",
+      createdAt: "2026-09-05T19:00:00.000Z"
+    }
+  });
+  assert.equal(JSON.stringify(res.body).includes("private-thread-value"), false);
+  assert.equal(JSON.stringify(res.body).includes("must not reach dashboard"), false);
+  assert.equal(JSON.stringify(res.body).includes(APPROVAL_ID), false);
+  assert.equal(JSON.stringify(res.body).includes(INTENT_ID), false);
 });
 
 test("T5 routes reject browser-owned text, hashes, contacts, device IDs, payloads, or generic actions before service calls", async () => {
@@ -145,31 +207,39 @@ test("T5 routes reject invalid Draft IDs and preserve controlled missing-foundat
 test("T5 route registration puts dashboard authentication and existing readiness guards before every action", async () => {
   const routes = [];
   const service = {
+    async getDraftReviewForCapture() { throw new Error("must not run"); },
     async approveDraft() { throw new Error("must not run"); },
     async reserveApprovedSend() { throw new Error("must not run"); },
     async rejectDraft() { throw new Error("must not run"); },
     async cancelApprovedSend() { throw new Error("must not run"); }
   };
   registerTinderManualSendRoutes({
-    app: { post(path, handler) { routes.push({ path, handler }); } },
+    app: {
+      get(path, handler) { routes.push({ method: "GET", path, handler }); },
+      post(path, handler) { routes.push({ method: "POST", path, handler }); }
+    },
     dashboardApiReady: () => true,
     dashboardApiAuthorized: () => false,
     requireDeviceBridgeReady: () => true,
     service
   });
-  assert.deepEqual(routes.map(route => route.path), [
-    "/dashboard-api/tinder/drafts/:draftId/approval",
-    "/dashboard-api/tinder/drafts/:draftId/dispatch",
-    "/dashboard-api/tinder/drafts/:draftId/reject",
-    "/dashboard-api/tinder/drafts/:draftId/cancel"
+  assert.deepEqual(routes.map(route => `${route.method} ${route.path}`), [
+    "GET /dashboard-api/tinder/captures/:captureId/draft-review",
+    "POST /dashboard-api/tinder/drafts/:draftId/approval",
+    "POST /dashboard-api/tinder/drafts/:draftId/dispatch",
+    "POST /dashboard-api/tinder/drafts/:draftId/reject",
+    "POST /dashboard-api/tinder/drafts/:draftId/cancel"
   ]);
   const unauthorized = responseRecorder();
-  await routes[0].handler({ params: { draftId: DRAFT_ID }, body: { action: "APPROVE" } }, unauthorized);
+  await routes[0].handler({ params: { captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0" } }, unauthorized);
   assert.equal(unauthorized.statusCode, 401);
 
   const blockedRoutes = [];
   registerTinderManualSendRoutes({
-    app: { post(path, handler) { blockedRoutes.push({ path, handler }); } },
+    app: {
+      get(path, handler) { blockedRoutes.push({ method: "GET", path, handler }); },
+      post(path, handler) { blockedRoutes.push({ method: "POST", path, handler }); }
+    },
     dashboardApiReady: () => true,
     dashboardApiAuthorized: () => true,
     requireDeviceBridgeReady: (res) => {
@@ -179,7 +249,10 @@ test("T5 route registration puts dashboard authentication and existing readiness
     service
   });
   const notReady = responseRecorder();
-  await blockedRoutes[1].handler({ params: { draftId: DRAFT_ID }, body: { action: "DISPATCH" } }, notReady);
+  await blockedRoutes.find((route) => route.path.endsWith("/dispatch")).handler(
+    { params: { draftId: DRAFT_ID }, body: { action: "DISPATCH" } },
+    notReady
+  );
   assert.equal(notReady.statusCode, 503);
 });
 

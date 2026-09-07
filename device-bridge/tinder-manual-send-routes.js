@@ -33,6 +33,17 @@ function normalizeDraftId(value) {
   return draftId;
 }
 
+function normalizeCaptureId(value) {
+  const captureId = String(value || "").trim();
+  if (!isUuidV4(captureId)) {
+    const error = new Error("Die Capture-ID ist ungültig.");
+    error.code = "INVALID_CAPTURE_ID";
+    error.statusCode = 400;
+    throw error;
+  }
+  return captureId;
+}
+
 function assertExactAction(body, action) {
   if (!plainObject(body) || Object.keys(body).length !== 1 || body.action !== action) {
     const error = new Error("Die T5-Aktion darf keine Client-Daten enthalten.");
@@ -90,6 +101,91 @@ function boundedResult(value) {
   if (result.commandId !== undefined && !isUuidV4(result.commandId)) throw new Error("Ungültige Command-Antwort.");
   if (result.idempotent !== undefined && typeof result.idempotent !== "boolean") throw new Error("Ungültige Intent-Antwort.");
   return Object.freeze(result);
+}
+
+function boundedDraftReview(value, expectedCaptureId) {
+  if (!plainObject(value)) {
+    const error = new Error("Die Tinder-Draft-Prüfung ist ungültig.");
+    error.code = "INVALID_TINDER_DRAFT_REVIEW";
+    throw error;
+  }
+  const draftId = normalizeDraftId(value.draftId ?? value.draft_id);
+  const captureId = normalizeCaptureId(value.captureId ?? value.capture_id);
+  const draftRevision = Number(value.draftRevision ?? value.draft_revision);
+  const captureRevision = Number(value.captureRevision ?? value.capture_revision);
+  const identityRevision = Number(value.identityRevision ?? value.identity_revision);
+  const status = String(value.status || "").trim().toUpperCase();
+  const approvalStateValue = value.approvalState ?? value.approval_state;
+  const approvalState = approvalStateValue === null || approvalStateValue === undefined
+    ? null : String(approvalStateValue).trim().toUpperCase();
+  const intentStateValue = value.intentState ?? value.intent_state;
+  const intentState = intentStateValue === null || intentStateValue === undefined
+    ? null : String(intentStateValue).trim().toUpperCase();
+  const originalDraft = typeof (value.originalDraft ?? value.original_draft) === "string"
+    ? (value.originalDraft ?? value.original_draft).trim() : "";
+  const controlDraftValue = value.controlDraftDe ?? value.control_draft_de;
+  const controlDraftDe = controlDraftValue === null || controlDraftValue === undefined
+    ? null : typeof controlDraftValue === "string" ? controlDraftValue.trim() : "";
+  const sourceLanguageValue = value.sourceLanguage ?? value.source_language;
+  const sourceLanguage = sourceLanguageValue === null || sourceLanguageValue === undefined
+    ? null : String(sourceLanguageValue).trim();
+  const modelVersion = String(value.modelVersion ?? value.model_version ?? "").trim();
+  const createdAt = String(value.createdAt ?? value.created_at ?? "").trim();
+  const allowedDraftStates = new Set(["DRAFT", "APPROVED", "REJECTED", "STALE"]);
+  const allowedApprovalStates = new Set(["ACTIVE", "INVALIDATED", "CANCELLED"]);
+  const allowedIntentStates = new Set([
+    "PENDING_T5_WRITER", "DISPATCHING", "SENT", "FAILED", "STALE", "CANCELLED", "SEND_RESULT_UNKNOWN"
+  ]);
+  if (captureId !== expectedCaptureId || !Number.isSafeInteger(draftRevision) || draftRevision < 1 ||
+      !Number.isSafeInteger(captureRevision) || captureRevision < 1 ||
+      !Number.isSafeInteger(identityRevision) || identityRevision < 1 ||
+      !allowedDraftStates.has(status) ||
+      (approvalState !== null && !allowedApprovalStates.has(approvalState)) ||
+      (intentState !== null && !allowedIntentStates.has(intentState)) ||
+      !originalDraft || originalDraft.length > 8000 ||
+      (controlDraftDe !== null && (!controlDraftDe || controlDraftDe.length > 8000)) ||
+      (sourceLanguage !== null && !/^[A-Za-z-]{2,32}$/.test(sourceLanguage)) ||
+      !modelVersion || modelVersion.length > 160 || Number.isNaN(new Date(createdAt).valueOf())) {
+    const error = new Error("Die Tinder-Draft-Prüfung ist ungültig.");
+    error.code = "INVALID_TINDER_DRAFT_REVIEW";
+    throw error;
+  }
+  return Object.freeze({
+    draftId,
+    captureId,
+    draftRevision,
+    captureRevision,
+    identityRevision,
+    status,
+    approvalState,
+    intentState,
+    originalDraft,
+    controlDraftDe,
+    sourceLanguage,
+    modelVersion,
+    createdAt: new Date(createdAt).toISOString()
+  });
+}
+
+function createTinderDashboardDraftReviewHandler(service) {
+  if (!service || typeof service.getDraftReviewForCapture !== "function") {
+    throw new TypeError("service.getDraftReviewForCapture must be a function");
+  }
+  return async function tinderDashboardDraftReviewHandler(req, res) {
+    try {
+      const captureId = normalizeCaptureId(req.params?.captureId);
+      const review = boundedDraftReview(
+        await service.getDraftReviewForCapture({ captureId }),
+        captureId
+      );
+      return res.status(200).json({ ok: true, review });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) return foundationNotReadyResponse(res);
+      const status = safeStatusCode(error);
+      if (status === 500) console.error("Tinder dashboard draft review failed.");
+      return res.status(status).json({ ok: false, code: error?.code || "TINDER_DRAFT_REVIEW_FAILED", error: publicErrorMessage(error, status) });
+    }
+  };
 }
 
 function createTinderDashboardApproveHandler(service) {
@@ -177,7 +273,9 @@ function registerTinderManualSendRoutes({
   requireDeviceBridgeReady,
   service
 } = {}) {
-  if (!app || typeof app.post !== "function") throw new TypeError("app.post must be a function");
+  if (!app || typeof app.get !== "function" || typeof app.post !== "function") {
+    throw new TypeError("app.get and app.post must be functions");
+  }
   if (typeof dashboardApiReady !== "function" || typeof dashboardApiAuthorized !== "function" ||
       typeof requireDeviceBridgeReady !== "function") {
     throw new TypeError("dashboard and device bridge guards must be functions");
@@ -188,6 +286,7 @@ function registerTinderManualSendRoutes({
     if (!requireDeviceBridgeReady(res)) return;
     return handler(req, res);
   };
+  app.get("/dashboard-api/tinder/captures/:captureId/draft-review", dashboard(createTinderDashboardDraftReviewHandler(service)));
   app.post("/dashboard-api/tinder/drafts/:draftId/approval", dashboard(createTinderDashboardApproveHandler(service)));
   app.post("/dashboard-api/tinder/drafts/:draftId/dispatch", dashboard(createTinderDashboardDispatchHandler(service)));
   app.post("/dashboard-api/tinder/drafts/:draftId/reject", dashboard(createTinderDashboardRejectHandler(service)));
@@ -197,11 +296,14 @@ function registerTinderManualSendRoutes({
 export {
   TINDER_SEND_FOUNDATION_ERROR_CODES,
   assertExactAction,
+  boundedDraftReview,
   boundedResult,
   createTinderDashboardApproveHandler,
   createTinderDashboardCancelHandler,
+  createTinderDashboardDraftReviewHandler,
   createTinderDashboardDispatchHandler,
   createTinderDashboardRejectHandler,
+  normalizeCaptureId,
   normalizeDraftId,
   registerTinderManualSendRoutes
 };

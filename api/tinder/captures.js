@@ -57,6 +57,8 @@ const HUMAN_ARMED_BINDINGS_VIEW = "human-armed-bindings";
 const HUMAN_ARMED_BINDING_LIMIT = 25;
 const HUMAN_ARM_OPERATION = "human-arm";
 const HUMAN_REARM_OPERATION = "human-rearm";
+const DRAFT_OPERATION = "draft";
+const PUBLIC_DRAFT_STATUS = "DRAFT";
 
 function getCookie(req, name) {
   const cookies = String(req.headers.cookie || "").split(";").map((cookie) => cookie.trim());
@@ -144,6 +146,42 @@ function validPositiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0;
 }
 
+function validBoundedText(value, maximum) {
+  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= maximum;
+}
+
+function normalizePublicDraft(value, captureId) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      value.capture_id !== captureId || !validCaptureId(value.capture_id) ||
+      !validCaptureId(value.draft_id) || value.status !== PUBLIC_DRAFT_STATUS ||
+      !validPositiveInteger(value.capture_revision) ||
+      !validPositiveInteger(value.identity_revision) ||
+      !validBoundedText(value.original_draft, 8000) ||
+      !validBoundedText(value.model_version, 160)) {
+    return null;
+  }
+  const createdAt = normalizePublicTimestamp(value.created_at);
+  const sourceLanguage = value.source_language === null || value.source_language === undefined
+    ? null
+    : validBoundedText(value.source_language, 32) ? value.source_language.trim() : undefined;
+  const controlDraftDe = value.control_draft_de === null || value.control_draft_de === undefined
+    ? null
+    : validBoundedText(value.control_draft_de, 8000) ? value.control_draft_de.trim() : undefined;
+  if (createdAt === undefined || sourceLanguage === undefined || controlDraftDe === undefined) return null;
+  return Object.freeze({
+    draft_id: value.draft_id,
+    capture_id: value.capture_id,
+    capture_revision: value.capture_revision,
+    identity_revision: value.identity_revision,
+    status: PUBLIC_DRAFT_STATUS,
+    original_draft: value.original_draft.trim(),
+    control_draft_de: controlDraftDe,
+    source_language: sourceLanguage,
+    model_version: value.model_version.trim(),
+    created_at: createdAt
+  });
+}
+
 function normalizePublicMappingResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       !PUBLIC_MAPPING_SUCCESS_STATUSES.has(value.status) ||
@@ -180,6 +218,10 @@ function exactKeys(value, keys) {
 
 function captureRequestFromQuery(req) {
   const query = req.query || {};
+  if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
+      && query.operation === DRAFT_OPERATION) {
+    return Object.freeze({ type: "draft", captureId: query.captureId });
+  }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === HUMAN_ARM_OPERATION) {
     return Object.freeze({ type: "human_arm", captureId: query.captureId });
@@ -255,6 +297,10 @@ function validHumanArmedBindingBody(body) {
 
 function validHumanArmedRearmBody(body) {
   return exactKeys(body, HUMAN_ARMED_REARM_FIELDS) && body.confirmed === true;
+}
+
+function validEmptyDraftBody(body) {
+  return body === undefined || body === null || exactKeys(body, []);
 }
 
 function normalizePublicConversationBindingResult(value) {
@@ -456,6 +502,17 @@ function safeHumanArmedBindingBackendError(data, fallback) {
   };
 }
 
+function safeDraftBackendError(data, fallback) {
+  if (data?.code === "TINDER_DRAFT_FOUNDATION_NOT_READY") {
+    return {
+      ok: false,
+      code: "TINDER_DRAFT_FOUNDATION_NOT_READY",
+      error: "Tinder-Draft Foundation ist noch nicht bereit."
+    };
+  }
+  return { ok: false, error: fallback };
+}
+
 async function forwardConversationBinding(req, res, configuration, captureId) {
   try {
     const response = await fetch(
@@ -556,6 +613,40 @@ async function forwardHumanArmedRearm(req, res, configuration, bindingId) {
   }
 }
 
+async function forwardDraftCreation(res, configuration, captureId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/${encodeURIComponent(captureId)}/drafts`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        // The backend accepts an empty object only; no browser-owned context
+        // crosses this proxy boundary.
+        body: JSON.stringify({}),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 404, 409, 422, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(safeDraftBackendError(data, "Tinder-Draft konnte nicht erstellt werden."));
+    }
+    const draft = normalizePublicDraft(data?.draft, captureId);
+    if (!draft) {
+      return res.status(502).json({ ok: false, error: "Ung\u00fcltige Tinder-Draft-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(201).json({ ok: true, draft });
+  } catch {
+    console.error("Verbindung zum Tinder-Draft-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
 async function forwardHumanArmedBindingList(res, configuration) {
   try {
     const response = await fetch(
@@ -593,15 +684,17 @@ export default async function handler(req, res) {
   }
 
   const captureRequest = captureRequestFromQuery(req);
-  if (!captureRequest || (req.method === "POST" && !["capture", "human_arm", "human_rearm"].includes(captureRequest.type))) {
+  if (!captureRequest || (req.method === "POST" && !["capture", "human_arm", "human_rearm", "draft"].includes(captureRequest.type))) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
   const requestKind = req.method !== "POST" ? null
     : captureRequest.type === "human_arm" && validHumanArmedBindingBody(req.body)
       ? "human_arm"
-      : captureRequest.type === "human_rearm" && validHumanArmedRearmBody(req.body)
-        ? "human_rearm"
-        : captureRequest.type === "capture" && validMappingBody(req.body)
+    : captureRequest.type === "human_rearm" && validHumanArmedRearmBody(req.body)
+      ? "human_rearm"
+      : captureRequest.type === "draft" && validEmptyDraftBody(req.body)
+        ? "draft"
+      : captureRequest.type === "capture" && validMappingBody(req.body)
           ? "profile_mapping"
           : captureRequest.type === "capture" && validConversationBindingBody(req.body)
             ? "conversation_binding"
@@ -627,6 +720,9 @@ export default async function handler(req, res) {
   if (requestKind === "human_rearm") {
     return forwardHumanArmedRearm(req, res, configuration, captureRequest.bindingId);
   }
+  if (requestKind === "draft") {
+    return forwardDraftCreation(res, configuration, captureRequest.captureId);
+  }
   return requestKind === "conversation_binding"
     ? forwardConversationBinding(req, res, configuration, captureRequest.captureId)
     : forwardHumanMapping(req, res, configuration, captureRequest.captureId);
@@ -639,6 +735,7 @@ export {
   HUMAN_ARMED_REARM_FIELDS,
   HUMAN_ARM_OPERATION,
   HUMAN_REARM_OPERATION,
+  DRAFT_OPERATION,
   MAPPING_FIELDS,
   PENDING_CAPTURE_LIMIT,
   PENDING_CAPTURE_VIEW,
@@ -651,10 +748,12 @@ export {
   normalizePublicHumanArmedBindingErrorResult,
   normalizePublicHumanArmedBindingResult,
   normalizePublicHumanArmedBindings,
+  normalizePublicDraft,
   normalizePublicMappingResult,
   validCaptureId,
   validConversationBindingBody,
   validHumanArmedBindingBody,
   validHumanArmedRearmBody,
+  validEmptyDraftBody,
   validMappingBody
 };

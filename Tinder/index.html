@@ -790,6 +790,7 @@
    @media(max-width:900px){.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
    @media(max-width:620px){.platform-layout{grid-template-columns:1fr}.platform-rail{height:auto;padding:10px 14px;display:grid;grid-template-columns:1fr auto}.platform-brand{padding:7px;font-size:15px}.platform-toggle{display:block;border:1px solid var(--border);background:#171e24;color:#fff;border-radius:8px;padding:7px 10px}.platform-nav{display:none;grid-column:1/-1;padding-top:8px}.platform-rail.open .platform-nav{display:grid}.platform-nav a{font-size:14px;text-align:left}.platform-secondary{margin-top:8px}.status-grid{grid-template-columns:1fr 1fr}}
     main{display:flex;flex-direction:column}.shell>header{padding-top:12px;padding-bottom:12px}.content-title{margin:0;font-size:22px}.status-grid{order:1;display:flex;flex-wrap:nowrap;gap:0;margin:0 0 8px;padding:5px 7px;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow-x:auto}.status-card{position:relative;min-height:0;flex:1 0 auto;padding:6px 10px;border:0;border-radius:0;background:transparent;box-shadow:none}.status-card+.status-card{border-left:1px solid var(--border)}.status-top{display:flex;align-items:center;justify-content:flex-start;gap:6px;white-space:nowrap}.status-value{display:inline;font-size:11px;margin-left:2px}.status-name{font-size:10px}.status-sub{display:none;position:absolute;z-index:8;top:calc(100% + 5px);left:8px;width:max-content;max-width:280px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#111820}.status-card:hover .status-sub,.status-card:focus-within .status-sub{display:block}.pending-capture-panel{order:2;margin:6px 0}.matches{order:2;margin:6px 0}.workspace{order:3}.technical{order:4;margin-top:10px}.technical>summary{padding:12px 15px}.status-grid .status-card:nth-child(2){display:none}@media(max-width:620px){.status-grid{display:flex;flex-wrap:nowrap}.status-card{border-radius:0}.status-sub{max-width:220px}}
+    .tinder-draft-copy{margin:10px 0 0;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.025);white-space:pre-wrap;overflow-wrap:anywhere}.tinder-draft-meta{margin-top:9px;color:var(--muted);font-size:12px}
  </style>
 </head>
 
@@ -872,6 +873,24 @@
         <span class="enrollment-message" id="humanArmedBindingMessage" role="status" aria-live="polite">
           Menschlich bestätigte Conversation-Bindungen werden geladen.
         </span>
+      </section>
+
+      <section class="enrollment-panel pending-capture-panel" id="captureDraftPanel" hidden aria-labelledby="captureDraftHeading">
+        <h2 id="captureDraftHeading">T4 Antwortentwurf</h2>
+        <p>
+          Ein Entwurf wird nur auf ausdruecklichen Klick aus dem bereits menschlich bestaetigten,
+          sicheren Capture erstellt. Er wird nicht versendet und aktiviert keine Automation.
+        </p>
+        <div class="enrollment-actions">
+          <button class="button primary" id="createCaptureDraft" type="button" disabled>Entwurf erstellen</button>
+          <span class="enrollment-message" id="captureDraftMessage" role="status" aria-live="polite"></span>
+        </div>
+        <div id="captureDraftResult" hidden>
+          <h3>Vorschlag</h3>
+          <div class="tinder-draft-copy" id="captureDraftOriginal"></div>
+          <div class="tinder-draft-copy" id="captureDraftControl" hidden></div>
+          <div class="tinder-draft-meta" id="captureDraftMeta"></div>
+        </div>
       </section>
 
       <details class="technical">
@@ -1106,6 +1125,13 @@
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        humanArmedBindingList: document.getElementById("humanArmedBindingList"),
        humanArmedBindingMessage: document.getElementById("humanArmedBindingMessage"),
+       captureDraftPanel: document.getElementById("captureDraftPanel"),
+       createCaptureDraft: document.getElementById("createCaptureDraft"),
+       captureDraftMessage: document.getElementById("captureDraftMessage"),
+       captureDraftResult: document.getElementById("captureDraftResult"),
+       captureDraftOriginal: document.getElementById("captureDraftOriginal"),
+       captureDraftControl: document.getElementById("captureDraftControl"),
+       captureDraftMeta: document.getElementById("captureDraftMeta"),
        captureMappingPanel: document.getElementById("captureMappingPanel"),
       captureMappingIntro: document.getElementById("captureMappingIntro"),
       captureVisibleNameContext: document.getElementById("captureVisibleNameContext"),
@@ -1132,6 +1158,9 @@
     let mappingBusy = false;
     let conversationBindingMode = false;
     let humanArmedBindingMode = false;
+    let draftCapture = null;
+    let draftBusy = false;
+    let draftCompleted = false;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
@@ -1369,6 +1398,109 @@
      return String(capture?.mapping_status || capture?.mappingStatus || "").toUpperCase();
    }
 
+    function captureReviewStatus(capture) {
+      return String(capture?.human_review_status || capture?.humanReviewStatus || "").toUpperCase();
+    }
+
+    function captureIsDraftEligible(capture) {
+      return captureMappingStatus(capture) === "RESOLVED" && captureReviewStatus(capture) === "CONFIRMED";
+    }
+
+    function setCaptureDraftMessage(message, isError = false) {
+      elements.captureDraftMessage.className = isError
+        ? "enrollment-message enrollment-error"
+        : "enrollment-message";
+      elements.captureDraftMessage.textContent = message;
+    }
+
+    function clearCaptureDraft() {
+      draftCapture = null;
+      draftBusy = false;
+      draftCompleted = false;
+      elements.captureDraftPanel.hidden = true;
+      elements.createCaptureDraft.disabled = true;
+      elements.captureDraftResult.hidden = true;
+      elements.captureDraftOriginal.textContent = "";
+      elements.captureDraftControl.textContent = "";
+      elements.captureDraftControl.hidden = true;
+      elements.captureDraftMeta.textContent = "";
+      setCaptureDraftMessage("");
+    }
+
+    function validPublicDraft(draft, captureId) {
+      return draft && typeof draft === "object" &&
+        UUID_V4.test(String(draft.draft_id || "")) &&
+        String(draft.capture_id || "") === captureId &&
+        draft.status === "DRAFT" &&
+        Number.isInteger(draft.capture_revision) && draft.capture_revision > 0 &&
+        Number.isInteger(draft.identity_revision) && draft.identity_revision > 0 &&
+        typeof draft.original_draft === "string" && draft.original_draft.trim() &&
+        draft.original_draft.trim().length <= 8000 &&
+        (draft.control_draft_de === null ||
+          (typeof draft.control_draft_de === "string" && draft.control_draft_de.trim().length <= 8000)) &&
+        (draft.source_language === null ||
+          (typeof draft.source_language === "string" && draft.source_language.trim().length <= 32)) &&
+        typeof draft.model_version === "string" && draft.model_version.trim() &&
+        draft.model_version.trim().length <= 160 &&
+        !Number.isNaN(new Date(draft.created_at).valueOf());
+    }
+
+    function renderCaptureDraft(capture) {
+      if (!captureIsDraftEligible(capture) || !UUID_V4.test(String(capture?.capture_id || ""))) {
+        clearCaptureDraft();
+        return;
+      }
+      if (draftCapture?.capture_id !== capture.capture_id) {
+        draftCompleted = false;
+        elements.captureDraftResult.hidden = true;
+        elements.captureDraftOriginal.textContent = "";
+        elements.captureDraftControl.textContent = "";
+        elements.captureDraftControl.hidden = true;
+        elements.captureDraftMeta.textContent = "";
+      }
+      draftCapture = capture;
+      elements.captureDraftPanel.hidden = false;
+      elements.createCaptureDraft.disabled = draftBusy || draftCompleted;
+      if (!draftBusy && !draftCompleted) {
+        setCaptureDraftMessage("Bereit fuer einen einzelnen, nicht versendenden Entwurf.");
+      }
+    }
+
+    async function createCaptureDraft() {
+      const captureId = String(draftCapture?.capture_id || "");
+      if (draftBusy || draftCompleted || !captureIsDraftEligible(draftCapture) || !UUID_V4.test(captureId)) return;
+      draftBusy = true;
+      elements.createCaptureDraft.disabled = true;
+      setCaptureDraftMessage("Entwurf wird serverseitig vorbereitet ...");
+      try {
+        const data = await requestJson(
+          `/api/tinder/captures?captureId=${encodeURIComponent(captureId)}&operation=draft`,
+          { method: "POST", body: JSON.stringify({}) }
+        );
+        if (!validPublicDraft(data?.draft, captureId)) {
+          throw new Error("Das Backend hat keinen gueltigen Tinder-Draft geliefert.");
+        }
+        const draft = data.draft;
+        elements.captureDraftOriginal.textContent = draft.original_draft.trim();
+        if (typeof draft.control_draft_de === "string" && draft.control_draft_de.trim()) {
+          elements.captureDraftControl.textContent = `Kontrollfassung DE: ${draft.control_draft_de.trim()}`;
+          elements.captureDraftControl.hidden = false;
+        } else {
+          elements.captureDraftControl.textContent = "";
+          elements.captureDraftControl.hidden = true;
+        }
+        elements.captureDraftMeta.textContent = `Entwurf gespeichert · Modell ${draft.model_version.trim()} · keine Nachricht wurde gesendet.`;
+        elements.captureDraftResult.hidden = false;
+        draftCompleted = true;
+        setCaptureDraftMessage("Entwurf liegt zur menschlichen Pruefung vor. Es wurde nichts gesendet.");
+      } catch (error) {
+        setCaptureDraftMessage(error?.message || "Tinder-Draft konnte nicht erstellt werden.", true);
+      } finally {
+        draftBusy = false;
+        elements.createCaptureDraft.disabled = !captureIsDraftEligible(draftCapture) || draftCompleted;
+      }
+    }
+
    function mappingContactLabel(contact) {
      const name = String(
        contact?.name || contact?.displayName || contact?.canonicalName || "Unbekannter Kontakt"
@@ -1522,6 +1654,7 @@
          throw new Error("Das Backend hat kein gültiges Tinder-Capture geliefert.");
        }
        renderCaptureMapping(data.capture);
+       renderCaptureDraft(data.capture);
        if (captureMappingStatus(data.capture) === "NEEDS_HUMAN_MAPPING" && !conversationBindingBlocksMapping(data.capture)) {
          await loadCaptureMappingContacts();
          updateCaptureMappingControls();
@@ -1529,6 +1662,7 @@
      } catch (error) {
        mappingCapture = null;
        applyCaptureMappingMode(null);
+       clearCaptureDraft();
        elements.captureMappingPanel.hidden = false;
        elements.captureMappingForm.hidden = true;
        elements.captureMappingIntro.textContent = "Tinder-Capture kann nicht sicher zugeordnet werden.";
@@ -2054,6 +2188,10 @@
     elements.useHumanArmedBinding.addEventListener("click", () => {
       enableHumanArmedBindingMode();
     });
+
+   elements.createCaptureDraft.addEventListener("click", () => {
+     void createCaptureDraft();
+   });
 
    window.addEventListener("focus", () => {
      void refreshAllStatuses();

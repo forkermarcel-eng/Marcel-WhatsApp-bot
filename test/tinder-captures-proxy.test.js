@@ -138,12 +138,95 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
     {
       query: { captureId: CAPTURE_ID, operation: "unknown" },
       body: { action: "BIND_EXISTING", contact_id: 7, confirmed: true }
+    },
+    {
+      query: { captureId: CAPTURE_ID, operation: "draft" },
+      body: { extra_context: "must-not-pass" }
     }
   ]) {
     const invalidHumanArm = responseRecorder();
     await handler(request({ method: "POST", query, body }), invalidHumanArm);
     assert.equal(invalidHumanArm.statusCode, 400);
   }
+}));
+
+test("T4 draft POST forwards only an empty browser body and returns a bounded draft", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      draft: {
+        draft_id: "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d",
+        capture_id: CAPTURE_ID,
+        contact_id: 7,
+        capture_revision: 1,
+        identity_revision: 1,
+        status: "DRAFT",
+        original_draft: "Hallo, schön von dir zu hören.",
+        control_draft_de: "Hallo, schön von dir zu hören.",
+        source_language: "de",
+        model_version: "shared-reply-core-v1",
+        created_at: "2026-09-07T13:00:00.000Z",
+        visible_messages: [{ text: "private visible Tinder message" }],
+        runtime_thread_fingerprint: "private-thread-fingerprint",
+        capture_fingerprint: "private-capture-fingerprint"
+      }
+    }, { status: 201 });
+  };
+
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { captureId: CAPTURE_ID, operation: "draft" },
+    body: {}
+  }), res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(call.url, `https://shared-backend.example/dashboard-api/tinder/captures/${CAPTURE_ID}/drafts`);
+  assert.equal(call.options.method, "POST");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.deepEqual(JSON.parse(call.options.body), {});
+  assert.deepEqual(res.body, {
+    ok: true,
+    draft: {
+      draft_id: "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d",
+      capture_id: CAPTURE_ID,
+      capture_revision: 1,
+      identity_revision: 1,
+      status: "DRAFT",
+      original_draft: "Hallo, schön von dir zu hören.",
+      control_draft_de: "Hallo, schön von dir zu hören.",
+      source_language: "de",
+      model_version: "shared-reply-core-v1",
+      created_at: "2026-09-07T13:00:00.000Z"
+    }
+  });
+  assert.equal(JSON.stringify(res.body).includes("contact_id"), false);
+  assert.equal(JSON.stringify(res.body).includes("private visible Tinder message"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+}));
+
+test("T4 draft proxy reports an unmigrated foundation without backend detail", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    code: "TINDER_DRAFT_FOUNDATION_NOT_READY",
+    error: "private database detail"
+  }, { ok: false, status: 503 });
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { captureId: CAPTURE_ID, operation: "draft" },
+    body: {}
+  }), res);
+  assert.equal(res.statusCode, 503);
+  assert.deepEqual(res.body, {
+    ok: false,
+    code: "TINDER_DRAFT_FOUNDATION_NOT_READY",
+    error: "Tinder-Draft Foundation ist noch nicht bereit."
+  });
+  assert.equal(JSON.stringify(res.body).includes("private database detail"), false);
 }));
 
 test("capture GET uses only the shared backend route and server-only authorization", async () => withEnvironment(async () => {

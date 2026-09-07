@@ -130,6 +130,20 @@ test("human-armed fallback remains opt-in, never renders technical identifiers, 
   assert.doesNotMatch(mappingCode, /threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|uniqueId/);
 });
 
+test("T4 draft UI is opt-in for a resolved confirmed capture and never sends browser-owned context", () => {
+  const draftCode = sourceBetween("function captureReviewStatus", "function mappingContactLabel");
+  assert.match(page, /id="captureDraftPanel" hidden/);
+  assert.match(page, /id="createCaptureDraft"/);
+  assert.match(draftCode, /function captureIsDraftEligible\(capture\)\s*\{\s*return captureMappingStatus\(capture\) === "RESOLVED" && captureReviewStatus\(capture\) === "CONFIRMED";/s);
+  assert.match(draftCode, /function createCaptureDraft\(\)/);
+  assert.match(draftCode, /operation=draft/);
+  assert.match(draftCode, /body: JSON\.stringify\(\{\}\)/);
+  assert.match(page, /elements\.createCaptureDraft\.addEventListener\("click"/);
+  assert.match(page, /renderCaptureDraft\(data\.capture\)/);
+  assert.doesNotMatch(draftCode, /visible_name|threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|humanBindingPermit|uniqueId/);
+  assert.doesNotMatch(draftCode, /window\.location(?:\.href)?\s*=/);
+});
+
 test("channel-native T3 contacts remain visible in the existing contacts list while persona tests stay hidden", () => {
   assert.match(backend, /WHERE \(\s*c\.whatsapp_jid IS NULL\s*OR c\.whatsapp_jid NOT LIKE '%@persona\.test'\s*\)/);
   assert.match(backend, /FROM messages m\s+\s*WHERE m\.whatsapp_jid =\s+c\.whatsapp_jid/s);

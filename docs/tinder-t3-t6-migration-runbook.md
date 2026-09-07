@@ -43,7 +43,8 @@ Run at most one approved stage at a time, in this order:
 | --- | --- | --- | --- |
 | T3 identity | `npm run migrate:tinder-identity-foundation` | T1, ACK, T2 and contact/contact-identifier contracts | Protected capture reader and human-only mapping audit |
 | T4 draft | `npm run migrate:tinder-draft-foundation` | T3 | Shared-core Tinder drafts |
-| T5 send foundation | `node scripts/migrate-tinder-manual-send-foundation.js --apply` | T4 | Human-approved sealed future writer reservations only |
+| T5 send foundation | `node scripts/migrate-tinder-manual-send-foundation.js --apply` | T4 | Human-approved sealed intent reservations |
+| T5 signed command vocabulary | `npm run migrate:tinder-manual-send-command` | Canonical T5 foundation + T2 command constraint | The one existing command-type CHECK extension: `SEND_TINDER_DRAFT` |
 | T6 inbound queue | `node scripts/migrate-tinder-inbound-queue-foundation.js --apply` | T4 | Persisted verified-inbound collection windows only |
 
 The direct T5/T6 commands are intentionally not package/startup hooks.  Their
@@ -63,6 +64,10 @@ execute it only after the relevant production DDL approval.
    The runner's own source validation, global preflight, locks, locked
    preflight, postcheck, and transaction boundary are mandatory; do not bypass
    them with a SQL console or copied statements.
+5. Before the single signed T5 transport proof, confirm the Android bridge is
+   ACTIVE/ONLINE/RUNNING, Tinder Gate is CONNECTED, and **Command-Polling is
+   NORMAL**.  Static T5 capability advertising in HEARTBEAT_ONLY mode does
+   not make that mode eligible to receive a command.
 
 ## Interpretation and stop conditions
 
@@ -97,8 +102,10 @@ automatically.
 ## Explicit non-goals of these stages
 
 - No Android command, UI action, Tinder navigation, capture, upload, or send.
-- No T5 writer dispatch: T5 currently stores only an immutable,
-  `PENDING_T5_WRITER` future reservation.
+- No physical T5 Tinder writer or send.  The signed T5 proof may deliver one
+  sealed command only to the exact T5 profile; the current Android behavior
+  must directly terminally reject it with the bounded
+  `TINDER_WRITER_NOT_IMPLEMENTED` result and no retry.
 - No T6 notification listener, scheduled scan, capture trigger, draft, or
   send.
 - No T7 runtime activation or automatic approval.

@@ -216,8 +216,10 @@ function createTinderDashboardDispatchHandler(service) {
         draftId: normalizeDraftId(req.params?.draftId),
         actor: "marcel_dashboard"
       }));
-      // The result is a sealed PENDING_T5_WRITER reservation, never a live
-      // device dispatch while the Android writer remains absent.
+      // The server creates a sealed, device-scoped signed command together
+      // with the reservation.  The present Android contract still terminates
+      // it fail-closed as TINDER_WRITER_NOT_IMPLEMENTED; this route never
+      // writes Tinder or exposes a generic device-command surface.
       return res.status(result.idempotent ? 200 : 202).json({ ok: true, intent: result });
     } catch (error) {
       if (isFoundationNotReadyError(error)) return foundationNotReadyResponse(res);

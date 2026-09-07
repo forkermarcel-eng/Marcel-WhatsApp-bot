@@ -8,6 +8,8 @@ import {
   T1_TINDER_STATE_CONSTRAINT_NAME,
   T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION,
   T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
+  T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION,
+  T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME,
   inspectDeviceBridgeT1Schema
 } from "../device-bridge/t1-schema.js";
 import {
@@ -132,8 +134,11 @@ function t1Constraint({ kind, mode }) {
   const legacyValues = tinder ? LEGACY_TINDER : LEGACY_COMMANDS;
   const finalExpression = tinder ? T1_TINDER_STATE_CHECK_EXPRESSION : T1_COMMAND_TYPE_CHECK_EXPRESSION;
   const isT2CommandConstraint = !tinder && mode === "T2";
-  const isFinal = mode === "FINAL" || isT2CommandConstraint;
-  const base = isT2CommandConstraint
+  const isT5CommandConstraint = !tinder && mode === "T5";
+  const isFinal = mode === "FINAL" || isT2CommandConstraint || isT5CommandConstraint;
+  const base = isT5CommandConstraint
+    ? T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION
+    : isT2CommandConstraint
     ? T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION
     : isFinal ? finalExpression : enumExpression(column, legacyValues);
   return {
@@ -141,6 +146,8 @@ function t1Constraint({ kind, mode }) {
       ? finalName
       : isT2CommandConstraint
         ? T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME
+        : isT5CommandConstraint
+          ? T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME
         : isFinal ? finalName : legacyName,
     convalidated: mode !== "UNVALIDATED",
     condeferrable: false,
@@ -414,6 +421,16 @@ test("runtime T1 inspection accepts only the exact named forward-compatible T2 c
   assert.equal(inspection.ready, true);
   const command = inspection.constraints.find(item => item.specification.column === "command_type");
   assert.equal(command.constraintName, T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME);
+  assert.equal(await migrateDeviceBridgeSchema(fake.pool).then(result => result.migrated), false);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
+});
+
+test("runtime T1 inspection accepts the exact named future T5 command superset without mutating it", async () => {
+  const fake = migrationClient({ tinder: "FINAL", command: "T5" });
+  const inspection = await inspectDeviceBridgeT1Schema(fake.client);
+  assert.equal(inspection.ready, true);
+  const command = inspection.constraints.find(item => item.specification.column === "command_type");
+  assert.equal(command.constraintName, T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME);
   assert.equal(await migrateDeviceBridgeSchema(fake.pool).then(result => result.migrated), false);
   assert.equal(ddlCalls(fake.client.calls).length, 0);
 });

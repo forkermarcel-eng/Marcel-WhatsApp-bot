@@ -34,6 +34,7 @@ import {
   createPgTinderManualSendRepository,
   createTinderManualSendService
 } from "./services/tinder-manual-send.js";
+import { createTinderManualSendDeliveryPolicy } from "./services/tinder-manual-send-delivery-policy.js";
 
 const { Pool } = pg;
 
@@ -8500,11 +8501,12 @@ registerTinderDraftRoutes({
   draftService: tinderDraftService
 });
 
-// T5 is deliberately a sealed approval/intent contract only.  Its default
-// delivery-policy adapter fails closed because no verified Android writer or
-// shared Delivery Policy exists in this release line.
+// T5 dispatch remains server-owned and finite.  The Android writer still
+// rejects the received command as BLOCKED_WRITER_NOT_IMPLEMENTED; this wiring
+// neither sends nor enables any browser-owned Device Bridge command surface.
 const tinderManualSendService = createTinderManualSendService({
-  repository: createPgTinderManualSendRepository(pool)
+  repository: createPgTinderManualSendRepository(pool),
+  deliveryPolicy: createTinderManualSendDeliveryPolicy()
 });
 
 registerTinderManualSendRoutes({

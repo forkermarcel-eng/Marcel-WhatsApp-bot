@@ -12,9 +12,15 @@ import {
   T0_DEVICE_CAPABILITIES,
   T1_DEVICE_CAPABILITIES,
   T2_DEVICE_CAPABILITIES,
+  T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
 } from "../device-bridge/protocol-v1.js";
+import {
+  TINDER_SEND_COMMAND_TYPE,
+  TINDER_SEND_INTENT_STATE
+} from "../services/tinder-manual-send.js";
+import { TINDER_WRITER_NOT_IMPLEMENTED_ERROR } from "../device-bridge/command-ack.js";
 
 const NOW = new Date("2026-09-01T12:34:56.000Z");
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
@@ -84,9 +90,13 @@ function historyRow(ack) {
 function ackPool({ request, history = [], terminalStatus = null, commandDeviceId = DEVICE_ID,
   commandType = "PING", revision = 1, deviceRevision = 1, expiresAt = new Date(NOW.valueOf() + 60_000),
   deviceState = "ACTIVE", deviceRevoked = false, keyRevoked = false, missingCommand = false,
-  nonceReplay = false, failAudit = false, capabilities = T0_DEVICE_CAPABILITIES } = {}) {
+  nonceReplay = false, failAudit = false, capabilities = T0_DEVICE_CAPABILITIES,
+  commandPayload = {}, tinderIntent = null } = {}) {
   const calls = [];
-  const state = { nonce: 0, ackInserts: 0, commandUpdates: 0, audits: 0, commits: 0, rollbacks: 0 };
+  const state = {
+    nonce: 0, ackInserts: 0, commandUpdates: 0, audits: 0, commits: 0, rollbacks: 0,
+    tinderIntent: tinderIntent ? { ...tinderIntent } : null, tinderIntentUpdates: 0, tinderAudits: 0
+  };
   const authRow = {
     device_id: DEVICE_ID, key_id: KEY_ID, enrollment_state: "ACTIVE", device_revoked_at: null,
     key_revoked_at: null, public_key_spki_der: request?.keys.publicKey.export({ type: "spki", format: "der" })
@@ -108,12 +118,26 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
       }
       if (sql.includes("FROM device_bridge_commands") && sql.includes("FOR UPDATE")) return { rows: missingCommand ? [] : [{
         command_id: COMMAND_ID, device_id: commandDeviceId, command_type: commandType,
+        payload: commandPayload,
         configuration_revision: revision, issued_at: new Date(NOW.valueOf() - 60_000),
         expires_at: expiresAt, terminal_status: terminalStatus, terminal_at: terminalStatus ? NOW : null
       }] };
       if (sql.includes("FROM device_bridge_command_acks")) return { rows: history };
       if (sql.includes("INSERT INTO device_bridge_command_acks")) { state.ackInserts += 1; return { rows: [] }; }
       if (sql.includes("UPDATE device_bridge_commands")) { state.commandUpdates += 1; return { rows: [] }; }
+      if (sql.includes("FROM tinder_reply_send_intents") && sql.includes("FOR UPDATE")) {
+        return { rows: state.tinderIntent ? [{ ...state.tinderIntent }] : [] };
+      }
+      if (sql.includes("UPDATE tinder_reply_send_intents")) {
+        if (!state.tinderIntent) return { rows: [] };
+        state.tinderIntent.state = params[1];
+        state.tinderIntent.received_at = params[2];
+        state.tinderIntent.completed_at = params[3];
+        state.tinderIntent.result_code = params[4];
+        state.tinderIntentUpdates += 1;
+        return { rows: [{ intent_id: state.tinderIntent.intent_id }] };
+      }
+      if (sql.includes("INSERT INTO tinder_reply_send_audit")) { state.tinderAudits += 1; return { rows: [] }; }
       if (sql.includes("INSERT INTO device_bridge_audit_events")) {
         if (failAudit) throw new Error("simulated audit failure");
         state.audits += 1; return { rows: [] };
@@ -244,6 +268,76 @@ test("T2 human-armed conversation acknowledgement is exact and capability-gated"
       "ARM_TINDER_CONVERSATION_BINDING",
       T2_DEVICE_CAPABILITIES
     ), error => error.code === "INVALID_BODY");
+  }
+});
+
+test("T5 accepts only direct blocked-writer REJECTED and atomically cancels its sealed intent", async () => {
+  const rejected = ackPayload("REJECTED", { error: TINDER_WRITER_NOT_IMPLEMENTED_ERROR });
+  const fake = ackPool({
+    commandType: TINDER_SEND_COMMAND_TYPE,
+    capabilities: T5_DEVICE_CAPABILITIES,
+    tinderIntent: {
+      intent_id: "f3dd4498-1c29-48d2-b953-6c8668dc8fcf",
+      approval_id: "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d",
+      draft_id: "a565e8a7-ef60-42d0-b19d-26e7904390fa",
+      state: TINDER_SEND_INTENT_STATE.PENDING_T5_WRITER,
+      received_at: null
+    }
+  });
+  const response = await processCommandAckTransaction(fake.pool, auth(), rejected, NOW);
+  assert.equal(response.status, "REJECTED");
+  assert.equal(fake.state.commandUpdates, 1);
+  assert.equal(fake.state.tinderIntentUpdates, 1);
+  assert.equal(fake.state.tinderIntent.state, TINDER_SEND_INTENT_STATE.CANCELLED);
+  assert.equal(fake.state.tinderIntent.result_code, "TINDER_WRITER_NOT_IMPLEMENTED");
+  assert.equal(fake.state.tinderAudits, 1);
+  assert.equal(fake.state.commits, 1);
+  const ackInsert = fake.calls.findIndex(call => call.sql.includes("INSERT INTO device_bridge_command_acks"));
+  const intentUpdate = fake.calls.findIndex(call => call.sql.includes("UPDATE tinder_reply_send_intents"));
+  const commit = fake.calls.findIndex(call => call.sql === "COMMIT");
+  assert.ok(ackInsert >= 0 && intentUpdate > ackInsert && commit > intentUpdate);
+
+  const duplicate = ackPool({
+    commandType: TINDER_SEND_COMMAND_TYPE,
+    capabilities: T5_DEVICE_CAPABILITIES,
+    history: [historyRow(rejected)],
+    tinderIntent: {
+      intent_id: "f3dd4498-1c29-48d2-b953-6c8668dc8fcf",
+      approval_id: "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d",
+      draft_id: "a565e8a7-ef60-42d0-b19d-26e7904390fa",
+      state: TINDER_SEND_INTENT_STATE.CANCELLED,
+      received_at: null
+    }
+  });
+  const duplicateResponse = await processCommandAckTransaction(duplicate.pool, auth("4dbf2bd9-3d7c-4925-89de-fc0dc62a2fe1"), rejected, NOW);
+  assert.equal(duplicateResponse.status, "REJECTED");
+  assert.equal(duplicate.state.ackInserts, 0);
+  assert.equal(duplicate.state.tinderIntentUpdates, 0);
+  assert.equal(duplicate.state.tinderAudits, 0);
+});
+
+test("T5 rejects generic errors, receipt/success transitions, and non-T5 capability profiles fail closed", async () => {
+  const intent = {
+    intent_id: "f3dd4498-1c29-48d2-b953-6c8668dc8fcf",
+    approval_id: "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d",
+    draft_id: "a565e8a7-ef60-42d0-b19d-26e7904390fa",
+    state: TINDER_SEND_INTENT_STATE.PENDING_T5_WRITER,
+    received_at: null
+  };
+  const cases = [
+    [ackPayload("REJECTED", { error: { code: "COMMAND_REJECTED", message: "Command was rejected" } }), T5_DEVICE_CAPABILITIES, "INVALID_BODY"],
+    [ackPayload("RECEIVED"), T5_DEVICE_CAPABILITIES, "INVALID_BODY"],
+    [ackPayload("SUCCEEDED", { result: null }), T5_DEVICE_CAPABILITIES, "INVALID_BODY"],
+    [ackPayload("REJECTED", { error: TINDER_WRITER_NOT_IMPLEMENTED_ERROR }), T2_DEVICE_CAPABILITIES, "DEVICE_CAPABILITY_UNSUPPORTED"]
+  ];
+  for (const [ack, capabilities, code] of cases) {
+    await assert.rejects(
+      () => processCommandAckTransaction(
+        ackPool({ commandType: TINDER_SEND_COMMAND_TYPE, capabilities, tinderIntent: intent }).pool,
+        auth(), ack, NOW
+      ),
+      error => error.code === code
+    );
   }
 });
 

@@ -14,7 +14,8 @@ import { canonicalSchemaPredicate } from "./schema-contract.js";
 import {
   inspectDeviceBridgeT1Schema,
   T1_COMMAND_TYPE_CONSTRAINT_NAME,
-  T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME
+  T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
+  T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME
 } from "./t1-schema.js";
 
 /* ==================================================
@@ -352,7 +353,8 @@ async function commandConstraintState(client) {
   const command = inspection.constraints.find(item => item.specification.table === "device_bridge_commands"
     && item.specification.column === "command_type");
   if (command?.constraintName === T1_COMMAND_TYPE_CONSTRAINT_NAME) return "T1";
-  if (command?.constraintName === T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME) return "T2";
+  if (command?.constraintName === T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME ||
+      command?.constraintName === T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME) return "T2";
   return "INVALID";
 }
 

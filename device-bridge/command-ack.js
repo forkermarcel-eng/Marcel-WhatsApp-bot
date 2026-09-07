@@ -2,11 +2,13 @@ import {
   BRIDGE_SERVICE_STATES,
   DEVICE_BRIDGE_COMMANDS,
   DeviceBridgeProtocolError,
+  T5_TINDER_MANUAL_SEND_COMMANDS,
   T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS,
   T1_TINDER_MANUAL_GATE_COMMANDS,
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
   isTinderManualGateCapable,
+  isTinderManualSendCapable,
   isExactUtcTimestamp,
   isUuidV4,
   protocolErrorBody,
@@ -16,6 +18,10 @@ import {
   registerAuthenticatedRequestReplay,
   verifyAuthenticatedDeviceRequest
 } from "./device-auth.js";
+import {
+  projectTinderManualSendCommandAck,
+  TINDER_WRITER_NOT_IMPLEMENTED_CODE
+} from "./tinder-manual-send-command-ack.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 COMMAND ACK
@@ -26,6 +32,7 @@ const TERMINAL_STATUSES = new Set(["SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"]
 const SUPPORTED_COMMANDS = new Set(DEVICE_BRIDGE_COMMANDS);
 const TINDER_MANUAL_GATE_COMMANDS = new Set(T1_TINDER_MANUAL_GATE_COMMANDS);
 const TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS = new Set(T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS);
+const TINDER_MANUAL_SEND_COMMANDS = new Set(T5_TINDER_MANUAL_SEND_COMMANDS);
 const BRIDGE_STATES = new Set(BRIDGE_SERVICE_STATES);
 const MAX_RESULT_BYTES = 1024;
 const MAX_ERROR_BYTES = 1024;
@@ -36,6 +43,10 @@ const T0_ERROR_MESSAGES = Object.freeze({
   PROTOCOL_ERROR: "Protocol error",
   DEVICE_STOP_FAILED: "Bridge stop failed",
   CONFIGURATION_REVISION_UNSUPPORTED: "Configuration revision unsupported"
+});
+export const TINDER_WRITER_NOT_IMPLEMENTED_ERROR = Object.freeze({
+  code: TINDER_WRITER_NOT_IMPLEMENTED_CODE,
+  message: "Tinder writer is not implemented"
 });
 
 function invalidAck(message = "Command acknowledgement is invalid") {
@@ -55,6 +66,9 @@ function jsonBytes(value) {
 }
 
 function validateSucceededResult(commandType, result, capabilities = null) {
+  if (TINDER_MANUAL_SEND_COMMANDS.has(commandType)) {
+    throw invalidAck("Tinder send cannot report success while its writer is blocked");
+  }
   if (result === null) {
     if (!TINDER_MANUAL_GATE_COMMANDS.has(commandType)
         && !TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS.has(commandType)) return;
@@ -78,11 +92,32 @@ function validateSucceededResult(commandType, result, capabilities = null) {
 
 function validateTechnicalError(error) {
   if (!exactKeys(error, ["code", "message"]) ||
-      !Object.hasOwn(T0_ERROR_MESSAGES, error.code) ||
-      error.message !== T0_ERROR_MESSAGES[error.code] ||
+      (!(Object.hasOwn(T0_ERROR_MESSAGES, error.code) && error.message === T0_ERROR_MESSAGES[error.code]) &&
+        !(error.code === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.code &&
+          error.message === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.message)) ||
       jsonBytes(error) > MAX_ERROR_BYTES) {
     throw invalidAck("Ack error is invalid or exceeds the T0 limit");
   }
+}
+
+function isTinderWriterNotImplementedError(error) {
+  return plainObject(error) && error.code === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.code &&
+    error.message === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.message;
+}
+
+function validateAckForCommand(ack, commandType, capabilities) {
+  if (TINDER_MANUAL_SEND_COMMANDS.has(commandType)) {
+    if (!isTinderManualSendCapable(capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual send contract");
+    }
+    if (ack.status === "REJECTED" && ack.result === null && isTinderWriterNotImplementedError(ack.error)) return;
+    if (ack.status === "EXPIRED" && ack.result === null && ack.error === null) return;
+    throw invalidAck("Tinder manual send requires a direct blocked-writer terminal acknowledgement");
+  }
+  if (isTinderWriterNotImplementedError(ack.error)) {
+    throw invalidAck("Tinder writer error is not allowed for this command");
+  }
+  if (ack.status === "SUCCEEDED") validateSucceededResult(commandType, ack.result, capabilities);
 }
 
 export function parseAndValidateCommandAck(req, commandType = null, capabilities = null) {
@@ -160,7 +195,7 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     await registerAuthenticatedRequestReplay(client, auth, now);
 
     const commandResult = await client.query(
-      `SELECT command_id, device_id, command_type, configuration_revision,
+      `SELECT command_id, device_id, command_type, payload, configuration_revision,
               issued_at, expires_at, terminal_status, terminal_at
        FROM device_bridge_commands WHERE command_id=$1 FOR UPDATE`,
       [ack.command_id]
@@ -176,9 +211,13 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         && !isTinderHumanArmedConversationBindingCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support human-armed conversation binding");
     }
+    if (TINDER_MANUAL_SEND_COMMANDS.has(command.command_type)
+        && !isTinderManualSendCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual send contract");
+    }
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
 
-    validateSucceededResultForCommand(ack, command.command_type, device.capabilities);
+    validateAckForCommand(ack, command.command_type, device.capabilities);
     const semanticHash = commandAckSemanticHash(ack);
     const history = await client.query(
       `SELECT status, occurred_at, result, error, body_sha256, accepted_at
@@ -211,6 +250,7 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         [ack.command_id, ack.status, now]
       );
     }
+    await projectTinderManualSendCommandAck(client, { command, ack });
     await client.query(
       `INSERT INTO device_bridge_audit_events
         (event_type, request_id, device_id, key_id, command_id, result_code, http_status, details)
@@ -227,10 +267,6 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
   } finally {
     client.release();
   }
-}
-
-function validateSucceededResultForCommand(ack, commandType, capabilities) {
-  if (ack.status === "SUCCEEDED") validateSucceededResult(commandType, ack.result, capabilities);
 }
 
 export function createCommandAckHandler(pool) {

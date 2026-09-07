@@ -1,32 +1,32 @@
 import crypto from "node:crypto";
-import { DEVICE_BRIDGE_PROTOCOL, T1_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
+import {
+  DEVICE_BRIDGE_PROTOCOL,
+  T5_DEVICE_CAPABILITIES,
+  isTinderManualSendCapable
+} from "../device-bridge/protocol-v1.js";
 
 /* ==================================================
 T5 HUMAN-APPROVED TINDER SEND CONTRACT
 
-This is deliberately a sealed, future-writer contract.  It can record an
-immutable approval and reserve exactly one server-owned SEND_TINDER_DRAFT
-intent, but it never inserts into device_bridge_commands and never touches a
-device, browser, accessibility service, or Tinder network endpoint.
+This service owns the server-side sealed approval and exactly one signed
+SEND_TINDER_DRAFT command reservation.  It never touches a browser,
+accessibility service, Tinder network endpoint, or a physical writer.  The
+Android side is required to fail closed with TINDER_WRITER_NOT_IMPLEMENTED.
 
-The active T0/T1 heartbeat/ACK path must remain unchanged until a separately
-reviewed Android writer has durable point-of-no-return handling.  In
-particular, a current non-terminal Device Bridge command can be delivered more
-than once, which is unacceptable for a physical send action.
+The command is deliberately created only through this locked, server-owned
+approval path.  It is not available from the generic Device Bridge admin
+command route and cannot be supplied by a browser-owned payload.
 ================================================== */
 
 const TINDER_SEND_COMMAND_TYPE = "SEND_TINDER_DRAFT";
 const TINDER_THREAD_REF_KIND = "runtime_thread_fingerprint_v1";
 const TINDER_MANUAL_SEND_CAPABILITY = "TINDER_DRAFT_SEND_V1";
 const TINDER_T5_PAYLOAD_VERSION = "tinder_t5_send_v1";
+const TINDER_T5_COMMAND_DESCRIPTOR_VERSION = "tinder_t5_send_descriptor_v1";
 
-/* This exact profile is a future contract only.  protocol-v1.js intentionally
-does not yet accept it, so an existing T0/T1 Android runtime cannot receive a
-send intent by accident. */
-const FUTURE_T5_DEVICE_CAPABILITIES = Object.freeze([
-  ...T1_DEVICE_CAPABILITIES,
-  TINDER_MANUAL_SEND_CAPABILITY
-]);
+// Kept as a named export for the existing T5 contract consumers.  It now
+// aliases the active exact T2+T5 profile rather than widening older profiles.
+const FUTURE_T5_DEVICE_CAPABILITIES = T5_DEVICE_CAPABILITIES;
 
 const TINDER_APPROVAL_STATE = Object.freeze({
   ACTIVE: "ACTIVE",
@@ -79,11 +79,6 @@ function sourceValue(source, camelCase, snakeCase) {
 
 function normalizedState(value) {
   return String(value ?? "").trim().toUpperCase();
-}
-
-function exactArray(left, right) {
-  return Array.isArray(left) && left.length === right.length &&
-    left.every((item, index) => item === right[index]);
 }
 
 function normalizeCapabilities(value) {
@@ -200,7 +195,7 @@ function futureCommandFingerprint({ commandId, intentId, sealedPayloadHash }) {
 }
 
 function futureT5Capable(value) {
-  return exactArray(normalizeCapabilities(value), FUTURE_T5_DEVICE_CAPABILITIES);
+  return isTinderManualSendCapable(normalizeCapabilities(value));
 }
 
 function statusFromHeartbeat(lastAcceptedHeartbeatAt, now) {
@@ -256,6 +251,10 @@ function normalizeDraftSnapshot(row) {
     bridgeState: normalizedState(sourceValue(row, "bridgeServiceState", "bridge_service_state")),
     tinderState: normalizedState(sourceValue(row, "tinderState", "tinder_state")),
     automationState: normalizedState(sourceValue(row, "automationState", "automation_state")),
+    configurationRevision: positiveInteger(
+      sourceValue(row, "configurationRevision", "configuration_revision"),
+      "Device-Konfigurations-Revision"
+    ),
     capabilities: normalizeCapabilities(sourceValue(row, "deviceCapabilities", "device_capabilities") ?? row.capabilities),
     lastAcceptedHeartbeatAt: sourceValue(row, "lastAcceptedHeartbeatAt", "last_accepted_heartbeat_at"),
     humanTakeoverActive: sourceValue(row, "humanTakeoverActive", "human_takeover_active"),
@@ -304,7 +303,17 @@ function normalizeIntent(row) {
     approvalId: normalizedUuid(sourceValue(row, "approvalId", "approval_id"), "Freigabe-ID", 500),
     draftId: normalizedUuid(sourceValue(row, "draftId", "draft_id"), "Draft-ID", 500),
     draftRevision: positiveInteger(sourceValue(row, "draftRevision", "draft_revision"), "Draft-Revision", 500),
+    contactId: positiveInteger(sourceValue(row, "contactId", "contact_id"), "Kontakt-ID", 500),
+    captureId: normalizedUuid(sourceValue(row, "captureId", "capture_id"), "Capture-ID", 500),
+    captureFingerprint: normalizedHash(sourceValue(row, "captureFingerprint", "capture_fingerprint"), "Capture-Fingerprint", 500),
+    threadRefKind: String(sourceValue(row, "threadRefKind", "thread_ref_kind") || "").trim(),
+    runtimeThreadFingerprint: normalizedHash(sourceValue(row, "runtimeThreadFingerprint", "runtime_thread_fingerprint"), "Thread-Fingerprint", 500),
+    identityRevision: positiveInteger(sourceValue(row, "identityRevision", "identity_revision"), "Identitäts-Revision", 500),
     commandId: normalizedUuid(sourceValue(row, "commandId", "command_id"), "Command-ID", 500),
+    commandType: normalizedState(sourceValue(row, "commandType", "command_type")),
+    protocolVersion: Number(sourceValue(row, "protocolVersion", "protocol_version")),
+    approvedTextSha256: normalizedHash(sourceValue(row, "approvedTextSha256", "approved_text_sha256"), "Freigabe-Text-Hash", 500),
+    approvalBindingSha256: normalizedHash(sourceValue(row, "approvalBindingSha256", "approval_binding_sha256"), "Freigabe-Bindung", 500),
     deliveryPolicyRevision: (() => {
       const value = String(sourceValue(row, "deliveryPolicyRevision", "delivery_policy_revision") || "").trim();
       if (!/^[A-Za-z0-9._:-]{1,120}$/.test(value)) {
@@ -493,6 +502,7 @@ function normalizeDeliveryPlan(value, now) {
   const typingDurationMs = Number(value.typingDurationMs ?? value.typing_duration_ms);
   if (!Number.isSafeInteger(typingDurationMs) || typingDurationMs < 0 || typingDurationMs > 900000 ||
       new Date(expiresAt).valueOf() <= new Date(notBefore).valueOf() ||
+      new Date(notBefore).valueOf() > now.valueOf() ||
       new Date(expiresAt).valueOf() <= now.valueOf()) {
     throw new TinderManualSendError("Die serverseitige Delivery Policy ist ungültig.", "INVALID_DELIVERY_POLICY", 500);
   }
@@ -557,7 +567,17 @@ function intentFromApproval(approval, plan, { intentId, commandId, createdAt }) 
 function assertIntentMatchesApproval(intent, approval) {
   return intent.approvalId === approval.approvalId &&
     intent.draftId === approval.draftId &&
-    intent.draftRevision === approval.draftRevision;
+    intent.draftRevision === approval.draftRevision &&
+    intent.contactId === approval.contactId &&
+    intent.captureId === approval.captureId &&
+    intent.captureFingerprint === approval.captureFingerprint &&
+    intent.threadRefKind === approval.threadRefKind &&
+    intent.runtimeThreadFingerprint === approval.runtimeThreadFingerprint &&
+    intent.identityRevision === approval.identityRevision &&
+    intent.approvedTextSha256 === approval.approvedTextSha256 &&
+    intent.approvalBindingSha256 === approval.approvalBindingSha256 &&
+    intent.commandType === TINDER_SEND_COMMAND_TYPE &&
+    intent.protocolVersion === DEVICE_BRIDGE_PROTOCOL.version;
 }
 
 function requireRepository(repository) {
@@ -572,6 +592,8 @@ function requireRepository(repository) {
     "invalidateApproval",
     "findIntentForApproval",
     "insertIntent",
+    "insertDeviceBridgeCommand",
+    "findDeviceBridgeCommand",
     "updateIntent",
     "findIntentByCommand",
     "insertAudit"
@@ -646,6 +668,125 @@ function futureCommandPayload(snapshot, approval, intent) {
   return Object.freeze(payload);
 }
 
+/*
+ * The durable Device Bridge row must never contain approved_text.  It stores
+ * only this integrity-bound descriptor; the full 21-field payload is rebuilt
+ * transiently inside the authenticated heartbeat transaction from the
+ * authoritative draft/approval/intent snapshot.
+ */
+function futureCommandDescriptor(snapshot, approval, intent) {
+  const transientPayload = futureCommandPayload(snapshot, approval, intent);
+  const descriptor = {
+    payload_version: TINDER_T5_COMMAND_DESCRIPTOR_VERSION,
+    intent_id: transientPayload.intent_id,
+    command_id: transientPayload.command_id,
+    approval_id: transientPayload.approval_id,
+    draft_id: transientPayload.draft_id,
+    draft_revision: transientPayload.draft_revision,
+    contact_id: transientPayload.contact_id,
+    capture_id: transientPayload.capture_id,
+    capture_fingerprint: transientPayload.capture_fingerprint,
+    thread_ref_kind: transientPayload.thread_ref_kind,
+    thread_ref_hash: transientPayload.thread_ref_hash,
+    identity_revision: transientPayload.identity_revision,
+    approved_text_sha256: transientPayload.approved_text_sha256,
+    approval_binding_sha256: transientPayload.approval_binding_sha256,
+    delivery_policy_revision: transientPayload.delivery_policy_revision,
+    not_before: transientPayload.not_before,
+    expires_at: transientPayload.expires_at,
+    typing_duration_ms: transientPayload.typing_duration_ms,
+    sealed_payload_sha256: transientPayload.sealed_payload_sha256,
+    command_fingerprint: transientPayload.command_fingerprint
+  };
+  assertFutureTinderSendCommandDescriptor(descriptor);
+  return Object.freeze(descriptor);
+}
+
+function deviceBridgeCommandFromIntent(snapshot, approval, intent, issuedAt) {
+  const payload = futureCommandDescriptor(snapshot, approval, intent);
+  const command = Object.freeze({
+    commandId: intent.commandId,
+    deviceId: snapshot.deviceId,
+    protocolVersion: DEVICE_BRIDGE_PROTOCOL.version,
+    commandType: TINDER_SEND_COMMAND_TYPE,
+    payload,
+    configurationRevision: snapshot.configurationRevision,
+    issuedAt,
+    expiresAt: intent.expiresAt
+  });
+  if (new Date(command.expiresAt).valueOf() <= new Date(command.issuedAt).valueOf()) {
+    throw new TinderManualSendError("Der Send-Command ist bereits abgelaufen.", "SEND_COMMAND_EXPIRED", 409);
+  }
+  return command;
+}
+
+function matchesReservedDeviceBridgeCommand(command, snapshot, approval, intent) {
+  if (!plainObject(command) || command.command_id !== intent.commandId ||
+      command.device_id !== snapshot.deviceId ||
+      Number(command.protocol_version) !== DEVICE_BRIDGE_PROTOCOL.version ||
+      command.command_type !== TINDER_SEND_COMMAND_TYPE ||
+      command.terminal_status !== null) {
+    return false;
+  }
+  try {
+    const expected = deviceBridgeCommandFromIntent(snapshot, approval, intent, new Date(command.issued_at || Date.now()).toISOString());
+    return normalizedTimestamp(command.expires_at, "Command-Ablauf", 500) === expected.expiresAt &&
+      plainObject(command.payload) &&
+      command.payload.sealed_payload_sha256 === expected.payload.sealed_payload_sha256 &&
+      command.payload.command_fingerprint === expected.payload.command_fingerprint &&
+      assertFutureTinderSendCommandDescriptor(command.payload) === true;
+  } catch {
+    return false;
+  }
+}
+
+function assertFutureTinderSendCommandDescriptor(descriptor) {
+  const fields = [
+    "payload_version", "intent_id", "command_id", "approval_id", "draft_id", "draft_revision", "contact_id", "capture_id",
+    "capture_fingerprint", "thread_ref_kind", "thread_ref_hash", "identity_revision",
+    "approved_text_sha256", "approval_binding_sha256", "delivery_policy_revision", "not_before", "expires_at",
+    "typing_duration_ms", "sealed_payload_sha256", "command_fingerprint"
+  ];
+  if (!plainObject(descriptor) || Object.keys(descriptor).length !== fields.length ||
+      Object.keys(descriptor).some(key => !fields.includes(key)) ||
+      Object.values(descriptor).some(value => typeof value !== "string")) {
+    throw new TinderManualSendError("Der zukünftige Send-Command ist ungültig.", "INVALID_SEND_COMMAND_DESCRIPTOR", 500);
+  }
+  if (descriptor.payload_version !== TINDER_T5_COMMAND_DESCRIPTOR_VERSION) {
+    throw new TinderManualSendError("Der zukünftige Send-Command ist ungültig.", "INVALID_SEND_COMMAND_DESCRIPTOR", 500);
+  }
+  normalizedUuid(descriptor.intent_id, "Intent-ID", 500);
+  normalizedUuid(descriptor.command_id, "Command-ID", 500);
+  normalizedUuid(descriptor.approval_id, "Freigabe-ID", 500);
+  normalizedUuid(descriptor.draft_id, "Draft-ID", 500);
+  normalizedUuid(descriptor.capture_id, "Capture-ID", 500);
+  positiveInteger(descriptor.draft_revision, "Draft-Revision", 500);
+  positiveInteger(descriptor.contact_id, "Kontakt-ID", 500);
+  positiveInteger(descriptor.identity_revision, "Identitäts-Revision", 500);
+  normalizedHash(descriptor.capture_fingerprint, "Capture-Fingerprint", 500);
+  normalizedHash(descriptor.thread_ref_hash, "Thread-Fingerprint", 500);
+  normalizedHash(descriptor.approved_text_sha256, "Freigabe-Text-Hash", 500);
+  normalizedHash(descriptor.approval_binding_sha256, "Freigabe-Bindung", 500);
+  normalizedHash(descriptor.sealed_payload_sha256, "Sealed-Payload-Hash", 500);
+  normalizedHash(descriptor.command_fingerprint, "Command-Fingerprint", 500);
+  if (descriptor.thread_ref_kind !== TINDER_THREAD_REF_KIND ||
+      !/^[A-Za-z0-9._:-]{1,120}$/.test(descriptor.delivery_policy_revision) ||
+      !/^\d+$/.test(descriptor.typing_duration_ms) || Number(descriptor.typing_duration_ms) > 900000) {
+    throw new TinderManualSendError("Der zukünftige Send-Command ist ungültig.", "INVALID_SEND_COMMAND_DESCRIPTOR", 500);
+  }
+  const notBefore = normalizedTimestamp(descriptor.not_before, "Policy-Start", 500);
+  const expiresAt = normalizedTimestamp(descriptor.expires_at, "Policy-Ablauf", 500);
+  if (new Date(expiresAt).valueOf() <= new Date(notBefore).valueOf() ||
+      futureCommandFingerprint({
+        commandId: descriptor.command_id,
+        intentId: descriptor.intent_id,
+        sealedPayloadHash: descriptor.sealed_payload_sha256
+      }) !== descriptor.command_fingerprint) {
+    throw new TinderManualSendError("Der zukünftige Send-Command ist ungültig.", "INVALID_SEND_COMMAND_DESCRIPTOR", 500);
+  }
+  return true;
+}
+
 function assertFutureTinderSendPayload(payload) {
   const fields = [
     "payload_version", "intent_id", "command_id", "approval_id", "draft_id", "draft_revision", "contact_id", "capture_id",
@@ -694,6 +835,74 @@ function assertFutureTinderSendPayload(payload) {
     throw new TinderManualSendError("Der zukünftige Send-Command ist ungültig.", "INVALID_SEND_COMMAND_PAYLOAD", 500);
   }
   return true;
+}
+
+/*
+ * This is deliberately the only full-payload builder exported to the
+ * authenticated Device Bridge delivery seam.  Its inputs are freshly locked
+ * authoritative rows, never browser input or the durable command descriptor.
+ * Callers must keep the return value transient and may only place it in the
+ * signed heartbeat response.
+ */
+function hydrateFutureTinderSendCommandPayload({ command, snapshot, approval, intent, now = new Date() } = {}) {
+  const currentNow = new Date(normalizedTimestamp(now, "Hydrierungs-Zeit", 500));
+  const normalizedSnapshot = normalizeDraftSnapshot(snapshot);
+  const normalizedApproval = normalizeApproval(approval);
+  const normalizedIntent = normalizeIntent(intent);
+  if (!normalizedApproval) {
+    throw new TinderManualSendError("Die gespeicherte Draft-Freigabe ist nicht verfügbar.", "APPROVAL_NOT_ACTIVE", 409);
+  }
+  if (!normalizedIntent) {
+    throw new TinderManualSendError("Der gespeicherte Send-Intent ist nicht verfügbar.", "SEND_INTENT_NOT_PENDING", 409);
+  }
+  if (!plainObject(command)) {
+    throw new TinderManualSendError("Der Send-Command ist nicht verfügbar.", "SEND_COMMAND_INCONSISTENT", 409);
+  }
+  const commandId = normalizedUuid(sourceValue(command, "commandId", "command_id"), "Command-ID", 500);
+  const deviceId = normalizedUuid(sourceValue(command, "deviceId", "device_id"), "Device-ID", 500);
+  const protocolVersion = Number(sourceValue(command, "protocolVersion", "protocol_version"));
+  const commandType = normalizedState(sourceValue(command, "commandType", "command_type"));
+  const configurationRevision = positiveInteger(
+    sourceValue(command, "configurationRevision", "configuration_revision"),
+    "Command-Konfigurations-Revision", 500
+  );
+  const issuedAt = normalizedTimestamp(sourceValue(command, "issuedAt", "issued_at"), "Command-Zeit", 500);
+  const expiresAt = normalizedTimestamp(sourceValue(command, "expiresAt", "expires_at"), "Command-Ablauf", 500);
+  const terminalStatus = sourceValue(command, "terminalStatus", "terminal_status");
+  const descriptor = sourceValue(command, "payload", "payload");
+  if (terminalStatus !== null || commandId !== normalizedIntent.commandId ||
+      deviceId !== normalizedSnapshot.deviceId || protocolVersion !== DEVICE_BRIDGE_PROTOCOL.version ||
+      commandType !== TINDER_SEND_COMMAND_TYPE ||
+      configurationRevision !== normalizedSnapshot.configurationRevision ||
+      new Date(issuedAt).valueOf() > currentNow.valueOf() ||
+      new Date(expiresAt).valueOf() <= new Date(issuedAt).valueOf() ||
+      expiresAt !== normalizedIntent.expiresAt ||
+      normalizedIntent.state !== TINDER_SEND_INTENT_STATE.PENDING_T5_WRITER ||
+      normalizedApproval.state !== TINDER_APPROVAL_STATE.ACTIVE ||
+      normalizedSnapshot.draftStatus !== "APPROVED") {
+    throw new TinderManualSendError("Der Send-Command ist nicht zustellbar.", "SEND_COMMAND_INCONSISTENT", 409);
+  }
+  if (new Date(normalizedIntent.notBefore).valueOf() > currentNow.valueOf() ||
+      new Date(normalizedIntent.expiresAt).valueOf() <= currentNow.valueOf()) {
+    throw new TinderManualSendError("Der Send-Command ist nicht im gültigen Zeitfenster.", "SEND_COMMAND_WINDOW_INVALID", 409);
+  }
+  assertFutureWriterGates(normalizedSnapshot, currentNow);
+  assertIdentityAndCaptureReady(normalizedSnapshot);
+  if (!sameApprovalBinding(normalizedApproval, normalizedSnapshot) ||
+      !assertIntentMatchesApproval(normalizedIntent, normalizedApproval)) {
+    throw new TinderManualSendError("Der Send-Command ist nicht mehr an den aktuellen Draft gebunden.", "APPROVAL_BINDING_CHANGED", 409);
+  }
+  assertFutureTinderSendCommandDescriptor(descriptor);
+  const expectedDescriptor = futureCommandDescriptor(normalizedSnapshot, normalizedApproval, normalizedIntent);
+  if (stableJson(descriptor) !== stableJson(expectedDescriptor)) {
+    throw new TinderManualSendError("Der Send-Command-Descriptor ist inkonsistent.", "SEND_COMMAND_INCONSISTENT", 409);
+  }
+  const payload = futureCommandPayload(normalizedSnapshot, normalizedApproval, normalizedIntent);
+  if (payload.sealed_payload_sha256 !== descriptor.sealed_payload_sha256 ||
+      payload.command_fingerprint !== descriptor.command_fingerprint) {
+    throw new TinderManualSendError("Der Send-Command-Descriptor ist inkonsistent.", "SEND_COMMAND_INCONSISTENT", 409);
+  }
+  return payload;
 }
 
 /**
@@ -886,24 +1095,53 @@ function createTinderManualSendService({
           throw new TinderManualSendError("Der vorhandene Send-Intent ist inkonsistent.", "SEND_INTENT_INCONSISTENT", 500);
         }
         if ([TINDER_SEND_INTENT_STATE.PENDING_T5_WRITER, TINDER_SEND_INTENT_STATE.DISPATCHING].includes(existing.state)) {
+          const existingCommand = await repository.findDeviceBridgeCommand(transaction, existing.commandId);
+          if (!existingCommand) {
+            throw new TinderManualSendError(
+              "Der bestehende Send-Intent hat keinen zustellbaren Command.",
+              "SEND_COMMAND_MISSING",
+              409
+            );
+          }
+          if (!matchesReservedDeviceBridgeCommand(existingCommand, snapshot, approval, existing)) {
+            throw new TinderManualSendError(
+              "Der bestehende Send-Command ist inkonsistent.",
+              "SEND_COMMAND_INCONSISTENT",
+              500
+            );
+          }
           return presentIntent(existing, true);
         }
         throw new TinderManualSendError("Für diese Freigabe existiert bereits ein terminaler Send-Vorgang.", "SEND_ATTEMPT_ALREADY_TERMINAL");
       }
       assertFutureWriterGates(snapshot, currentNow);
-      const plan = normalizeDeliveryPlan(await deliveryPolicy(Object.freeze({
+      const proposedPlan = await deliveryPolicy(Object.freeze({
         draftId: snapshot.draftId,
         draftRevision: snapshot.draftRevision,
         contactId: snapshot.contactId,
         captureId: snapshot.captureId,
         approvalId: approval.approvalId
-      })), currentNow);
+      }));
+      // The server-owned policy may stamp not_before while it is issuing the
+      // plan.  Validate against the actual materialization instant, not the
+      // earlier request instant, so a just-issued live window is not rejected
+      // merely because it began a few milliseconds later.  Re-check every
+      // runtime gate at the same instant before either row is written.
+      const materializedAt = nowIso(now);
+      const materializedNow = new Date(materializedAt);
+      assertFutureWriterGates(snapshot, materializedNow);
+      const plan = normalizeDeliveryPlan(proposedPlan, materializedNow);
       const intent = intentFromApproval(approval, plan, {
         intentId: createIntentId(),
         commandId: createCommandId(),
-        createdAt: timestamp
+        createdAt: materializedAt
       });
+      const command = deviceBridgeCommandFromIntent(snapshot, approval, intent, materializedAt);
       await repository.insertIntent(transaction, intent);
+      const insertedCommand = await repository.insertDeviceBridgeCommand(transaction, command);
+      if (!insertedCommand || insertedCommand.command_id !== intent.commandId) {
+        throw new TinderManualSendError("Der Send-Command konnte nicht angelegt werden.", "SEND_COMMAND_WRITE_FAILED", 500);
+      }
       await repository.insertAudit(transaction, {
         action: "SEND_INTENT_RESERVED",
         actor: normalizedActorValue,
@@ -1091,7 +1329,7 @@ function createTinderManualSendService({
         commandId: intent.commandId,
         commandType: TINDER_SEND_COMMAND_TYPE,
         protocolVersion: DEVICE_BRIDGE_PROTOCOL.version,
-        payload: futureCommandPayload(snapshot, approval, intent)
+        payload: futureCommandDescriptor(snapshot, approval, intent)
       });
     });
   }
@@ -1126,6 +1364,7 @@ function createPgTinderManualSendRepository(pool) {
       capture.human_takeover_active, capture.handoff_active,
       device.enrollment_state AS device_enrollment_state,
       device.bridge_service_state, device.tinder_state, device.automation_state,
+      device.configuration_revision AS configuration_revision,
       device.capabilities AS device_capabilities,
       device.last_accepted_heartbeat_at,
       (
@@ -1301,6 +1540,31 @@ function createPgTinderManualSendRepository(pool) {
       return singleRow(result);
     },
 
+    async findDeviceBridgeCommand(client, commandId) {
+      return singleRow(await client.query(
+        `SELECT command_id, device_id, protocol_version, command_type,
+                payload, configuration_revision, issued_at, expires_at, terminal_status
+           FROM device_bridge_commands
+          WHERE command_id=$1
+          FOR UPDATE`,
+        [commandId]
+      ));
+    },
+
+    async insertDeviceBridgeCommand(client, command) {
+      const result = await client.query(
+        `INSERT INTO device_bridge_commands (
+          command_id, device_id, protocol_version, command_type, payload,
+          configuration_revision, issued_at, expires_at, created_by
+        ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,'tinder_manual_send')
+        RETURNING command_id`,
+        [command.commandId, command.deviceId, command.protocolVersion,
+          command.commandType, JSON.stringify(command.payload),
+          command.configurationRevision, command.issuedAt, command.expiresAt]
+      );
+      return singleRow(result);
+    },
+
     async updateIntent(client, intentId, patch) {
       const fields = [];
       const values = [intentId];
@@ -1350,6 +1614,7 @@ export {
   FUTURE_T5_DEVICE_CAPABILITIES,
   TINDER_APPROVAL_STATE,
   TINDER_MANUAL_SEND_CAPABILITY,
+  TINDER_T5_COMMAND_DESCRIPTOR_VERSION,
   TINDER_T5_PAYLOAD_VERSION,
   TINDER_SEND_COMMAND_TYPE,
   TINDER_SEND_INTENT_STATE,
@@ -1357,6 +1622,8 @@ export {
   TINDER_THREAD_REF_KIND,
   TinderManualSendError,
   assertFutureTinderSendPayload,
+  assertFutureTinderSendCommandDescriptor,
+  hydrateFutureTinderSendCommandPayload,
   futureCommandFingerprint,
   sealedFuturePayloadHash,
   createPgTinderManualSendRepository,

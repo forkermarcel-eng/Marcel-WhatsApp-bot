@@ -7,6 +7,7 @@ import {
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
   isTinderManualGateCapable,
+  isTinderManualSendCapable,
   isExactUtcTimestamp,
   isUuidV4,
   protocolErrorBody
@@ -15,6 +16,10 @@ import {
   registerAuthenticatedRequestReplay,
   verifyAuthenticatedDeviceRequest
 } from "./device-auth.js";
+import {
+  TINDER_SEND_COMMAND_TYPE
+} from "../services/tinder-manual-send.js";
+import { hydrateTinderManualSendCommandForHeartbeat } from "./tinder-manual-send-command-hydration.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 HEARTBEAT
@@ -62,7 +67,7 @@ export function deriveDeviceStatus(lastAcceptedHeartbeatAt, now = new Date()) {
   return age >= 0 && age <= DEVICE_BRIDGE_PROTOCOL.offlineAfterSeconds * 1000 ? "ONLINE" : "OFFLINE";
 }
 
-function commandEnvelope(row) {
+function commandEnvelope(row, payload = row.payload) {
   return {
     command_id: row.command_id,
     protocol_version: row.protocol_version,
@@ -70,19 +75,26 @@ function commandEnvelope(row) {
     issued_at: new Date(row.issued_at).toISOString(),
     expires_at: new Date(row.expires_at).toISOString(),
     configuration_revision: row.configuration_revision,
-    payload: row.payload
+    payload
   };
 }
 
 async function selectDeliverableCommands(client, deviceId, capabilities, now) {
   const t1Capable = isTinderManualGateCapable(capabilities);
   const humanArmedBindingCapable = isTinderHumanArmedConversationBindingCapable(capabilities);
-  const commandTypes = humanArmedBindingCapable
+  const t5Capable = isTinderManualSendCapable(capabilities);
+  const commandTypes = t5Capable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SEND_TINDER_DRAFT'"
+    : humanArmedBindingCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING'"
     : t1Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
     : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
-  const payloadPredicate = humanArmedBindingCapable
+  const payloadPredicate = t5Capable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING') AND payload='{}'::jsonb)
+         OR command_type='SEND_TINDER_DRAFT'`
+    : humanArmedBindingCapable
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING') AND payload='{}'::jsonb)`
     : t1Capable
@@ -104,7 +116,27 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
      LIMIT $3`,
     [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit]
   );
-  return result.rows.map(commandEnvelope);
+  const commands = [];
+  for (const row of result.rows) {
+    if (row.command_type !== TINDER_SEND_COMMAND_TYPE) {
+      commands.push(commandEnvelope(row));
+      continue;
+    }
+    if (!t5Capable || row.protocol_version !== DEVICE_BRIDGE_PROTOCOL.version) continue;
+
+    // The durable T5 payload is intentionally descriptor-only.  The exact
+    // text-bearing envelope exists only in this authenticated heartbeat
+    // transaction after the source rows were locked and revalidated.  Drift
+    // is a silent fail-closed omission: no command, audit, status, or retry
+    // write is created by this delivery decision.
+    const payload = await hydrateTinderManualSendCommandForHeartbeat(client, {
+      commandId: row.command_id,
+      deviceId,
+      now
+    });
+    if (payload) commands.push(commandEnvelope(row, payload));
+  }
+  return commands;
 }
 
 function heartbeatResponse(serverTime, acceptedAt, commands) {

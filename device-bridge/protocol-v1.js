@@ -11,6 +11,10 @@ export const T0_DEVICE_CAPABILITIES = Object.freeze([
 export const TINDER_MANUAL_GATE_CAPABILITY = "TINDER_MANUAL_GATE_V1";
 export const TINDER_HUMAN_ARMED_CONVERSATION_BINDING_CAPABILITY =
   "TINDER_HUMAN_ARMED_CONVERSATION_BINDING_V1";
+// T5 intentionally remains an exact additive profile.  A device that merely
+// knows the older T2 reader/binding contract must never receive an opaque
+// send-intent payload.
+export const TINDER_MANUAL_SEND_CAPABILITY = "TINDER_DRAFT_SEND_V1";
 
 export const T1_DEVICE_CAPABILITIES = Object.freeze([
   ...T0_DEVICE_CAPABILITIES,
@@ -24,6 +28,11 @@ export const T1_DEVICE_CAPABILITIES = Object.freeze([
 export const T2_DEVICE_CAPABILITIES = Object.freeze([
   ...T1_DEVICE_CAPABILITIES,
   TINDER_HUMAN_ARMED_CONVERSATION_BINDING_CAPABILITY
+]);
+
+export const T5_DEVICE_CAPABILITIES = Object.freeze([
+  ...T2_DEVICE_CAPABILITIES,
+  TINDER_MANUAL_SEND_CAPABILITY
 ]);
 
 export const T0_DEVICE_BRIDGE_COMMANDS = Object.freeze([
@@ -41,10 +50,15 @@ export const T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS = Object.freeze([
   "ARM_TINDER_CONVERSATION_BINDING"
 ]);
 
+export const T5_TINDER_MANUAL_SEND_COMMANDS = Object.freeze([
+  "SEND_TINDER_DRAFT"
+]);
+
 export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
   ...T0_DEVICE_BRIDGE_COMMANDS,
   ...T1_TINDER_MANUAL_GATE_COMMANDS,
-  ...T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS
+  ...T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS,
+  ...T5_TINDER_MANUAL_SEND_COMMANDS
 ]);
 
 export const BRIDGE_SERVICE_STATES = Object.freeze([
@@ -97,16 +111,22 @@ export function deviceBridgeCapabilityProfile(capabilities) {
   if (exactArray(capabilities, T0_DEVICE_CAPABILITIES)) return "T0";
   if (exactArray(capabilities, T1_DEVICE_CAPABILITIES)) return "T1";
   if (exactArray(capabilities, T2_DEVICE_CAPABILITIES)) return "T2";
+  if (exactArray(capabilities, T5_DEVICE_CAPABILITIES)) return "T5";
   return null;
 }
 
 export function isTinderManualGateCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T1" || profile === "T2";
+  return profile === "T1" || profile === "T2" || profile === "T5";
 }
 
 export function isTinderHumanArmedConversationBindingCapable(capabilities) {
-  return deviceBridgeCapabilityProfile(capabilities) === "T2";
+  const profile = deviceBridgeCapabilityProfile(capabilities);
+  return profile === "T2" || profile === "T5";
+}
+
+export function isTinderManualSendCapable(capabilities) {
+  return deviceBridgeCapabilityProfile(capabilities) === "T5";
 }
 
 export function isKnownTinderStateForCapabilities(state, capabilities) {

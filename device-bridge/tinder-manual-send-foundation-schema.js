@@ -15,9 +15,10 @@ import { canonicalSchemaPredicate } from "./schema-contract.js";
 /* ==================================================
 T5 — SEALED MANUAL-SEND FOUNDATION SCHEMA CONTRACT
 
-The T5 tables are a sealed approval/intent outbox only.  They are not active
-Device-Bridge commands and this inspector has no dispatch, writer, or route
-side effect.
+The T5 tables are a sealed approval/intent outbox only.  The separately
+owned signed-command vocabulary may correlate an intent by its existing
+unique `command_id`, but this inspector itself has no dispatch, writer, or
+route side effect.
 ================================================== */
 
 export const TINDER_MANUAL_SEND_FOUNDATION_STATE = Object.freeze({

@@ -27,16 +27,23 @@ test("T5 migration is explicit-only, additive to T3/T4, and reserves no active D
   assert.doesNotMatch(migration, /whatsapp_jid/i);
 });
 
-test("no startup initializer, T1 runner, or package hook imports or applies the T5 foundation", () => {
+test("no startup initializer or existing runner applies T5; only the reviewed explicit command migration runner is registered", () => {
   const index = readFileSync(new URL("../index.js", import.meta.url), "utf8");
   const initialization = readFileSync(new URL("../device-bridge/initialization.js", import.meta.url), "utf8");
   const runner = readFileSync(new URL("../device-bridge/database.js", import.meta.url), "utf8");
   const cli = readFileSync(new URL("../scripts/migrate-device-bridge-t1.js", import.meta.url), "utf8");
-  const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
-  for (const source of [index, initialization, runner, cli, packageJson]) {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  for (const source of [index, initialization, runner, cli]) {
     assert.doesNotMatch(source, /20260905_tinder_manual_send_foundation\.sql/);
     assert.doesNotMatch(source, /migrate-tinder-manual-send/);
   }
+  assert.equal(packageJson.scripts.start, "node index.js");
+  assert.equal(packageJson.scripts["migrate:tinder-manual-send-foundation"], undefined);
+  assert.equal(
+    packageJson.scripts["migrate:tinder-manual-send-command"],
+    "node scripts/migrate-tinder-manual-send-command.js --apply"
+  );
+  assert.doesNotMatch(packageJson.scripts.start, /tinder-manual-send-command/);
   assert.doesNotMatch(initialization, /tinder_reply_send_(approvals|intents|audit)/);
   assert.doesNotMatch(runner, /SEND_TINDER_DRAFT/);
 });

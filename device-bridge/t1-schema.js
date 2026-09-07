@@ -11,6 +11,11 @@ export const T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_t
 // human-armed migration may create it.
 export const T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME =
   "device_bridge_commands_command_type_check_v2";
+// T5 owns the next exact superset.  T1/T2 readiness may accept it as a
+// forward-compatible command vocabulary, but only the dedicated T5 runner
+// may create it.
+export const T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME =
+  "device_bridge_commands_command_type_check_v3";
 
 const LEGACY_T1_TINDER_STATE_CONSTRAINT_NAME = "device_bridge_devices_tinder_state_check";
 const LEGACY_T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_type_check";
@@ -42,6 +47,10 @@ const T2_HUMAN_ARMED_COMMAND_TYPES = Object.freeze([
   ...FINAL_COMMAND_TYPES,
   "ARM_TINDER_CONVERSATION_BINDING"
 ]);
+const T5_TINDER_MANUAL_SEND_COMMAND_TYPES = Object.freeze([
+  ...T2_HUMAN_ARMED_COMMAND_TYPES,
+  "SEND_TINDER_DRAFT"
+]);
 
 export const T1_TINDER_STATE_CHECK_EXPRESSION = `
   tinder_state IN ('DISCONNECTED', 'CONNECTING', 'CONNECTED', 'AUTH_REQUIRED', 'REVIEW_REQUIRED', 'UNKNOWN')
@@ -53,6 +62,10 @@ export const T1_COMMAND_TYPE_CHECK_EXPRESSION = `
 
 export const T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION = `
   command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING')
+`;
+
+export const T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION = `
+  command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT')
 `;
 
 export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
@@ -75,7 +88,10 @@ export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
     finalValues: FINAL_COMMAND_TYPES,
     forwardCompatibleName: T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
     forwardCompatibleExpression: T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION,
-    forwardCompatibleValues: T2_HUMAN_ARMED_COMMAND_TYPES
+    forwardCompatibleValues: T2_HUMAN_ARMED_COMMAND_TYPES,
+    futureCompatibleName: T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME,
+    futureCompatibleExpression: T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION,
+    futureCompatibleValues: T5_TINDER_MANUAL_SEND_COMMAND_TYPES
   })
 ]);
 
@@ -128,6 +144,15 @@ async function inspectColumnConstraint(client, specification) {
       state: "FINAL",
       constraintName: current.conname,
       compatibilityExpression: specification.forwardCompatibleExpression
+    };
+  }
+  if (current.conname === specification.futureCompatibleName
+      && hasExactCheckDefinition(current.constraint_definition, specification.futureCompatibleExpression)) {
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.futureCompatibleExpression
     };
   }
   const legacyExpression = `${specification.column} IN (${specification.legacyValues.map(value => `'${value}'`).join(", ")})`;

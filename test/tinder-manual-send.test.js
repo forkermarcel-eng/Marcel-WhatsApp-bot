@@ -7,12 +7,18 @@ import {
   TINDER_SEND_COMMAND_TYPE,
   TINDER_SEND_INTENT_STATE,
   TinderManualSendError,
+  assertFutureTinderSendCommandDescriptor,
   assertFutureTinderSendPayload,
   createTinderManualSendService,
   createPgTinderManualSendRepository,
+  hydrateFutureTinderSendCommandPayload,
   sha256Text
 } from "../services/tinder-manual-send.js";
-import { DEVICE_BRIDGE_COMMANDS, T1_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
+import {
+  DEVICE_BRIDGE_COMMANDS,
+  T1_DEVICE_CAPABILITIES,
+  T5_DEVICE_CAPABILITIES
+} from "../device-bridge/protocol-v1.js";
 
 const DRAFT_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
 const CAPTURE_ID = "6c7308cf-5d40-423d-913b-c4424f0e4ee0";
@@ -53,6 +59,7 @@ function readySnapshot(overrides = {}) {
     bridge_service_state: "RUNNING",
     tinder_state: "CONNECTED",
     automation_state: "STOPPED",
+    configuration_revision: 1,
     device_capabilities: [...FUTURE_T5_DEVICE_CAPABILITIES],
     last_accepted_heartbeat_at: "2026-09-05T18:59:30.000Z",
     human_takeover_active: false,
@@ -80,12 +87,13 @@ function readyDraftReview(overrides = {}) {
   };
 }
 
-function fixtureRepository({ snapshot = readySnapshot(), review = readyDraftReview(), approvals = [], intents = [] } = {}) {
+function fixtureRepository({ snapshot = readySnapshot(), review = readyDraftReview(), approvals = [], intents = [], deviceBridgeCommands = [] } = {}) {
   const state = {
     snapshot: copy(snapshot),
     review: copy(review),
     approvals: copy(approvals),
     intents: copy(intents),
+    deviceBridgeCommands: copy(deviceBridgeCommands),
     audits: [],
     operations: []
   };
@@ -179,6 +187,25 @@ function fixtureRepository({ snapshot = readySnapshot(), review = readyDraftRevi
       state.intents.push(row);
       return copy(row);
     },
+    async findDeviceBridgeCommand(_transaction, commandId) {
+      return copy(state.deviceBridgeCommands.find(item => item.command_id === commandId) || null);
+    },
+    async insertDeviceBridgeCommand(_transaction, command) {
+      const row = {
+        command_id: command.commandId,
+        device_id: command.deviceId,
+        protocol_version: command.protocolVersion,
+        command_type: command.commandType,
+        payload: copy(command.payload),
+        configuration_revision: command.configurationRevision,
+        issued_at: command.issuedAt,
+        expires_at: command.expiresAt,
+        terminal_status: null
+      };
+      state.operations.push("insertDeviceBridgeCommand");
+      state.deviceBridgeCommands.push(row);
+      return copy(row);
+    },
     async updateIntent(_transaction, intentId, patch) {
       const intent = state.intents.find(item => item.intent_id === intentId);
       assert.ok(intent, "intent must exist before update");
@@ -200,10 +227,10 @@ function fixtureRepository({ snapshot = readySnapshot(), review = readyDraftRevi
   return repository;
 }
 
-function fixtureService({ repository = fixtureRepository(), deliveryPolicy, ids = {} } = {}) {
+function fixtureService({ repository = fixtureRepository(), deliveryPolicy, ids = {}, now = () => new Date(NOW) } = {}) {
   const service = createTinderManualSendService({
     repository,
-    now: () => new Date(NOW),
+    now,
     createApprovalId: () => ids.approvalId || APPROVAL_ID,
     createIntentId: () => ids.intentId || INTENT_ID,
     createCommandId: () => ids.commandId || COMMAND_ID,
@@ -255,7 +282,11 @@ test("an explicit server-bound approval reserves exactly one sealed future SEND_
   assert.equal(repository.state.intents.length, 1);
   assert.equal(repository.state.intents[0].command_type, TINDER_SEND_COMMAND_TYPE);
   assert.equal(repository.state.operations.includes("insertIntent"), true);
-  assert.equal(Object.hasOwn(repository.state, "deviceBridgeCommands"), false);
+  assert.equal(repository.state.operations.includes("insertDeviceBridgeCommand"), true);
+  assert.equal(repository.state.deviceBridgeCommands.length, 1);
+  assert.equal(repository.state.deviceBridgeCommands[0].command_id, COMMAND_ID);
+  assert.equal(repository.state.deviceBridgeCommands[0].device_id, DEVICE_ID);
+  assert.equal(repository.state.deviceBridgeCommands[0].configuration_revision, 1);
 });
 
 test("approval and reservation double-clicks are idempotent and never make another intent", async () => {
@@ -272,6 +303,7 @@ test("approval and reservation double-clicks are idempotent and never make anoth
   assert.equal(secondIntent.intentId, firstIntent.intentId);
   assert.equal(repository.state.approvals.length, 1);
   assert.equal(repository.state.intents.length, 1);
+  assert.equal(repository.state.deviceBridgeCommands.length, 1);
 });
 
 test("changed text invalidates an approval and blocks a future command reservation", async () => {
@@ -441,6 +473,7 @@ test("the production T5 snapshot query projects draft and current capture identi
   assert.ok(snapshotQuery);
   assert.match(snapshotQuery, /draft\.identity_revision\s+AS\s+draft_identity_revision/i);
   assert.match(snapshotQuery, /capture\.identity_revision\s+AS\s+current_identity_revision/i);
+  assert.match(snapshotQuery, /device\.configuration_revision\s+AS\s+configuration_revision/i);
   await repository.findCurrentDraftReviewByCapture(CAPTURE_ID);
   const reviewQuery = queries.find((sql) => /LEFT JOIN LATERAL/.test(sql));
   assert.ok(reviewQuery);
@@ -483,13 +516,86 @@ test("a missing shared Delivery Policy blocks the sealed intent without inventin
   assert.equal(repository.state.intents.length, 0);
 });
 
-test("the future payload is server-derived, scalar-only, exact, and excludes credentials or UI instructions", async () => {
+test("a server delivery plan must already be live and atomically reserves the command with the intent", async () => {
+  const futurePolicy = async () => ({
+    revision: "delivery-policy-v1",
+    notBefore: "2026-09-05T19:00:00.001Z",
+    expiresAt: "2026-09-05T19:10:00.000Z",
+    typingDurationMs: 0
+  });
+  const future = fixtureService({ deliveryPolicy: futurePolicy });
+  await future.service.approveDraft({ draftId: DRAFT_ID });
+  await assert.rejects(
+    () => future.service.reserveApprovedSend({ draftId: DRAFT_ID }),
+    (error) => error instanceof TinderManualSendError && error.code === "INVALID_DELIVERY_POLICY"
+  );
+  assert.equal(future.repository.state.intents.length, 0);
+  assert.equal(future.repository.state.deviceBridgeCommands.length, 0);
+
+  const repository = fixtureRepository();
+  const originalTransaction = repository.withTransaction;
+  repository.withTransaction = async work => {
+    const checkpoint = copy({
+      snapshot: repository.state.snapshot,
+      review: repository.state.review,
+      approvals: repository.state.approvals,
+      intents: repository.state.intents,
+      deviceBridgeCommands: repository.state.deviceBridgeCommands,
+      audits: repository.state.audits,
+      operations: repository.state.operations
+    });
+    try {
+      return await originalTransaction(work);
+    } catch (error) {
+      Object.assign(repository.state, checkpoint);
+      throw error;
+    }
+  };
+  const insert = repository.insertDeviceBridgeCommand;
+  let failCommandWrite = false;
+  repository.insertDeviceBridgeCommand = async (...args) => {
+    if (failCommandWrite) throw new Error("simulated command write failure");
+    return insert(...args);
+  };
+  const { service } = fixtureService({ repository });
+  await service.approveDraft({ draftId: DRAFT_ID });
+  failCommandWrite = true;
+  await assert.rejects(() => service.reserveApprovedSend({ draftId: DRAFT_ID }), /simulated command write failure/);
+  assert.equal(repository.state.intents.length, 0);
+  assert.equal(repository.state.deviceBridgeCommands.length, 0);
+});
+
+test("a policy window issued milliseconds after request capture is validated at the materialization instant", async () => {
+  const times = [
+    "2026-09-05T19:00:00.000Z",
+    "2026-09-05T19:00:00.000Z",
+    "2026-09-05T19:00:00.002Z"
+  ];
+  let clockIndex = 0;
+  const { service, repository } = fixtureService({
+    now: () => new Date(times[Math.min(clockIndex++, times.length - 1)]),
+    deliveryPolicy: async () => ({
+      revision: "delivery-policy-v1",
+      notBefore: "2026-09-05T19:00:00.001Z",
+      expiresAt: "2026-09-05T19:10:00.000Z",
+      typingDurationMs: 0
+    })
+  });
+  await service.approveDraft({ draftId: DRAFT_ID });
+  const result = await service.reserveApprovedSend({ draftId: DRAFT_ID });
+  assert.equal(result.state, "PENDING_T5_WRITER");
+  assert.equal(repository.state.intents.length, 1);
+  assert.equal(repository.state.intents[0].created_at, "2026-09-05T19:00:00.002Z");
+  assert.equal(repository.state.deviceBridgeCommands[0].issued_at, "2026-09-05T19:00:00.002Z");
+});
+
+test("the durable T5 command descriptor is content-free and excludes draft text from command, intent, approval, and audit persistence", async () => {
   const { service, repository } = await approveAndReserve();
   const command = await service.buildReservedFutureCommand({ draftId: DRAFT_ID });
   assert.equal(command.commandId, COMMAND_ID);
   assert.equal(command.commandType, "SEND_TINDER_DRAFT");
   assert.deepEqual(Object.keys(command.payload).sort(), [
-    "approval_binding_sha256", "approval_id", "approved_text", "approved_text_sha256",
+    "approval_binding_sha256", "approval_id", "approved_text_sha256",
     "capture_fingerprint", "capture_id", "command_fingerprint", "command_id", "contact_id",
     "delivery_policy_revision", "draft_id", "draft_revision", "expires_at", "identity_revision",
     "intent_id", "not_before", "payload_version", "sealed_payload_sha256", "thread_ref_hash",
@@ -498,22 +604,102 @@ test("the future payload is server-derived, scalar-only, exact, and excludes cre
   assert.equal(command.payload.thread_ref_kind, "runtime_thread_fingerprint_v1");
   assert.equal(command.payload.intent_id, INTENT_ID);
   assert.equal(command.payload.command_id, COMMAND_ID);
-  assert.equal(command.payload.payload_version, "tinder_t5_send_v1");
+  assert.equal(command.payload.payload_version, "tinder_t5_send_descriptor_v1");
   assert.equal(command.payload.approved_text_sha256, sha256Text(repository.state.snapshot.original_draft));
-  assert.equal(assertFutureTinderSendPayload(command.payload), true);
+  assert.equal(assertFutureTinderSendCommandDescriptor(command.payload), true);
+  assert.equal(Object.hasOwn(command.payload, "approved_text"), false);
+  assert.equal(Object.hasOwn(repository.state.deviceBridgeCommands[0].payload, "approved_text"), false);
+  const durableProjection = JSON.stringify({
+    command: repository.state.deviceBridgeCommands[0],
+    intent: repository.state.intents[0],
+    approval: repository.state.approvals[0],
+    audit: repository.state.audits
+  });
+  assert.equal(durableProjection.includes(repository.state.snapshot.original_draft), false);
+  assert.equal(/"approved_text"\s*:/.test(durableProjection), false);
   assert.throws(
-    () => assertFutureTinderSendPayload({ ...command.payload, intent_id: APPROVAL_ID }),
-    (error) => error instanceof TinderManualSendError && error.code === "INVALID_SEND_COMMAND_PAYLOAD"
+    () => assertFutureTinderSendCommandDescriptor({ ...command.payload, intent_id: APPROVAL_ID }),
+    (error) => error instanceof TinderManualSendError && error.code === "INVALID_SEND_COMMAND_DESCRIPTOR"
   );
   assert.throws(
-    () => assertFutureTinderSendPayload({ ...command.payload, sealed_payload_sha256: "0".repeat(64) }),
-    (error) => error instanceof TinderManualSendError && error.code === "INVALID_SEND_COMMAND_PAYLOAD"
+    () => assertFutureTinderSendCommandDescriptor({ ...command.payload, sealed_payload_sha256: "0".repeat(64) }),
+    (error) => error instanceof TinderManualSendError && error.code === "INVALID_SEND_COMMAND_DESCRIPTOR"
   );
   assert.equal(JSON.stringify(command.payload).match(/token|credential|password|selector|url|browser|instruction/i), null);
   assert.throws(
-    () => assertFutureTinderSendPayload({ ...command.payload, selector: "unsafe" }),
-    (error) => error instanceof TinderManualSendError && error.code === "INVALID_SEND_COMMAND_PAYLOAD"
+    () => assertFutureTinderSendCommandDescriptor({ ...command.payload, selector: "unsafe" }),
+    (error) => error instanceof TinderManualSendError && error.code === "INVALID_SEND_COMMAND_DESCRIPTOR"
   );
+});
+
+test("only locked current source rows transiently hydrate the exact full T5 payload, while capture/identity/takeover/draft/approval drift omits it fail closed", async () => {
+  const { repository } = await approveAndReserve();
+  const command = repository.state.deviceBridgeCommands[0];
+  const hydrate = () => hydrateFutureTinderSendCommandPayload({
+    command,
+    snapshot: repository.state.snapshot,
+    approval: repository.state.approvals[0],
+    intent: repository.state.intents[0],
+    now: new Date(NOW)
+  });
+  const payload = hydrate();
+  assert.equal(assertFutureTinderSendPayload(payload), true);
+  assert.equal(payload.approved_text, repository.state.snapshot.original_draft);
+  assert.equal(payload.command_id, command.command_id);
+  assert.equal(Object.hasOwn(command.payload, "approved_text"), false);
+
+  const durableBefore = JSON.stringify({
+    command: repository.state.deviceBridgeCommands,
+    intent: repository.state.intents,
+    approval: repository.state.approvals,
+    audit: repository.state.audits
+  });
+  for (const [name, expectedCode] of [
+    ["newer capture", "NEWER_CAPTURE_REVISION"],
+    ["identity revision", "IDENTITY_REVISION_CHANGED"],
+    ["human takeover", "HUMAN_TAKEOVER_ACTIVE"],
+    ["handoff", "HANDOFF_ACTIVE"],
+    ["draft text", "APPROVAL_BINDING_CHANGED"],
+    ["approval state", "SEND_COMMAND_INCONSISTENT"]
+  ]) {
+    const isolated = await approveAndReserve();
+    // Apply the selected drift to the isolated current source, never to the
+    // durable command descriptor.  Hydration must produce no payload and no
+    // persistence mutation for every stale condition.
+    const apply = {
+      "newer capture": () => { isolated.repository.state.snapshot.latest_capture_revision = 4; },
+      "identity revision": () => { isolated.repository.state.snapshot.current_identity_revision = 5; },
+      "human takeover": () => { isolated.repository.state.snapshot.human_takeover_active = true; },
+      handoff: () => { isolated.repository.state.snapshot.handoff_active = true; },
+      "draft text": () => { isolated.repository.state.snapshot.original_draft = "Changed approved draft"; },
+      "approval state": () => { isolated.repository.state.approvals[0].state = "CANCELLED"; }
+    }[name];
+    apply();
+    const before = JSON.stringify({
+      command: isolated.repository.state.deviceBridgeCommands,
+      intent: isolated.repository.state.intents,
+      approval: isolated.repository.state.approvals,
+      audit: isolated.repository.state.audits
+    });
+    assert.throws(
+      () => hydrateFutureTinderSendCommandPayload({
+        command: isolated.repository.state.deviceBridgeCommands[0],
+        snapshot: isolated.repository.state.snapshot,
+        approval: isolated.repository.state.approvals[0],
+        intent: isolated.repository.state.intents[0],
+        now: new Date(NOW)
+      }),
+      (error) => error instanceof TinderManualSendError && error.code === expectedCode,
+      name
+    );
+    assert.equal(JSON.stringify({
+      command: isolated.repository.state.deviceBridgeCommands,
+      intent: isolated.repository.state.intents,
+      approval: isolated.repository.state.approvals,
+      audit: isolated.repository.state.audits
+    }), before, name);
+  }
+  assert.equal(durableBefore.includes(repository.state.snapshot.original_draft), false);
 });
 
 test("terminal success blocks a second send and terminal failure/rejection/ambiguity remain terminal without retry", async () => {
@@ -564,9 +750,10 @@ test("manual cancellation is safe before receipt and never falsely rolls back a 
   assert.equal(second.repository.state.approvals[0].state, "INVALIDATED");
 });
 
-test("T5 is a sealed future contract: active Protocol V1, heartbeat/ACK/admin, and T1 runner do not expose SEND_TINDER_DRAFT", () => {
-  assert.equal(DEVICE_BRIDGE_COMMANDS.includes("SEND_TINDER_DRAFT"), false);
+test("T5 is an active signed-only contract: exact T5 capability, heartbeat/ACK delivery, no generic admin route or writer", () => {
+  assert.equal(DEVICE_BRIDGE_COMMANDS.includes("SEND_TINDER_DRAFT"), true);
   assert.equal(FUTURE_T5_DEVICE_CAPABILITIES.includes("TINDER_DRAFT_SEND_V1"), true);
+  assert.deepEqual(FUTURE_T5_DEVICE_CAPABILITIES, T5_DEVICE_CAPABILITIES);
   const root = new URL("..", import.meta.url);
   const heartbeat = readFileSync(new URL("../device-bridge/heartbeat.js", import.meta.url), "utf8");
   const ack = readFileSync(new URL("../device-bridge/command-ack.js", import.meta.url), "utf8");
@@ -574,10 +761,10 @@ test("T5 is a sealed future contract: active Protocol V1, heartbeat/ACK/admin, a
   const t1 = readFileSync(new URL("../device-bridge/t1-schema.js", import.meta.url), "utf8");
   const index = readFileSync(new URL("../index.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../services/tinder-manual-send.js", import.meta.url), "utf8");
-  assert.doesNotMatch(heartbeat, /SEND_TINDER_DRAFT/);
-  assert.doesNotMatch(ack, /SEND_TINDER_DRAFT/);
+  assert.match(heartbeat, /SEND_TINDER_DRAFT/);
+  assert.match(ack, /TINDER_WRITER_NOT_IMPLEMENTED/);
   assert.doesNotMatch(admin, /SEND_TINDER_DRAFT/);
-  assert.doesNotMatch(t1, /SEND_TINDER_DRAFT/);
+  assert.match(t1, /SEND_TINDER_DRAFT/);
   assert.doesNotMatch(index, /20260905_tinder_manual_send_foundation\.sql/);
   assert.doesNotMatch(source, /fetch\(|playwright|chromium|sendMessage|from\s+["'][^"']*accessibility/i);
   assert.equal(root.pathname.length > 0, true);

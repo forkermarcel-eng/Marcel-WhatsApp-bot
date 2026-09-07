@@ -6,9 +6,16 @@ import {
   T0_DEVICE_CAPABILITIES,
   T1_DEVICE_CAPABILITIES,
   T2_DEVICE_CAPABILITIES,
+  T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
 } from "../device-bridge/protocol-v1.js";
+import {
+  futureCommandFingerprint,
+  hydrateFutureTinderSendCommandPayload,
+  sealedFuturePayloadHash,
+  sha256Text
+} from "../services/tinder-manual-send.js";
 import {
   createHeartbeatHandler,
   deriveDeviceStatus,
@@ -82,9 +89,155 @@ function commandRow(type, issuedAt, id, overrides = {}) {
   };
 }
 
-function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt = null, commands = [], failUpdate = false, nonceReplay = false } = {}) {
+function t5Payload(commandId) {
+  const stableJson = value => {
+    if (value === null || typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  };
+  const approvedText = "bounded test draft";
+  const approvedTextSha256 = sha256Text(approvedText);
+  const approvalBindingSha256 = crypto.createHash("sha256").update(stableJson({
+    draft_id: "a565e8a7-ef60-42d0-b19d-26e7904390fa",
+    draft_revision: 1,
+    contact_id: 7,
+    capture_id: "6c7308cf-5d40-423d-913b-c4424f0e4ee0",
+    capture_fingerprint: "c".repeat(64),
+    thread_ref_kind: "runtime_thread_fingerprint_v1",
+    thread_ref: "a".repeat(64),
+    capture_revision: 3,
+    identity_revision: 4,
+    text_sha256: approvedTextSha256
+  }), "utf8").digest("hex");
+  const binding = {
+    payload_version: "tinder_t5_send_v1",
+    intent_id: "f3dd4498-1c29-48d2-b953-6c8668dc8fcf",
+    command_id: commandId,
+    approval_id: "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d",
+    draft_id: "a565e8a7-ef60-42d0-b19d-26e7904390fa",
+    draft_revision: "1",
+    contact_id: "7",
+    capture_id: "6c7308cf-5d40-423d-913b-c4424f0e4ee0",
+    capture_fingerprint: "c".repeat(64),
+    thread_ref_kind: "runtime_thread_fingerprint_v1",
+    thread_ref_hash: "a".repeat(64),
+    identity_revision: "4",
+    approved_text: approvedText,
+    approved_text_sha256: approvedTextSha256,
+    approval_binding_sha256: approvalBindingSha256,
+    delivery_policy_revision: "tinder_manual_send_v1",
+    not_before: NOW.toISOString(),
+    expires_at: new Date(NOW.valueOf() + 300_000).toISOString(),
+    typing_duration_ms: "0"
+  };
+  const sealedPayloadHash = sealedFuturePayloadHash(binding);
+  return {
+    ...binding,
+    sealed_payload_sha256: sealedPayloadHash,
+    command_fingerprint: futureCommandFingerprint({
+      commandId,
+      intentId: binding.intent_id,
+      sealedPayloadHash
+    })
+  };
+}
+
+function t5Descriptor(commandId) {
+  const { approved_text: _approvedText, ...descriptor } = t5Payload(commandId);
+  return { ...descriptor, payload_version: "tinder_t5_send_descriptor_v1" };
+}
+
+function t5HydrationRow(command, { snapshot: snapshotOverrides = {}, approval: approvalOverrides = {}, intent: intentOverrides = {} } = {}) {
+  const payload = t5Payload(command.command_id);
+  const expiresAt = new Date(payload.expires_at);
+  return {
+    command: {
+      ...command,
+      device_id: DEVICE_ID,
+      payload: command.payload,
+      expires_at: expiresAt,
+      terminal_status: null
+    },
+    snapshot: {
+      draft_id: payload.draft_id,
+      draft_status: "APPROVED",
+      draft_revision: Number(payload.draft_revision),
+      contact_id: Number(payload.contact_id),
+      capture_id: payload.capture_id,
+      runtime_thread_fingerprint: payload.thread_ref_hash,
+      capture_revision: 3,
+      draft_identity_revision: Number(payload.identity_revision),
+      original_draft: payload.approved_text,
+      current_identity_revision: Number(payload.identity_revision),
+      capture_fingerprint: payload.capture_fingerprint,
+      capture_safety_status: "SAFE",
+      mapping_status: "RESOLVED",
+      human_review_status: "CONFIRMED",
+      resolved_contact_id: Number(payload.contact_id),
+      device_id: DEVICE_ID,
+      human_takeover_active: false,
+      handoff_active: false,
+      device_enrollment_state: "ACTIVE",
+      bridge_service_state: "RUNNING",
+      tinder_state: "CONNECTED",
+      automation_state: "STOPPED",
+      configuration_revision: 1,
+      device_capabilities: T5_DEVICE_CAPABILITIES,
+      last_accepted_heartbeat_at: new Date(NOW.valueOf() - 30_000),
+      latest_capture_revision: 3,
+      ...snapshotOverrides
+    },
+    approval: {
+      approval_id: payload.approval_id,
+      draft_id: payload.draft_id,
+      draft_revision: Number(payload.draft_revision),
+      contact_id: Number(payload.contact_id),
+      capture_id: payload.capture_id,
+      capture_fingerprint: payload.capture_fingerprint,
+      thread_ref_kind: payload.thread_ref_kind,
+      runtime_thread_fingerprint: payload.thread_ref_hash,
+      capture_revision: 3,
+      identity_revision: Number(payload.identity_revision),
+      approved_text_sha256: payload.approved_text_sha256,
+      approval_binding_sha256: payload.approval_binding_sha256,
+      approved_by: "marcel_dashboard",
+      approved_at: NOW,
+      state: "ACTIVE",
+      ...approvalOverrides
+    },
+    intent: {
+      intent_id: payload.intent_id,
+      approval_id: payload.approval_id,
+      draft_id: payload.draft_id,
+      draft_revision: Number(payload.draft_revision),
+      contact_id: Number(payload.contact_id),
+      capture_id: payload.capture_id,
+      capture_fingerprint: payload.capture_fingerprint,
+      thread_ref_kind: payload.thread_ref_kind,
+      runtime_thread_fingerprint: payload.thread_ref_hash,
+      identity_revision: Number(payload.identity_revision),
+      command_id: payload.command_id,
+      command_type: "SEND_TINDER_DRAFT",
+      protocol_version: 1,
+      approved_text_sha256: payload.approved_text_sha256,
+      approval_binding_sha256: payload.approval_binding_sha256,
+      delivery_policy_revision: payload.delivery_policy_revision,
+      not_before: payload.not_before,
+      expires_at: payload.expires_at,
+      typing_duration_ms: Number(payload.typing_duration_ms),
+      state: "PENDING_T5_WRITER",
+      received_at: null,
+      completed_at: null,
+      result_code: null,
+      created_at: new Date(NOW.valueOf() - 1000),
+      ...intentOverrides
+    }
+  };
+}
+
+function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt = null, commands = [], hydrationRows = new Map(), failUpdate = false, nonceReplay = false } = {}) {
   const calls = [];
-  const state = { updates: 0, audits: 0, commits: 0, rollbacks: 0, nonceInserts: 0 };
+  const state = { updates: 0, audits: 0, commits: 0, rollbacks: 0, nonceInserts: 0, hydrationQueries: 0 };
   const authRow = {
     device_id: DEVICE_ID, key_id: KEY_ID, enrollment_state: "ACTIVE",
     device_revoked_at: null, key_revoked_at: null,
@@ -96,6 +249,11 @@ function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt =
       if (sql === "BEGIN") return { rows: [] };
       if (sql === "COMMIT") { state.commits += 1; return { rows: [] }; }
       if (sql === "ROLLBACK") { state.rollbacks += 1; return { rows: [] }; }
+      if (sql.includes("jsonb_build_object") && sql.includes("tinder_reply_send_intents")) {
+        state.hydrationQueries += 1;
+        const row = hydrationRows.get(params[0]) || null;
+        return { rows: row ? [row] : [] };
+      }
       if (sql.includes("FOR UPDATE") && sql.includes("device_bridge_devices")) return { rows: [{
         device_id: DEVICE_ID, installation_id: INSTALLATION_ID, enrollment_state: "ACTIVE", revoked_at: null,
         key_id: KEY_ID, key_revoked_at: null,
@@ -114,12 +272,16 @@ function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt =
       if (sql.includes("FROM device_bridge_commands")) {
         const deliversT1 = sql.includes("CONNECT_TINDER") && sql.includes("DISCONNECT_TINDER");
         const deliversT2 = deliversT1 && sql.includes("ARM_TINDER_CONVERSATION_BINDING");
+        const deliversT5 = deliversT2 && sql.includes("SEND_TINDER_DRAFT");
+        const allowed = deliversT5
+          ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SEND_TINDER_DRAFT"])
+          : deliversT2
+          ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING"])
+          : deliversT1
+          ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER"])
+          : new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE"]);
         return {
-          rows: commands.filter(command =>
-            deliversT2
-              || (deliversT1 && command.command_type !== "ARM_TINDER_CONVERSATION_BINDING")
-              || !["CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING"].includes(command.command_type)
-          )
+          rows: commands.filter(command => allowed.has(command.command_type))
         };
       }
       return { rows: [] };
@@ -309,6 +471,138 @@ test("T2 human-armed conversation command is delivered only to the exact T2 prof
   assert.equal(t2Response.commands[0].type, "ARM_TINDER_CONVERSATION_BINDING");
   assert.deepEqual(t2Response.commands[0].payload, {});
   assert.match(t2.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /ARM_TINDER_CONVERSATION_BINDING/);
+});
+
+test("T5 persists only a descriptor and transiently hydrates a full signed envelope only for the exact T5 heartbeat profile", async () => {
+  const id = "55555555-5555-4555-8555-555555555555";
+  const command = commandRow("SEND_TINDER_DRAFT", new Date(NOW.valueOf() - 1000), id, {
+    payload: t5Descriptor(id),
+    expires_at: new Date(NOW.valueOf() + 300_000)
+  });
+  const t2Payload = heartbeatPayload({ capabilities: T2_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const t2Request = heartbeatRequest(t2Payload);
+  const t2 = heartbeatPool({ request: t2Request, commands: [command] });
+  const t2Response = await processHeartbeatTransaction(
+    t2.pool, { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t2Request.hash }, t2Payload, NOW
+  );
+  assert.deepEqual(t2Response.commands, []);
+
+  const t5PayloadBody = heartbeatPayload({ capabilities: T5_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const t5Request = heartbeatRequest(t5PayloadBody);
+  const t5 = heartbeatPool({
+    request: t5Request,
+    commands: [command],
+    hydrationRows: new Map([[id, t5HydrationRow(command)]])
+  });
+  const source = t5HydrationRow(command);
+  assert.doesNotThrow(() => hydrateFutureTinderSendCommandPayload({ ...source, now: NOW }));
+  const t5Response = await processHeartbeatTransaction(
+    t5.pool, { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t5Request.hash }, t5PayloadBody, NOW
+  );
+  assert.equal(t5Response.commands.length, 1);
+  assert.equal(t5Response.commands[0].type, "SEND_TINDER_DRAFT");
+  assert.equal(t5Response.commands[0].payload.command_id, id);
+  assert.equal(t5Response.commands[0].payload.approved_text, "bounded test draft");
+  assert.equal(Object.hasOwn(command.payload, "approved_text"), false);
+  assert.equal(t5.state.hydrationQueries, 1);
+  assert.equal(JSON.stringify(t5.calls).includes("bounded test draft"), false);
+
+  const redeliveryPayloadBody = heartbeatPayload({
+    sequence: 2,
+    capabilities: T5_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED"
+  });
+  const redeliveryRequest = heartbeatRequest(redeliveryPayloadBody, {
+    requestId: "7d267534-0888-4548-9feb-ae4d71a972cf"
+  });
+  const redelivery = heartbeatPool({
+    request: redeliveryRequest,
+    commands: [command],
+    hydrationRows: new Map([[id, t5HydrationRow(command)]])
+  });
+  const redeliveryResponse = await processHeartbeatTransaction(
+    redelivery.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "7d267534-0888-4548-9feb-ae4d71a972cf", contentSha256: redeliveryRequest.hash },
+    redeliveryPayloadBody,
+    NOW
+  );
+  assert.deepEqual(redeliveryResponse.commands[0].payload, t5Response.commands[0].payload);
+  assert.equal(Object.hasOwn(command.payload, "approved_text"), false);
+
+  const malformed = commandRow("SEND_TINDER_DRAFT", new Date(NOW.valueOf() - 500), "66666666-6666-4666-8666-666666666666", {
+    payload: { ...t5Descriptor("66666666-6666-4666-8666-666666666666"), command_fingerprint: "0".repeat(64) },
+    expires_at: new Date(NOW.valueOf() + 300_000)
+  });
+  const malformedRequest = heartbeatRequest(t5PayloadBody, { requestId: "7d267534-0888-4548-9feb-ae4d71a972cf" });
+  const malformedPool = heartbeatPool({
+    request: malformedRequest,
+    commands: [malformed],
+    hydrationRows: new Map([[
+      malformed.command_id,
+      t5HydrationRow(malformed)
+    ]])
+  });
+  const malformedResponse = await processHeartbeatTransaction(
+    malformedPool.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "7d267534-0888-4548-9feb-ae4d71a972cf", contentSha256: malformedRequest.hash },
+    t5PayloadBody,
+    NOW
+  );
+  assert.deepEqual(malformedResponse.commands, []);
+});
+
+test("T5 heartbeat omits a descriptor when freshly locked source shows newer capture, identity, takeover, handoff, draft, or approval drift", async () => {
+  const t5PayloadBody = heartbeatPayload({ capabilities: T5_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const driftCases = [
+    ["newer capture", { snapshot: { latest_capture_revision: 4 } }],
+    ["identity", { snapshot: { current_identity_revision: 5 } }],
+    ["takeover", { snapshot: { human_takeover_active: true } }],
+    ["handoff", { snapshot: { handoff_active: true } }],
+    ["draft", { snapshot: { original_draft: "current draft changed" } }],
+    ["approval", { approval: { state: "CANCELLED" } }]
+  ];
+  const commandIds = [
+    "77777777-7777-4777-8777-777777777777",
+    "88888888-8888-4888-8888-888888888888",
+    "99999999-9999-4999-8999-999999999999",
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+  ];
+  const requestIds = [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222",
+    "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444",
+    "55555555-5555-4555-8555-555555555555",
+    "66666666-6666-4666-8666-666666666666"
+  ];
+  for (const [index, [name, overrides]] of driftCases.entries()) {
+    // Use fixed valid UUIDs, while changing the request identifier for each
+    // isolated signed heartbeat.  The command descriptor remains untouched.
+    const commandId = commandIds[index];
+    const command = commandRow("SEND_TINDER_DRAFT", new Date(NOW.valueOf() - 1000), commandId, {
+      payload: t5Descriptor(commandId),
+      expires_at: new Date(NOW.valueOf() + 300_000)
+    });
+    const requestId = requestIds[index];
+    const request = heartbeatRequest(t5PayloadBody, { requestId });
+    const fake = heartbeatPool({
+      request,
+      commands: [command],
+      hydrationRows: new Map([[commandId, t5HydrationRow(command, overrides)]])
+    });
+    const response = await processHeartbeatTransaction(
+      fake.pool,
+      { deviceId: DEVICE_ID, keyId: KEY_ID, requestId, contentSha256: request.hash },
+      t5PayloadBody,
+      NOW
+    );
+    assert.deepEqual(response.commands, [], name);
+    assert.equal(fake.state.hydrationQueries, 1, name);
+    assert.equal(JSON.stringify(fake.calls).includes("bounded test draft"), false, name);
+    assert.equal(fake.calls.some(call => /UPDATE\s+device_bridge_commands|UPDATE\s+tinder_reply_send|INSERT\s+INTO\s+tinder_reply_send/i.test(call.sql)), false, name);
+  }
 });
 
 function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN") {

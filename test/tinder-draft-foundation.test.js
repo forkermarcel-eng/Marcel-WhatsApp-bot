@@ -242,6 +242,33 @@ test("a current capture and revision return the existing DRAFT without a second 
   assert.equal(repository.state.staleRequests.length, 1);
 });
 
+test("a PostgreSQL-shaped current DRAFT retains its thread fingerprint when reused", async () => {
+  const repository = fixtureRepository({
+    drafts: [{
+      draft_id: DRAFT_ID,
+      contact_id: 7,
+      capture_id: CAPTURE_ID,
+      runtime_thread_fingerprint: THREAD_A,
+      capture_revision: 2,
+      identity_revision: 4,
+      status: "DRAFT",
+      original_draft: "Bereits gespeicherter Entwurf.",
+      control_draft_de: "Bereits gespeicherter Entwurf.",
+      source_language: "de",
+      model_version: "shared-reply-core-v1",
+      created_at: "2026-09-04T19:00:00.000Z"
+    }]
+  });
+  const { service, state } = fixtureService({ repository });
+
+  const result = await service.createDraft({ captureId: CAPTURE_ID });
+
+  assert.equal(result.runtimeThreadFingerprint, THREAD_A);
+  assert.equal(result.originalDraft, "Bereits gespeicherter Entwurf.");
+  assert.equal(state.sharedReplyCalls.length, 0);
+  assert.equal(repository.state.insertCalls.length, 0);
+});
+
 test("a DRAFT discovered after the capture lock prevents concurrent duplicate persistence", async () => {
   const { service, state, repository } = fixtureService();
   const concurrent = {
@@ -468,6 +495,7 @@ test("the PostgreSQL current-DRAFT lookup is scoped to the capture and both revi
   for (const call of calls) {
     assert.deepEqual(call.values, [CAPTURE_ID, 2, 4]);
     assert.match(call.sql, /WHERE capture_id = \$1/);
+    assert.match(call.sql, /runtime_thread_fingerprint/);
     assert.match(call.sql, /capture_revision = \$2/);
     assert.match(call.sql, /identity_revision = \$3/);
     assert.match(call.sql, /status = 'DRAFT'/);

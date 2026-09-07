@@ -608,6 +608,7 @@ function createPgTinderDraftRepository(pool) {
       draft_id,
       contact_id,
       capture_id,
+      runtime_thread_fingerprint,
       capture_revision,
       identity_revision,
       status,

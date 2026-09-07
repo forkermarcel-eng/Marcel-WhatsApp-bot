@@ -43,6 +43,12 @@ export const HUMAN_ARMED_CONVERSATION_CAPABILITY =
 export const HUMAN_ARMED_CONVERSATION_PERMIT_ENVELOPE_FIELD =
   "humanBindingPermit";
 export const HUMAN_ARMED_CONVERSATION_PERMIT_COMMAND_FIELD = "command_id";
+// This is a server-owned, finite execution window. It starts with the
+// deliberate human arm and is shared by the queued command and its one-shot
+// permit; an ACK never extends it. Five minutes covers a normal dashboard to
+// device hand-off plus the bounded local one-shot window without turning the
+// authorization into a persistent gate.
+export const HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS = 5 * 60_000;
 
 export const HUMAN_ARMED_CONVERSATION_ACTION = Object.freeze({
   BIND_EXISTING: "BIND_EXISTING",
@@ -451,7 +457,7 @@ export function createTinderHumanArmedConversationBindingService(repository, {
   createReferenceHash = () => crypto.randomBytes(32).toString("hex"),
   createIdentityKey = () => `tinder_${crypto.randomUUID().replace(/-/g, "")}`,
   now = () => new Date(),
-  armTtlMs = 90_000
+  armTtlMs = HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS
 } = {}) {
   requireRepository(repository);
   if (!Number.isSafeInteger(armTtlMs) || armTtlMs < 10_000 || armTtlMs > 15 * 60_000) {

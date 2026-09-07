@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   HUMAN_ARMED_CONVERSATION_COMMAND_TYPE,
+  HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS,
   HUMAN_ARMED_CONVERSATION_REASON,
   HUMAN_ARMED_CONVERSATION_REFERENCE_KIND,
   HUMAN_ARMED_CONVERSATION_STATUS,
@@ -210,7 +211,7 @@ test("initial human-confirmed existing-contact arm creates opaque binding, empty
     deviceId: DEVICE_ID,
     commandType: HUMAN_ARMED_CONVERSATION_COMMAND_TYPE,
     payload: {},
-    expiresAt: "2026-09-07T12:01:30.000Z"
+    expiresAt: "2026-09-07T12:05:00.000Z"
   });
   assert.equal(Object.keys(command.payload).length, 0);
   assert.equal(repository.state.createdContacts.length, 0);
@@ -294,7 +295,7 @@ test("rearm loads only a human-confirmed persisted binding and never accepts a c
     deviceId: DEVICE_ID,
     commandType: HUMAN_ARMED_CONVERSATION_COMMAND_TYPE,
     payload: {},
-    expiresAt: "2026-09-07T12:01:30.000Z"
+    expiresAt: "2026-09-07T12:05:00.000Z"
   }]);
 
   await assert.rejects(
@@ -315,6 +316,65 @@ test("rearm blocks a revoked/non-human/WhatsApp binding and never queues a Tinde
     assert.equal(result.status, HUMAN_ARMED_CONVERSATION_STATUS.BINDING_NOT_READY);
     assert.equal(repository.state.commands.length, 0);
   }
+});
+
+test("the fixed server-owned arm window covers a manual hand-off, consumes once, and expires at its exact boundary", async () => {
+  let currentTime = NOW;
+  const repository = fixtureRepository({ bindings: [binding()] });
+  const bindingService = service(repository, { now: () => currentTime });
+
+  await bindingService.rearmExistingBinding({ bindingId: BINDING_ID, confirmed: true });
+  assert.equal(HUMAN_ARMED_CONVERSATION_PERMIT_TTL_MS, 5 * 60_000);
+  assert.equal(repository.state.commands[0].expiresAt, "2026-09-07T12:05:00.000Z");
+  assert.equal(repository.state.permits.get(PERMIT_ID).expires_at, "2026-09-07T12:05:00.000Z");
+
+  // Model a normal 30-second command poll/terminal ACK, followed by the
+  // existing bounded 60-second local one-shot window and a manual app switch.
+  // The command and permit remain exact, single-use server authority; only
+  // the fixed expiry changed.
+  Object.assign(repository.state.permits.get(PERMIT_ID), {
+    terminal_status: "SUCCEEDED",
+    ack_status: "SUCCEEDED",
+    ack_result: { conversation_binding_permit: "ARMED" }
+  });
+  currentTime = new Date("2026-09-07T12:04:30.000Z");
+  const duringManualFlow = await bindingService.authorizeIncomingCapturePermit({}, {
+    commandId: PERMIT_ID,
+    deviceId: DEVICE_ID,
+    captureId: CAPTURE_B
+  });
+  assert.equal(duringManualFlow.status, HUMAN_ARMED_CONVERSATION_STATUS.AUTHORIZED);
+  assert.deepEqual(await bindingService.consumeAuthorizedIncomingPermit({}, {
+    authorization: duringManualFlow.authorization,
+    captureId: CAPTURE_B
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONSUMED,
+    contactId: 7,
+    bindingId: BINDING_ID
+  });
+  assert.equal(repository.state.permits.get(PERMIT_ID).permit_state, "CONSUMED");
+  assert.equal(repository.state.audits.some(audit => audit.action === "PERMIT_CONSUMED"), true);
+
+  const expiredRepository = fixtureRepository({ bindings: [binding()] });
+  const expiredService = service(expiredRepository, { now: () => currentTime });
+  currentTime = NOW;
+  await expiredService.rearmExistingBinding({ bindingId: BINDING_ID, confirmed: true });
+  Object.assign(expiredRepository.state.permits.get(PERMIT_ID), {
+    terminal_status: "SUCCEEDED",
+    ack_status: "SUCCEEDED",
+    ack_result: { conversation_binding_permit: "ARMED" }
+  });
+  currentTime = new Date("2026-09-07T12:05:00.000Z");
+  assert.deepEqual(await expiredService.authorizeIncomingCapturePermit({}, {
+    commandId: PERMIT_ID,
+    deviceId: DEVICE_ID,
+    captureId: CAPTURE_B
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.PERMIT_NOT_AVAILABLE,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.PERMIT_EXPIRED
+  });
+  assert.equal(expiredRepository.state.permits.get(PERMIT_ID).permit_state, "ISSUED");
+  assert.equal(expiredRepository.state.audits.some(audit => audit.action === "PERMIT_CONSUMED"), false);
 });
 
 test("a valid issued permit is single-use, device-scoped and resolves only its SAFE pending capture", async () => {

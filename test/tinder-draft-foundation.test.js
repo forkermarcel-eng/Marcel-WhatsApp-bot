@@ -74,12 +74,22 @@ function fixtureRepository({
     staleRequests: [],
     insertCalls: []
   };
-  const currentDraft = (captureId, captureRevision, identityRevision) => state.drafts.find((draft) =>
-    String(draft.captureId ?? draft.capture_id) === captureId &&
-    Number(draft.captureRevision ?? draft.capture_revision) === captureRevision &&
-    Number(draft.identityRevision ?? draft.identity_revision) === identityRevision &&
-    String(draft.status).toUpperCase() === TINDER_DRAFT_STATUS.DRAFT
-  );
+  const currentDraft = (captureId, captureRevision, identityRevision) => state.drafts
+    .filter((draft) =>
+      String(draft.captureId ?? draft.capture_id) === captureId &&
+      Number(draft.captureRevision ?? draft.capture_revision) === captureRevision &&
+      Number(draft.identityRevision ?? draft.identity_revision) === identityRevision &&
+      [
+        TINDER_DRAFT_STATUS.DRAFT,
+        TINDER_DRAFT_STATUS.APPROVED,
+        TINDER_DRAFT_STATUS.REJECTED
+      ].includes(String(draft.status).toUpperCase())
+    )
+    .sort((left, right) => {
+      const leftPriority = String(left.status).toUpperCase() === TINDER_DRAFT_STATUS.DRAFT ? 0 : 1;
+      const rightPriority = String(right.status).toUpperCase() === TINDER_DRAFT_STATUS.DRAFT ? 0 : 1;
+      return leftPriority - rightPriority;
+    })[0];
   const repository = {
     state,
     async getCapture(captureId) {
@@ -219,8 +229,9 @@ test("an eligible resolved central identity creates exactly one Tinder DRAFT thr
   assert.equal(state.sharedReplyCalls[0].incomingText, "¿Cómo estás?");
   assert.equal(
     state.sharedReplyCalls[0].conversation,
-    "INCOMING: Hola Marcel\nOUTGOING: Hola Sandry\nINCOMING: ¿Cómo estás?"
+    "Andere Person: Hola Marcel\nMarcel: Hola Sandry"
   );
+  assert.equal(state.sharedReplyCalls[0].conversation.includes(state.sharedReplyCalls[0].incomingText), false);
   assert.equal(state.sharedReplyCalls[0].memoryContext, "existing central memory context");
   assert.equal(state.languageCalls[0].jid, null);
   assert.equal(Object.hasOwn(state.buildContexts[0].contact, "whatsapp_jid"), false);
@@ -229,6 +240,39 @@ test("an eligible resolved central identity creates exactly one Tinder DRAFT thr
   assert.equal(repository.state.insertCalls[0].status, "DRAFT");
   assert.equal(repository.state.staleRequests[0].reason, "NEWER_CAPTURE_REVISION");
   assert.equal(repository.state.staleRequests[0].newerCaptureRevision, 2);
+});
+
+test("T4 excludes only the terminal row from history even when a real earlier message has identical text", async () => {
+  const repeatedText = "Das ist dieselbe sichtbare Formulierung.";
+  const repository = fixtureRepository({
+    capture: readyCapture({
+      visible_messages: [
+        { visible_order: 1, direction: "INCOMING", text: repeatedText },
+        { visible_order: 2, direction: "OUTGOING", text: "Verstanden." },
+        { visible_order: 3, direction: "INCOMING", text: repeatedText }
+      ]
+    })
+  });
+  const { service, state } = fixtureService({ repository });
+
+  await service.createDraft({ captureId: CAPTURE_ID });
+
+  assert.equal(state.sharedReplyCalls.length, 1);
+  assert.equal(state.sharedReplyCalls[0].incomingText, repeatedText);
+  assert.equal(
+    state.sharedReplyCalls[0].conversation,
+    `Andere Person: ${repeatedText}\nMarcel: Verstanden.`
+  );
+  assert.equal(
+    state.sharedReplyCalls[0].conversation.split(repeatedText).length - 1,
+    1,
+    "the genuine earlier row remains while the terminal row is excluded by position"
+  );
+  assert.deepEqual(
+    Object.keys(state.sharedReplyCalls[0]).sort(),
+    ["channelLabel", "conversation", "incomingText", "memoryContext", "resolvedLanguage"],
+    "capture, permit, identity, and diagnostic metadata never reach the shared core"
+  );
 });
 
 test("a current capture and revision return the existing DRAFT without a second shared-core call", async () => {
@@ -240,6 +284,47 @@ test("a current capture and revision return the existing DRAFT without a second 
   assert.equal(state.sharedReplyCalls.length, 1);
   assert.equal(repository.state.insertCalls.length, 1);
   assert.equal(repository.state.staleRequests.length, 1);
+});
+
+test("a terminal human decision blocks a second draft for the unchanged capture snapshot before shared-core generation", async () => {
+  for (const status of [TINDER_DRAFT_STATUS.APPROVED, TINDER_DRAFT_STATUS.REJECTED]) {
+    const repository = fixtureRepository({
+      drafts: [{
+        draftId: DRAFT_ID,
+        contactId: 7,
+        captureId: CAPTURE_ID,
+        runtimeThreadFingerprint: THREAD_A,
+        captureRevision: 2,
+        identityRevision: 4,
+        status
+      }]
+    });
+    const { service, state } = fixtureService({ repository });
+
+    await assert.rejects(
+      () => service.createDraft({ captureId: CAPTURE_ID }),
+      (error) => error instanceof TinderDraftEligibilityError && error.code === "DRAFT_ALREADY_FINALIZED",
+      status
+    );
+    assert.equal(state.sharedReplyCalls.length, 0, status);
+    assert.equal(repository.state.insertCalls.length, 0, status);
+    assert.equal(repository.state.staleRequests.length, 0, status);
+  }
+});
+
+test("a terminal human decision made while the core is generating prevents persistence for that snapshot", async () => {
+  const repository = fixtureRepository();
+  repository.findCurrentDraft = async () => null;
+  repository.findCurrentDraftForUpdate = async () => ({ status: TINDER_DRAFT_STATUS.APPROVED });
+  const { service, state } = fixtureService({ repository });
+
+  await assert.rejects(
+    () => service.createDraft({ captureId: CAPTURE_ID }),
+    (error) => error instanceof TinderDraftEligibilityError && error.code === "DRAFT_ALREADY_FINALIZED"
+  );
+  assert.equal(state.sharedReplyCalls.length, 1);
+  assert.equal(repository.state.insertCalls.length, 0);
+  assert.equal(repository.state.staleRequests.length, 0);
 });
 
 test("a PostgreSQL-shaped current DRAFT retains its thread fingerprint when reused", async () => {
@@ -471,7 +556,7 @@ test("the PostgreSQL stale query has distinct typed placeholders for equality an
   assert.match(calls[0].sql, /\$9::jsonb/);
 });
 
-test("the PostgreSQL current-DRAFT lookup is scoped to the capture and both revisions, with a locked recheck", async () => {
+test("the PostgreSQL current-snapshot lookup is scoped to the capture and both revisions, with a locked recheck", async () => {
   const calls = [];
   const client = {
     async query(sql, values = []) {
@@ -498,7 +583,8 @@ test("the PostgreSQL current-DRAFT lookup is scoped to the capture and both revi
     assert.match(call.sql, /runtime_thread_fingerprint/);
     assert.match(call.sql, /capture_revision = \$2/);
     assert.match(call.sql, /identity_revision = \$3/);
-    assert.match(call.sql, /status = 'DRAFT'/);
+    assert.match(call.sql, /status IN \('DRAFT', 'APPROVED', 'REJECTED'\)/);
+    assert.match(call.sql, /CASE status WHEN 'DRAFT' THEN 0 ELSE 1 END/);
   }
   assert.doesNotMatch(calls[0].sql, /FOR UPDATE/);
   assert.match(calls[1].sql, /FOR UPDATE\s*$/);

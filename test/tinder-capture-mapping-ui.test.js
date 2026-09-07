@@ -168,6 +168,15 @@ test("T4 draft UI is opt-in for a resolved confirmed capture and never sends bro
   assert.doesNotMatch(draftCode, /window\.location(?:\.href)?\s*=/);
 });
 
+test("T4 review shows one human-decision draft and hides the redundant German control copy", () => {
+  const reviewCode = sourceBetween("function renderCaptureDraftReview(review)", "function renderCaptureDraft(capture)");
+  assert.match(reviewCode, /const originalDraft = review\.original_draft\.trim\(\)/);
+  assert.match(reviewCode, /const controlDraft = typeof review\.control_draft_de === "string"/);
+  assert.match(reviewCode, /if \(controlDraft && controlDraft !== originalDraft\)/);
+  assert.match(reviewCode, /elements\.captureDraftControl\.hidden = true/);
+  assert.doesNotMatch(reviewCode, /Kontrollfassung DE: \$\{review\.control_draft_de\.trim\(\)\}/);
+});
+
 test("T5 draft review is durable, explicitly human-controlled, and has no browser dispatch or send path", () => {
   const draftCode = sourceBetween("function captureReviewStatus", "function mappingContactLabel");
   assert.match(page, /id="captureDraftReviewActions" hidden/);

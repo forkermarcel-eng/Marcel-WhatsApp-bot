@@ -228,9 +228,27 @@ function terminalIncomingMessage(capture) {
   return terminal;
 }
 
-function visibleTinderConversation(capture) {
+/*
+ * `incomingText` is the terminal incoming row. It must not also appear in
+ * the short-term history given to the shared core: that would make one
+ * observed Tinder message look like a transport duplicate. This mirrors the
+ * WhatsApp adapter, whose history query stops before the current row.
+ *
+ * Exclude by the already-normalized terminal position, never by matching
+ * text; two genuinely separate visible rows may legitimately have identical
+ * wording.
+ */
+function visibleTinderHistory(capture) {
   return capture.visibleMessages
-    .map((message) => `${message.direction}: ${message.text}`)
+    .slice(0, -1)
+    .map((message) => {
+      const speaker = message.direction === "INCOMING"
+        ? "Andere Person"
+        : message.direction === "OUTGOING"
+          ? "Marcel"
+          : "Unbekannt";
+      return `${speaker}: ${message.text}`;
+    })
     .join("\n");
 }
 
@@ -323,6 +341,20 @@ function normalizeDraftRow(row, fallback) {
     modelVersion,
     createdAt: new Date(createdAt).toISOString()
   });
+}
+
+function resolveSnapshotDraft(row) {
+  const status = normalizedState(row?.status);
+  if (status === TINDER_DRAFT_STATUS.DRAFT) {
+    return normalizeDraftRow(row);
+  }
+  if (status === TINDER_DRAFT_STATUS.APPROVED || status === TINDER_DRAFT_STATUS.REJECTED) {
+    throw new TinderDraftEligibilityError(
+      "Der gespeicherte Draft hat bereits eine terminale menschliche Entscheidung.",
+      "DRAFT_ALREADY_FINALIZED"
+    );
+  }
+  throw new TinderDraftEligibilityError("Der gespeicherte Tinder-Draft ist ungÃ¼ltig.", "INVALID_DRAFT_RECORD", 500);
 }
 
 function requireRepository(repository) {
@@ -467,7 +499,7 @@ function createTinderDraftFoundationService({
       initial.capture.identityRevision
     );
     if (existingInitial) {
-      return normalizeDraftRow(existingInitial);
+      return resolveSnapshotDraft(existingInitial);
     }
     const incoming = terminalIncomingMessage(initial.capture);
 
@@ -494,7 +526,7 @@ function createTinderDraftFoundationService({
     // after all server-owned eligibility gates above have passed.
     const originalDraft = normalizedDraftText(await adapters.generateSharedReply({
       incomingText: incoming.text,
-      conversation: visibleTinderConversation(initial.capture),
+      conversation: visibleTinderHistory(initial.capture),
       memoryContext: typeof memoryContext === "string" ? memoryContext : String(memoryContext || ""),
       resolvedLanguage: sourceLanguage,
       channelLabel: "Tinder"
@@ -521,7 +553,7 @@ function createTinderDraftFoundationService({
         currentCapture.identityRevision
       );
       if (existingLocked) {
-        return normalizeDraftRow(existingLocked);
+        return resolveSnapshotDraft(existingLocked);
       }
 
       await repository.markDraftsStale(transaction, {
@@ -619,10 +651,10 @@ function createPgTinderDraftRepository(pool) {
       created_at
     FROM tinder_reply_drafts
     WHERE capture_id = $1
-      AND capture_revision = $2
-      AND identity_revision = $3
-      AND status = 'DRAFT'
-    ORDER BY created_at DESC, draft_id DESC
+       AND capture_revision = $2
+       AND identity_revision = $3
+       AND status IN ('DRAFT', 'APPROVED', 'REJECTED')
+    ORDER BY CASE status WHEN 'DRAFT' THEN 0 ELSE 1 END, created_at DESC, draft_id DESC
     LIMIT 1`;
 
   function singleRow(result) {

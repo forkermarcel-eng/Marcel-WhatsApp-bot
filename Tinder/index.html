@@ -1595,9 +1595,13 @@
       draftReview = review;
       draftReviewLoadState = "loaded";
       draftCompleted = true;
-      elements.captureDraftOriginal.textContent = review.original_draft.trim();
-      if (typeof review.control_draft_de === "string" && review.control_draft_de.trim()) {
-        elements.captureDraftControl.textContent = `Kontrollfassung DE: ${review.control_draft_de.trim()}`;
+      const originalDraft = review.original_draft.trim();
+      const controlDraft = typeof review.control_draft_de === "string"
+        ? review.control_draft_de.trim()
+        : "";
+      elements.captureDraftOriginal.textContent = originalDraft;
+      if (controlDraft && controlDraft !== originalDraft) {
+        elements.captureDraftControl.textContent = `Kontrollfassung DE: ${controlDraft}`;
         elements.captureDraftControl.hidden = false;
       } else {
         elements.captureDraftControl.textContent = "";

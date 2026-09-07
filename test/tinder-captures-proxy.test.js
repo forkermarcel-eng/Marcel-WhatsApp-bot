@@ -57,6 +57,19 @@ function safeOpenDraftReview(overrides = {}) {
   };
 }
 
+function safeDraftEligibleCapture(overrides = {}) {
+  return {
+    capture_id: CAPTURE_ID,
+    visible_name: "M Tinder Test",
+    visible_messages: [{ text: "private visible Tinder message" }],
+    device_id: DEVICE_ID,
+    contact_id: 7,
+    runtime_thread_fingerprint: "private-thread-fingerprint",
+    capture_fingerprint: "private-capture-fingerprint",
+    ...overrides
+  };
+}
+
 function validCookie() {
   const token = "test-session";
   const signature = crypto.createHmac("sha256", PASSWORD).update(token).digest("hex");
@@ -459,6 +472,41 @@ test("pending capture GET rejects a non-pending backend record before it reaches
   await handler(request({ query: { view: "pending" } }), res);
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.error, "Ungültige Capture-Antwort vom Backend.");
+}));
+
+test("draft-eligible capture selector forwards only a bounded existing-detail discovery projection", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({ ok: true, captures: [safeDraftEligibleCapture()] });
+  };
+  const res = responseRecorder();
+  await handler(request({ query: { view: "draft-eligible" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, "https://shared-backend.example/dashboard-api/tinder/captures/draft-eligible");
+  assert.equal(call.options.method, "GET");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.deepEqual(res.body, {
+    ok: true,
+    captures: [{ capture_id: CAPTURE_ID, visible_name: "M Tinder Test" }]
+  });
+  assert.equal(JSON.stringify(res.body).includes("private visible Tinder message"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes(String(DEVICE_ID)), false);
+  assert.equal(JSON.stringify(res.body).includes("contact_id"), false);
+}));
+
+test("draft-eligible capture selector fails closed before browser display on malformed backend context", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    captures: [safeDraftEligibleCapture({ visible_name: "" })]
+  });
+  const res = responseRecorder();
+  await handler(request({ query: { view: "draft-eligible" } }), res);
+  assert.equal(res.statusCode, 502);
+  assert.match(res.body.error, /bereite Tinder-Captures vom Backend/i);
 }));
 
 test("open T4 review selector forwards a bounded reader and strips draft content and technical fields", async () => withEnvironment(async () => {

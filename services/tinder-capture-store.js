@@ -34,6 +34,10 @@ const TINDER_CAPTURE_REVIEW_STATUS = Object.freeze({
   REJECTED: "REJECTED"
 });
 const TINDER_PENDING_HUMAN_MAPPING_LIMIT = 25;
+// Dashboard discovery stays deliberately bounded. The selector only exposes
+// a capture ID and its visible thread label; draft creation remains a separate
+// explicit T4 action after the existing detail screen has reloaded the capture.
+const TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT = 25;
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -854,6 +858,48 @@ function createPgTinderCaptureRepository(pool) {
         [TINDER_PENDING_HUMAN_MAPPING_LIMIT]
       );
       return result.rows;
+    },
+
+    /**
+     * Bounded discovery projection for the first explicit T4 draft. This is
+     * intentionally not a draft creator and does not return capture content,
+     * fingerprints, device data, contacts, or provenance. A correlated latest
+     * revision check prevents an older observation of the same runtime thread
+     * from re-entering the selector after newer capture data exists.
+     */
+    async findDraftEligibleCaptures() {
+      const result = await pool.query(
+        `SELECT c.capture_id,
+                c.source_package,
+                c.capture_safety_status,
+                c.mapping_status,
+                c.human_review_status,
+                COALESCE(
+                  c.visible_thread_metadata ->> 'visibleName',
+                  c.visible_thread_metadata ->> 'visible_name'
+                ) AS visible_name
+           FROM tinder_visible_chat_captures c
+          WHERE c.capture_safety_status = 'SAFE'
+            AND c.source_package = 'com.tinder'
+            AND c.mapping_status = 'RESOLVED'
+            AND c.human_review_status = 'CONFIRMED'
+            AND c.resolved_contact_id IS NOT NULL
+            AND c.capture_revision = (
+              SELECT MAX(newer.capture_revision)
+                FROM tinder_visible_chat_captures newer
+               WHERE newer.device_id = c.device_id
+                 AND newer.runtime_thread_fingerprint = c.runtime_thread_fingerprint
+            )
+            AND NOT EXISTS (
+              SELECT 1
+                FROM tinder_reply_drafts draft
+               WHERE draft.capture_id = c.capture_id
+            )
+          ORDER BY c.received_at DESC, c.capture_id DESC
+          LIMIT $1`,
+        [TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT]
+      );
+      return result.rows;
     }
   });
 }
@@ -866,6 +912,7 @@ export {
   TINDER_HUMAN_ARMED_PERMIT,
   TINDER_CAPTURE_MAPPING_STATUS,
   TINDER_CAPTURE_REVIEW_STATUS,
+  TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT,
   TINDER_PENDING_HUMAN_MAPPING_LIMIT,
   TINDER_CAPTURE_SCHEMA_VERSION,
   TINDER_SOURCE_PACKAGE,

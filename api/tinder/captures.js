@@ -53,6 +53,8 @@ const PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES = new Set([
 ]);
 const PENDING_CAPTURE_VIEW = "pending";
 const PENDING_CAPTURE_LIMIT = 25;
+const DRAFT_ELIGIBLE_CAPTURE_VIEW = "draft-eligible";
+const DRAFT_ELIGIBLE_CAPTURE_LIMIT = 25;
 const HUMAN_ARMED_BINDINGS_VIEW = "human-armed-bindings";
 const HUMAN_ARMED_BINDING_LIMIT = 25;
 const HUMAN_ARM_OPERATION = "human-arm";
@@ -293,6 +295,9 @@ function captureRequestFromQuery(req) {
   if (exactKeys(query, ["view"]) && query.view === OPEN_DRAFT_REVIEWS_VIEW) {
     return Object.freeze({ type: "open_draft_reviews" });
   }
+  if (exactKeys(query, ["view"]) && query.view === DRAFT_ELIGIBLE_CAPTURE_VIEW) {
+    return Object.freeze({ type: "draft_eligible" });
+  }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === DRAFT_OPERATION) {
     return Object.freeze({ type: "draft", captureId: query.captureId });
@@ -526,6 +531,23 @@ function normalizePublicPendingCaptures(value) {
   return Object.freeze(captures);
 }
 
+function normalizePublicDraftEligibleCapture(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !validCaptureId(value.capture_id) || !validBoundedText(value.visible_name, 240)) {
+    return null;
+  }
+  return Object.freeze({
+    capture_id: value.capture_id,
+    visible_name: value.visible_name.trim()
+  });
+}
+
+function normalizePublicDraftEligibleCaptures(value) {
+  if (!Array.isArray(value) || value.length > DRAFT_ELIGIBLE_CAPTURE_LIMIT) return null;
+  const captures = value.map(normalizePublicDraftEligibleCapture);
+  return captures.some((capture) => capture === null) ? null : Object.freeze(captures);
+}
+
 async function forwardPendingCaptureRead(res, configuration) {
   try {
     const response = await fetch(
@@ -549,6 +571,33 @@ async function forwardPendingCaptureRead(res, configuration) {
     return res.status(200).json({ ok: true, captures });
   } catch {
     console.error("Verbindung zum Tinder-Capture-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardDraftEligibleCaptureRead(res, configuration) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/draft-eligible`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 409, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(safeBackendError(data, "Bereite Tinder-Captures konnten nicht geladen werden."));
+    }
+    const captures = normalizePublicDraftEligibleCaptures(data?.captures);
+    if (!captures) {
+      return res.status(502).json({ ok: false, error: "UngÃ¼ltige bereite Tinder-Captures vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, captures });
+  } catch {
+    console.error("Verbindung zu bereiten Tinder-Captures fehlgeschlagen.");
     return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
   }
 }
@@ -936,6 +985,9 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "pending") {
     return forwardPendingCaptureRead(res, configuration);
   }
+  if (req.method === "GET" && captureRequest.type === "draft_eligible") {
+    return forwardDraftEligibleCaptureRead(res, configuration);
+  }
   if (req.method === "GET" && captureRequest.type === "human_armed_bindings") {
     return forwardHumanArmedBindingList(res, configuration);
   }
@@ -979,6 +1031,8 @@ export {
   HUMAN_ARM_OPERATION,
   HUMAN_REARM_OPERATION,
   DRAFT_OPERATION,
+  DRAFT_ELIGIBLE_CAPTURE_LIMIT,
+  DRAFT_ELIGIBLE_CAPTURE_VIEW,
   DRAFT_REVIEW_VIEW,
   OPEN_DRAFT_REVIEWS_VIEW,
   OPEN_DRAFT_REVIEW_LIMIT,
@@ -990,6 +1044,8 @@ export {
   PENDING_CAPTURE_VIEW,
   captureRequestFromQuery,
   normalizePublicCapture,
+  normalizePublicDraftEligibleCapture,
+  normalizePublicDraftEligibleCaptures,
   normalizePublicPendingCaptures,
   normalizePublicMappingErrorResult,
   normalizePublicConversationBindingErrorResult,

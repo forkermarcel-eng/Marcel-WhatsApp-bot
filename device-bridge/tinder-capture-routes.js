@@ -2,6 +2,7 @@ import { isUuidV4 } from "./protocol-v1.js";
 import {
   createPgTinderCaptureRepository,
   createTinderCaptureStore,
+  TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT,
   TINDER_PENDING_HUMAN_MAPPING_LIMIT
 } from "../services/tinder-capture-store.js";
 import {
@@ -201,6 +202,38 @@ function normalizePendingCaptureRecords(rows) {
       throw error;
     }
     return capture;
+  }));
+}
+
+/**
+ * The initial T4 selector remains deliberately less revealing than a capture
+ * detail: it provides only an opaque capture handle and the visible label.
+ * Eligibility itself is selected by the repository and is rechecked by the
+ * existing explicit draft-creation route after a human opens the detail.
+ */
+function normalizeDraftEligibleCaptureRecords(rows) {
+  if (!Array.isArray(rows) || rows.length > TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT) {
+    const error = new Error("Invalid draft-eligible capture records.");
+    error.statusCode = 500;
+    error.code = "INVALID_DRAFT_ELIGIBLE_TINDER_CAPTURES";
+    throw error;
+  }
+  return Object.freeze(rows.map((row) => {
+    const captureId = String(row?.captureId ?? row?.capture_id ?? "").trim();
+    const visibleName = String(row?.visibleName ?? row?.visible_name ?? "").trim();
+    const safetyStatus = String(row?.captureSafetyStatus ?? row?.capture_safety_status ?? "").trim().toUpperCase();
+    const mappingStatus = String(row?.mappingStatus ?? row?.mapping_status ?? "").trim().toUpperCase();
+    const reviewStatus = String(row?.humanReviewStatus ?? row?.human_review_status ?? "").trim().toUpperCase();
+    const sourcePackage = String(row?.sourcePackage ?? row?.source_package ?? "").trim();
+    if (!isUuidV4(captureId) || !visibleName || visibleName.length > 240
+        || safetyStatus !== "SAFE" || sourcePackage !== "com.tinder"
+        || mappingStatus !== "RESOLVED" || reviewStatus !== "CONFIRMED") {
+      const error = new Error("Invalid draft-eligible capture record.");
+      error.statusCode = 500;
+      error.code = "INVALID_DRAFT_ELIGIBLE_TINDER_CAPTURES";
+      throw error;
+    }
+    return Object.freeze({ capture_id: captureId, visible_name: visibleName });
   }));
 }
 
@@ -445,6 +478,40 @@ function createTinderDashboardPendingCaptureListHandler(pool, {
   };
 }
 
+function createTinderDashboardDraftEligibleCaptureListHandler(pool, {
+  createRepository = createPgTinderCaptureRepository
+} = {}) {
+  const repository = createRepository(pool);
+  return async function tinderDashboardDraftEligibleCaptureListHandler(_req, res) {
+    try {
+      if (typeof repository.findDraftEligibleCaptures !== "function") {
+        const error = new Error("Draft-eligible capture reader is unavailable.");
+        error.statusCode = 503;
+        error.code = "TINDER_DRAFT_FOUNDATION_NOT_READY";
+        throw error;
+      }
+      const captures = normalizeDraftEligibleCaptureRecords(
+        await repository.findDraftEligibleCaptures()
+      );
+      return res.status(200).json({ ok: true, captures });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        const notReady = foundationNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder dashboard draft-eligible capture list failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_DRAFT_ELIGIBLE_CAPTURE_LIST_FAILED",
+        error: status === 500
+          ? "Tinder captures ready for a draft could not be loaded."
+          : safeMessage(error, "Tinder captures ready for a draft could not be loaded.")
+      });
+    }
+  };
+}
+
 function createTinderDashboardMappingHandler(pool, {
   createRepository = createPgTinderHumanMappingRepository,
   createService = createTinderHumanMappingService
@@ -638,6 +705,7 @@ function registerTinderCaptureRoutes({
   requireDeviceBridgeReady
 }) {
   const listPendingCaptures = createTinderDashboardPendingCaptureListHandler(pool);
+  const listDraftEligibleCaptures = createTinderDashboardDraftEligibleCaptureListHandler(pool);
   const readCapture = createTinderDashboardCaptureReadHandler(pool);
   const mapCapture = createTinderDashboardMappingHandler(pool);
   const bindCaptureConversation = createTinderDashboardConversationBindingHandler(pool);
@@ -652,6 +720,7 @@ function registerTinderCaptureRoutes({
   };
 
   app.get("/dashboard-api/tinder/captures/pending", dashboard(listPendingCaptures));
+  app.get("/dashboard-api/tinder/captures/draft-eligible", dashboard(listDraftEligibleCaptures));
   app.get("/dashboard-api/tinder/human-armed-conversation-bindings", dashboard(listHumanArmedBindings));
   app.get("/dashboard-api/tinder/captures/:captureId", dashboard(readCapture));
   app.post("/dashboard-api/tinder/captures/:captureId/mapping", dashboard(mapCapture));
@@ -671,6 +740,7 @@ export {
   assertHumanArmedRearmBody,
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
+  createTinderDashboardDraftEligibleCaptureListHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
   createTinderDashboardConversationBindingHandler,
@@ -680,6 +750,7 @@ export {
   isFoundationNotReadyError,
   normalizeBindingId,
   normalizeCaptureRecord,
+  normalizeDraftEligibleCaptureRecords,
   normalizeHumanArmedBindingRecords,
   normalizePendingCaptureRecords,
   registerTinderCaptureRoutes

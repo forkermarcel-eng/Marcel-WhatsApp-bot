@@ -873,6 +873,16 @@
         <span class="enrollment-message" id="openDraftReviewMessage" role="status" aria-live="polite">
           Offene Tinder-Entwurfsprüfungen werden geladen.
         </span>
+        <div id="draftEligibleCapturePanel" hidden>
+          <h3>Bereit für einen T4-Entwurf</h3>
+          <p>
+            Diese sicher bestätigten Captures haben noch keinen Entwurf. Die Auswahl öffnet
+            ausschließlich die vorhandene Capture-Detailprüfung; ein Entwurf entsteht erst
+            nach einem weiteren ausdrücklichen Klick.
+          </p>
+          <div class="pending-capture-list" id="draftEligibleCaptureList" aria-live="polite"></div>
+          <span class="enrollment-message" id="draftEligibleCaptureMessage" role="status" aria-live="polite"></span>
+        </div>
       </section>
 
       <section class="enrollment-panel pending-capture-panel" id="humanArmedBindingPanel" aria-labelledby="humanArmedBindingHeading">
@@ -1143,6 +1153,9 @@
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        openDraftReviewList: document.getElementById("openDraftReviewList"),
        openDraftReviewMessage: document.getElementById("openDraftReviewMessage"),
+       draftEligibleCapturePanel: document.getElementById("draftEligibleCapturePanel"),
+       draftEligibleCaptureList: document.getElementById("draftEligibleCaptureList"),
+       draftEligibleCaptureMessage: document.getElementById("draftEligibleCaptureMessage"),
        humanArmedBindingList: document.getElementById("humanArmedBindingList"),
        humanArmedBindingMessage: document.getElementById("humanArmedBindingMessage"),
        captureDraftPanel: document.getElementById("captureDraftPanel"),
@@ -1383,6 +1396,64 @@
         unavailable.textContent = "Offene Tinder-Entwurfsprüfungen können derzeit nicht sicher geladen werden.";
         elements.openDraftReviewList.append(unavailable);
         elements.openDraftReviewMessage.textContent = error?.message || "Offene Tinder-Entwurfsprüfungen konnten nicht geladen werden.";
+      }
+    }
+
+    function draftEligibleCaptureIsSafeForSelection(capture) {
+      return capture && typeof capture === "object" &&
+        UUID_V4.test(String(capture.capture_id || "")) &&
+        typeof capture.visible_name === "string" && capture.visible_name.trim() &&
+        capture.visible_name.trim().length <= 240;
+    }
+
+    function renderDraftEligibleCaptureDiscovery(captures) {
+      elements.draftEligibleCaptureList.replaceChildren();
+      elements.draftEligibleCapturePanel.hidden = captures.length === 0;
+      if (captures.length === 0) {
+        elements.draftEligibleCaptureMessage.textContent = "";
+        return;
+      }
+
+      for (const capture of captures) {
+        const item = document.createElement("article");
+        item.className = "pending-capture-item";
+        const copy = document.createElement("div");
+        copy.className = "pending-capture-copy";
+        const name = document.createElement("div");
+        name.className = "pending-capture-name";
+        name.textContent = capture.visible_name.trim();
+        const meta = document.createElement("div");
+        meta.className = "pending-capture-meta";
+        meta.textContent = "Sicheres bestätigtes Capture · bereit für einen einzelnen Entwurf";
+        copy.append(name, meta);
+
+        const open = document.createElement("a");
+        open.className = "button primary";
+        open.href = pendingCaptureMappingUrl(capture.capture_id);
+        open.textContent = "Entwurf öffnen";
+        item.append(copy, open);
+        elements.draftEligibleCaptureList.append(item);
+      }
+      elements.draftEligibleCaptureMessage.textContent =
+        `${captures.length} sicheres Capture${captures.length === 1 ? "" : "s"} ist für einen einzelnen T4-Entwurf bereit.`;
+    }
+
+    async function loadDraftEligibleCaptureDiscovery() {
+      try {
+        const data = await requestJson("/api/tinder/captures?view=draft-eligible");
+        const captures = Array.isArray(data?.captures) ? data.captures : null;
+        if (!captures || captures.length > 25 || captures.some((capture) => !draftEligibleCaptureIsSafeForSelection(capture))) {
+          throw new Error("Das Backend hat keine gültige Liste bereiter Tinder-Captures geliefert.");
+        }
+        renderDraftEligibleCaptureDiscovery(captures);
+      } catch (error) {
+        elements.draftEligibleCapturePanel.hidden = false;
+        elements.draftEligibleCaptureList.replaceChildren();
+        const unavailable = document.createElement("div");
+        unavailable.className = "pending-capture-empty";
+        unavailable.textContent = "Bereite Tinder-Captures können derzeit nicht sicher geladen werden.";
+        elements.draftEligibleCaptureList.append(unavailable);
+        elements.draftEligibleCaptureMessage.textContent = error?.message || "Bereite Tinder-Captures konnten nicht geladen werden.";
       }
     }
 
@@ -1689,6 +1760,8 @@
           throw new Error("Das Backend hat keinen gueltigen Tinder-Draft geliefert.");
         }
         await loadCaptureDraftReview(draftCapture);
+        void loadDraftEligibleCaptureDiscovery();
+        void loadOpenDraftReviewDiscovery();
       } catch (error) {
         setCaptureDraftMessage(error?.message || "Tinder-Draft konnte nicht erstellt werden.", true);
       } finally {
@@ -2444,6 +2517,7 @@
      void refreshAllStatuses();
      void loadPendingCaptureDiscovery();
      void loadOpenDraftReviewDiscovery();
+     void loadDraftEligibleCaptureDiscovery();
      void loadHumanArmedBindingList();
      void loadCaptureMappingFromLocation();
 

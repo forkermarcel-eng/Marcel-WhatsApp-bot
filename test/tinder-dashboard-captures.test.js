@@ -10,6 +10,7 @@ import {
   createTinderDashboardHumanArmedBindingHandler,
   createTinderDashboardHumanArmedBindingListHandler,
   createTinderDashboardHumanArmedRearmHandler,
+  createTinderDashboardDraftEligibleCaptureListHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
   registerTinderCaptureRoutes
@@ -221,7 +222,85 @@ test("dashboard pending capture list fails closed when a store violates the fixe
   assert.equal(res.body.code, "INVALID_PENDING_TINDER_CAPTURES");
 });
 
-test("pending route remains protected and is registered before the capture-id route", () => {
+test("dashboard draft-eligible capture list exposes only a bounded existing-detail selector", async () => {
+  const handler = createTinderDashboardDraftEligibleCaptureListHandler({}, {
+    createRepository() {
+      return {
+        async findDraftEligibleCaptures() {
+          return [capture({
+            capture_safety_status: "SAFE",
+            mapping_status: "RESOLVED",
+            human_review_status: "CONFIRMED",
+            visible_name: "Sandry"
+          })];
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({}, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    ok: true,
+    captures: [{ capture_id: CAPTURE_ID, visible_name: "Sandry" }]
+  });
+  assert.equal(JSON.stringify(res.body).includes("private visible text"), false);
+  assert.equal(JSON.stringify(res.body).includes("thread_fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes(DEVICE_ID), false);
+});
+
+test("dashboard draft-eligible capture list fails closed for missing foundation, noneligible rows, and oversized results", async () => {
+  const missingFoundation = createTinderDashboardDraftEligibleCaptureListHandler({}, {
+    createRepository() {
+      return {
+        async findDraftEligibleCaptures() {
+          const error = new Error("missing table");
+          error.code = "42P01";
+          throw error;
+        }
+      };
+    }
+  });
+  const missing = responseRecorder();
+  await missingFoundation({}, missing);
+  assert.equal(missing.statusCode, 503);
+  assert.equal(missing.body.code, "TINDER_IDENTITY_FOUNDATION_NOT_READY");
+
+  for (const rows of [
+    [capture({
+      capture_safety_status: "SAFE",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      visible_name: "Sandry"
+    })],
+    Array.from({ length: 26 }, () => capture({
+      capture_safety_status: "SAFE",
+      mapping_status: "RESOLVED",
+      human_review_status: "CONFIRMED",
+      visible_name: "Sandry"
+    }))
+  ]) {
+    const handler = createTinderDashboardDraftEligibleCaptureListHandler({}, {
+      createRepository() {
+        return { async findDraftEligibleCaptures() { return rows; } };
+      }
+    });
+    const res = responseRecorder();
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await handler({}, res);
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.body.code, "INVALID_DRAFT_ELIGIBLE_TINDER_CAPTURES");
+    assert.equal(JSON.stringify(res.body).includes("private visible text"), false);
+  }
+});
+
+test("capture discovery routes remain protected and are registered before the capture-id route", () => {
   const registrations = [];
   registerTinderCaptureRoutes({
     app: {
@@ -239,8 +318,13 @@ test("pending route remains protected and is registered before the capture-id ro
   const captureIndex = registrations.findIndex(({ method, path }) =>
     method === "GET" && path === "/dashboard-api/tinder/captures/:captureId"
   );
+  const draftEligibleIndex = registrations.findIndex(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/captures/draft-eligible"
+  );
   assert.ok(pendingIndex >= 0);
   assert.ok(captureIndex > pendingIndex);
+  assert.ok(draftEligibleIndex >= 0);
+  assert.ok(captureIndex > draftEligibleIndex);
 
   const bindingRoute = registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/conversation-binding"
@@ -255,6 +339,31 @@ test("pending route remains protected and is registered before the capture-id ro
   assert.ok(registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm"
   ));
+});
+
+test("draft-eligible discovery retains dashboard authorization before any database reader", async () => {
+  let deviceBridgeReadinessCalled = false;
+  const registrations = [];
+  registerTinderCaptureRoutes({
+    app: {
+      get(path, handler) { registrations.push({ method: "GET", path, handler }); },
+      post(path, handler) { registrations.push({ method: "POST", path, handler }); }
+    },
+    pool: { connect() {}, query() {} },
+    dashboardApiReady() { return true; },
+    dashboardApiAuthorized() { return false; },
+    requireDeviceBridgeReady() {
+      deviceBridgeReadinessCalled = true;
+      return true;
+    }
+  });
+  const route = registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/captures/draft-eligible"
+  );
+  const res = responseRecorder();
+  await route.handler({}, res);
+  assert.equal(res.statusCode, 401);
+  assert.equal(deviceBridgeReadinessCalled, false);
 });
 
 test("conversation-binding route retains dashboard authorization before any service call", async () => {

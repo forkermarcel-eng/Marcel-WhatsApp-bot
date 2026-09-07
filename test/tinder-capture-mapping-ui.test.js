@@ -125,6 +125,20 @@ test("open T4 draft discovery reuses the existing capture-detail review screen w
   assert.doesNotMatch(discoveryCode, /textContent\s*=\s*review\.capture_id/);
 });
 
+test("draft-ready capture discovery reuses the existing detail/review panel without creating a draft", () => {
+  const discoveryCode = sourceBetween("function draftEligibleCaptureIsSafeForSelection", "function humanArmedBindingIsSafeForSelection");
+  assert.match(page, /id="draftEligibleCapturePanel" hidden/);
+  assert.match(page, /id="draftEligibleCaptureList"/);
+  assert.match(discoveryCode, /function loadDraftEligibleCaptureDiscovery\(\)/);
+  assert.match(discoveryCode, /requestJson\("\/api\/tinder\/captures\?view=draft-eligible"\)/);
+  assert.match(discoveryCode, /open\.href = pendingCaptureMappingUrl\(capture\.capture_id\)/);
+  assert.match(discoveryCode, /open\.textContent = "Entwurf öffnen"/);
+  assert.match(discoveryCode, /Sicheres bestätigtes Capture · bereit für einen einzelnen Entwurf/);
+  assert.match(page, /void loadDraftEligibleCaptureDiscovery\(\)/);
+  assert.doesNotMatch(discoveryCode, /operation=draft|draft-approve|draft-reject|draft-cancel|original_draft|visible_messages|thread_fingerprint|capture_fingerprint|contact_id|device_id|dispatch|SEND_TINDER_DRAFT/i);
+  assert.doesNotMatch(discoveryCode, /textContent\s*=\s*capture\.capture_id/);
+});
+
 test("a successful non-armed mapping refreshes the selected safe capture through the existing review component", () => {
   const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
   assert.match(mappingCode, /async function loadCaptureDetail\(captureId\)/);

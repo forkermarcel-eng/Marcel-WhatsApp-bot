@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   TINDER_CAPTURE_MAPPING_STATUS,
   TINDER_CAPTURE_REVIEW_STATUS,
+  TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT,
   TINDER_PENDING_HUMAN_MAPPING_LIMIT,
   TinderCaptureValidationError,
   createPgTinderCaptureRepository,
@@ -797,5 +798,32 @@ test("the PostgreSQL pending reader selects only bounded redacted mapping contex
   assert.match(call.sql, /ORDER BY received_at DESC, capture_id DESC/i);
   assert.match(call.sql, /LIMIT \$1/i);
   assert.doesNotMatch(call.sql, /visible_messages|runtime_thread_fingerprint|capture_fingerprint|provenance/i);
+  assert.doesNotMatch(call.sql, /SELECT\s+\*/i);
+});
+
+test("the PostgreSQL draft-eligible reader selects only the latest resolved confirmed capture without any existing draft", async () => {
+  let call;
+  const repository = createPgTinderCaptureRepository({
+    async connect() { throw new Error("not used"); },
+    async query(sql, values = []) {
+      call = { sql, values };
+      return { rows: [] };
+    }
+  });
+
+  assert.deepEqual(await repository.findDraftEligibleCaptures(), []);
+  assert.deepEqual(call.values, [TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT]);
+  assert.match(call.sql, /capture_safety_status\s*=\s*'SAFE'/i);
+  assert.match(call.sql, /source_package\s*=\s*'com\.tinder'/i);
+  assert.match(call.sql, /mapping_status\s*=\s*'RESOLVED'/i);
+  assert.match(call.sql, /human_review_status\s*=\s*'CONFIRMED'/i);
+  assert.match(call.sql, /resolved_contact_id\s+IS\s+NOT\s+NULL/i);
+  assert.match(call.sql, /MAX\(newer\.capture_revision\)/i);
+  assert.match(call.sql, /newer\.device_id\s*=\s*c\.device_id/i);
+  assert.match(call.sql, /newer\.runtime_thread_fingerprint\s*=\s*c\.runtime_thread_fingerprint/i);
+  assert.match(call.sql, /NOT EXISTS\s*\(\s*SELECT 1\s+FROM tinder_reply_drafts/i);
+  assert.match(call.sql, /ORDER BY c\.received_at DESC, c\.capture_id DESC/i);
+  assert.match(call.sql, /LIMIT \$1/i);
+  assert.doesNotMatch(call.sql, /visible_messages|capture_fingerprint|provenance/i);
   assert.doesNotMatch(call.sql, /SELECT\s+\*/i);
 });

@@ -11,6 +11,9 @@ import {
   migrateContactConversationBindingFoundation,
   validateContactConversationBindingFoundationPreDdl
 } from "../device-bridge/contact-conversation-binding-foundation-migration.js";
+import {
+  runContactConversationBindingFoundationPreflightCli
+} from "../scripts/preflight-contact-conversation-binding-foundation.js";
 import { verifyDeviceBridgeSchema } from "../device-bridge/schema-readiness.js";
 import { migrateTinderIdentityFoundation } from "../device-bridge/tinder-identity-foundation-migration.js";
 import { migrateTinderVisibleChatCaptureSchema } from "../device-bridge/tinder-visible-chat-capture-migration.js";
@@ -65,8 +68,10 @@ async function prepareCanonicalT3Dependencies(pool) {
 
 function tracePool(pool, { afterQuery } = {}) {
   const records = [];
+  let ended = false;
   return {
     records,
+    get ended() { return ended; },
     async connect() {
       const rawClient = await pool.connect();
       return {
@@ -81,6 +86,9 @@ function tracePool(pool, { afterQuery } = {}) {
           return rawClient.release(error);
         }
       };
+    },
+    async end() {
+      ended = true;
     }
   };
 }
@@ -121,6 +129,57 @@ test("real loopback PostgreSQL applies, postchecks, commits and rechecks the exa
       preflight: { binding: { state: "CANONICAL" }, mutate: false }
     });
   }, { prefix: "marcel_cbind" });
+});
+
+test("real loopback PostgreSQL operational preflight is repeatable-read read-only, reports eligibility, and makes no DDL or writes", { timeout: 45_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareCanonicalT3Dependencies(pool);
+    const trace = tracePool(pool);
+    const output = { log() {}, error() {} };
+    const result = await runContactConversationBindingFoundationPreflightCli({
+      environment: { DATABASE_URL: "postgres://test-only-not-used-by-injected-pool" },
+      createPool: async () => trace,
+      logger: output
+    });
+    assert.deepEqual(result, {
+      ok: true,
+      reason: "ELIGIBLE_FOR_MIGRATION",
+      binding_state: "ABSENT",
+      migration_required: true,
+      transaction: "READ_ONLY_REPEATABLE_READ",
+      rollback: "COMPLETED"
+    });
+    assert.equal(trace.records[0]?.sql.trim(), "BEGIN");
+    assert.equal(trace.records[1]?.sql.trim(), "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    assert.equal(trace.records.at(-1)?.sql.trim(), "ROLLBACK");
+    assert.equal(trace.records.some(record => /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|LOCK)\b/i.test(record.sql)), false);
+    assert.equal(trace.ended, true);
+    assert.equal(await bindingTablesPresent(pool), false);
+  }, { prefix: "marcel_cbind_preflight" });
+});
+
+test("real loopback PostgreSQL operational preflight fails bounded on partial binding drift without DDL or writes", { timeout: 45_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareCanonicalT3Dependencies(pool);
+    await pool.query("CREATE TABLE contact_conversation_bindings (id bigint)");
+    const trace = tracePool(pool);
+    const output = { log() {}, error() {} };
+    const result = await runContactConversationBindingFoundationPreflightCli({
+      environment: { DATABASE_URL: "postgres://test-only-not-used-by-injected-pool" },
+      createPool: async () => trace,
+      logger: output
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      reason: "CONVERSATION_BINDING_SCHEMA_INCOMPATIBLE",
+      binding_state: "UNRESOLVED",
+      migration_required: "UNRESOLVED",
+      transaction: "READ_ONLY_REPEATABLE_READ",
+      rollback: "COMPLETED"
+    });
+    assert.equal(trace.records.some(record => /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|LOCK)\b/i.test(record.sql)), false);
+    assert.equal(trace.ended, true);
+  }, { prefix: "marcel_cbind_preflight_drift" });
 });
 
 test("real loopback PostgreSQL rolls back the whole binding foundation when the postcheck sees injected drift", { timeout: 45_000 }, async () => {

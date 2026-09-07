@@ -87,10 +87,22 @@ function readyDraftReview(overrides = {}) {
   };
 }
 
-function fixtureRepository({ snapshot = readySnapshot(), review = readyDraftReview(), approvals = [], intents = [], deviceBridgeCommands = [] } = {}) {
+function fixtureRepository({
+  snapshot = readySnapshot(),
+  review = readyDraftReview(),
+  openDraftReviews = [{
+    capture_id: CAPTURE_ID,
+    visible_name: "M Tinder Test",
+    draft_status: "DRAFT"
+  }],
+  approvals = [],
+  intents = [],
+  deviceBridgeCommands = []
+} = {}) {
   const state = {
     snapshot: copy(snapshot),
     review: copy(review),
+    openDraftReviews: copy(openDraftReviews),
     approvals: copy(approvals),
     intents: copy(intents),
     deviceBridgeCommands: copy(deviceBridgeCommands),
@@ -105,6 +117,9 @@ function fixtureRepository({ snapshot = readySnapshot(), review = readyDraftRevi
     },
     async findCurrentDraftReviewByCapture(captureId) {
       return captureId === state.snapshot.capture_id ? copy(state.review) : null;
+    },
+    async listOpenDraftReviews() {
+      return copy(state.openDraftReviews);
     },
     async findApprovalForDraftRevision(_transaction, draftId, revision) {
       return copy(state.approvals.find(item => item.draft_id === draftId && Number(item.draft_revision) === Number(revision)) || null);
@@ -395,6 +410,85 @@ test("a missing or stale current draft review fails closed without creating a dr
   assert.equal(repository.state.intents.length, 0);
 });
 
+test("open draft review discovery exposes only a bounded selection handle and no draft content", async () => {
+  const repository = fixtureRepository({
+    openDraftReviews: [{
+      capture_id: CAPTURE_ID,
+      visible_name: "M Tinder Test",
+      draft_status: "DRAFT",
+      original_draft: "must not leave service",
+      contact_id: 7,
+      device_id: DEVICE_ID,
+      runtime_thread_fingerprint: THREAD_A,
+      capture_fingerprint: CAPTURE_HASH_A
+    }]
+  });
+  const { service } = fixtureService({ repository });
+  const reviews = await service.listOpenDraftReviews();
+  assert.deepEqual(reviews, [{
+    captureId: CAPTURE_ID,
+    visibleName: "M Tinder Test",
+    status: "DRAFT"
+  }]);
+  assert.equal(JSON.stringify(reviews).includes("must not leave service"), false);
+  assert.equal(JSON.stringify(reviews).includes(THREAD_A), false);
+  assert.equal(JSON.stringify(reviews).includes(CAPTURE_HASH_A), false);
+  assert.equal(JSON.stringify(reviews).includes(String(DEVICE_ID)), false);
+});
+
+test("open draft review discovery retains a bounded stale selector for an active approval that may only be revoked", async () => {
+  const repository = fixtureRepository({
+    openDraftReviews: [{
+      capture_id: CAPTURE_ID,
+      visible_name: "M Tinder Test",
+      draft_status: "STALE",
+      approval_id: APPROVAL_ID,
+      original_draft: "must not leave service"
+    }]
+  });
+  const { service } = fixtureService({ repository });
+  assert.deepEqual(await service.listOpenDraftReviews(), [{
+    captureId: CAPTURE_ID,
+    visibleName: "M Tinder Test",
+    status: "STALE"
+  }]);
+});
+
+test("open draft review discovery retains a current approved selector only for the existing active approval lifecycle", async () => {
+  const repository = fixtureRepository({
+    openDraftReviews: [{
+      capture_id: CAPTURE_ID,
+      visible_name: "M Tinder Test",
+      draft_status: "APPROVED",
+      approval_id: APPROVAL_ID,
+      approval_state: "ACTIVE",
+      original_draft: "must not leave service"
+    }]
+  });
+  const { service } = fixtureService({ repository });
+  assert.deepEqual(await service.listOpenDraftReviews(), [{
+    captureId: CAPTURE_ID,
+    visibleName: "M Tinder Test",
+    status: "APPROVED"
+  }]);
+});
+
+test("open draft review discovery fails closed for a terminal or malformed selector row", async () => {
+  const repository = fixtureRepository({
+    openDraftReviews: [{
+      capture_id: CAPTURE_ID,
+      visible_name: "M Tinder Test",
+      draft_status: "REJECTED"
+    }]
+  });
+  const { service } = fixtureService({ repository });
+  await assert.rejects(
+    () => service.listOpenDraftReviews(),
+    (error) => error instanceof TinderManualSendError && error.code === "INVALID_OPEN_DRAFT_REVIEW"
+  );
+  assert.equal(repository.state.operations.length, 0);
+});
+
 test("a changed current capture identity revision blocks a fresh approval before any T5 write", async () => {
   const repository = fixtureRepository({
     snapshot: readySnapshot({ current_identity_revision: 5 })
@@ -479,6 +573,16 @@ test("the production T5 snapshot query projects draft and current capture identi
   assert.ok(reviewQuery);
   assert.match(reviewQuery, /ELSE 'STALE'/);
   assert.match(reviewQuery, /draft\.status = 'APPROVED' AND approval\.state = 'ACTIVE'/);
+  await repository.listOpenDraftReviews();
+  const discoveryQuery = queries.find((sql) => /capture\.mapping_status = 'RESOLVED'/.test(sql));
+  assert.ok(discoveryQuery);
+  assert.match(discoveryQuery, /capture\.human_review_status = 'CONFIRMED'/);
+  assert.match(discoveryQuery, /draft\.status = 'DRAFT'/);
+  assert.match(discoveryQuery, /draft\.status = 'APPROVED' AND approval\.state = 'ACTIVE'/);
+  assert.match(discoveryQuery, /draft\.capture_revision = capture\.capture_revision/);
+  assert.match(discoveryQuery, /draft\.identity_revision = capture\.identity_revision/);
+  const discoverySelect = discoveryQuery.slice(0, discoveryQuery.indexOf("FROM"));
+  assert.doesNotMatch(discoverySelect, /original_draft|runtime_thread_fingerprint|capture_fingerprint|contact_id|device_id/);
 });
 
 test("all runtime gate blockers deny reservation before an intent is inserted", async () => {

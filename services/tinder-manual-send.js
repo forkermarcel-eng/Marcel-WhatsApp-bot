@@ -59,6 +59,8 @@ const DRAFT_STATUSES = new Set(["DRAFT", "APPROVED", "REJECTED", "STALE"]);
 const INTENT_STATES = new Set(Object.values(TINDER_SEND_INTENT_STATE));
 const APPROVAL_STATES = new Set(Object.values(TINDER_APPROVAL_STATE));
 const SEND_OUTCOMES = new Set(Object.values(TINDER_SEND_OUTCOME));
+const TINDER_OPEN_DRAFT_REVIEW_LIMIT = 25;
+const OPEN_DRAFT_REVIEW_STATUSES = new Set(["DRAFT", "APPROVED", "STALE"]);
 
 class TinderManualSendError extends Error {
   constructor(message, code = "TINDER_SEND_NOT_ALLOWED", statusCode = 409) {
@@ -397,6 +399,31 @@ function normalizeDraftReview(row, expectedCaptureId) {
   return Object.freeze(review);
 }
 
+/*
+ * This is deliberately only a discovery projection for the existing draft
+ * review screen. It never contains a draft body, contact/device reference,
+ * capture/thread fingerprint, approval/intent handle, or raw capture data.
+ */
+function normalizeOpenDraftReviewCandidate(row) {
+  if (!plainObject(row)) {
+    throw new TinderManualSendError("Die offene Tinder-Draft-Prüfung ist ungültig.", "INVALID_OPEN_DRAFT_REVIEW", 500);
+  }
+  const visibleName = normalizedText(
+    sourceValue(row, "visibleName", "visible_name"),
+    "Sichtbarer Thread-Name",
+    500
+  );
+  const candidate = {
+    captureId: normalizedUuid(sourceValue(row, "captureId", "capture_id"), "Capture-ID", 500),
+    visibleName,
+    status: normalizedState(sourceValue(row, "draftStatus", "draft_status") ?? row.status)
+  };
+  if (candidate.visibleName.length > 240 || !OPEN_DRAFT_REVIEW_STATUSES.has(candidate.status)) {
+    throw new TinderManualSendError("Die offene Tinder-Draft-Prüfung ist ungültig.", "INVALID_OPEN_DRAFT_REVIEW", 500);
+  }
+  return Object.freeze(candidate);
+}
+
 function approvalFromSnapshot(snapshot, { approvalId, actor, approvedAt }) {
   const approvedTextSha256 = sha256Text(snapshot.originalDraft);
   const approval = {
@@ -585,6 +612,7 @@ function requireRepository(repository) {
     "withTransaction",
     "lockDraftSnapshot",
     "findCurrentDraftReviewByCapture",
+    "listOpenDraftReviews",
     "findApprovalForDraftRevision",
     "findActiveApprovalForDraft",
     "insertApproval",
@@ -1043,6 +1071,14 @@ function createTinderManualSendService({
     );
   }
 
+  async function listOpenDraftReviews() {
+    const rows = await repository.listOpenDraftReviews();
+    if (!Array.isArray(rows) || rows.length > TINDER_OPEN_DRAFT_REVIEW_LIMIT) {
+      throw new TinderManualSendError("Die offenen Tinder-Draft-Prüfungen sind ungültig.", "INVALID_OPEN_DRAFT_REVIEWS", 500);
+    }
+    return Object.freeze(rows.map(normalizeOpenDraftReviewCandidate));
+  }
+
   async function reserveApprovedSend({ draftId, actor = "marcel_dashboard" } = {}) {
     const normalizedDraftId = normalizedUuid(draftId, "Draft-ID");
     const normalizedActorValue = normalizedActor(actor);
@@ -1337,6 +1373,7 @@ function createTinderManualSendService({
   return Object.freeze({
     approveDraft,
     getDraftReviewForCapture,
+    listOpenDraftReviews,
     reserveApprovedSend,
     rejectDraft,
     cancelApprovedSend,
@@ -1429,6 +1466,40 @@ function createPgTinderManualSendRepository(pool) {
       draft.draft_id DESC
     LIMIT 1`;
 
+  const openDraftReviewSql = `
+    SELECT
+      draft.capture_id,
+      CASE
+        WHEN draft.capture_revision = capture.capture_revision
+         AND draft.identity_revision = capture.identity_revision
+          THEN draft.status
+        ELSE 'STALE'
+      END AS draft_status,
+      capture.visible_thread_metadata ->> 'visibleName' AS visible_name
+    FROM tinder_reply_drafts draft
+    JOIN tinder_visible_chat_captures capture ON capture.capture_id = draft.capture_id
+    LEFT JOIN LATERAL (
+      SELECT approval_record.state
+      FROM tinder_reply_send_approvals approval_record
+      WHERE approval_record.draft_id = draft.draft_id
+        AND approval_record.draft_revision = draft.draft_revision
+      ORDER BY approval_record.approved_at DESC, approval_record.approval_id DESC
+      LIMIT 1
+    ) approval ON TRUE
+    WHERE capture.capture_safety_status = 'SAFE'
+      AND capture.source_package = 'com.tinder'
+      AND capture.mapping_status = 'RESOLVED'
+      AND capture.human_review_status = 'CONFIRMED'
+      AND capture.resolved_contact_id = draft.contact_id
+      AND (
+        (draft.status = 'DRAFT'
+          AND draft.capture_revision = capture.capture_revision
+          AND draft.identity_revision = capture.identity_revision)
+        OR (draft.status = 'APPROVED' AND approval.state = 'ACTIVE')
+      )
+    ORDER BY draft.created_at DESC, draft.draft_id DESC
+    LIMIT $1`;
+
   return Object.freeze({
     async withTransaction(work) {
       const client = await pool.connect();
@@ -1451,6 +1522,11 @@ function createPgTinderManualSendRepository(pool) {
 
     async findCurrentDraftReviewByCapture(captureId) {
       return singleRow(await pool.query(draftReviewSql, [captureId]));
+    },
+
+    async listOpenDraftReviews() {
+      const result = await pool.query(openDraftReviewSql, [TINDER_OPEN_DRAFT_REVIEW_LIMIT]);
+      return result.rows;
     },
 
     async findApprovalForDraftRevision(client, draftId, draftRevision) {
@@ -1614,6 +1690,7 @@ export {
   FUTURE_T5_DEVICE_CAPABILITIES,
   TINDER_APPROVAL_STATE,
   TINDER_MANUAL_SEND_CAPABILITY,
+  TINDER_OPEN_DRAFT_REVIEW_LIMIT,
   TINDER_T5_COMMAND_DESCRIPTOR_VERSION,
   TINDER_T5_PAYLOAD_VERSION,
   TINDER_SEND_COMMAND_TYPE,

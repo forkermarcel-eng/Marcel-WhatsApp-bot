@@ -60,6 +60,9 @@ const HUMAN_REARM_OPERATION = "human-rearm";
 const DRAFT_OPERATION = "draft";
 const PUBLIC_DRAFT_STATUS = "DRAFT";
 const DRAFT_REVIEW_VIEW = "draft-review";
+const OPEN_DRAFT_REVIEWS_VIEW = "open-draft-reviews";
+const OPEN_DRAFT_REVIEW_LIMIT = 25;
+const PUBLIC_OPEN_DRAFT_REVIEW_STATUSES = new Set(["DRAFT", "APPROVED", "STALE"]);
 const DRAFT_APPROVE_OPERATION = "draft-approve";
 const DRAFT_REJECT_OPERATION = "draft-reject";
 const DRAFT_CANCEL_OPERATION = "draft-cancel";
@@ -228,6 +231,25 @@ function normalizePublicDraftReview(value, captureId) {
   });
 }
 
+function normalizePublicOpenDraftReview(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !validCaptureId(value.captureId) || !validBoundedText(value.visibleName, 240) ||
+      !PUBLIC_OPEN_DRAFT_REVIEW_STATUSES.has(value.status)) {
+    return null;
+  }
+  return Object.freeze({
+    capture_id: value.captureId,
+    visible_name: value.visibleName.trim(),
+    status: value.status
+  });
+}
+
+function normalizePublicOpenDraftReviews(value) {
+  if (!Array.isArray(value) || value.length > OPEN_DRAFT_REVIEW_LIMIT) return null;
+  const reviews = value.map(normalizePublicOpenDraftReview);
+  return reviews.some((review) => review === null) ? null : Object.freeze(reviews);
+}
+
 function normalizePublicMappingResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       !PUBLIC_MAPPING_SUCCESS_STATUSES.has(value.status) ||
@@ -267,6 +289,9 @@ function captureRequestFromQuery(req) {
   if (exactKeys(query, ["captureId", "view"]) && validCaptureId(query.captureId)
       && query.view === DRAFT_REVIEW_VIEW) {
     return Object.freeze({ type: "draft_review", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["view"]) && query.view === OPEN_DRAFT_REVIEWS_VIEW) {
+    return Object.freeze({ type: "open_draft_reviews" });
   }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === DRAFT_OPERATION) {
@@ -773,6 +798,33 @@ async function forwardDraftReview(res, configuration, captureId) {
   return res.status(200).json({ ok: true, review });
 }
 
+async function forwardOpenDraftReviewRead(res, configuration) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/drafts/open-reviews`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 409, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(safeDraftReviewBackendError(data, "Offene Tinder-Draft-Prüfungen konnten nicht geladen werden."));
+    }
+    const reviews = normalizePublicOpenDraftReviews(data?.reviews);
+    if (!reviews) {
+      return res.status(502).json({ ok: false, error: "Ungültige offene Tinder-Draft-Prüfungen vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, reviews });
+  } catch {
+    console.error("Verbindung zu offenen Tinder-Draft-Prüfungen fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
 async function forwardDraftReviewAction(res, configuration, captureId, action) {
   const review = await loadDraftReview(res, configuration, captureId);
   if (!review) return;
@@ -887,6 +939,9 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "human_armed_bindings") {
     return forwardHumanArmedBindingList(res, configuration);
   }
+  if (req.method === "GET" && captureRequest.type === "open_draft_reviews") {
+    return forwardOpenDraftReviewRead(res, configuration);
+  }
   if (req.method === "GET" && captureRequest.type === "draft_review") {
     return forwardDraftReview(res, configuration, captureRequest.captureId);
   }
@@ -925,6 +980,8 @@ export {
   HUMAN_REARM_OPERATION,
   DRAFT_OPERATION,
   DRAFT_REVIEW_VIEW,
+  OPEN_DRAFT_REVIEWS_VIEW,
+  OPEN_DRAFT_REVIEW_LIMIT,
   DRAFT_APPROVE_OPERATION,
   DRAFT_REJECT_OPERATION,
   DRAFT_CANCEL_OPERATION,
@@ -942,6 +999,8 @@ export {
   normalizePublicHumanArmedBindings,
   normalizePublicDraft,
   normalizePublicDraftReview,
+  normalizePublicOpenDraftReview,
+  normalizePublicOpenDraftReviews,
   normalizePublicDraftActionResult,
   normalizePublicMappingResult,
   validCaptureId,

@@ -65,7 +65,7 @@ test("conversation binding mode is enabled only by the bounded eligible server s
 test("conversation binding and the human-armed fallback send only deliberate bounded binding bodies", () => {
   const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
   const branchStart = mappingCode.indexOf("if (isConversationBinding || isHumanArmedBinding) {");
-  const branchEnd = mappingCode.indexOf("     } else {\n       const identifier", branchStart);
+  const branchEnd = mappingCode.indexOf("     } else {", branchStart);
   assert.notEqual(branchStart, -1);
   assert.notEqual(branchEnd, -1);
   const bindingBranch = mappingCode.slice(branchStart, branchEnd);
@@ -109,6 +109,30 @@ test("pending capture discovery displays only bounded mapping context and keeps 
   assert.doesNotMatch(discoveryCode, /Capture \$\{capture\.capture_id\}|Gerät \$\{capture\.device_id\}|Kontakt #/);
   assert.doesNotMatch(discoveryCode, /visible_messages|thread_fingerprint|capture_fingerprint|provenance/);
   assert.doesNotMatch(discoveryCode, /newContactName\.value\s*=/);
+});
+
+test("open T4 draft discovery reuses the existing capture-detail review screen without exposing draft text", () => {
+  const discoveryCode = sourceBetween("function openDraftReviewIsSafeForSelection", "function humanArmedBindingIsSafeForSelection");
+  assert.match(page, /id="openDraftReviewPanel"/);
+  assert.match(page, /id="openDraftReviewList"/);
+  assert.match(discoveryCode, /function loadOpenDraftReviewDiscovery\(\)/);
+  assert.match(discoveryCode, /requestJson\("\/api\/tinder\/captures\?view=open-draft-reviews"\)/);
+  assert.match(discoveryCode, /\["DRAFT", "APPROVED", "STALE"\]\.includes\(review\.status\)/);
+  assert.match(discoveryCode, /open\.href = pendingCaptureMappingUrl\(review\.capture_id\)/);
+  assert.match(discoveryCode, /open\.textContent = "Entwurf pr/);
+  assert.match(page, /void loadOpenDraftReviewDiscovery\(\)/);
+  assert.doesNotMatch(discoveryCode, /original_draft|control_draft_de|threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|contact_id|device_id|operation=draft|draft-approve|draft-reject|draft-cancel|SEND_TINDER_DRAFT|dispatch/i);
+  assert.doesNotMatch(discoveryCode, /textContent\s*=\s*review\.capture_id/);
+});
+
+test("a successful non-armed mapping refreshes the selected safe capture through the existing review component", () => {
+  const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
+  assert.match(mappingCode, /async function loadCaptureDetail\(captureId\)/);
+  assert.match(mappingCode, /renderCaptureDraft\(data\.capture\);/);
+  assert.match(mappingCode, /await loadCaptureDraftReview\(data\.capture\);/);
+  assert.match(mappingCode, /await loadCaptureDetail\(captureId\);/);
+  assert.match(mappingCode, /void loadOpenDraftReviewDiscovery\(\);/);
+  assert.doesNotMatch(mappingCode, /await createCaptureDraft\(/);
 });
 
 test("human-armed fallback remains opt-in, never renders technical identifiers, and requires a separate rearm confirmation", () => {

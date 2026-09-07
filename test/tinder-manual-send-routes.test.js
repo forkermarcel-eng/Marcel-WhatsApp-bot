@@ -6,6 +6,7 @@ import {
   createTinderDashboardApproveHandler,
   createTinderDashboardCancelHandler,
   createTinderDashboardDraftReviewHandler,
+  createTinderDashboardOpenDraftReviewsHandler,
   createTinderDashboardDispatchHandler,
   createTinderDashboardRejectHandler,
   registerTinderManualSendRoutes
@@ -76,6 +77,19 @@ function safeReview(overrides = {}) {
     approvalId: APPROVAL_ID,
     intentId: INTENT_ID,
     payload: { approved_text: "must not reach dashboard" },
+    ...overrides
+  };
+}
+
+function safeOpenDraftReview(overrides = {}) {
+  return {
+    captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0",
+    visibleName: "M Tinder Test",
+    status: "DRAFT",
+    originalDraft: "must not reach dashboard",
+    contactId: 7,
+    deviceId: "e880455d-325c-4f35-9914-823dcb0e0b18",
+    runtimeThreadFingerprint: "private-thread-value",
     ...overrides
   };
 }
@@ -152,6 +166,42 @@ test("T5 draft-review route loads only a capture ID and returns a bounded human-
   assert.equal(JSON.stringify(res.body).includes(INTENT_ID), false);
 });
 
+test("open T4 review selector returns only bounded existing-review handles", async () => {
+  let calls = 0;
+  const handler = createTinderDashboardOpenDraftReviewsHandler({
+    async listOpenDraftReviews() {
+      calls += 1;
+      return [safeOpenDraftReview()];
+    }
+  });
+  const res = responseRecorder();
+  await handler({}, res);
+  assert.equal(calls, 1);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    ok: true,
+    reviews: [{
+      captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0",
+      visibleName: "M Tinder Test",
+      status: "DRAFT"
+    }]
+  });
+  assert.equal(JSON.stringify(res.body).includes("must not reach dashboard"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-thread-value"), false);
+  assert.equal(JSON.stringify(res.body).includes("contactId"), false);
+  assert.equal(JSON.stringify(res.body).includes("deviceId"), false);
+});
+
+test("open T4 review selector fails closed for an ineligible terminal draft state", async () => {
+  const handler = createTinderDashboardOpenDraftReviewsHandler({
+    async listOpenDraftReviews() { return [safeOpenDraftReview({ status: "REJECTED" })]; }
+  });
+  const res = responseRecorder();
+  await handler({}, res);
+  assert.equal(res.statusCode, 500);
+  assert.equal(res.body.code, "INVALID_OPEN_DRAFT_REVIEW");
+});
+
 test("T5 routes reject browser-owned text, hashes, contacts, device IDs, payloads, or generic actions before service calls", async () => {
   let calls = 0;
   const handler = createTinderDashboardApproveHandler({
@@ -208,6 +258,7 @@ test("T5 route registration puts dashboard authentication and existing readiness
   const routes = [];
   const service = {
     async getDraftReviewForCapture() { throw new Error("must not run"); },
+    async listOpenDraftReviews() { throw new Error("must not run"); },
     async approveDraft() { throw new Error("must not run"); },
     async reserveApprovedSend() { throw new Error("must not run"); },
     async rejectDraft() { throw new Error("must not run"); },
@@ -224,6 +275,7 @@ test("T5 route registration puts dashboard authentication and existing readiness
     service
   });
   assert.deepEqual(routes.map(route => `${route.method} ${route.path}`), [
+    "GET /dashboard-api/tinder/drafts/open-reviews",
     "GET /dashboard-api/tinder/captures/:captureId/draft-review",
     "POST /dashboard-api/tinder/drafts/:draftId/approval",
     "POST /dashboard-api/tinder/drafts/:draftId/dispatch",
@@ -231,7 +283,7 @@ test("T5 route registration puts dashboard authentication and existing readiness
     "POST /dashboard-api/tinder/drafts/:draftId/cancel"
   ]);
   const unauthorized = responseRecorder();
-  await routes[0].handler({ params: { captureId: "6c7308cf-5d40-423d-913b-c4424f0e4ee0" } }, unauthorized);
+  await routes[0].handler({}, unauthorized);
   assert.equal(unauthorized.statusCode, 401);
 
   const blockedRoutes = [];

@@ -43,6 +43,20 @@ function safeDraftReview(overrides = {}) {
   };
 }
 
+function safeOpenDraftReview(overrides = {}) {
+  return {
+    captureId: CAPTURE_ID,
+    visibleName: "M Tinder Test",
+    status: "DRAFT",
+    originalDraft: "private draft must not reach selector",
+    contactId: 7,
+    deviceId: DEVICE_ID,
+    runtimeThreadFingerprint: "private-thread-fingerprint",
+    captureFingerprint: "private-capture-fingerprint",
+    ...overrides
+  };
+}
+
 function validCookie() {
   const token = "test-session";
   const signature = crypto.createHmac("sha256", PASSWORD).update(token).digest("hex");
@@ -445,6 +459,44 @@ test("pending capture GET rejects a non-pending backend record before it reaches
   await handler(request({ query: { view: "pending" } }), res);
   assert.equal(res.statusCode, 502);
   assert.equal(res.body.error, "Ungültige Capture-Antwort vom Backend.");
+}));
+
+test("open T4 review selector forwards a bounded reader and strips draft content and technical fields", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({ ok: true, reviews: [safeOpenDraftReview()] });
+  };
+  const res = responseRecorder();
+  await handler(request({ query: { view: "open-draft-reviews" } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, "https://shared-backend.example/dashboard-api/tinder/drafts/open-reviews");
+  assert.equal(call.options.method, "GET");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.deepEqual(res.body, {
+    ok: true,
+    reviews: [{
+      capture_id: CAPTURE_ID,
+      visible_name: "M Tinder Test",
+      status: "DRAFT"
+    }]
+  });
+  assert.equal(JSON.stringify(res.body).includes("private draft must not reach selector"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-thread-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes("private-capture-fingerprint"), false);
+  assert.equal(JSON.stringify(res.body).includes(String(DEVICE_ID)), false);
+  assert.equal(JSON.stringify(res.body).includes("contact_id"), false);
+}));
+
+test("open T4 review selector rejects an ineligible or malformed backend review before browser display", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    reviews: [safeOpenDraftReview({ status: "REJECTED" })]
+  });
+  const res = responseRecorder();
+  await handler(request({ query: { view: "open-draft-reviews" } }), res);
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.error, "Ungültige offene Tinder-Draft-Prüfungen vom Backend.");
 }));
 
 test("capture mapping POST forwards the exact human-confirmation contract to the shared backend", async () => withEnvironment(async () => {

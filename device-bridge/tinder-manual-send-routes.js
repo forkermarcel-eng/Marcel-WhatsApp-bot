@@ -17,6 +17,7 @@ const TINDER_SEND_FOUNDATION_ERROR_CODES = new Set([
   "42703", // undefined_column
   "23502"  // foundation row unavailable
 ]);
+const TINDER_OPEN_DRAFT_REVIEW_LIMIT = 25;
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -167,6 +168,35 @@ function boundedDraftReview(value, expectedCaptureId) {
   });
 }
 
+/*
+ * This is a selector for the existing T4/T5 review screen, not a second
+ * review representation. The capture UUID is only an opaque browser handle
+ * for the already protected capture-detail reader.
+ */
+function boundedOpenDraftReviews(value) {
+  if (!Array.isArray(value) || value.length > TINDER_OPEN_DRAFT_REVIEW_LIMIT) {
+    const error = new Error("Die offenen Tinder-Draft-Prüfungen sind ungültig.");
+    error.code = "INVALID_OPEN_DRAFT_REVIEWS";
+    throw error;
+  }
+  return Object.freeze(value.map((entry) => {
+    if (!plainObject(entry)) {
+      const error = new Error("Die offene Tinder-Draft-Prüfung ist ungültig.");
+      error.code = "INVALID_OPEN_DRAFT_REVIEW";
+      throw error;
+    }
+    const captureId = normalizeCaptureId(entry.captureId ?? entry.capture_id);
+    const visibleName = String(entry.visibleName ?? entry.visible_name ?? "").trim();
+    const status = String(entry.status ?? entry.draftStatus ?? entry.draft_status ?? "").trim().toUpperCase();
+    if (!visibleName || visibleName.length > 240 || !["DRAFT", "APPROVED", "STALE"].includes(status)) {
+      const error = new Error("Die offene Tinder-Draft-Prüfung ist ungültig.");
+      error.code = "INVALID_OPEN_DRAFT_REVIEW";
+      throw error;
+    }
+    return Object.freeze({ captureId, visibleName, status });
+  }));
+}
+
 function createTinderDashboardDraftReviewHandler(service) {
   if (!service || typeof service.getDraftReviewForCapture !== "function") {
     throw new TypeError("service.getDraftReviewForCapture must be a function");
@@ -184,6 +214,23 @@ function createTinderDashboardDraftReviewHandler(service) {
       const status = safeStatusCode(error);
       if (status === 500) console.error("Tinder dashboard draft review failed.");
       return res.status(status).json({ ok: false, code: error?.code || "TINDER_DRAFT_REVIEW_FAILED", error: publicErrorMessage(error, status) });
+    }
+  };
+}
+
+function createTinderDashboardOpenDraftReviewsHandler(service) {
+  if (!service || typeof service.listOpenDraftReviews !== "function") {
+    throw new TypeError("service.listOpenDraftReviews must be a function");
+  }
+  return async function tinderDashboardOpenDraftReviewsHandler(_req, res) {
+    try {
+      const reviews = boundedOpenDraftReviews(await service.listOpenDraftReviews());
+      return res.status(200).json({ ok: true, reviews });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) return foundationNotReadyResponse(res);
+      const status = safeStatusCode(error);
+      if (status === 500) console.error("Tinder dashboard open draft reviews failed.");
+      return res.status(status).json({ ok: false, code: error?.code || "TINDER_OPEN_DRAFT_REVIEWS_FAILED", error: publicErrorMessage(error, status) });
     }
   };
 }
@@ -288,6 +335,7 @@ function registerTinderManualSendRoutes({
     if (!requireDeviceBridgeReady(res)) return;
     return handler(req, res);
   };
+  app.get("/dashboard-api/tinder/drafts/open-reviews", dashboard(createTinderDashboardOpenDraftReviewsHandler(service)));
   app.get("/dashboard-api/tinder/captures/:captureId/draft-review", dashboard(createTinderDashboardDraftReviewHandler(service)));
   app.post("/dashboard-api/tinder/drafts/:draftId/approval", dashboard(createTinderDashboardApproveHandler(service)));
   app.post("/dashboard-api/tinder/drafts/:draftId/dispatch", dashboard(createTinderDashboardDispatchHandler(service)));
@@ -299,10 +347,12 @@ export {
   TINDER_SEND_FOUNDATION_ERROR_CODES,
   assertExactAction,
   boundedDraftReview,
+  boundedOpenDraftReviews,
   boundedResult,
   createTinderDashboardApproveHandler,
   createTinderDashboardCancelHandler,
   createTinderDashboardDraftReviewHandler,
+  createTinderDashboardOpenDraftReviewsHandler,
   createTinderDashboardDispatchHandler,
   createTinderDashboardRejectHandler,
   normalizeCaptureId,

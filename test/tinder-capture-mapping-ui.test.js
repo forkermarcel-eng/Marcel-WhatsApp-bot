@@ -62,9 +62,9 @@ test("conversation binding mode is enabled only by the bounded eligible server s
   assert.match(mappingCode, /captureMappingStatus\(data\.capture\) === "NEEDS_HUMAN_MAPPING" && !conversationBindingBlocksMapping\(data\.capture\)/);
 });
 
-test("conversation binding sends only the deliberate bounded binding body", () => {
+test("conversation binding and the human-armed fallback send only deliberate bounded binding bodies", () => {
   const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
-  const branchStart = mappingCode.indexOf("if (isConversationBinding) {");
+  const branchStart = mappingCode.indexOf("if (isConversationBinding || isHumanArmedBinding) {");
   const branchEnd = mappingCode.indexOf("     } else {\n       const identifier", branchStart);
   assert.notEqual(branchStart, -1);
   assert.notEqual(branchEnd, -1);
@@ -73,7 +73,10 @@ test("conversation binding sends only the deliberate bounded binding body", () =
   assert.match(bindingBranch, /body = \{ action: "BIND_CREATE", new_contact_name: newContactName, confirmed: true \}/);
   assert.match(bindingBranch, /!confirmed/);
   assert.doesNotMatch(bindingBranch, /tinder_identifier|visible_name|threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|threadBindingEvidence|uniqueId/i);
-  assert.match(mappingCode, /const expectedStatuses = isConversationBinding \? \["CONFIRMED"\] : \["RESOLVED", "NEW_CONTACT_CONFIRMED"\]/);
+  assert.match(mappingCode, /const isHumanArmedBinding = humanArmedBindingMode && humanArmedBindingAvailable\(mappingCapture\)/);
+  assert.match(mappingCode, /operation=human-arm/);
+  assert.match(mappingCode, /\["ARMED"\]/);
+  assert.doesNotMatch(mappingCode, /human-arm[^\n]*(?:tinder_identifier|visible_name|threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|uniqueId)/i);
 });
 
 test("legacy profile mapping remains separate from the fail-closed conversation binding path", () => {
@@ -102,9 +105,29 @@ test("pending capture discovery displays only bounded mapping context and keeps 
   assert.match(discoveryCode, /mapping_status === "NEEDS_HUMAN_MAPPING"/);
   assert.match(discoveryCode, /human_review_status === "PENDING"/);
   assert.match(discoveryCode, /Keine sicheren Captures warten derzeit auf eine menschliche Zuordnung/);
-  assert.match(discoveryCode, /Capture \$\{capture\.capture_id\}/);
+  assert.match(discoveryCode, /Sicheres Capture · wartet auf eine bewusste menschliche Entscheidung/);
+  assert.doesNotMatch(discoveryCode, /Capture \$\{capture\.capture_id\}|Gerät \$\{capture\.device_id\}|Kontakt #/);
   assert.doesNotMatch(discoveryCode, /visible_messages|thread_fingerprint|capture_fingerprint|provenance/);
   assert.doesNotMatch(discoveryCode, /newContactName\.value\s*=/);
+});
+
+test("human-armed fallback remains opt-in, never renders technical identifiers, and requires a separate rearm confirmation", () => {
+  const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
+  const humanListCode = sourceBetween("function humanArmedBindingIsSafeForSelection", "function captureMappingStatus");
+  assert.match(page, /id="captureHumanArmedOption" hidden/);
+  assert.match(page, /id="useHumanArmedBinding"/);
+  assert.match(mappingCode, /function humanArmedBindingAvailable\(capture\).*LEGACY_CAPTURE/s);
+  assert.match(mappingCode, /function enableHumanArmedBindingMode\(\)/);
+  assert.match(mappingCode, /captureMappingConfirmed\.checked = false/);
+  assert.match(mappingCode, /elements\.captureTinderIdentifierField\.hidden = true/);
+  assert.match(mappingCode, /elements\.captureVisibleNameContext\.hidden = true/);
+  assert.match(humanListCode, /checkbox\.checked !== true/);
+  assert.match(humanListCode, /body: JSON\.stringify\(\{ confirmed: true \}\)/);
+  assert.match(humanListCode, /operation=human-rearm/);
+  assert.doesNotMatch(humanListCode, /textContent\s*=\s*binding\.binding_id|dataset\.[A-Za-z_]*binding|binding\.binding_id.*textContent/);
+  assert.doesNotMatch(page, /id="captureMappingId"|id="captureDeviceId"|id="captureRevision"/);
+  assert.doesNotMatch(mappingCode, /capture\.visible_name.*newContactName\.value|newContactName\.value.*capture\.visible_name/);
+  assert.doesNotMatch(mappingCode, /threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|uniqueId/);
 });
 
 test("channel-native T3 contacts remain visible in the existing contacts list while persona tests stay hidden", () => {

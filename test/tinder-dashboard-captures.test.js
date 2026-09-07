@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertConversationBindingBody,
+  assertHumanArmedBindingBody,
+  assertHumanArmedRearmBody,
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
   createTinderDashboardConversationBindingHandler,
+  createTinderDashboardHumanArmedBindingHandler,
+  createTinderDashboardHumanArmedBindingListHandler,
+  createTinderDashboardHumanArmedRearmHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
   registerTinderCaptureRoutes
@@ -241,6 +246,15 @@ test("pending route remains protected and is registered before the capture-id ro
     method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/conversation-binding"
   );
   assert.ok(bindingRoute);
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/human-armed-conversation-bindings"
+  ));
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/human-armed-binding"
+  ));
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm"
+  ));
 });
 
 test("conversation-binding route retains dashboard authorization before any service call", async () => {
@@ -265,6 +279,42 @@ test("conversation-binding route retains dashboard authorization before any serv
   const res = responseRecorder();
   await route.handler({ params: { captureId: CAPTURE_ID } }, res);
   assert.equal(res.statusCode, 401);
+  assert.equal(deviceBridgeReadinessCalled, false);
+});
+
+test("human-armed routes retain dashboard authorization before any service or readiness call", async () => {
+  let deviceBridgeReadinessCalled = false;
+  const registrations = [];
+  registerTinderCaptureRoutes({
+    app: {
+      get(path, handler) { registrations.push({ method: "GET", path, handler }); },
+      post(path, handler) { registrations.push({ method: "POST", path, handler }); }
+    },
+    pool: { connect() {}, query() {} },
+    dashboardApiReady() { return true; },
+    dashboardApiAuthorized() { return false; },
+    requireDeviceBridgeReady() {
+      deviceBridgeReadinessCalled = true;
+      return true;
+    }
+  });
+  const initial = registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/human-armed-binding"
+  );
+  const rearm = registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm"
+  );
+  const list = registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/human-armed-conversation-bindings"
+  );
+  for (const route of [initial, rearm, list]) {
+    const res = responseRecorder();
+    await route.handler({
+      params: { captureId: CAPTURE_ID, bindingId: "832d0663-8bb1-4947-ae8a-14a6d9de8924" },
+      body: { confirmed: true }
+    }, res);
+    assert.equal(res.statusCode, 401);
+  }
   assert.equal(deviceBridgeReadinessCalled, false);
 });
 
@@ -331,6 +381,48 @@ test("conversation-binding request permits only a minimal deliberate human confi
     { action: "BIND_EXISTING", contact_id: 7, new_contact_name: "M Tinder Test", confirmed: true }
   ]) {
     assert.throws(() => assertConversationBindingBody(body), /Conversation|Bestätigung/i);
+  }
+});
+
+test("human-armed binding accepts only a deliberate minimal fallback contract", () => {
+  assert.deepEqual(assertHumanArmedBindingBody({
+    action: "BIND_EXISTING",
+    contact_id: 7,
+    confirmed: true
+  }), {
+    action: "BIND_EXISTING",
+    contactId: 7,
+    confirmed: true
+  });
+  assert.deepEqual(assertHumanArmedBindingBody({
+    action: "BIND_CREATE",
+    new_contact_name: "M Tinder Test",
+    confirmed: true
+  }), {
+    action: "BIND_CREATE",
+    newContactName: "M Tinder Test",
+    confirmed: true
+  });
+  assert.deepEqual(assertHumanArmedRearmBody({ confirmed: true }), { confirmed: true });
+
+  for (const body of [
+    { action: "BIND_EXISTING", contact_id: 7, confirmed: false },
+    { action: "BIND_EXISTING", contact_id: 7, confirmed: true, tinder_identifier: "must-not-pass" },
+    { action: "BIND_EXISTING", contact_id: 7, confirmed: true, visible_name: "M" },
+    { action: "BIND_CREATE", new_contact_name: "M Tinder Test", confirmed: true, thread_fingerprint: "a".repeat(64) },
+    { action: "BIND_CREATE", new_contact_name: "M Tinder Test", confirmed: true, capture_id: CAPTURE_ID },
+    { action: "BIND_CREATE", new_contact_name: "M Tinder Test", confirmed: true, permit_id: DEVICE_ID },
+    { action: "BIND_CREATE", new_contact_name: "", confirmed: true },
+    { action: "BIND_EXISTING", contact_id: 0, confirmed: true }
+  ]) {
+    assert.throws(() => assertHumanArmedBindingBody(body));
+  }
+  for (const body of [
+    {},
+    { confirmed: false },
+    { confirmed: true, binding_id: DEVICE_ID }
+  ]) {
+    assert.throws(() => assertHumanArmedRearmBody(body));
   }
 });
 
@@ -445,4 +537,97 @@ test("conversation-binding route exposes a bounded conflict without overwrite de
   assert.deepEqual(res.body, { ok: false, conflict: true, result: { status: "CONFLICT" } });
   assert.equal(JSON.stringify(res.body).includes("preservedContactId"), false);
   assert.equal(JSON.stringify(res.body).includes("d".repeat(64)), false);
+});
+
+test("human-armed binding route supplies only server-owned authority and redacts all technical handles", async () => {
+  let received = null;
+  const handler = createTinderDashboardHumanArmedBindingHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return {
+        async armInitialCapture(input) {
+          received = input;
+          return {
+            status: "ARMED",
+            bindingId: "832d0663-8bb1-4947-ae8a-14a6d9de8924",
+            contactId: 7,
+            commandId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5",
+            referenceHash: "a".repeat(64)
+          };
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({
+    params: { captureId: CAPTURE_ID },
+    body: { action: "BIND_EXISTING", contact_id: 7, confirmed: true }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(received, {
+    captureId: CAPTURE_ID,
+    action: "BIND_EXISTING",
+    contactId: 7,
+    confirmed: true,
+    actor: "marcel_dashboard"
+  });
+  assert.deepEqual(res.body, { ok: true, result: { status: "ARMED" } });
+  assert.equal(JSON.stringify(res.body).includes("bindingId"), false);
+  assert.equal(JSON.stringify(res.body).includes("contactId"), false);
+  assert.equal(JSON.stringify(res.body).includes("commandId"), false);
+  assert.equal(JSON.stringify(res.body).includes("a".repeat(64)), false);
+});
+
+test("human-armed rearm requires the opaque route handle and an explicit confirmation", async () => {
+  const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
+  let received = null;
+  const handler = createTinderDashboardHumanArmedRearmHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return {
+        async rearmExistingBinding(input) {
+          received = input;
+          return { status: "ARMED", commandId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5" };
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({ params: { bindingId }, body: { confirmed: true } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(received, { bindingId, confirmed: true, actor: "marcel_dashboard" });
+  assert.deepEqual(res.body, { ok: true, result: { status: "ARMED" } });
+  assert.equal(JSON.stringify(res.body).includes("commandId"), false);
+});
+
+test("human-armed binding list stays bounded and exposes only the opaque rearm handle plus contact label", async () => {
+  const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
+  const handler = createTinderDashboardHumanArmedBindingListHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return {
+        async listHumanArmedBindingsForDashboard() {
+          return [{
+            bindingId,
+            contactName: "M Tinder Test",
+            state: "CONFIRMED",
+            contactId: 7,
+            referenceHash: "b".repeat(64),
+            commandId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5"
+          }];
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({}, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    ok: true,
+    bindings: [{ binding_id: bindingId, contact_name: "M Tinder Test" }]
+  });
+  assert.equal(JSON.stringify(res.body).includes("contactId"), false);
+  assert.equal(JSON.stringify(res.body).includes("referenceHash"), false);
+  assert.equal(JSON.stringify(res.body).includes("commandId"), false);
 });

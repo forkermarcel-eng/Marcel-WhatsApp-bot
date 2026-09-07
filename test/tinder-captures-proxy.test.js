@@ -121,6 +121,29 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
     await handler(request({ method: "POST", body }), invalidBinding);
     assert.equal(invalidBinding.statusCode, 400);
   }
+
+  for (const { query, body } of [
+    {
+      query: { captureId: CAPTURE_ID, operation: "human-arm" },
+      body: { action: "BIND_EXISTING", contact_id: 7, confirmed: true, thread_fingerprint: "a".repeat(64) }
+    },
+    {
+      query: { captureId: CAPTURE_ID, operation: "human-arm" },
+      body: { action: "BIND_CREATE", new_contact_name: "", confirmed: true }
+    },
+    {
+      query: { bindingId: DEVICE_ID, operation: "human-rearm" },
+      body: { confirmed: true, command_id: CAPTURE_ID }
+    },
+    {
+      query: { captureId: CAPTURE_ID, operation: "unknown" },
+      body: { action: "BIND_EXISTING", contact_id: 7, confirmed: true }
+    }
+  ]) {
+    const invalidHumanArm = responseRecorder();
+    await handler(request({ method: "POST", query, body }), invalidHumanArm);
+    assert.equal(invalidHumanArm.statusCode, 400);
+  }
 }));
 
 test("capture GET uses only the shared backend route and server-only authorization", async () => withEnvironment(async () => {
@@ -288,6 +311,100 @@ test("conversation-binding POST forwards only the exact minimal binding contract
   assert.equal(JSON.stringify(res.body).includes("referenceHash"), false);
   assert.equal(JSON.stringify(res.body).includes("c".repeat(64)), false);
   assert.equal(JSON.stringify(res.body).includes("backend-regression-field"), false);
+}));
+
+test("human-armed binding POST forwards only the exact explicit fallback contract and redacts all handles", async () => withEnvironment(async () => {
+  let call;
+  const body = { action: "BIND_CREATE", new_contact_name: "M Tinder Test", confirmed: true };
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      result: {
+        status: "ARMED",
+        bindingId: "832d0663-8bb1-4947-ae8a-14a6d9de8924",
+        contactId: 7,
+        commandId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5",
+        referenceHash: "c".repeat(64)
+      }
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { captureId: CAPTURE_ID, operation: "human-arm" },
+    body
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, `https://shared-backend.example/dashboard-api/tinder/captures/${CAPTURE_ID}/human-armed-binding`);
+  assert.equal(call.options.method, "POST");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.deepEqual(JSON.parse(call.options.body), body);
+  assert.deepEqual(res.body, { ok: true, result: { status: "ARMED" } });
+  assert.equal(JSON.stringify(res.body).includes("bindingId"), false);
+  assert.equal(JSON.stringify(res.body).includes("contactId"), false);
+  assert.equal(JSON.stringify(res.body).includes("commandId"), false);
+  assert.equal(JSON.stringify(res.body).includes("c".repeat(64)), false);
+}));
+
+test("human-armed rearm POST uses only an opaque JS handle and explicit confirmation", async () => withEnvironment(async () => {
+  const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      result: {
+        status: "ARMED",
+        commandId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5"
+      }
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId, operation: "human-rearm" },
+    body: { confirmed: true }
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, `https://shared-backend.example/dashboard-api/tinder/human-armed-conversation-bindings/${bindingId}/rearm`);
+  assert.deepEqual(JSON.parse(call.options.body), { confirmed: true });
+  assert.deepEqual(res.body, { ok: true, result: { status: "ARMED" } });
+  assert.equal(JSON.stringify(res.body).includes("commandId"), false);
+}));
+
+test("human-armed binding GET keeps the UUID as a bounded browser handle and strips raw server fields", async () => withEnvironment(async () => {
+  const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      bindings: [{
+        binding_id: bindingId,
+        contact_name: "M Tinder Test",
+        contact_id: 7,
+        device_id: DEVICE_ID,
+        reference_hash: "d".repeat(64),
+        permit_id: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5"
+      }]
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({ query: { view: "human-armed-bindings" } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url, "https://shared-backend.example/dashboard-api/tinder/human-armed-conversation-bindings");
+  assert.equal(call.options.method, "GET");
+  assert.deepEqual(res.body, {
+    ok: true,
+    bindings: [{ binding_id: bindingId, contact_name: "M Tinder Test" }]
+  });
+  assert.equal(JSON.stringify(res.body).includes("contact_id"), false);
+  assert.equal(JSON.stringify(res.body).includes("device_id"), false);
+  assert.equal(JSON.stringify(res.body).includes("reference_hash"), false);
+  assert.equal(JSON.stringify(res.body).includes("permit_id"), false);
 }));
 
 test("capture proxy preserves a controlled conflict and never leaks backend details", async () => withEnvironment(async () => {

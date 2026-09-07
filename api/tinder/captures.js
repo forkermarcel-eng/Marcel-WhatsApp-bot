@@ -14,6 +14,13 @@ const CONVERSATION_BINDING_FIELDS = new Set([
   "new_contact_name",
   "confirmed"
 ]);
+const HUMAN_ARMED_BINDING_FIELDS = new Set([
+  "action",
+  "contact_id",
+  "new_contact_name",
+  "confirmed"
+]);
+const HUMAN_ARMED_REARM_FIELDS = new Set(["confirmed"]);
 const PUBLIC_CAPTURE_MAPPING_STATUSES = new Set(["NEEDS_HUMAN_MAPPING", "RESOLVED", "CONFLICT"]);
 const PUBLIC_CAPTURE_REVIEW_STATUSES = new Set(["PENDING", "CONFIRMED", "REJECTED"]);
 const PUBLIC_MAPPING_SUCCESS_STATUSES = new Set(["RESOLVED", "NEW_CONTACT_CONFIRMED"]);
@@ -35,8 +42,21 @@ const PUBLIC_CONVERSATION_BINDING_ERROR_STATUSES = new Set([
   "CONFLICT",
   "UNSAFE"
 ]);
+const PUBLIC_HUMAN_ARMED_BINDING_SUCCESS_STATUSES = new Set(["ARMED"]);
+const PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES = new Set([
+  "UNSAFE_CAPTURE",
+  "PENDING_CAPTURE_REQUIRED",
+  "DEVICE_NOT_READY",
+  "BINDING_NOT_READY",
+  "PERMIT_NOT_AVAILABLE",
+  "CONFLICT"
+]);
 const PENDING_CAPTURE_VIEW = "pending";
 const PENDING_CAPTURE_LIMIT = 25;
+const HUMAN_ARMED_BINDINGS_VIEW = "human-armed-bindings";
+const HUMAN_ARMED_BINDING_LIMIT = 25;
+const HUMAN_ARM_OPERATION = "human-arm";
+const HUMAN_REARM_OPERATION = "human-rearm";
 
 function getCookie(req, name) {
   const cookies = String(req.headers.cookie || "").split(";").map((cookie) => cookie.trim());
@@ -160,11 +180,22 @@ function exactKeys(value, keys) {
 
 function captureRequestFromQuery(req) {
   const query = req.query || {};
+  if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
+      && query.operation === HUMAN_ARM_OPERATION) {
+    return Object.freeze({ type: "human_arm", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["bindingId", "operation"]) && validCaptureId(query.bindingId)
+      && query.operation === HUMAN_REARM_OPERATION) {
+    return Object.freeze({ type: "human_rearm", bindingId: query.bindingId });
+  }
   if (exactKeys(query, ["captureId"]) && validCaptureId(query.captureId)) {
     return Object.freeze({ type: "capture", captureId: query.captureId });
   }
   if (exactKeys(query, ["view"]) && query.view === PENDING_CAPTURE_VIEW) {
     return Object.freeze({ type: "pending" });
+  }
+  if (exactKeys(query, ["view"]) && query.view === HUMAN_ARMED_BINDINGS_VIEW) {
+    return Object.freeze({ type: "human_armed_bindings" });
   }
   return null;
 }
@@ -201,6 +232,31 @@ function validConversationBindingBody(body) {
   return false;
 }
 
+function validHumanArmedBindingBody(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some((field) => !HUMAN_ARMED_BINDING_FIELDS.has(field)) ||
+      body.confirmed !== true) {
+    return false;
+  }
+  const action = String(body.action || "").trim().toUpperCase();
+  if (action === "BIND_EXISTING") {
+    return exactKeys(body, ["action", "contact_id", "confirmed"])
+      && validPositiveInteger(body.contact_id);
+  }
+  if (action === "BIND_CREATE") {
+    const name = typeof body.new_contact_name === "string"
+      ? body.new_contact_name.trim().replace(/\s+/g, " ")
+      : "";
+    return exactKeys(body, ["action", "new_contact_name", "confirmed"])
+      && name.length >= 1 && name.length <= 160;
+  }
+  return false;
+}
+
+function validHumanArmedRearmBody(body) {
+  return exactKeys(body, HUMAN_ARMED_REARM_FIELDS) && body.confirmed === true;
+}
+
 function normalizePublicConversationBindingResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       !PUBLIC_CONVERSATION_BINDING_SUCCESS_STATUSES.has(value.status) ||
@@ -220,6 +276,39 @@ function normalizePublicConversationBindingErrorResult(value) {
     return null;
   }
   return Object.freeze({ status: value.status });
+}
+
+function normalizePublicHumanArmedBindingResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !PUBLIC_HUMAN_ARMED_BINDING_SUCCESS_STATUSES.has(value.status)) {
+    return null;
+  }
+  // Never forward binding/contact/permit/command/reference identifiers.
+  return Object.freeze({ status: value.status });
+}
+
+function normalizePublicHumanArmedBindingErrorResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES.has(value.status)) {
+    return null;
+  }
+  return Object.freeze({ status: value.status });
+}
+
+function normalizePublicHumanArmedBindings(value) {
+  if (!Array.isArray(value) || value.length > HUMAN_ARMED_BINDING_LIMIT) return null;
+  const bindings = value.map((binding) => {
+    if (!binding || typeof binding !== "object" || Array.isArray(binding) ||
+        !validCaptureId(binding.binding_id) || typeof binding.contact_name !== "string") {
+      return null;
+    }
+    const contactName = binding.contact_name.trim().replace(/\s+/g, " ");
+    if (!contactName || contactName.length > 160) return null;
+    // binding_id is an opaque JavaScript-only handle for the separate rearm
+    // operation. It is intentionally not rendered or put in a URL.
+    return Object.freeze({ binding_id: binding.binding_id, contact_name: contactName });
+  });
+  return bindings.some((binding) => !binding) ? null : Object.freeze(bindings);
 }
 
 function backendHeaders(configuration, withBody = false) {
@@ -357,6 +446,16 @@ function safeConversationBindingBackendError(data, fallback) {
   };
 }
 
+function safeHumanArmedBindingBackendError(data, fallback) {
+  const result = normalizePublicHumanArmedBindingErrorResult(data?.result);
+  return {
+    ok: false,
+    ...(data?.conflict === true && result ? { conflict: true } : {}),
+    ...(result ? { result } : {}),
+    error: fallback
+  };
+}
+
 async function forwardConversationBinding(req, res, configuration, captureId) {
   try {
     const response = await fetch(
@@ -389,6 +488,101 @@ async function forwardConversationBinding(req, res, configuration, captureId) {
   }
 }
 
+async function forwardHumanArmedBinding(req, res, configuration, captureId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/${encodeURIComponent(captureId)}/human-armed-binding`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        body: JSON.stringify(req.body),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 404, 409, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(
+        safeHumanArmedBindingBackendError(data, "Human-bestätigte Conversation-Bindung konnte nicht vorbereitet werden.")
+      );
+    }
+    const result = normalizePublicHumanArmedBindingResult(data?.result);
+    if (!result) {
+      return res.status(502).json({ ok: false, error: "Ungültige Human-Binding-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, result });
+  } catch {
+    console.error("Verbindung zum Tinder-Human-Binding-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardHumanArmedRearm(req, res, configuration, bindingId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/human-armed-conversation-bindings/${encodeURIComponent(bindingId)}/rearm`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        body: JSON.stringify(req.body),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 404, 409, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json(
+        safeHumanArmedBindingBackendError(data, "Human-bestätigte Conversation konnte nicht erneut freigegeben werden.")
+      );
+    }
+    const result = normalizePublicHumanArmedBindingResult(data?.result);
+    if (!result) {
+      return res.status(502).json({ ok: false, error: "Ungültige Human-Rearm-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, result });
+  } catch {
+    console.error("Verbindung zum Tinder-Human-Rearm-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardHumanArmedBindingList(res, configuration) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/human-armed-conversation-bindings`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) {
+      if (response.status === 401) {
+        return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+      }
+      const status = [400, 409, 503].includes(response.status) ? response.status : 502;
+      return res.status(status).json({ ok: false, error: "Menschlich gebundene Tinder-Conversations konnten nicht geladen werden." });
+    }
+    const bindings = normalizePublicHumanArmedBindings(data?.bindings);
+    if (!bindings) {
+      return res.status(502).json({ ok: false, error: "Ungültige Binding-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, bindings });
+  } catch {
+    console.error("Verbindung zum Tinder-Human-Binding-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
 export default async function handler(req, res) {
   if (!["GET", "POST"].includes(req.method)) {
     res.setHeader("Allow", "GET, POST");
@@ -399,16 +593,19 @@ export default async function handler(req, res) {
   }
 
   const captureRequest = captureRequestFromQuery(req);
-  if (!captureRequest || (req.method === "POST" && captureRequest.type !== "capture")) {
+  if (!captureRequest || (req.method === "POST" && !["capture", "human_arm", "human_rearm"].includes(captureRequest.type))) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
-  const requestKind = req.method !== "POST"
-    ? null
-    : validMappingBody(req.body)
-      ? "profile_mapping"
-      : validConversationBindingBody(req.body)
-        ? "conversation_binding"
-        : null;
+  const requestKind = req.method !== "POST" ? null
+    : captureRequest.type === "human_arm" && validHumanArmedBindingBody(req.body)
+      ? "human_arm"
+      : captureRequest.type === "human_rearm" && validHumanArmedRearmBody(req.body)
+        ? "human_rearm"
+        : captureRequest.type === "capture" && validMappingBody(req.body)
+          ? "profile_mapping"
+          : captureRequest.type === "capture" && validConversationBindingBody(req.body)
+            ? "conversation_binding"
+            : null;
   if (req.method === "POST" && !requestKind) {
     return res.status(400).json({ ok: false, error: "Ungültige Mapping-Anfrage." });
   }
@@ -418,8 +615,17 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "pending") {
     return forwardPendingCaptureRead(res, configuration);
   }
+  if (req.method === "GET" && captureRequest.type === "human_armed_bindings") {
+    return forwardHumanArmedBindingList(res, configuration);
+  }
   if (req.method === "GET") {
     return forwardCaptureRead(res, configuration, captureRequest.captureId);
+  }
+  if (requestKind === "human_arm") {
+    return forwardHumanArmedBinding(req, res, configuration, captureRequest.captureId);
+  }
+  if (requestKind === "human_rearm") {
+    return forwardHumanArmedRearm(req, res, configuration, captureRequest.bindingId);
   }
   return requestKind === "conversation_binding"
     ? forwardConversationBinding(req, res, configuration, captureRequest.captureId)
@@ -428,6 +634,11 @@ export default async function handler(req, res) {
 
 export {
   CONVERSATION_BINDING_FIELDS,
+  HUMAN_ARMED_BINDING_FIELDS,
+  HUMAN_ARMED_BINDINGS_VIEW,
+  HUMAN_ARMED_REARM_FIELDS,
+  HUMAN_ARM_OPERATION,
+  HUMAN_REARM_OPERATION,
   MAPPING_FIELDS,
   PENDING_CAPTURE_LIMIT,
   PENDING_CAPTURE_VIEW,
@@ -437,8 +648,13 @@ export {
   normalizePublicMappingErrorResult,
   normalizePublicConversationBindingErrorResult,
   normalizePublicConversationBindingResult,
+  normalizePublicHumanArmedBindingErrorResult,
+  normalizePublicHumanArmedBindingResult,
+  normalizePublicHumanArmedBindings,
   normalizePublicMappingResult,
   validCaptureId,
   validConversationBindingBody,
+  validHumanArmedBindingBody,
+  validHumanArmedRearmBody,
   validMappingBody
 };

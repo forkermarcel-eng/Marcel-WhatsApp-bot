@@ -861,6 +861,19 @@
         </span>
       </section>
 
+      <section class="enrollment-panel pending-capture-panel" id="humanArmedBindingPanel" aria-labelledby="humanArmedBindingHeading">
+        <h2 id="humanArmedBindingHeading">Bewusst gebundene Tinder-Conversations</h2>
+        <p>
+          Ohne eine offizielle stabile Tinder-Referenz bleibt jede spätere Erfassung gesperrt,
+          bis Marcel sie für genau eine neue sichere Beobachtung bewusst freigibt. Eine Freigabe
+          erkennt keine Person automatisch und überträgt keine Nachricht.
+        </p>
+        <div class="pending-capture-list" id="humanArmedBindingList" aria-live="polite"></div>
+        <span class="enrollment-message" id="humanArmedBindingMessage" role="status" aria-live="polite">
+          Menschlich bestätigte Conversation-Bindungen werden geladen.
+        </span>
+      </section>
+
       <details class="technical">
        <summary>Technik &amp; Diagnose</summary><div class="technical-body">
      <section class="control-panel" aria-label="Legacy Tinder Worker Status">
@@ -936,12 +949,17 @@
 
        <div class="capture-mapping-context" id="captureMappingContext">
         <div id="captureVisibleNameContext">Sichtbarer Tinder-Name<strong id="captureVisibleName">–</strong></div>
-         <div>Capture-ID<code id="captureMappingId">–</code></div>
-         <div>Android-Gerät<code id="captureDeviceId">–</code></div>
-         <div>Capture-Revision<strong id="captureRevision">–</strong></div>
        </div>
 
        <div id="captureMappingForm">
+         <div class="enrollment-actions" id="captureHumanArmedOption" hidden>
+           <button class="button info" id="useHumanArmedBinding" type="button">
+             Ohne Plattform-Identifier bewusst binden
+           </button>
+           <span class="enrollment-message">
+             Erst nach einer bewussten Bestätigung wird genau eine spätere sichere Beobachtung freigegeben.
+           </span>
+         </div>
          <div class="capture-mapping-grid">
           <label class="capture-mapping-field">
             Bestehenden Kontakt auswählen
@@ -1084,16 +1102,17 @@
      connectAndroidTinder: document.getElementById("connectAndroidTinder"),
      disconnectAndroidTinder: document.getElementById("disconnectAndroidTinder"),
       deviceCommandMessage: document.getElementById("deviceCommandMessage"),
-      pendingCaptureList: document.getElementById("pendingCaptureList"),
-      pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
-      captureMappingPanel: document.getElementById("captureMappingPanel"),
-     captureMappingIntro: document.getElementById("captureMappingIntro"),
-     captureMappingId: document.getElementById("captureMappingId"),
-     captureVisibleNameContext: document.getElementById("captureVisibleNameContext"),
-     captureVisibleName: document.getElementById("captureVisibleName"),
-     captureDeviceId: document.getElementById("captureDeviceId"),
-     captureRevision: document.getElementById("captureRevision"),
-     captureMappingForm: document.getElementById("captureMappingForm"),
+       pendingCaptureList: document.getElementById("pendingCaptureList"),
+       pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
+       humanArmedBindingList: document.getElementById("humanArmedBindingList"),
+       humanArmedBindingMessage: document.getElementById("humanArmedBindingMessage"),
+       captureMappingPanel: document.getElementById("captureMappingPanel"),
+      captureMappingIntro: document.getElementById("captureMappingIntro"),
+      captureVisibleNameContext: document.getElementById("captureVisibleNameContext"),
+      captureVisibleName: document.getElementById("captureVisibleName"),
+      captureMappingForm: document.getElementById("captureMappingForm"),
+      captureHumanArmedOption: document.getElementById("captureHumanArmedOption"),
+      useHumanArmedBinding: document.getElementById("useHumanArmedBinding"),
      captureContactSelect: document.getElementById("captureContactSelect"),
      captureTinderIdentifierField: document.getElementById("captureTinderIdentifierField"),
      captureTinderIdentifier: document.getElementById("captureTinderIdentifier"),
@@ -1109,9 +1128,10 @@
    let commandBusy = false;
    let commandFeedback = "";
    let commandFeedbackIsError = false;
-   let mappingCapture = null;
-   let mappingBusy = false;
-   let conversationBindingMode = false;
+    let mappingCapture = null;
+    let mappingBusy = false;
+    let conversationBindingMode = false;
+    let humanArmedBindingMode = false;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
@@ -1217,7 +1237,7 @@
         name.textContent = capture.visible_name.trim();
         const meta = document.createElement("div");
         meta.className = "pending-capture-meta";
-        meta.textContent = `Capture ${capture.capture_id} · Gerät ${capture.device_id} · Revision ${capture.capture_revision}`;
+        meta.textContent = "Sicheres Capture · wartet auf eine bewusste menschliche Entscheidung";
         copy.append(name, meta);
 
         const open = document.createElement("a");
@@ -1248,6 +1268,103 @@
       }
     }
 
+    function humanArmedBindingIsSafeForSelection(binding) {
+      return binding && typeof binding === "object" &&
+        UUID_V4.test(String(binding.binding_id || "")) &&
+        typeof binding.contact_name === "string" && binding.contact_name.trim() &&
+        binding.contact_name.trim().length <= 160;
+    }
+
+    function renderHumanArmedBindingList(bindings) {
+      elements.humanArmedBindingList.replaceChildren();
+      if (bindings.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "pending-capture-empty";
+        empty.textContent = "Keine menschlich gebundene Conversation wartet auf eine neue Einmalfreigabe.";
+        elements.humanArmedBindingList.append(empty);
+        elements.humanArmedBindingMessage.textContent = "Keine erneute Conversation-Freigabe erforderlich.";
+        return;
+      }
+
+      for (const binding of bindings) {
+        const item = document.createElement("article");
+        item.className = "pending-capture-item";
+        const copy = document.createElement("div");
+        copy.className = "pending-capture-copy";
+        const name = document.createElement("div");
+        name.className = "pending-capture-name";
+        name.textContent = binding.contact_name.trim();
+        const meta = document.createElement("div");
+        meta.className = "pending-capture-meta";
+        meta.textContent = "Menschlich bestätigte Conversation · keine automatische Wiedererkennung";
+        copy.append(name, meta);
+
+        const actions = document.createElement("div");
+        actions.className = "notice-actions";
+        const confirmation = document.createElement("label");
+        confirmation.className = "capture-mapping-confirmation";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        const confirmationText = document.createElement("span");
+        confirmationText.textContent = "Eine neue einzelne sichere Beobachtung bewusst freigeben";
+        confirmation.append(checkbox, confirmationText);
+        const rearm = document.createElement("button");
+        rearm.type = "button";
+        rearm.className = "button info";
+        rearm.textContent = "Einmal freigeben";
+        rearm.disabled = true;
+        checkbox.addEventListener("change", () => {
+          rearm.disabled = checkbox.checked !== true;
+        });
+        rearm.addEventListener("click", async () => {
+          if (checkbox.checked !== true || rearm.disabled) return;
+          rearm.disabled = true;
+          checkbox.disabled = true;
+          elements.humanArmedBindingMessage.className = "enrollment-message";
+          elements.humanArmedBindingMessage.textContent = "Einmalfreigabe wird vorbereitet …";
+          try {
+            const data = await requestJson(
+              `/api/tinder/captures?bindingId=${encodeURIComponent(binding.binding_id)}&operation=human-rearm`,
+              { method: "POST", body: JSON.stringify({ confirmed: true }) }
+            );
+            if (data?.result?.status !== "ARMED") {
+              throw new Error("Das Backend hat keine gültige Einmalfreigabe bestätigt.");
+            }
+            elements.humanArmedBindingMessage.textContent =
+              "Eine einzelne spätere sichere Beobachtung wurde bewusst freigegeben. Keine automatische Zuordnung oder Nachricht wurde ausgelöst.";
+          } catch (error) {
+            checkbox.disabled = false;
+            elements.humanArmedBindingMessage.className = "enrollment-message enrollment-error";
+            elements.humanArmedBindingMessage.textContent = error?.message || "Einmalfreigabe konnte nicht vorbereitet werden.";
+          }
+        });
+        actions.append(confirmation, rearm);
+        item.append(copy, actions);
+        elements.humanArmedBindingList.append(item);
+      }
+      elements.humanArmedBindingMessage.textContent =
+        `${bindings.length} menschlich bestätigte Conversation${bindings.length === 1 ? "" : "s"} kann bewusst einmal freigegeben werden.`;
+    }
+
+    async function loadHumanArmedBindingList() {
+      try {
+        const data = await requestJson("/api/tinder/captures?view=human-armed-bindings");
+        const bindings = Array.isArray(data?.bindings) ? data.bindings : null;
+        if (!bindings || bindings.length > 25 || bindings.some((binding) => !humanArmedBindingIsSafeForSelection(binding))) {
+          throw new Error("Das Backend hat keine gültige Liste menschlich gebundener Conversations geliefert.");
+        }
+        renderHumanArmedBindingList(bindings);
+      } catch (error) {
+        elements.humanArmedBindingList.replaceChildren();
+        const unavailable = document.createElement("div");
+        unavailable.className = "pending-capture-empty";
+        unavailable.textContent = "Menschlich gebundene Conversations können derzeit nicht sicher geladen werden.";
+        elements.humanArmedBindingList.append(unavailable);
+        elements.humanArmedBindingMessage.className = "enrollment-message enrollment-error";
+        elements.humanArmedBindingMessage.textContent = error?.message || "Conversation-Bindungen konnten nicht geladen werden.";
+      }
+    }
+
     function captureMappingStatus(capture) {
      return String(capture?.mapping_status || capture?.mappingStatus || "").toUpperCase();
    }
@@ -1256,7 +1373,7 @@
      const name = String(
        contact?.name || contact?.displayName || contact?.canonicalName || "Unbekannter Kontakt"
      ).trim();
-     return `${name || "Unbekannter Kontakt"} · Kontakt #${contact.id}`;
+      return name || "Unbekannter Kontakt";
    }
 
     function conversationBindingStatus(capture) {
@@ -1265,6 +1382,12 @@
 
     function conversationBindingEligible(capture) {
       return conversationBindingStatus(capture) === "ELIGIBLE_FOR_HUMAN_BINDING";
+    }
+
+    function humanArmedBindingAvailable(capture) {
+      // No source-observed stable reference is present. This is deliberately
+      // distinct from V2 evidence binding and is never an automatic match.
+      return conversationBindingStatus(capture) === "LEGACY_CAPTURE";
     }
 
     function conversationBindingBlocksMapping(capture) {
@@ -1289,8 +1412,23 @@
 
     function applyCaptureMappingMode(capture) {
       conversationBindingMode = conversationBindingEligible(capture);
+      humanArmedBindingMode = false;
       elements.captureTinderIdentifierField.hidden = conversationBindingMode;
       elements.captureVisibleNameContext.hidden = conversationBindingMode;
+      elements.captureHumanArmedOption.hidden = conversationBindingMode || !humanArmedBindingAvailable(capture);
+    }
+
+    function enableHumanArmedBindingMode() {
+      if (!mappingCapture || !humanArmedBindingAvailable(mappingCapture) || mappingBusy) return;
+      humanArmedBindingMode = true;
+      elements.captureTinderIdentifierField.hidden = true;
+      elements.captureVisibleNameContext.hidden = true;
+      elements.captureHumanArmedOption.hidden = true;
+      elements.captureMappingIntro.textContent =
+        "Für diesen sichtbaren Thread liegt keine stabile Plattform-Referenz vor. Die bewusste menschliche Conversation-Bindung löst keine automatische Personen-Erkennung aus und gibt nur eine spätere sichere Beobachtung frei.";
+      elements.captureMappingConfirmed.checked = false;
+      setCaptureMappingMessage("Kontakt auswählen oder neuen Kontakt benennen und diese begrenzte Freigabe bewusst bestätigen.");
+      updateCaptureMappingControls();
     }
 
     function updateCaptureMappingControls() {
@@ -1299,7 +1437,7 @@
       const identifier = elements.captureTinderIdentifier.value.trim();
       const contactId = Number(elements.captureContactSelect.value);
       const newContactName = elements.captureNewContactName.value.trim();
-      const requiresIdentifier = !conversationBindingMode;
+      const requiresIdentifier = !conversationBindingMode && !humanArmedBindingMode;
       elements.mapCaptureExisting.disabled = mappingBusy || !hasCapture || !confirmed || (requiresIdentifier && !identifier) ||
         !Number.isInteger(contactId) || contactId <= 0;
       elements.mapCaptureNew.disabled = mappingBusy || !hasCapture || !confirmed || (requiresIdentifier && !identifier) || !newContactName;
@@ -1318,12 +1456,9 @@
       applyCaptureMappingMode(capture);
       elements.captureMappingForm.hidden = false;
       elements.captureMappingPanel.hidden = false;
-      elements.captureVisibleName.textContent = conversationBindingMode
+      elements.captureVisibleName.textContent = conversationBindingMode || humanArmedBindingMode
         ? "–"
         : String(capture.visible_name || "Unbekannt");
-      elements.captureMappingId.textContent = String(capture.capture_id || "–");
-      elements.captureDeviceId.textContent = String(capture.device_id || "–");
-      elements.captureRevision.textContent = String(capture.capture_revision || "–");
       if (status === "CONFLICT") {
         elements.captureMappingForm.hidden = true;
         elements.captureMappingIntro.textContent = "Konflikt erkannt: Die bestehende menschliche Zuordnung wurde nicht automatisch überschrieben.";
@@ -1344,6 +1479,10 @@
         elements.captureMappingIntro.textContent =
           "Zwei unabhängige sichere Runtime-Beobachtungen bestätigen dieselbe technische Conversation-Evidenz. Wähle einen Kontakt oder lege bewusst einen neuen an; die Evidenz wird nicht angezeigt und ist kein Profil-Identifier.";
         setCaptureMappingMessage("Bestehenden Kontakt auswählen oder neuen Kontakt bewusst an diese Conversation binden.");
+      } else if (humanArmedBindingMode) {
+        elements.captureMappingIntro.textContent =
+          "Für diesen sichtbaren Thread liegt keine stabile Plattform-Referenz vor. Die bewusste menschliche Conversation-Bindung löst keine automatische Personen-Erkennung aus und gibt nur eine spätere sichere Beobachtung frei.";
+        setCaptureMappingMessage("Kontakt auswählen oder neuen Kontakt benennen und diese begrenzte Freigabe bewusst bestätigen.");
       } else {
         elements.captureMappingIntro.textContent =
           "Dieses sichere sichtbare Capture braucht eine ausdrückliche menschliche Zuordnung. Der sichtbare Tinder-Name ist kein Identifier und wird nicht automatisch zusammengeführt.";
@@ -1406,10 +1545,11 @@
        return;
      }
 
-     const confirmed = elements.captureMappingConfirmed.checked === true;
-     const isConversationBinding = conversationBindingMode && conversationBindingEligible(mappingCapture);
-     let body;
-     if (isConversationBinding) {
+      const confirmed = elements.captureMappingConfirmed.checked === true;
+      const isConversationBinding = conversationBindingMode && conversationBindingEligible(mappingCapture);
+      const isHumanArmedBinding = humanArmedBindingMode && humanArmedBindingAvailable(mappingCapture);
+      let body;
+      if (isConversationBinding || isHumanArmedBinding) {
        if (action === "MAP_EXISTING") {
          const contactId = Number(elements.captureContactSelect.value);
          if (!confirmed || !Number.isInteger(contactId) || contactId <= 0) {
@@ -1459,24 +1599,36 @@
      setCaptureMappingMessage("Menschliche Zuordnung wird gespeichert …");
      updateCaptureMappingControls();
      try {
-       const data = await requestJson(`/api/tinder/captures?captureId=${encodeURIComponent(captureId)}`, {
-         method: "POST",
-         body: JSON.stringify(body)
-       });
-       const expectedStatuses = isConversationBinding ? ["CONFIRMED"] : ["RESOLVED", "NEW_CONTACT_CONFIRMED"];
+        const mappingQuery = isHumanArmedBinding
+          ? `captureId=${encodeURIComponent(captureId)}&operation=human-arm`
+          : `captureId=${encodeURIComponent(captureId)}`;
+        const data = await requestJson(`/api/tinder/captures?${mappingQuery}`, {
+          method: "POST",
+          body: JSON.stringify(body)
+        });
+        const expectedStatuses = isHumanArmedBinding
+          ? ["ARMED"]
+          : isConversationBinding
+            ? ["CONFIRMED"]
+            : ["RESOLVED", "NEW_CONTACT_CONFIRMED"];
        if (!data?.result || !expectedStatuses.includes(data.result.status)) {
          throw new Error("Das Backend hat keine gültige Mapping-Bestätigung geliefert.");
        }
        mappingCapture = {
          ...mappingCapture,
          mapping_status: "RESOLVED",
-         conversation_binding_status: isConversationBinding ? "CONFIRMED" : mappingCapture?.conversation_binding_status
-       };
-       elements.captureMappingForm.hidden = true;
-       elements.captureMappingIntro.textContent = isConversationBinding
-         ? "Die menschlich bestätigte Conversation-Bindung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt."
-         : "Die menschlich bestätigte Tinder-Zuordnung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt.";
-       setCaptureMappingMessage(isConversationBinding ? "Conversation-Bindung sicher gespeichert." : "Zuordnung sicher gespeichert.");
+          conversation_binding_status: isConversationBinding ? "CONFIRMED" : mappingCapture?.conversation_binding_status
+        };
+        elements.captureMappingForm.hidden = true;
+        elements.captureMappingIntro.textContent = isHumanArmedBinding
+          ? "Die menschlich bestätigte Conversation-Bindung ist vorbereitet. Sie gibt nur eine spätere einzelne sichere Beobachtung frei und erzeugt keine Plattform- oder WhatsApp-ID."
+          : isConversationBinding
+            ? "Die menschlich bestätigte Conversation-Bindung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt."
+            : "Die menschlich bestätigte Tinder-Zuordnung wurde auditiert. Es wurde keine WhatsApp-ID erzeugt.";
+        setCaptureMappingMessage(isHumanArmedBinding
+          ? "Begrenzte Conversation-Freigabe sicher vorbereitet."
+          : isConversationBinding ? "Conversation-Bindung sicher gespeichert." : "Zuordnung sicher gespeichert.");
+        if (isHumanArmedBinding) void loadHumanArmedBindingList();
      } catch (error) {
        const conflict = error?.data?.result?.status === "CONFLICT";
        if (conflict) {
@@ -1895,17 +2047,22 @@
      void submitCaptureMapping("MAP_EXISTING");
    });
 
-   elements.mapCaptureNew.addEventListener("click", () => {
-     void submitCaptureMapping("CREATE_NEW");
-   });
+    elements.mapCaptureNew.addEventListener("click", () => {
+      void submitCaptureMapping("CREATE_NEW");
+    });
+
+    elements.useHumanArmedBinding.addEventListener("click", () => {
+      enableHumanArmedBindingMode();
+    });
 
    window.addEventListener("focus", () => {
      void refreshAllStatuses();
     });
 
-    void refreshAllStatuses();
-    void loadPendingCaptureDiscovery();
-    void loadCaptureMappingFromLocation();
+     void refreshAllStatuses();
+     void loadPendingCaptureDiscovery();
+     void loadHumanArmedBindingList();
+     void loadCaptureMappingFromLocation();
 
    window.setInterval(() => {
      void refreshAllStatuses();

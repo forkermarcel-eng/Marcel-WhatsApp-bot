@@ -3,6 +3,11 @@ import { deriveDeviceStatus } from "../device-bridge/heartbeat.js";
 import {
   isTinderVisibleChatSyncCapable
 } from "../device-bridge/protocol-v1.js";
+import {
+  HUMAN_ARMED_CONVERSATION_BINDING_TABLE,
+  HUMAN_ARMED_CONVERSATION_PERMIT_TABLE,
+  HUMAN_ARMED_CONVERSATION_REFERENCE_KIND
+} from "./tinder-human-armed-conversation-binding.js";
 
 /* ==================================================
 TINDER V4 VISIBLE-CHAT SYNC PERMIT
@@ -50,7 +55,8 @@ export const TINDER_VISIBLE_CHAT_SYNC_REASON = Object.freeze({
   PERMIT_EXPIRED: "PERMIT_EXPIRED",
   PERMIT_ACK_NOT_STAGED: "PERMIT_ACK_NOT_STAGED",
   PERMIT_DEVICE_MISMATCH: "PERMIT_DEVICE_MISMATCH",
-  SOURCE_CAPTURE_NOT_CONFIRMED: "SOURCE_CAPTURE_NOT_CONFIRMED"
+  SOURCE_CAPTURE_NOT_CONFIRMED: "SOURCE_CAPTURE_NOT_CONFIRMED",
+  HUMAN_ARMED_BINDING_NOT_CONFIRMED: "HUMAN_ARMED_BINDING_NOT_CONFIRMED"
 });
 
 export class TinderVisibleChatSyncError extends Error {
@@ -106,6 +112,23 @@ function normalizeIssueInput(value) {
     // This is a dashboard-selected server reference. It is never provided by
     // the Android sync payload and never crosses the Device-Bridge command.
     sourceCaptureId: normalizeUuid(value.sourceCaptureId, "Die Quellaufnahme", "INVALID_SOURCE_CAPTURE_ID")
+  });
+}
+
+/**
+ * The opaque binding handle comes only from the existing bounded human-armed
+ * dashboard reader. It is a server-side association handle, never a Tinder
+ * identifier and never a capture choice rendered to Marcel.
+ */
+function normalizeHumanBindingIssueInput(value) {
+  if (!exactKeys(value, ["bindingId"])) {
+    throw new TinderVisibleChatSyncError(
+      "Die menschlich best\u00e4tigte Conversation-Anfrage enth\u00e4lt nicht erlaubte Felder.",
+      "INVALID_HUMAN_BINDING_SYNC_REQUEST"
+    );
+  }
+  return Object.freeze({
+    bindingId: normalizeUuid(value.bindingId, "Die Conversation-Bindung", "INVALID_HUMAN_BINDING_ID")
   });
 }
 
@@ -191,6 +214,14 @@ function syncPermitFromRow(row) {
     acknowledgementStatus: normalizedStatus(sourceValue(row, "acknowledgementStatus", "ack_status")),
     acknowledgementResult: sourceValue(row, "acknowledgementResult", "ack_result")
   });
+}
+
+function humanBindingSourceFromRow(row) {
+  const deviceId = uuid(sourceValue(row, "deviceId", "device_id"));
+  const sourceCaptureId = uuid(sourceValue(row, "sourceCaptureId", "source_capture_id"));
+  return deviceId && sourceCaptureId
+    ? Object.freeze({ deviceId, sourceCaptureId })
+    : null;
 }
 
 export function isExactVisibleChatSyncStagedAcknowledgement(value) {
@@ -279,9 +310,9 @@ export function createTinderVisibleChatSyncService(repository, {
     return normalizeUuid(createCommandId(), "Die Sync-Command-ID", "INVALID_SYNC_COMMAND_ID");
   }
 
-  async function queueVisibleChatSync(input = {}) {
+  async function queueVisibleChatSync(input = {}, existingTransaction = null) {
     const normalized = normalizeIssueInput(input);
-    return repository.withTransaction(async transaction => {
+    const queue = async transaction => {
       const currentTime = new Date(now());
       if (Number.isNaN(currentTime.valueOf())) {
         throw new TinderVisibleChatSyncError("Die Sync-Zeit ist ungültig.", "INVALID_SYNC_TIME", 500);
@@ -357,6 +388,37 @@ export function createTinderVisibleChatSyncService(repository, {
       // creation result. The authenticated device receives it only through
       // the signed command channel.
       return Object.freeze({ status: TINDER_VISIBLE_CHAT_SYNC_STATUS.QUEUED });
+    };
+    return existingTransaction ? queue(existingTransaction) : repository.withTransaction(queue);
+  }
+
+  /**
+   * The only current-view bridge permitted when Tinder exposes no stable
+   * platform reference. A human explicitly confirms the already-visible
+   * official chat on an existing binding card; the server then derives the
+   * one eligible consumed capture without accepting a name, timestamp,
+   * fingerprint, message, device, or capture choice from the caller.
+   */
+  async function queueVisibleChatSyncForHumanBinding(input = {}) {
+    const normalized = normalizeHumanBindingIssueInput(input);
+    if (typeof repository.getConfirmedSourceCaptureForHumanBindingForUpdate !== "function") {
+      throw new TinderVisibleChatSyncError(
+        "Die menschlich best\u00e4tigte Conversation-Quelle ist nicht verf\u00fcgbar.",
+        "INVALID_SYNC_REPOSITORY",
+        500
+      );
+    }
+    return repository.withTransaction(async transaction => {
+      const source = humanBindingSourceFromRow(
+        await repository.getConfirmedSourceCaptureForHumanBindingForUpdate(transaction, normalized)
+      );
+      if (!source) {
+        return Object.freeze({
+          status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+          reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.HUMAN_ARMED_BINDING_NOT_CONFIRMED
+        });
+      }
+      return queueVisibleChatSync(source, transaction);
     });
   }
 
@@ -423,6 +485,7 @@ export function createTinderVisibleChatSyncService(repository, {
 
   return Object.freeze({
     queueVisibleChatSync,
+    queueVisibleChatSyncForHumanBinding,
     authorizeStagedVisibleChatSyncPermit,
     consumeAuthorizedStagedVisibleChatSyncPermit,
     isAuthorizedStagedVisibleChatSyncPermit
@@ -610,6 +673,49 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
         [sourceCaptureId, deviceId]
       );
       return result.rows.length === 1;
+    },
+
+    /**
+     * A V3 human-arm may have produced several historical permits. Do not
+     * choose one by name, time, fingerprint, or recency: the only admissible
+     * bridge is exactly one consumed capture from the same current binding
+     * revision that still passes every existing V4 source gate.
+     */
+    async getConfirmedSourceCaptureForHumanBindingForUpdate(client, { bindingId }) {
+      const result = await client.query(
+        `SELECT binding.device_id, permit.consumed_capture_id AS source_capture_id
+           FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+           JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} permit
+             ON permit.binding_id=binding.binding_id
+           JOIN tinder_visible_chat_captures capture
+             ON capture.capture_id=permit.consumed_capture_id
+          WHERE binding.binding_id=$1
+            AND binding.channel='tinder'
+            AND binding.reference_kind=$2
+            AND binding.binding_state='CONFIRMED'
+            AND binding.human_verified=TRUE
+            AND binding.device_id IS NOT NULL
+            AND permit.device_id=binding.device_id
+            AND permit.binding_revision=binding.binding_revision
+            AND permit.permit_state='CONSUMED'
+            AND permit.consumed_capture_id IS NOT NULL
+            AND capture.device_id=binding.device_id
+            AND capture.source_package='com.tinder'
+            AND capture.capture_schema_version='tinder-visible-chat-v3'
+            AND capture.capture_safety_status='SAFE'
+            AND capture.mapping_status='RESOLVED'
+            AND capture.human_review_status='CONFIRMED'
+            AND capture.resolved_contact_id=binding.contact_id
+            AND capture.capture_revision = (
+              SELECT MAX(newer.capture_revision)
+                FROM tinder_visible_chat_captures newer
+               WHERE newer.device_id=capture.device_id
+                 AND newer.runtime_thread_fingerprint=capture.runtime_thread_fingerprint
+            )
+          FOR UPDATE OF binding, permit, capture`,
+        [bindingId, HUMAN_ARMED_CONVERSATION_REFERENCE_KIND]
+      );
+      return result.rows.length === 1 ? result.rows[0] : null;
     },
 
     async markVisibleChatSyncPermitConsumed(client, { commandId, deviceId, consumedAt }) {

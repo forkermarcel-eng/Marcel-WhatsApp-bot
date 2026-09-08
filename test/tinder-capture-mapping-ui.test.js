@@ -149,9 +149,13 @@ test("a successful non-armed mapping refreshes the selected safe capture through
   assert.doesNotMatch(mappingCode, /await createCaptureDraft\(/);
 });
 
-test("human-armed fallback remains opt-in, never renders technical identifiers, and requires a separate rearm confirmation", () => {
+test("human-armed fallback keeps rearm separate from an explicit current-visible-chat attestation without UUID selection", () => {
   const mappingCode = sourceBetween("function captureIdFromLocation()", "async function createEnrollmentCode()");
   const humanListCode = sourceBetween("function humanArmedBindingIsSafeForSelection", "function captureMappingStatus");
+  const currentSyncCode = humanListCode.slice(
+    humanListCode.indexOf("syncCurrentChat.addEventListener"),
+    humanListCode.indexOf("actions.append", humanListCode.indexOf("syncCurrentChat.addEventListener"))
+  );
   assert.match(page, /id="captureHumanArmedOption" hidden/);
   assert.match(page, /id="useHumanArmedBinding"/);
   assert.match(mappingCode, /function humanArmedBindingAvailable\(capture\).*LEGACY_CAPTURE/s);
@@ -162,7 +166,17 @@ test("human-armed fallback remains opt-in, never renders technical identifiers, 
   assert.match(humanListCode, /checkbox\.checked !== true/);
   assert.match(humanListCode, /body: JSON\.stringify\(\{ confirmed: true \}\)/);
   assert.match(humanListCode, /operation=human-rearm/);
+  assert.match(humanListCode, /operation=human-armed-visible-chat-sync/);
+  assert.match(humanListCode, /Der aktuell sichtbar ge\\u00f6ffnete offizielle Tinder-Chat geh\\u00f6rt zu dieser bewusst gebundenen Conversation/);
+  assert.match(humanListCode, /Aktuell sichtbaren Chat synchronisieren/);
+  assert.match(humanListCode, /humanArmedBindingActionBusy/);
+  assert.match(humanListCode, /querySelectorAll\("input, button"\)/);
+  assert.match(humanListCode, /Keine automatische Personen-Erkennung, Chat-Auswahl oder Nachricht wurde ausgel\\u00f6st/);
+  assert.match(humanListCode, /Keine automatische Wiederholung/);
+  assert.equal((humanListCode.match(/operation=human-armed-visible-chat-sync/g) || []).length, 1);
+  assert.doesNotMatch(currentSyncCode, /disabled\s*=\s*false|setTimeout|setInterval|location\.reload/);
   assert.doesNotMatch(humanListCode, /textContent\s*=\s*binding\.binding_id|dataset\.[A-Za-z_]*binding|binding\.binding_id.*textContent/);
+  assert.doesNotMatch(humanListCode, /source_capture_id|capture_id|device_id|contact_id|thread_fingerprint|capture_fingerprint|visible_name|messages/i);
   assert.doesNotMatch(page, /id="captureMappingId"|id="captureDeviceId"|id="captureRevision"/);
   assert.doesNotMatch(mappingCode, /capture\.visible_name.*newContactName\.value|newContactName\.value.*capture\.visible_name/);
   assert.doesNotMatch(mappingCode, /threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|uniqueId/);

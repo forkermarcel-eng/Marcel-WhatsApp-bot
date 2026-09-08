@@ -1184,6 +1184,7 @@
     let mappingBusy = false;
     let conversationBindingMode = false;
     let humanArmedBindingMode = false;
+    let humanArmedBindingActionBusy = false;
     let draftCapture = null;
     let draftBusy = false;
     let draftCompleted = false;
@@ -1502,12 +1503,15 @@
         rearm.textContent = "Einmal freigeben";
         rearm.disabled = true;
         checkbox.addEventListener("change", () => {
-          rearm.disabled = checkbox.checked !== true;
+          rearm.disabled = humanArmedBindingActionBusy || checkbox.checked !== true;
         });
         rearm.addEventListener("click", async () => {
-          if (checkbox.checked !== true || rearm.disabled) return;
+          if (checkbox.checked !== true || rearm.disabled || humanArmedBindingActionBusy) return;
+          humanArmedBindingActionBusy = true;
           rearm.disabled = true;
           checkbox.disabled = true;
+          syncCurrentChat.disabled = true;
+          currentChatCheckbox.disabled = true;
           elements.humanArmedBindingMessage.className = "enrollment-message";
           elements.humanArmedBindingMessage.textContent = "Einmalfreigabe wird vorbereitet …";
           try {
@@ -1521,12 +1525,57 @@
             elements.humanArmedBindingMessage.textContent =
               "Eine einzelne spätere sichere Beobachtung wurde bewusst freigegeben. Keine automatische Zuordnung oder Nachricht wurde ausgelöst.";
           } catch (error) {
+            humanArmedBindingActionBusy = false;
             checkbox.disabled = false;
+            currentChatCheckbox.disabled = false;
+            syncCurrentChat.disabled = currentChatCheckbox.checked !== true;
             elements.humanArmedBindingMessage.className = "enrollment-message enrollment-error";
             elements.humanArmedBindingMessage.textContent = error?.message || "Einmalfreigabe konnte nicht vorbereitet werden.";
           }
         });
-        actions.append(confirmation, rearm);
+
+        const currentChatConfirmation = document.createElement("label");
+        currentChatConfirmation.className = "capture-mapping-confirmation";
+        const currentChatCheckbox = document.createElement("input");
+        currentChatCheckbox.type = "checkbox";
+        const currentChatConfirmationText = document.createElement("span");
+        currentChatConfirmationText.textContent =
+          "Ich best\u00e4tige: Der aktuell sichtbar ge\u00f6ffnete offizielle Tinder-Chat geh\u00f6rt zu dieser bewusst gebundenen Conversation. Danach den Chat nicht wechseln.";
+        currentChatConfirmation.append(currentChatCheckbox, currentChatConfirmationText);
+        const syncCurrentChat = document.createElement("button");
+        syncCurrentChat.type = "button";
+        syncCurrentChat.className = "button info";
+        syncCurrentChat.textContent = "Aktuell sichtbaren Chat synchronisieren";
+        syncCurrentChat.disabled = true;
+        currentChatCheckbox.addEventListener("change", () => {
+          syncCurrentChat.disabled = humanArmedBindingActionBusy || currentChatCheckbox.checked !== true;
+        });
+        syncCurrentChat.addEventListener("click", async () => {
+          if (currentChatCheckbox.checked !== true || syncCurrentChat.disabled || humanArmedBindingActionBusy) return;
+          humanArmedBindingActionBusy = true;
+          for (const control of elements.humanArmedBindingList.querySelectorAll("input, button")) {
+            control.disabled = true;
+          }
+          elements.humanArmedBindingMessage.className = "enrollment-message";
+          elements.humanArmedBindingMessage.textContent =
+            "Human-best\u00e4tigte Synchronisierung des aktuell sichtbaren Chats wird vorbereitet …";
+          try {
+            const data = await requestJson(
+              `/api/tinder/captures?bindingId=${encodeURIComponent(binding.binding_id)}&operation=human-armed-visible-chat-sync`,
+              { method: "POST", body: JSON.stringify({ confirmed: true }) }
+            );
+            if (data?.sync?.command_type !== "SYNC_TINDER_VISIBLE_CHAT" || data?.sync?.status !== "QUEUED") {
+              throw new Error("Das Backend hat keine g\u00fcltige human-best\u00e4tigte Chat-Synchronisierung best\u00e4tigt.");
+            }
+            elements.humanArmedBindingMessage.textContent =
+              "Eine einzelne Synchronisierung f\u00fcr den aktuell menschlich best\u00e4tigten sichtbaren Chat wurde vorbereitet. Keine automatische Personen-Erkennung, Chat-Auswahl oder Nachricht wurde ausgel\u00f6st.";
+          } catch (error) {
+            elements.humanArmedBindingMessage.className = "enrollment-message enrollment-error";
+            elements.humanArmedBindingMessage.textContent =
+              "Synchronisierungsstatus unklar oder nicht verf\u00fcgbar. Keine automatische Wiederholung; den serverseitigen Status pr\u00fcfen.";
+          }
+        });
+        actions.append(confirmation, rearm, currentChatConfirmation, syncCurrentChat);
         item.append(copy, actions);
         elements.humanArmedBindingList.append(item);
       }

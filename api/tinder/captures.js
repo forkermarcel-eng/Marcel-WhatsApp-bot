@@ -21,6 +21,7 @@ const HUMAN_ARMED_BINDING_FIELDS = new Set([
   "confirmed"
 ]);
 const HUMAN_ARMED_REARM_FIELDS = new Set(["confirmed"]);
+const HUMAN_ARMED_VISIBLE_CHAT_SYNC_FIELDS = new Set(["confirmed"]);
 const PUBLIC_CAPTURE_MAPPING_STATUSES = new Set(["NEEDS_HUMAN_MAPPING", "RESOLVED", "CONFLICT"]);
 const PUBLIC_CAPTURE_REVIEW_STATUSES = new Set(["PENDING", "CONFIRMED", "REJECTED"]);
 const PUBLIC_MAPPING_SUCCESS_STATUSES = new Set(["RESOLVED", "NEW_CONTACT_CONFIRMED"]);
@@ -59,6 +60,7 @@ const HUMAN_ARMED_BINDINGS_VIEW = "human-armed-bindings";
 const HUMAN_ARMED_BINDING_LIMIT = 25;
 const HUMAN_ARM_OPERATION = "human-arm";
 const HUMAN_REARM_OPERATION = "human-rearm";
+const HUMAN_ARMED_VISIBLE_CHAT_SYNC_OPERATION = "human-armed-visible-chat-sync";
 const DRAFT_OPERATION = "draft";
 const PUBLIC_DRAFT_STATUS = "DRAFT";
 const DRAFT_REVIEW_VIEW = "draft-review";
@@ -94,7 +96,8 @@ const PUBLIC_VISIBLE_CHAT_SYNC_REASONS = new Set([
   "PERMIT_EXPIRED",
   "PERMIT_ACK_NOT_STAGED",
   "PERMIT_DEVICE_MISMATCH",
-  "SOURCE_CAPTURE_NOT_CONFIRMED"
+  "SOURCE_CAPTURE_NOT_CONFIRMED",
+  "HUMAN_ARMED_BINDING_NOT_CONFIRMED"
 ]);
 const PUBLIC_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const PUBLIC_OFFICIAL_APP_RESUME_STATUSES = new Set([
@@ -386,6 +389,10 @@ function captureRequestFromQuery(req) {
       && query.operation === HUMAN_REARM_OPERATION) {
     return Object.freeze({ type: "human_rearm", bindingId: query.bindingId });
   }
+  if (exactKeys(query, ["bindingId", "operation"]) && validCaptureId(query.bindingId)
+      && query.operation === HUMAN_ARMED_VISIBLE_CHAT_SYNC_OPERATION) {
+    return Object.freeze({ type: "human_armed_visible_chat_sync", bindingId: query.bindingId });
+  }
   if (exactKeys(query, ["captureId"]) && validCaptureId(query.captureId)) {
     return Object.freeze({ type: "capture", captureId: query.captureId });
   }
@@ -453,6 +460,10 @@ function validHumanArmedBindingBody(body) {
 
 function validHumanArmedRearmBody(body) {
   return exactKeys(body, HUMAN_ARMED_REARM_FIELDS) && body.confirmed === true;
+}
+
+function validHumanArmedVisibleChatSyncBody(body) {
+  return exactKeys(body, HUMAN_ARMED_VISIBLE_CHAT_SYNC_FIELDS) && body.confirmed === true;
 }
 
 function validEmptyDraftBody(body) {
@@ -1127,6 +1138,49 @@ async function forwardHumanArmedRearm(req, res, configuration, bindingId) {
   }
 }
 
+/**
+ * The browser submits only the existing opaque human-binding handle and an
+ * explicit confirmation. The Railway service derives all capture/device
+ * facts from the locked binding; no Tinder UI identity crosses this proxy.
+ */
+async function forwardHumanArmedVisibleChatSync(req, res, configuration, bindingId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/human-armed-conversation-bindings/${encodeURIComponent(bindingId)}/visible-chat-sync`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        // The request was already parsed as exactly `{ confirmed: true }`.
+        // Keep the proxy boundary fixed as well, so a future caller-side
+        // change cannot expand the browser-controlled wire contract.
+        body: JSON.stringify({ confirmed: true }),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const sync = normalizePublicVisibleChatSyncResult(data?.sync);
+    if (response.ok) {
+      if (data?.ok !== true || !sync || sync.status !== "QUEUED") {
+        return res.status(502).json({ ok: false, error: "Ung\u00fcltige human-best\u00e4tigte Chat-Synchronisierung vom Backend." });
+      }
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(202).json({ ok: true, sync });
+    }
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    if (response.status === 409 && data?.ok === false && sync && sync.status !== "QUEUED") {
+      return res.status(409).json({ ok: false, conflict: true, sync, error: "Human-best\u00e4tigte aktuelle Chat-Synchronisierung ist derzeit nicht verf\u00fcgbar." });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Human-best\u00e4tigte aktuelle Chat-Synchronisierung konnte nicht vorbereitet werden." });
+  } catch {
+    console.error("Verbindung zur human-best\u00e4tigten Tinder-Chat-Synchronisierung fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
 async function forwardDraftCreation(res, configuration, captureId) {
   try {
     const response = await fetch(
@@ -1316,7 +1370,7 @@ export default async function handler(req, res) {
 
   const captureRequest = captureRequestFromQuery(req);
   if (!captureRequest || (req.method === "POST" && ![
-    "capture", "human_arm", "human_rearm", "draft", "draft_approve", "draft_reject", "draft_cancel", "visible_chat_sync", "official_app_resume"
+    "capture", "human_arm", "human_rearm", "human_armed_visible_chat_sync", "draft", "draft_approve", "draft_reject", "draft_cancel", "visible_chat_sync", "official_app_resume"
   ].includes(captureRequest.type))) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
@@ -1325,6 +1379,8 @@ export default async function handler(req, res) {
       ? "human_arm"
     : captureRequest.type === "human_rearm" && validHumanArmedRearmBody(req.body)
       ? "human_rearm"
+      : captureRequest.type === "human_armed_visible_chat_sync" && validHumanArmedVisibleChatSyncBody(req.body)
+        ? "human_armed_visible_chat_sync"
       : captureRequest.type === "draft" && validEmptyDraftBody(req.body)
         ? "draft"
       : captureRequest.type === "draft_approve" && validEmptyDraftBody(req.body)
@@ -1377,6 +1433,9 @@ export default async function handler(req, res) {
   }
   if (requestKind === "human_rearm") {
     return forwardHumanArmedRearm(req, res, configuration, captureRequest.bindingId);
+  }
+  if (requestKind === "human_armed_visible_chat_sync") {
+    return forwardHumanArmedVisibleChatSync(req, res, configuration, captureRequest.bindingId);
   }
   if (requestKind === "draft") {
     return forwardDraftCreation(res, configuration, captureRequest.captureId);
@@ -1457,6 +1516,7 @@ export {
   validConversationBindingBody,
   validHumanArmedBindingBody,
   validHumanArmedRearmBody,
+  validHumanArmedVisibleChatSyncBody,
   validEmptyDraftBody,
   validEmptyVisibleChatSyncBody,
   validMappingBody

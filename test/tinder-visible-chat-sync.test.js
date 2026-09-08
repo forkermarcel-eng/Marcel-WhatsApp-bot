@@ -15,6 +15,7 @@ const DEVICE_ID = "36761d7f-2ac3-4da9-9ad4-7fd381665f1e";
 const OTHER_DEVICE_ID = "46761d7f-2ac3-4da9-9ad4-7fd381665f1e";
 const COMMAND_ID = "d565e8a7-ef60-42d0-b19d-26e7904390fa";
 const CAPTURE_ID = "6ebb6d37-8b69-444a-b22d-390b81860026";
+const BINDING_ID = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
 const NOW = new Date("2026-09-07T12:00:00.000Z");
 
 function runtime(overrides = {}) {
@@ -36,6 +37,7 @@ function fixtureRepository({
   activeOfficialAppResume = false,
   sourceConfirmed = true,
   sourceCaptureIsLatest = true,
+  humanBindingSource = { device_id: DEVICE_ID, source_capture_id: CAPTURE_ID },
   permits = []
 } = {}) {
   const permitRows = new Map(permits.map(row => [row.command_id, { ...row }]));
@@ -75,6 +77,10 @@ function fixtureRepository({
     async getConfirmedSourceCaptureForUpdate(_transaction, input) {
       state.calls.push({ type: "source-capture", input });
       return sourceConfirmed && sourceCaptureIsLatest;
+    },
+    async getConfirmedSourceCaptureForHumanBindingForUpdate(_transaction, input) {
+      state.calls.push({ type: "human-binding-source", input });
+      return humanBindingSource;
     },
     async queueVisibleChatSyncCommand(_transaction, command) {
       state.commands.push(command);
@@ -157,6 +163,85 @@ test("V4 creator rejects capture, identity, display, and fingerprint injection b
   }
   assert.equal(repository.state.transactions, 0);
   assert.equal(repository.state.commands.length, 0);
+});
+
+test("V4 human-bound current-chat sync derives its only source server-side and keeps the command empty", async () => {
+  const repository = fixtureRepository();
+  const result = await service(repository).queueVisibleChatSyncForHumanBinding({ bindingId: BINDING_ID });
+
+  assert.deepEqual(result, { status: TINDER_VISIBLE_CHAT_SYNC_STATUS.QUEUED });
+  assert.equal(repository.state.transactions, 1);
+  assert.deepEqual(repository.state.calls[0], {
+    type: "human-binding-source",
+    input: { bindingId: BINDING_ID }
+  });
+  assert.deepEqual(repository.state.commands, [{
+    commandId: COMMAND_ID,
+    deviceId: DEVICE_ID,
+    commandType: TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+    payload: {},
+    expiresAt: "2026-09-07T12:10:00.000Z"
+  }]);
+  const rendered = JSON.stringify({ result, calls: repository.state.calls, command: repository.state.commands[0] });
+  assert.equal(rendered.includes("visibleName"), false);
+  assert.equal(rendered.includes("threadFingerprint"), false);
+  assert.equal(rendered.includes("captureFingerprint"), false);
+  assert.equal(JSON.stringify(result).includes(BINDING_ID), false);
+  assert.equal(JSON.stringify(result).includes(CAPTURE_ID), false);
+  assert.equal(JSON.stringify(result).includes(DEVICE_ID), false);
+});
+
+test("V4 human-bound current-chat sync rejects browser capture, identity, timing, and content input before a transaction", async () => {
+  const repository = fixtureRepository();
+  for (const input of [
+    {},
+    { bindingId: "not-a-binding" },
+    { bindingId: BINDING_ID, captureId: CAPTURE_ID },
+    { bindingId: BINDING_ID, contactId: 7 },
+    { bindingId: BINDING_ID, deviceId: DEVICE_ID },
+    { bindingId: BINDING_ID, visibleName: "M" },
+    { bindingId: BINDING_ID, capturedAt: "2026-09-08T12:00:00.000Z" },
+    { bindingId: BINDING_ID, threadFingerprint: "a".repeat(64) },
+    { bindingId: BINDING_ID, captureFingerprint: "b".repeat(64) },
+    { bindingId: BINDING_ID, messages: ["private"] }
+  ]) {
+    await assert.rejects(
+      () => service(repository).queueVisibleChatSyncForHumanBinding(input),
+      error => error instanceof TinderVisibleChatSyncError
+        && ["INVALID_HUMAN_BINDING_SYNC_REQUEST", "INVALID_HUMAN_BINDING_ID"].includes(error.code)
+    );
+  }
+  assert.equal(repository.state.transactions, 0);
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
+});
+
+test("V4 human-bound current-chat sync fails closed when the existing binding has zero or ambiguous eligible sources", async () => {
+  const repository = fixtureRepository({ humanBindingSource: null });
+  assert.deepEqual(await service(repository).queueVisibleChatSyncForHumanBinding({ bindingId: BINDING_ID }), {
+    status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+    reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.HUMAN_ARMED_BINDING_NOT_CONFIRMED
+  });
+  assert.equal(repository.state.transactions, 1);
+  assert.deepEqual(repository.state.calls, [{
+    type: "human-binding-source",
+    input: { bindingId: BINDING_ID }
+  }]);
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
+});
+
+test("V4 human-bound current-chat sync preserves normal V4 source and runtime gates after source derivation", async () => {
+  const repository = fixtureRepository({ sourceConfirmed: false });
+  assert.deepEqual(await service(repository).queueVisibleChatSyncForHumanBinding({ bindingId: BINDING_ID }), {
+    status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+    reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.SOURCE_CAPTURE_NOT_CONFIRMED
+  });
+  assert.deepEqual(repository.state.calls.map(call => call.type), [
+    "human-binding-source", "expire", "find-v3", "find-v4", "find-v5-resume", "source-capture"
+  ]);
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
 });
 
 test("V4 refuses an active V3 permit or another active V4 permit without command writes", async () => {
@@ -251,6 +336,47 @@ test("V4 PostgreSQL source lock requires the latest revision for the same device
   assert.match(calls[0].sql, /newer\.device_id\s*=\s*capture\.device_id/s);
   assert.match(calls[0].sql, /newer\.runtime_thread_fingerprint\s*=\s*capture\.runtime_thread_fingerprint/s);
   assert.match(calls[0].sql, /FOR UPDATE/);
+});
+
+test("V4 PostgreSQL human-binding source lock accepts exactly one current consumed human-armed V3 capture", async () => {
+  const calls = [];
+  let rows = [{ device_id: DEVICE_ID, source_capture_id: CAPTURE_ID }];
+  const repository = createPgTinderVisibleChatSyncRepository({
+    async connect() { throw new Error("not used by this focused repository query"); },
+    async query() { throw new Error("not used by this focused repository query"); }
+  });
+  const client = {
+    async query(sql, parameters) {
+      calls.push({ sql, parameters });
+      return { rows };
+    }
+  };
+
+  assert.deepEqual(await repository.getConfirmedSourceCaptureForHumanBindingForUpdate(client, {
+    bindingId: BINDING_ID
+  }), rows[0]);
+  assert.deepEqual(calls[0].parameters, [BINDING_ID, "tinder_human_armed_conversation_v1"]);
+  assert.match(calls[0].sql, /binding\.channel='tinder'/i);
+  assert.match(calls[0].sql, /binding\.binding_state='CONFIRMED'/i);
+  assert.match(calls[0].sql, /binding\.human_verified=TRUE/i);
+  assert.match(calls[0].sql, /permit\.binding_revision=binding\.binding_revision/i);
+  assert.match(calls[0].sql, /permit\.permit_state='CONSUMED'/i);
+  assert.match(calls[0].sql, /capture\.capture_schema_version='tinder-visible-chat-v3'/i);
+  assert.match(calls[0].sql, /capture\.capture_safety_status='SAFE'/i);
+  assert.match(calls[0].sql, /capture\.mapping_status='RESOLVED'/i);
+  assert.match(calls[0].sql, /capture\.human_review_status='CONFIRMED'/i);
+  assert.match(calls[0].sql, /capture\.resolved_contact_id=binding\.contact_id/i);
+  assert.match(calls[0].sql, /MAX\(newer\.capture_revision\)/i);
+  assert.match(calls[0].sql, /FOR UPDATE OF binding, permit, capture/i);
+  assert.doesNotMatch(calls[0].sql, /ORDER BY|visible_name|captured_at|received_at|capture_fingerprint|binding\.source_capture_id|reference_hash/i);
+
+  rows = [{ device_id: DEVICE_ID, source_capture_id: CAPTURE_ID }, {
+    device_id: DEVICE_ID,
+    source_capture_id: COMMAND_ID
+  }];
+  assert.equal(await repository.getConfirmedSourceCaptureForHumanBindingForUpdate(client, {
+    bindingId: BINDING_ID
+  }), null);
 });
 
 test("V4 PostgreSQL resume conflict lookup accepts only live ISSUED permits", async () => {

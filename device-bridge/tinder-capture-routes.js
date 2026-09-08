@@ -75,6 +75,7 @@ const TINDER_HUMAN_ARMED_BINDING_BODY_FIELDS = new Set([
   "confirmed"
 ]);
 const TINDER_HUMAN_ARMED_REARM_BODY_FIELDS = new Set(["confirmed"]);
+const TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_BODY_FIELDS = new Set(["confirmed"]);
 const TINDER_HUMAN_ARMED_BINDING_LIST_LIMIT = 25;
 const PUBLIC_CONVERSATION_BINDING_STATUSES = new Set(Object.values(CHANNEL_CONVERSATION_BINDING_STATUS));
 const PUBLIC_VISIBLE_CHAT_SYNC_QUEUE_STATUSES = new Set([
@@ -459,6 +460,22 @@ function assertEmptyVisibleChatSyncBody(body) {
 }
 
 /**
+ * A current-view sync from an existing human binding is an explicit human
+ * assertion, not an automatic match. The binding handle resolves server-side;
+ * no browser name, device, capture, timestamp, fingerprint, or chat data is
+ * accepted here.
+ */
+function assertHumanArmedVisibleChatSyncBody(body) {
+  if (exactKeys(body, TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_BODY_FIELDS) && body.confirmed === true) {
+    return Object.freeze({ confirmed: true });
+  }
+  const error = new Error("Human confirmation is required for current-chat synchronization.");
+  error.statusCode = 400;
+  error.code = "INVALID_TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_REQUEST";
+  throw error;
+}
+
+/**
  * The standard-launcher action has no browser-controlled target, package,
  * component, URI, device, command, expiry, thread, or identity input. The
  * selected capture context is the only server-side correlation handle.
@@ -586,6 +603,53 @@ function createTinderDashboardVisibleChatSyncQueueHandler(pool, {
               ? "CAPTURE_NOT_FOUND"
               : "TINDER_VISIBLE_CHAT_SYNC_QUEUE_FAILED",
         error: "Tinder visible-chat sync could not be queued."
+      });
+    }
+  };
+}
+
+/**
+ * The current chat cannot be selected from a Tinder UI identifier on this
+ * device. This narrow alternative starts with a previously human-confirmed
+ * binding handle and one fresh human confirmation; it derives the source
+ * capture and device only inside the locked V4 service transaction.
+ */
+function createTinderDashboardHumanArmedVisibleChatSyncQueueHandler(pool, {
+  createSyncRepository = createPgTinderVisibleChatSyncRepository,
+  createSyncService = createTinderVisibleChatSyncService
+} = {}) {
+  const syncService = createSyncService(createSyncRepository(pool));
+  return async function tinderDashboardHumanArmedVisibleChatSyncQueueHandler(req, res) {
+    try {
+      assertHumanArmedVisibleChatSyncBody(req.body);
+      const sync = boundedVisibleChatSyncQueueResult(
+        await syncService.queueVisibleChatSyncForHumanBinding({
+          bindingId: normalizeBindingId(req.params.bindingId)
+        })
+      );
+      if (sync.status !== TINDER_VISIBLE_CHAT_SYNC_STATUS.QUEUED) {
+        return res.status(409).json({ ok: false, conflict: true, sync });
+      }
+      return res.status(202).json({ ok: true, sync });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        return res.status(503).json({
+          ok: false,
+          code: "TINDER_VISIBLE_CHAT_SYNC_FOUNDATION_NOT_READY",
+          error: "Tinder visible-chat sync foundation is not ready."
+        });
+      }
+      const status = Number(error?.statusCode)
+        || (error instanceof TinderVisibleChatSyncError ? error.statusCode : 500);
+      if (status === 500) console.error("Tinder human-bound visible-chat sync queue failed.");
+      return res.status(status).json({
+        ok: false,
+        code: status === 400 && error?.code === "INVALID_HUMAN_ARMED_BINDING_ID"
+          ? "INVALID_HUMAN_ARMED_BINDING_ID"
+          : status === 400 && error?.code === "INVALID_TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_REQUEST"
+            ? "INVALID_TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_REQUEST"
+            : "TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_QUEUE_FAILED",
+        error: "Human-confirmed current-chat synchronization could not be queued."
       });
     }
   };
@@ -1047,6 +1111,7 @@ function registerTinderCaptureRoutes({
   const rearmCaptureConversation = createTinderDashboardHumanArmedRearmHandler(pool);
   const listHumanArmedBindings = createTinderDashboardHumanArmedBindingListHandler(pool);
   const queueVisibleChatSync = createTinderDashboardVisibleChatSyncQueueHandler(pool);
+  const queueHumanArmedVisibleChatSync = createTinderDashboardHumanArmedVisibleChatSyncQueueHandler(pool);
   const queueOfficialAppResume = createTinderDashboardOfficialAppResumeQueueHandler(pool);
   const dashboard = (handler) => async (req, res) => {
     if (!dashboardApiReady(res)) return;
@@ -1067,6 +1132,7 @@ function registerTinderCaptureRoutes({
   app.post("/dashboard-api/tinder/captures/:captureId/visible-chat-sync", dashboard(queueVisibleChatSync));
   app.post("/dashboard-api/tinder/captures/:captureId/resume-official-app", dashboard(queueOfficialAppResume));
   app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm", dashboard(rearmCaptureConversation));
+  app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/visible-chat-sync", dashboard(queueHumanArmedVisibleChatSync));
 }
 
 export {
@@ -1077,6 +1143,7 @@ export {
   TINDER_HUMAN_ARMED_BINDING_LIST_LIMIT,
   assertConversationBindingBody,
   assertEmptyVisibleChatSyncBody,
+  assertHumanArmedVisibleChatSyncBody,
   assertHumanArmedBindingBody,
   assertHumanArmedRearmBody,
   assertMappingBody,
@@ -1088,6 +1155,7 @@ export {
   createTinderDashboardMappingHandler,
   createTinderDashboardConversationBindingHandler,
   createTinderDashboardVisibleChatSyncQueueHandler,
+  createTinderDashboardHumanArmedVisibleChatSyncQueueHandler,
   createTinderDashboardOfficialAppResumeQueueHandler,
   createTinderDashboardHumanArmedBindingHandler,
   createTinderDashboardHumanArmedRearmHandler,

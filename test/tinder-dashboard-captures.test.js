@@ -5,12 +5,14 @@ import {
   assertEmptyOfficialAppResumeBody,
   assertHumanArmedBindingBody,
   assertHumanArmedRearmBody,
+  assertHumanArmedVisibleChatSyncBody,
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
   createTinderDashboardConversationBindingHandler,
   createTinderDashboardHumanArmedBindingHandler,
   createTinderDashboardHumanArmedBindingListHandler,
   createTinderDashboardHumanArmedRearmHandler,
+  createTinderDashboardHumanArmedVisibleChatSyncQueueHandler,
   createTinderDashboardDraftEligibleCaptureListHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
@@ -20,6 +22,7 @@ import {
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const CAPTURE_ID = "6c7308cf-5d40-423d-913b-c4424f0e4ee0";
+const BINDING_ID = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
 
 function capture(overrides = {}) {
   return {
@@ -512,6 +515,9 @@ test("capture discovery routes remain protected and are registered before the ca
   assert.ok(registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm"
   ));
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/visible-chat-sync"
+  ));
 });
 
 test("draft-eligible discovery retains dashboard authorization before any database reader", async () => {
@@ -586,13 +592,16 @@ test("human-armed routes retain dashboard authorization before any service or re
   const rearm = registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm"
   );
+  const currentChatSync = registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/visible-chat-sync"
+  );
   const list = registrations.find(({ method, path }) =>
     method === "GET" && path === "/dashboard-api/tinder/human-armed-conversation-bindings"
   );
-  for (const route of [initial, rearm, list]) {
+  for (const route of [initial, rearm, currentChatSync, list]) {
     const res = responseRecorder();
     await route.handler({
-      params: { captureId: CAPTURE_ID, bindingId: "832d0663-8bb1-4947-ae8a-14a6d9de8924" },
+      params: { captureId: CAPTURE_ID, bindingId: BINDING_ID },
       body: { confirmed: true }
     }, res);
     assert.equal(res.statusCode, 401);
@@ -743,6 +752,7 @@ test("human-armed binding accepts only a deliberate minimal fallback contract", 
     confirmed: true
   });
   assert.deepEqual(assertHumanArmedRearmBody({ confirmed: true }), { confirmed: true });
+  assert.deepEqual(assertHumanArmedVisibleChatSyncBody({ confirmed: true }), { confirmed: true });
 
   for (const body of [
     { action: "BIND_EXISTING", contact_id: 7, confirmed: false },
@@ -762,6 +772,7 @@ test("human-armed binding accepts only a deliberate minimal fallback contract", 
     { confirmed: true, binding_id: DEVICE_ID }
   ]) {
     assert.throws(() => assertHumanArmedRearmBody(body));
+    assert.throws(() => assertHumanArmedVisibleChatSyncBody(body));
   }
 });
 
@@ -938,6 +949,95 @@ test("human-armed rearm requires the opaque route handle and an explicit confirm
   assert.deepEqual(received, { bindingId, confirmed: true, actor: "marcel_dashboard" });
   assert.deepEqual(res.body, { ok: true, result: { status: "ARMED" } });
   assert.equal(JSON.stringify(res.body).includes("commandId"), false);
+});
+
+test("human-armed current-chat sync accepts only an opaque binding and redacts all server-derived handles", async () => {
+  let received = null;
+  const handler = createTinderDashboardHumanArmedVisibleChatSyncQueueHandler({}, {
+    createSyncRepository() { return {}; },
+    createSyncService() {
+      return {
+        async queueVisibleChatSyncForHumanBinding(input) {
+          received = input;
+          return {
+            status: "QUEUED",
+            commandId: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5",
+            deviceId: DEVICE_ID,
+            sourceCaptureId: CAPTURE_ID,
+            contactId: 7,
+            fingerprint: "a".repeat(64)
+          };
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({ params: { bindingId: BINDING_ID }, body: { confirmed: true } }, res);
+
+  assert.deepEqual(received, { bindingId: BINDING_ID });
+  assert.equal(res.statusCode, 202);
+  assert.deepEqual(res.body, {
+    ok: true,
+    sync: { command_type: "SYNC_TINDER_VISIBLE_CHAT", status: "QUEUED" }
+  });
+  const rendered = JSON.stringify(res.body);
+  for (const forbidden of [BINDING_ID, CAPTURE_ID, DEVICE_ID, "commandId", "contactId", "fingerprint", "a".repeat(64)]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+});
+
+test("human-armed current-chat sync fails closed before service input and returns only bounded conflict state", async () => {
+  let calls = 0;
+  const handler = createTinderDashboardHumanArmedVisibleChatSyncQueueHandler({}, {
+    createSyncRepository() { return {}; },
+    createSyncService() {
+      return {
+        async queueVisibleChatSyncForHumanBinding() {
+          calls += 1;
+          return {
+            status: "PERMIT_NOT_AVAILABLE",
+            reasonCode: "HUMAN_ARMED_BINDING_NOT_CONFIRMED",
+            sourceCaptureId: CAPTURE_ID,
+            deviceId: DEVICE_ID,
+            contactId: 7
+          };
+        }
+      };
+    }
+  });
+  for (const body of [
+    {},
+    { confirmed: false },
+    { confirmed: true, capture_id: CAPTURE_ID },
+    { confirmed: true, device_id: DEVICE_ID },
+    { confirmed: true, contact_id: 7 },
+    { confirmed: true, visible_name: "M" },
+    { confirmed: true, thread_fingerprint: "a".repeat(64) },
+    { confirmed: true, messages: ["private"] }
+  ]) {
+    const invalid = responseRecorder();
+    await handler({ params: { bindingId: BINDING_ID }, body }, invalid);
+    assert.equal(invalid.statusCode, 400);
+  }
+  assert.equal(calls, 0);
+
+  const conflict = responseRecorder();
+  await handler({ params: { bindingId: BINDING_ID }, body: { confirmed: true } }, conflict);
+  assert.equal(calls, 1);
+  assert.equal(conflict.statusCode, 409);
+  assert.deepEqual(conflict.body, {
+    ok: false,
+    conflict: true,
+    sync: {
+      command_type: "SYNC_TINDER_VISIBLE_CHAT",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "HUMAN_ARMED_BINDING_NOT_CONFIRMED"
+    }
+  });
+  const rendered = JSON.stringify(conflict.body);
+  for (const forbidden of [CAPTURE_ID, DEVICE_ID, "contactId", "sourceCaptureId"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
 });
 
 test("human-armed binding list stays bounded and exposes only the opaque rearm handle plus contact label", async () => {

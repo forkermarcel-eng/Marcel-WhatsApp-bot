@@ -6,6 +6,7 @@ import handler from "../api/tinder/captures.js";
 
 const CAPTURE_ID = "6c7308cf-5d40-423d-913b-c4424f0e4ee0";
 const DEVICE_ID = "36761d7f-2ac3-4da9-9ad4-7fd381665f1e";
+const BINDING_ID = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
 const DRAFT_ID = "4d0b6b43-6a5a-4a06-a2d6-d5f2b60b4a2d";
 const PASSWORD = "test-dashboard-password";
 
@@ -181,6 +182,14 @@ test("capture proxy rejects unauthenticated or malformed requests before fetch",
     {
       query: { bindingId: DEVICE_ID, operation: "human-rearm" },
       body: { confirmed: true, command_id: CAPTURE_ID }
+    },
+    {
+      query: { bindingId: BINDING_ID, operation: "human-armed-visible-chat-sync" },
+      body: { confirmed: true, capture_id: CAPTURE_ID }
+    },
+    {
+      query: { bindingId: BINDING_ID, captureId: CAPTURE_ID, operation: "human-armed-visible-chat-sync" },
+      body: { confirmed: true }
     },
     {
       query: { captureId: CAPTURE_ID, operation: "unknown" },
@@ -677,6 +686,140 @@ test("human-armed rearm POST uses only an opaque JS handle and explicit confirma
   assert.deepEqual(JSON.parse(call.options.body), { confirmed: true });
   assert.deepEqual(res.body, { ok: true, result: { status: "ARMED" } });
   assert.equal(JSON.stringify(res.body).includes("commandId"), false);
+}));
+
+test("human-armed current-chat sync forwards only the opaque binding handle and explicit current-view confirmation", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      sync: {
+        command_type: "SYNC_TINDER_VISIBLE_CHAT",
+        status: "QUEUED",
+        command_id: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5",
+        device_id: DEVICE_ID,
+        source_capture_id: CAPTURE_ID,
+        contact_id: 7,
+        fingerprint: "a".repeat(64)
+      }
+    }, { status: 202 });
+  };
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-visible-chat-sync" },
+    body: { confirmed: true }
+  }), res);
+
+  assert.equal(res.statusCode, 502);
+  // A backend result with technical handles is deliberately rejected rather
+  // than partially accepted, so the browser never gets a hidden source.
+  assert.equal(JSON.stringify(res.body).includes("0a3699ca"), false);
+  assert.equal(JSON.stringify(res.body).includes(DEVICE_ID), false);
+  assert.equal(JSON.stringify(res.body).includes(CAPTURE_ID), false);
+
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      sync: { command_type: "SYNC_TINDER_VISIBLE_CHAT", status: "QUEUED" }
+    }, { status: 202 });
+  };
+  const success = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-visible-chat-sync" },
+    body: { confirmed: true }
+  }), success);
+
+  assert.equal(success.statusCode, 202);
+  assert.equal(call.url, `https://shared-backend.example/dashboard-api/tinder/human-armed-conversation-bindings/${BINDING_ID}/visible-chat-sync`);
+  assert.equal(call.options.method, "POST");
+  assert.equal(call.options.headers.Authorization, "Bearer server-only-secret");
+  assert.deepEqual(JSON.parse(call.options.body), { confirmed: true });
+  assert.deepEqual(success.body, {
+    ok: true,
+    sync: { command_type: "SYNC_TINDER_VISIBLE_CHAT", status: "QUEUED" }
+  });
+  const rendered = JSON.stringify(success.body);
+  for (const forbidden of [BINDING_ID, CAPTURE_ID, DEVICE_ID, "command_id", "source_capture_id", "contact_id", "fingerprint"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+}));
+
+test("human-armed current-chat sync rejects injected browser data and redacts bounded backend conflicts", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => { throw new Error("fetch must not run"); };
+  for (const body of [
+    {},
+    { confirmed: false },
+    { confirmed: true, capture_id: CAPTURE_ID },
+    { confirmed: true, device_id: DEVICE_ID },
+    { confirmed: true, contact_id: 7 },
+    { confirmed: true, visible_name: "M" },
+    { confirmed: true, thread_fingerprint: "a".repeat(64) },
+    { confirmed: true, messages: ["private"] }
+  ]) {
+    const invalid = responseRecorder();
+    await handler(request({
+      method: "POST",
+      query: { bindingId: BINDING_ID, operation: "human-armed-visible-chat-sync" },
+      body
+    }), invalid);
+    assert.equal(invalid.statusCode, 400);
+  }
+
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    conflict: true,
+    sync: {
+      command_type: "SYNC_TINDER_VISIBLE_CHAT",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "HUMAN_ARMED_BINDING_NOT_CONFIRMED"
+    }
+  }, { ok: false, status: 409 });
+  const boundedConflict = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-visible-chat-sync" },
+    body: { confirmed: true }
+  }), boundedConflict);
+  assert.equal(boundedConflict.statusCode, 409);
+  assert.deepEqual(boundedConflict.body, {
+    ok: false,
+    conflict: true,
+    sync: {
+      command_type: "SYNC_TINDER_VISIBLE_CHAT",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "HUMAN_ARMED_BINDING_NOT_CONFIRMED"
+    },
+    error: "Human-bestätigte aktuelle Chat-Synchronisierung ist derzeit nicht verfügbar."
+  });
+
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    conflict: true,
+    sync: {
+      command_type: "SYNC_TINDER_VISIBLE_CHAT",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "HUMAN_ARMED_BINDING_NOT_CONFIRMED",
+      source_capture_id: CAPTURE_ID,
+      device_id: DEVICE_ID,
+      contact_id: 7
+    },
+    error: "private database detail"
+  }, { ok: false, status: 409 });
+  const conflict = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-visible-chat-sync" },
+    body: { confirmed: true }
+  }), conflict);
+  assert.equal(conflict.statusCode, 502);
+  const rendered = JSON.stringify(conflict.body);
+  for (const forbidden of [CAPTURE_ID, DEVICE_ID, "private database detail", "source_capture_id", "contact_id"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
 }));
 
 test("human-armed binding GET keeps the UUID as a bounded browser handle and strips raw server fields", async () => withEnvironment(async () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertConversationBindingBody,
+  assertEmptyOfficialAppResumeBody,
   assertHumanArmedBindingBody,
   assertHumanArmedRearmBody,
   assertMappingBody,
@@ -13,6 +14,7 @@ import {
   createTinderDashboardDraftEligibleCaptureListHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
+  createTinderDashboardVisibleChatSyncQueueHandler,
   registerTinderCaptureRoutes
 } from "../device-bridge/tinder-capture-routes.js";
 
@@ -46,6 +48,24 @@ function responseRecorder() {
     json(value) { this.body = value; return this; }
   };
 }
+
+test("official-app resume accepts exactly an empty object and no absent, null, or targeting body", () => {
+  assert.doesNotThrow(() => assertEmptyOfficialAppResumeBody({}));
+  for (const body of [
+    undefined,
+    null,
+    { package: "com.tinder" },
+    { component: "com.tinder/.MainActivity" },
+    { uri: "tinder://chat" },
+    { device_id: DEVICE_ID },
+    { capture_id: CAPTURE_ID }
+  ]) {
+    assert.throws(
+      () => assertEmptyOfficialAppResumeBody(body),
+      error => error.code === "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST"
+    );
+  }
+});
 
 test("dashboard capture read exposes only mapping context, not visible message text or fingerprint", async () => {
   const handler = createTinderDashboardCaptureReadHandler({}, {
@@ -135,6 +155,153 @@ test("dashboard capture read rejects malformed ids and is fail closed when T3 sc
   await missingSchemaHandler({ params: { captureId: CAPTURE_ID } }, missing);
   assert.equal(missing.statusCode, 503);
   assert.equal(missing.body.code, "TINDER_IDENTITY_FOUNDATION_NOT_READY");
+});
+
+test("visible-chat sync queue derives the target from a confirmed source capture and returns only bounded command correlation", async () => {
+  let loadedCaptureId = null;
+  let queued = null;
+  const handler = createTinderDashboardVisibleChatSyncQueueHandler({}, {
+    createCaptureRepository() { return {}; },
+    createCaptureStore() {
+      return {
+        async getCapture(captureId) {
+          loadedCaptureId = captureId;
+          return capture({
+            capture_safety_status: "SAFE",
+            mapping_status: "RESOLVED",
+            human_review_status: "CONFIRMED"
+          });
+        }
+      };
+    },
+    createSyncRepository() { return {}; },
+    createSyncService() {
+      return {
+        async queueVisibleChatSync(input) {
+          queued = input;
+          return {
+            status: "QUEUED",
+            commandId: "d565e8a7-ef60-42d0-b19d-26e7904390fa",
+            deviceId: DEVICE_ID,
+            sourceCaptureId: CAPTURE_ID,
+            contactId: 7,
+            privateFingerprint: "a".repeat(64)
+          };
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({ params: { captureId: CAPTURE_ID }, body: {} }, res);
+
+  assert.equal(loadedCaptureId, CAPTURE_ID);
+  assert.deepEqual(queued, { deviceId: DEVICE_ID, sourceCaptureId: CAPTURE_ID });
+  assert.equal(res.statusCode, 202);
+  assert.deepEqual(res.body, {
+    ok: true,
+    sync: { command_type: "SYNC_TINDER_VISIBLE_CHAT", status: "QUEUED" }
+  });
+  const rendered = JSON.stringify(res.body);
+  for (const forbidden of [CAPTURE_ID, DEVICE_ID, "d565e8a7-ef60-42d0-b19d-26e7904390fa", "contactId", "privateFingerprint", "a".repeat(64)]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+});
+
+test("visible-chat sync queue fails closed before command creation for nonconfirmed or injected dashboard source input", async () => {
+  let queueCalls = 0;
+  let captureReads = 0;
+  const handler = createTinderDashboardVisibleChatSyncQueueHandler({}, {
+    createCaptureRepository() { return {}; },
+    createCaptureStore() {
+      return {
+        async getCapture() {
+          captureReads += 1;
+          return capture({ capture_safety_status: "SAFE" });
+        }
+      };
+    },
+    createSyncRepository() { return {}; },
+    createSyncService() {
+      return { async queueVisibleChatSync() { queueCalls += 1; return { status: "QUEUED" }; } };
+    }
+  });
+
+  const nonconfirmed = responseRecorder();
+  await handler({ params: { captureId: CAPTURE_ID }, body: {} }, nonconfirmed);
+  assert.equal(nonconfirmed.statusCode, 409);
+  assert.deepEqual(nonconfirmed.body, {
+    ok: false,
+    conflict: true,
+    sync: {
+      command_type: "SYNC_TINDER_VISIBLE_CHAT",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "SOURCE_CAPTURE_NOT_CONFIRMED"
+    }
+  });
+  assert.equal(queueCalls, 0);
+
+  const injected = responseRecorder();
+  await handler({
+    params: { captureId: CAPTURE_ID },
+    body: { device_id: DEVICE_ID, source_capture_id: CAPTURE_ID, thread_fingerprint: "a".repeat(64) }
+  }, injected);
+  assert.equal(injected.statusCode, 400);
+  assert.deepEqual(injected.body, {
+    ok: false,
+    code: "INVALID_TINDER_VISIBLE_CHAT_SYNC_REQUEST",
+    error: "Tinder visible-chat sync could not be queued."
+  });
+  assert.equal(captureReads, 1);
+  assert.equal(queueCalls, 0);
+});
+
+test("visible-chat sync queue returns only whitelisted conflict state and reason", async () => {
+  const handler = createTinderDashboardVisibleChatSyncQueueHandler({}, {
+    createCaptureRepository() { return {}; },
+    createCaptureStore() {
+      return {
+        async getCapture() {
+          return capture({
+            capture_safety_status: "SAFE",
+            mapping_status: "RESOLVED",
+            human_review_status: "CONFIRMED"
+          });
+        }
+      };
+    },
+    createSyncRepository() { return {}; },
+    createSyncService() {
+      return {
+        async queueVisibleChatSync() {
+          return {
+            status: "DEVICE_NOT_READY",
+            reasonCode: "DEVICE_OFFLINE",
+            device_id: DEVICE_ID,
+            source_capture_id: CAPTURE_ID,
+            contact_id: 7,
+            visible_name: "Sandry",
+            fingerprint: "b".repeat(64)
+          };
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({ params: { captureId: CAPTURE_ID }, body: {} }, res);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    ok: false,
+    conflict: true,
+    sync: {
+      command_type: "SYNC_TINDER_VISIBLE_CHAT",
+      status: "DEVICE_NOT_READY",
+      reason_code: "DEVICE_OFFLINE"
+    }
+  });
+  const rendered = JSON.stringify(res.body);
+  for (const forbidden of [CAPTURE_ID, DEVICE_ID, "Sandry", "contact_id", "fingerprint", "b".repeat(64)]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
 });
 
 test("dashboard pending capture list exposes only redacted safe pending mapping context", async () => {
@@ -337,6 +504,12 @@ test("capture discovery routes remain protected and are registered before the ca
     method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/human-armed-binding"
   ));
   assert.ok(registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/visible-chat-sync"
+  ));
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/resume-official-app"
+  ));
+  assert.ok(registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm"
   ));
 });
@@ -424,6 +597,63 @@ test("human-armed routes retain dashboard authorization before any service or re
     }, res);
     assert.equal(res.statusCode, 401);
   }
+  assert.equal(deviceBridgeReadinessCalled, false);
+});
+
+test("visible-chat sync route retains dashboard authorization before any reader, command, or readiness call", async () => {
+  let deviceBridgeReadinessCalled = false;
+  const registrations = [];
+  registerTinderCaptureRoutes({
+    app: {
+      get(path, handler) { registrations.push({ method: "GET", path, handler }); },
+      post(path, handler) { registrations.push({ method: "POST", path, handler }); }
+    },
+    pool: { connect() {}, query() {} },
+    dashboardApiReady() { return true; },
+    dashboardApiAuthorized() { return false; },
+    requireDeviceBridgeReady() {
+      deviceBridgeReadinessCalled = true;
+      return true;
+    }
+  });
+  const route = registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/visible-chat-sync"
+  );
+  const res = responseRecorder();
+  await route.handler({
+    params: { captureId: CAPTURE_ID },
+    body: { source_capture_id: CAPTURE_ID }
+  }, res);
+  assert.equal(res.statusCode, 401);
+  assert.equal(deviceBridgeReadinessCalled, false);
+});
+
+test("official-app resume route retains dashboard authorization before any reader, command, or readiness call", async () => {
+  let deviceBridgeReadinessCalled = false;
+  const registrations = [];
+  registerTinderCaptureRoutes({
+    app: {
+      get(path, handler) { registrations.push({ method: "GET", path, handler }); },
+      post(path, handler) { registrations.push({ method: "POST", path, handler }); }
+    },
+    pool: { connect() {}, query() {} },
+    dashboardApiReady() { return true; },
+    dashboardApiAuthorized() { return false; },
+    requireDeviceBridgeReady() {
+      deviceBridgeReadinessCalled = true;
+      return true;
+    }
+  });
+  const route = registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/resume-official-app"
+  );
+  assert.ok(route);
+  const res = responseRecorder();
+  await route.handler({
+    params: { captureId: CAPTURE_ID },
+    body: { package: "com.tinder" }
+  }, res);
+  assert.equal(res.statusCode, 401);
   assert.equal(deviceBridgeReadinessCalled, false);
 });
 

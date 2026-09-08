@@ -6,12 +6,17 @@ import {
   commandAckSemanticHash,
   createCommandAckHandler,
   parseAndValidateCommandAck,
-  processCommandAckTransaction
+  processCommandAckTransaction,
+  TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR,
+  TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR,
+  TINDER_WRITER_NOT_IMPLEMENTED_ERROR
 } from "../device-bridge/command-ack.js";
 import {
   T0_DEVICE_CAPABILITIES,
   T1_DEVICE_CAPABILITIES,
   T2_DEVICE_CAPABILITIES,
+  T4_DEVICE_CAPABILITIES,
+  T4_RESUME_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -20,7 +25,6 @@ import {
   TINDER_SEND_COMMAND_TYPE,
   TINDER_SEND_INTENT_STATE
 } from "../services/tinder-manual-send.js";
-import { TINDER_WRITER_NOT_IMPLEMENTED_ERROR } from "../device-bridge/command-ack.js";
 
 const NOW = new Date("2026-09-01T12:34:56.000Z");
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
@@ -59,6 +63,20 @@ function manualGateAckPayload(type, status, overrides = {}) {
   });
 }
 
+function visibleChatSyncAckPayload(status, overrides = {}) {
+  return ackPayload(status, {
+    ...(status === "SUCCEEDED" ? { result: { tinder_visible_chat_sync: "STAGED" } } : {}),
+    ...overrides
+  });
+}
+
+function officialAppResumeAckPayload(status, overrides = {}) {
+  return ackPayload(status, {
+    ...(status === "SUCCEEDED" ? { result: { official_tinder_app_resume: "INTENT_DISPATCHED" } } : {}),
+    ...overrides
+  });
+}
+
 function ackRequest(payload = ackPayload("RECEIVED"), { requestId = REQUEST_ID, keys, now = NOW } = {}) {
   const body = Buffer.from(JSON.stringify(payload));
   const hash = sha256Hex(body);
@@ -91,11 +109,15 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
   commandType = "PING", revision = 1, deviceRevision = 1, expiresAt = new Date(NOW.valueOf() + 60_000),
   deviceState = "ACTIVE", deviceRevoked = false, keyRevoked = false, missingCommand = false,
   nonceReplay = false, failAudit = false, capabilities = T0_DEVICE_CAPABILITIES,
-  commandPayload = {}, tinderIntent = null } = {}) {
+  commandPayload = {}, tinderIntent = null, visibleChatSyncPermit = null, officialAppResumePermit = null } = {}) {
   const calls = [];
   const state = {
     nonce: 0, ackInserts: 0, commandUpdates: 0, audits: 0, commits: 0, rollbacks: 0,
-    tinderIntent: tinderIntent ? { ...tinderIntent } : null, tinderIntentUpdates: 0, tinderAudits: 0
+    tinderIntent: tinderIntent ? { ...tinderIntent } : null, tinderIntentUpdates: 0, tinderAudits: 0,
+    visibleChatSyncPermit: visibleChatSyncPermit ? { ...visibleChatSyncPermit } : null,
+    visibleChatSyncPermitUpdates: 0,
+    officialAppResumePermit: officialAppResumePermit ? { ...officialAppResumePermit } : null,
+    officialAppResumePermitUpdates: 0
   };
   const authRow = {
     device_id: DEVICE_ID, key_id: KEY_ID, enrollment_state: "ACTIVE", device_revoked_at: null,
@@ -125,6 +147,28 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
       if (sql.includes("FROM device_bridge_command_acks")) return { rows: history };
       if (sql.includes("INSERT INTO device_bridge_command_acks")) { state.ackInserts += 1; return { rows: [] }; }
       if (sql.includes("UPDATE device_bridge_commands")) { state.commandUpdates += 1; return { rows: [] }; }
+      if (sql.includes("FROM tinder_visible_chat_sync_permits") && sql.includes("FOR UPDATE")) {
+        return { rows: state.visibleChatSyncPermit ? [{ ...state.visibleChatSyncPermit }] : [] };
+      }
+      if (sql.includes("UPDATE tinder_visible_chat_sync_permits")) {
+        if (!state.visibleChatSyncPermit || state.visibleChatSyncPermit.permit_state !== "ISSUED") return { rows: [] };
+        state.visibleChatSyncPermit.permit_state = params[1];
+        state.visibleChatSyncPermit.staged_at = params[2];
+        state.visibleChatSyncPermit.closed_at = params[3];
+        state.visibleChatSyncPermitUpdates += 1;
+        return { rows: [{ command_id: COMMAND_ID }] };
+      }
+      if (sql.includes("FROM tinder_official_app_resume_permits") && sql.includes("FOR UPDATE")) {
+        return { rows: state.officialAppResumePermit ? [{ ...state.officialAppResumePermit }] : [] };
+      }
+      if (sql.includes("UPDATE tinder_official_app_resume_permits")) {
+        if (!state.officialAppResumePermit || state.officialAppResumePermit.permit_state !== "ISSUED") return { rows: [] };
+        state.officialAppResumePermit.permit_state = params[1];
+        state.officialAppResumePermit.dispatched_at = params[2];
+        state.officialAppResumePermit.closed_at = params[3];
+        state.officialAppResumePermitUpdates += 1;
+        return { rows: [{ command_id: COMMAND_ID }] };
+      }
       if (sql.includes("FROM tinder_reply_send_intents") && sql.includes("FOR UPDATE")) {
         return { rows: state.tinderIntent ? [{ ...state.tinderIntent }] : [] };
       }
@@ -269,6 +313,181 @@ test("T2 human-armed conversation acknowledgement is exact and capability-gated"
       T2_DEVICE_CAPABILITIES
     ), error => error.code === "INVALID_BODY");
   }
+});
+
+test("V4 visible-chat sync acknowledgement atomically stages only its separate permit", async () => {
+  const received = visibleChatSyncAckPayload("RECEIVED");
+  const succeeded = visibleChatSyncAckPayload("SUCCEEDED");
+  const fake = ackPool({
+    commandType: "SYNC_TINDER_VISIBLE_CHAT",
+    capabilities: T4_DEVICE_CAPABILITIES,
+    history: [historyRow(received)],
+    visibleChatSyncPermit: {
+      command_id: COMMAND_ID,
+      device_id: DEVICE_ID,
+      permit_state: "ISSUED"
+    }
+  });
+  const response = await processCommandAckTransaction(fake.pool, auth(), succeeded, NOW);
+  assert.equal(response.status, "SUCCEEDED");
+  assert.equal(fake.state.commandUpdates, 1);
+  assert.equal(fake.state.visibleChatSyncPermitUpdates, 1);
+  assert.equal(fake.state.visibleChatSyncPermit.permit_state, "STAGED");
+  assert.equal(fake.state.visibleChatSyncPermit.staged_at, NOW.toISOString());
+  assert.equal(fake.state.visibleChatSyncPermit.closed_at, null);
+  const insertedAck = fake.calls.findIndex(call => call.sql.includes("INSERT INTO device_bridge_command_acks"));
+  const projectedPermit = fake.calls.findIndex(call => call.sql.includes("UPDATE tinder_visible_chat_sync_permits"));
+  const commit = fake.calls.findIndex(call => call.sql === "COMMIT");
+  assert.ok(insertedAck >= 0 && projectedPermit > insertedAck && commit > projectedPermit);
+  assert.equal(fake.calls.some(call => /capture|identity|visible_name|fingerprint/i.test(call.sql)), false);
+
+  await assert.rejects(
+    () => processCommandAckTransaction(
+      ackPool({
+        commandType: "SYNC_TINDER_VISIBLE_CHAT",
+        capabilities: T2_DEVICE_CAPABILITIES,
+        visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" }
+      }).pool,
+      auth(),
+      visibleChatSyncAckPayload("REJECTED"),
+      NOW
+    ),
+    error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
+  );
+});
+
+test("official Tinder app resume ACK is exact, capability-gated, and projects only its dedicated permit", async () => {
+  const received = officialAppResumeAckPayload("RECEIVED");
+  const succeeded = officialAppResumeAckPayload("SUCCEEDED");
+  const fake = ackPool({
+    commandType: "RESUME_OFFICIAL_TINDER_APP",
+    capabilities: T4_RESUME_DEVICE_CAPABILITIES,
+    history: [historyRow(received)],
+    officialAppResumePermit: {
+      command_id: COMMAND_ID,
+      device_id: DEVICE_ID,
+      permit_state: "ISSUED"
+    }
+  });
+  const response = await processCommandAckTransaction(fake.pool, auth(), succeeded, NOW);
+  assert.equal(response.status, "SUCCEEDED");
+  assert.equal(fake.state.commandUpdates, 1);
+  assert.equal(fake.state.officialAppResumePermitUpdates, 1);
+  assert.equal(fake.state.officialAppResumePermit.permit_state, "DISPATCHED");
+  assert.equal(fake.state.officialAppResumePermit.dispatched_at, NOW.toISOString());
+  assert.equal(fake.state.officialAppResumePermit.closed_at, null);
+  const insertedAck = fake.calls.findIndex(call => call.sql.includes("INSERT INTO device_bridge_command_acks"));
+  const projectedPermit = fake.calls.findIndex(call => call.sql.includes("UPDATE tinder_official_app_resume_permits"));
+  const commit = fake.calls.findIndex(call => call.sql === "COMMIT");
+  assert.ok(insertedAck >= 0 && projectedPermit > insertedAck && commit > projectedPermit);
+  assert.equal(fake.calls.some(call => /source_capture_id|capture|identity|visible_name|fingerprint|package|component/i.test(call.sql)), false);
+
+  for (const result of [
+    null,
+    { official_tinder_app_resume: "OPENED" },
+    { official_tinder_app_resume: "INTENT_DISPATCHED", package: "com.tinder" }
+  ]) {
+    assert.throws(() => parseAndValidateCommandAck(
+      ackRequest(officialAppResumeAckPayload("SUCCEEDED", { result })).req,
+      "RESUME_OFFICIAL_TINDER_APP",
+      T4_RESUME_DEVICE_CAPABILITIES
+    ), error => error.code === "INVALID_BODY");
+  }
+  await assert.rejects(
+    () => processCommandAckTransaction(
+      ackPool({
+        commandType: "RESUME_OFFICIAL_TINDER_APP",
+        capabilities: T4_DEVICE_CAPABILITIES,
+        officialAppResumePermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" }
+      }).pool,
+      auth(),
+      officialAppResumeAckPayload("RECEIVED"),
+      NOW
+    ),
+    error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
+  );
+});
+
+test("official Tinder app resume closes a post-receipt local block as bounded FAILED and never permits it for another command", async () => {
+  for (const error of [
+    TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR,
+    TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR
+  ]) {
+    const failed = officialAppResumeAckPayload("FAILED", { error });
+    assert.doesNotThrow(() => parseAndValidateCommandAck(
+      ackRequest(failed).req,
+      "RESUME_OFFICIAL_TINDER_APP",
+      T4_RESUME_DEVICE_CAPABILITIES
+    ));
+    assert.throws(() => parseAndValidateCommandAck(
+      ackRequest(failed).req,
+      "PING",
+      T0_DEVICE_CAPABILITIES
+    ), error => error.code === "INVALID_BODY");
+  }
+
+  const failed = officialAppResumeAckPayload("FAILED", {
+    error: TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR
+  });
+  const fake = ackPool({
+    commandType: "RESUME_OFFICIAL_TINDER_APP",
+    capabilities: T4_RESUME_DEVICE_CAPABILITIES,
+    history: [historyRow(officialAppResumeAckPayload("RECEIVED"))],
+    officialAppResumePermit: {
+      command_id: COMMAND_ID,
+      device_id: DEVICE_ID,
+      permit_state: "ISSUED"
+    }
+  });
+  const response = await processCommandAckTransaction(fake.pool, auth(), failed, NOW);
+  assert.equal(response.status, "FAILED");
+  assert.equal(fake.state.commandUpdates, 1);
+  assert.equal(fake.state.officialAppResumePermitUpdates, 1);
+  assert.equal(fake.state.officialAppResumePermit.permit_state, "CANCELLED");
+  assert.equal(fake.state.officialAppResumePermit.dispatched_at, null);
+  assert.equal(fake.state.officialAppResumePermit.closed_at, NOW.toISOString());
+});
+
+test("official Tinder app resume cannot record a late success after RECEIVED, while a late bounded failure still closes its permit", async () => {
+  const expiredAt = new Date(NOW.valueOf() - 1);
+  const received = officialAppResumeAckPayload("RECEIVED");
+  const succeeded = officialAppResumeAckPayload("SUCCEEDED");
+  const lateSuccess = ackPool({
+    commandType: "RESUME_OFFICIAL_TINDER_APP",
+    capabilities: T4_RESUME_DEVICE_CAPABILITIES,
+    expiresAt: expiredAt,
+    history: [historyRow(received)],
+    officialAppResumePermit: {
+      command_id: COMMAND_ID,
+      device_id: DEVICE_ID,
+      permit_state: "ISSUED"
+    }
+  });
+  await assert.rejects(
+    () => processCommandAckTransaction(lateSuccess.pool, auth(), succeeded, NOW),
+    error => error.code === "COMMAND_EXPIRED"
+  );
+  assert.equal(lateSuccess.state.ackInserts, 0);
+  assert.equal(lateSuccess.state.commandUpdates, 0);
+  assert.equal(lateSuccess.state.officialAppResumePermitUpdates, 0);
+
+  const failed = officialAppResumeAckPayload("FAILED", {
+    error: TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR
+  });
+  const lateFailure = ackPool({
+    commandType: "RESUME_OFFICIAL_TINDER_APP",
+    capabilities: T4_RESUME_DEVICE_CAPABILITIES,
+    expiresAt: expiredAt,
+    history: [historyRow(received)],
+    officialAppResumePermit: {
+      command_id: COMMAND_ID,
+      device_id: DEVICE_ID,
+      permit_state: "ISSUED"
+    }
+  });
+  const response = await processCommandAckTransaction(lateFailure.pool, auth(), failed, NOW);
+  assert.equal(response.status, "FAILED");
+  assert.equal(lateFailure.state.officialAppResumePermit.permit_state, "CANCELLED");
 });
 
 test("T5 accepts only direct blocked-writer REJECTED and atomically cancels its sealed intent", async () => {

@@ -1,5 +1,9 @@
 import {
   inspectDeviceBridgeT1Schema,
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION,
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
+  T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CHECK_EXPRESSION,
+  T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME,
   T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION,
   T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
   T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION,
@@ -46,6 +50,14 @@ export async function inspectTinderManualSendCommandSchema(client, {
   if (command.constraintName === T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME) {
     return { state: TINDER_MANUAL_SEND_COMMAND_SCHEMA_STATE.CANONICAL, bridge, command };
   }
+  // A later exact V4 command superset remains compatible with the completed
+  // T5 vocabulary. The V4 migration, not this older runner, owns that delta.
+  if (command.constraintName === T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME) {
+    return { state: TINDER_MANUAL_SEND_COMMAND_SCHEMA_STATE.CANONICAL, bridge, command };
+  }
+  if (command.constraintName === TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME) {
+    return { state: TINDER_MANUAL_SEND_COMMAND_SCHEMA_STATE.CANONICAL, bridge, command };
+  }
   return { state: TINDER_MANUAL_SEND_COMMAND_SCHEMA_STATE.INVALID, bridge, command };
 }
 
@@ -61,7 +73,11 @@ export async function preflightTinderManualSendCommandMigration(client, options 
   }
   const expression = command.state === TINDER_MANUAL_SEND_COMMAND_SCHEMA_STATE.LEGACY
     ? T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION
-    : T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION;
+    : command.command.constraintName === TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME
+      ? TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION
+      : command.command.constraintName === T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME
+        ? T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CHECK_EXPRESSION
+        : T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION;
   const compatibility = await client.query(`
     SELECT EXISTS (
       SELECT 1 FROM device_bridge_commands

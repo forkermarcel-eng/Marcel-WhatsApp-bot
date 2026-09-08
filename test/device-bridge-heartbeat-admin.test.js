@@ -6,6 +6,8 @@ import {
   T0_DEVICE_CAPABILITIES,
   T1_DEVICE_CAPABILITIES,
   T2_DEVICE_CAPABILITIES,
+  T4_DEVICE_CAPABILITIES,
+  T4_RESUME_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -273,7 +275,13 @@ function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt =
         const deliversT1 = sql.includes("CONNECT_TINDER") && sql.includes("DISCONNECT_TINDER");
         const deliversT2 = deliversT1 && sql.includes("ARM_TINDER_CONVERSATION_BINDING");
         const deliversT5 = deliversT2 && sql.includes("SEND_TINDER_DRAFT");
-        const allowed = deliversT5
+        const deliversT4 = deliversT2 && sql.includes("SYNC_TINDER_VISIBLE_CHAT");
+        const deliversT4Resume = deliversT4 && sql.includes("RESUME_OFFICIAL_TINDER_APP");
+        const allowed = deliversT4Resume
+          ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SYNC_TINDER_VISIBLE_CHAT", "RESUME_OFFICIAL_TINDER_APP"])
+          : deliversT4
+          ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SYNC_TINDER_VISIBLE_CHAT"])
+          : deliversT5
           ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SEND_TINDER_DRAFT"])
           : deliversT2
           ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING"])
@@ -471,6 +479,88 @@ test("T2 human-armed conversation command is delivered only to the exact T2 prof
   assert.equal(t2Response.commands[0].type, "ARM_TINDER_CONVERSATION_BINDING");
   assert.deepEqual(t2Response.commands[0].payload, {});
   assert.match(t2.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /ARM_TINDER_CONVERSATION_BINDING/);
+});
+
+test("V4 visible-chat sync command is delivered only to the exact V4 profile with an empty payload", async () => {
+  const command = commandRow(
+    "SYNC_TINDER_VISIBLE_CHAT",
+    new Date(NOW.valueOf() - 1000),
+    "4f444444-4444-4444-8444-444444444444"
+  );
+  const t5Payload = heartbeatPayload({ capabilities: T5_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const t5Request = heartbeatRequest(t5Payload);
+  const t5 = heartbeatPool({ request: t5Request, commands: [command] });
+  const t5Response = await processHeartbeatTransaction(
+    t5.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t5Request.hash },
+    t5Payload,
+    NOW
+  );
+  assert.deepEqual(t5Response.commands, []);
+  assert.doesNotMatch(t5.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /SYNC_TINDER_VISIBLE_CHAT/);
+
+  const v4Payload = heartbeatPayload({ capabilities: T4_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const v4Request = heartbeatRequest(v4Payload);
+  const v4 = heartbeatPool({ request: v4Request, commands: [command] });
+  const v4Response = await processHeartbeatTransaction(
+    v4.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: v4Request.hash },
+    v4Payload,
+    NOW
+  );
+  assert.deepEqual(v4Response.commands, [{
+    command_id: command.command_id,
+    protocol_version: 1,
+    type: "SYNC_TINDER_VISIBLE_CHAT",
+    issued_at: command.issued_at.toISOString(),
+    expires_at: command.expires_at.toISOString(),
+    configuration_revision: 1,
+    payload: {}
+  }]);
+  assert.match(v4.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /SYNC_TINDER_VISIBLE_CHAT/);
+  assert.doesNotMatch(v4.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /SEND_TINDER_DRAFT/);
+});
+
+test("official Tinder-app resume command is delivered only to the exact resume profile with an empty payload", async () => {
+  const command = commandRow(
+    "RESUME_OFFICIAL_TINDER_APP",
+    new Date(NOW.valueOf() - 1000),
+    "4a444444-4444-4444-8444-444444444444"
+  );
+  const v4Payload = heartbeatPayload({ capabilities: T4_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const v4Request = heartbeatRequest(v4Payload);
+  const v4 = heartbeatPool({ request: v4Request, commands: [command] });
+  const v4Response = await processHeartbeatTransaction(
+    v4.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: v4Request.hash },
+    v4Payload,
+    NOW
+  );
+  assert.deepEqual(v4Response.commands, []);
+  assert.doesNotMatch(v4.calls.find(call => call.sql.includes("FROM device_bridge_commands")).sql, /RESUME_OFFICIAL_TINDER_APP/);
+
+  const resumePayload = heartbeatPayload({ capabilities: T4_RESUME_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
+  const resumeRequest = heartbeatRequest(resumePayload);
+  const resume = heartbeatPool({ request: resumeRequest, commands: [command] });
+  const resumeResponse = await processHeartbeatTransaction(
+    resume.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: resumeRequest.hash },
+    resumePayload,
+    NOW
+  );
+  assert.deepEqual(resumeResponse.commands, [{
+    command_id: command.command_id,
+    protocol_version: 1,
+    type: "RESUME_OFFICIAL_TINDER_APP",
+    issued_at: command.issued_at.toISOString(),
+    expires_at: command.expires_at.toISOString(),
+    configuration_revision: 1,
+    payload: {}
+  }]);
+  const query = resume.calls.find(call => call.sql.includes("FROM device_bridge_commands"));
+  assert.match(query.sql, /RESUME_OFFICIAL_TINDER_APP/);
+  assert.doesNotMatch(query.sql, /SEND_TINDER_DRAFT/);
+  assert.doesNotMatch(JSON.stringify(resumeResponse), /package|component|uri|chat|capture|identity/i);
 });
 
 test("T5 persists only a descriptor and transiently hydrates a full signed envelope only for the exact T5 heartbeat profile", async () => {

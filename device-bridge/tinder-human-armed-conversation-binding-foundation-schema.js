@@ -13,6 +13,8 @@ import {
 import { canonicalSchemaPredicate } from "./schema-contract.js";
 import {
   inspectDeviceBridgeT1Schema,
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
+  T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME,
   T1_COMMAND_TYPE_CONSTRAINT_NAME,
   T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
   T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME
@@ -354,7 +356,9 @@ async function commandConstraintState(client) {
     && item.specification.column === "command_type");
   if (command?.constraintName === T1_COMMAND_TYPE_CONSTRAINT_NAME) return "T1";
   if (command?.constraintName === T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME ||
-      command?.constraintName === T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME) return "T2";
+      command?.constraintName === T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME ||
+      command?.constraintName === T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME ||
+      command?.constraintName === TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME) return "T2";
   return "INVALID";
 }
 

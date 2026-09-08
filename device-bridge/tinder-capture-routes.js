@@ -6,6 +6,12 @@ import {
   TINDER_PENDING_HUMAN_MAPPING_LIMIT
 } from "../services/tinder-capture-store.js";
 import {
+  createPgTinderConversationProductReadRepository,
+  createTinderConversationProductReadService,
+  normalizeTinderConversationProductDetail,
+  normalizeTinderConversationProductList
+} from "../services/tinder-conversation-product-read.js";
+import {
   TinderHumanMappingError,
   createPgTinderHumanMappingRepository,
   createTinderHumanMappingService
@@ -22,6 +28,22 @@ import {
   createPgTinderHumanArmedConversationBindingRepository,
   createTinderHumanArmedConversationBindingService
 } from "../services/tinder-human-armed-conversation-binding.js";
+import {
+  TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+  TINDER_VISIBLE_CHAT_SYNC_REASON,
+  TINDER_VISIBLE_CHAT_SYNC_STATUS,
+  TinderVisibleChatSyncError,
+  createPgTinderVisibleChatSyncRepository,
+  createTinderVisibleChatSyncService
+} from "../services/tinder-visible-chat-sync.js";
+import {
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE,
+  TINDER_OFFICIAL_APP_RESUME_REASON,
+  TINDER_OFFICIAL_APP_RESUME_STATUS,
+  TinderOfficialAppResumeError,
+  createPgTinderOfficialAppResumeRepository,
+  createTinderOfficialAppResumeService
+} from "../services/tinder-official-app-resume.js";
 import { TINDER_IDENTITY_RESOLUTION_STATUS } from "../services/tinder-identity-resolution.js";
 
 /* ==================================================
@@ -55,6 +77,20 @@ const TINDER_HUMAN_ARMED_BINDING_BODY_FIELDS = new Set([
 const TINDER_HUMAN_ARMED_REARM_BODY_FIELDS = new Set(["confirmed"]);
 const TINDER_HUMAN_ARMED_BINDING_LIST_LIMIT = 25;
 const PUBLIC_CONVERSATION_BINDING_STATUSES = new Set(Object.values(CHANNEL_CONVERSATION_BINDING_STATUS));
+const PUBLIC_VISIBLE_CHAT_SYNC_QUEUE_STATUSES = new Set([
+  TINDER_VISIBLE_CHAT_SYNC_STATUS.QUEUED,
+  TINDER_VISIBLE_CHAT_SYNC_STATUS.DEVICE_NOT_READY,
+  TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_CONFLICT,
+  TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE
+]);
+const PUBLIC_VISIBLE_CHAT_SYNC_REASONS = new Set(Object.values(TINDER_VISIBLE_CHAT_SYNC_REASON));
+const PUBLIC_OFFICIAL_APP_RESUME_QUEUE_STATUSES = new Set([
+  TINDER_OFFICIAL_APP_RESUME_STATUS.QUEUED,
+  TINDER_OFFICIAL_APP_RESUME_STATUS.DEVICE_NOT_READY,
+  TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_CONFLICT,
+  TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_NOT_AVAILABLE
+]);
+const PUBLIC_OFFICIAL_APP_RESUME_REASONS = new Set(Object.values(TINDER_OFFICIAL_APP_RESUME_REASON));
 const PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES = new Set([
   HUMAN_ARMED_CONVERSATION_STATUS.UNSAFE_CAPTURE,
   HUMAN_ARMED_CONVERSATION_STATUS.PENDING_CAPTURE_REQUIRED,
@@ -203,6 +239,14 @@ function normalizePendingCaptureRecords(rows) {
     }
     return capture;
   }));
+}
+
+function conversationProductReadNotReadyError() {
+  return {
+    statusCode: 503,
+    code: "TINDER_CONVERSATION_PRODUCT_READ_NOT_READY",
+    message: "Tinder conversation reader is not ready"
+  };
 }
 
 /**
@@ -401,6 +445,225 @@ function boundedHumanArmedBindingResult(result) {
   throw error;
 }
 
+/**
+ * V4 has no dashboard-provided operation input. The URL capture context is
+ * looked up server-side; an empty body prevents device, contact, thread, or
+ * fingerprint injection from becoming a second targeting surface.
+ */
+function assertEmptyVisibleChatSyncBody(body) {
+  if (body === undefined || body === null || exactKeys(body, [])) return;
+  const error = new Error("Visible-chat sync request has unsupported fields.");
+  error.statusCode = 400;
+  error.code = "INVALID_TINDER_VISIBLE_CHAT_SYNC_REQUEST";
+  throw error;
+}
+
+/**
+ * The standard-launcher action has no browser-controlled target, package,
+ * component, URI, device, command, expiry, thread, or identity input. The
+ * selected capture context is the only server-side correlation handle.
+ */
+function assertEmptyOfficialAppResumeBody(body) {
+  if (exactKeys(body, [])) return;
+  const error = new Error("Official Tinder app resume request has unsupported fields.");
+  error.statusCode = 400;
+  error.code = "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST";
+  throw error;
+}
+
+function boundedVisibleChatSyncQueueResult(result) {
+  const status = String(result?.status || "").trim().toUpperCase();
+  const reasonCode = result?.reasonCode === undefined
+    ? null
+    : String(result.reasonCode || "").trim().toUpperCase();
+  if (!PUBLIC_VISIBLE_CHAT_SYNC_QUEUE_STATUSES.has(status)
+      || (reasonCode !== null && !PUBLIC_VISIBLE_CHAT_SYNC_REASONS.has(reasonCode))
+      || (status === TINDER_VISIBLE_CHAT_SYNC_STATUS.QUEUED && reasonCode !== null)
+      || (status !== TINDER_VISIBLE_CHAT_SYNC_STATUS.QUEUED && reasonCode === null)) {
+    const error = new Error("Invalid visible-chat sync result.");
+    error.statusCode = 500;
+    error.code = "INVALID_TINDER_VISIBLE_CHAT_SYNC_RESULT";
+    throw error;
+  }
+  return Object.freeze({
+    command_type: TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+    status,
+    ...(reasonCode === null ? {} : { reason_code: reasonCode })
+  });
+}
+
+function boundedOfficialAppResumeQueueResult(result) {
+  const status = String(result?.status || "").trim().toUpperCase();
+  const reasonCode = result?.reasonCode === undefined
+    ? null
+    : String(result.reasonCode || "").trim().toUpperCase();
+  if (!PUBLIC_OFFICIAL_APP_RESUME_QUEUE_STATUSES.has(status)
+      || (reasonCode !== null && !PUBLIC_OFFICIAL_APP_RESUME_REASONS.has(reasonCode))
+      || (status === TINDER_OFFICIAL_APP_RESUME_STATUS.QUEUED && reasonCode !== null)
+      || (status !== TINDER_OFFICIAL_APP_RESUME_STATUS.QUEUED && reasonCode === null)) {
+    const error = new Error("Invalid official Tinder app resume result.");
+    error.statusCode = 500;
+    error.code = "INVALID_TINDER_OFFICIAL_APP_RESUME_RESULT";
+    throw error;
+  }
+  return Object.freeze({
+    command_type: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE,
+    status,
+    ...(reasonCode === null ? {} : { reason_code: reasonCode })
+  });
+}
+
+/**
+ * A dashboard user may only request the bounded V4 sync for the capture they
+ * already selected in the existing capture context. The server alone derives
+ * the device target, and the sync service re-locks/rechecks the confirmed
+ * source capture before it writes the empty command and opaque permit.
+ */
+function createTinderDashboardVisibleChatSyncQueueHandler(pool, {
+  createCaptureRepository = createPgTinderCaptureRepository,
+  createCaptureStore = createTinderCaptureStore,
+  createSyncRepository = createPgTinderVisibleChatSyncRepository,
+  createSyncService = createTinderVisibleChatSyncService
+} = {}) {
+  const captureStore = createCaptureStore(createCaptureRepository(pool));
+  const syncService = createSyncService(createSyncRepository(pool));
+  return async function tinderDashboardVisibleChatSyncQueueHandler(req, res) {
+    try {
+      assertEmptyVisibleChatSyncBody(req.body);
+      const captureId = normalizeCaptureId(req.params.captureId);
+      const sourceCapture = await captureStore.getCapture(captureId);
+      if (!sourceCapture) {
+        const error = new Error("Capture was not found.");
+        error.statusCode = 404;
+        error.code = "CAPTURE_NOT_FOUND";
+        throw error;
+      }
+      const capture = normalizeCaptureRecord(sourceCapture);
+      // Keep the UI route fail-closed before creating a command. The sync
+      // service repeats this condition in its locked transaction, including
+      // the resolved-contact requirement that never reaches the dashboard.
+      if (capture.mapping_status !== "RESOLVED" || capture.human_review_status !== "CONFIRMED") {
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          sync: {
+            command_type: TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+            status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+            reason_code: TINDER_VISIBLE_CHAT_SYNC_REASON.SOURCE_CAPTURE_NOT_CONFIRMED
+          }
+        });
+      }
+      const sync = boundedVisibleChatSyncQueueResult(await syncService.queueVisibleChatSync({
+        deviceId: capture.device_id,
+        sourceCaptureId: capture.capture_id
+      }));
+      if (sync.status !== TINDER_VISIBLE_CHAT_SYNC_STATUS.QUEUED) {
+        return res.status(409).json({ ok: false, conflict: true, sync });
+      }
+      // The command UUID remains private to the signed Device-Bridge channel.
+      // `command_type` + status is the bounded dashboard correlation only.
+      return res.status(202).json({ ok: true, sync });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        return res.status(503).json({
+          ok: false,
+          code: "TINDER_VISIBLE_CHAT_SYNC_FOUNDATION_NOT_READY",
+          error: "Tinder visible-chat sync foundation is not ready."
+        });
+      }
+      const status = Number(error?.statusCode)
+        || (error instanceof TinderVisibleChatSyncError ? error.statusCode : 500);
+      if (status === 500) console.error("Tinder visible-chat sync queue failed.");
+      // Intentionally do not reflect messages from capture, database, or
+      // command layers: every error response remains bounded and contentless.
+      return res.status(status).json({
+        ok: false,
+        code: status === 400 && error?.code === "INVALID_CAPTURE_ID"
+          ? "INVALID_CAPTURE_ID"
+          : status === 400 && error?.code === "INVALID_TINDER_VISIBLE_CHAT_SYNC_REQUEST"
+            ? "INVALID_TINDER_VISIBLE_CHAT_SYNC_REQUEST"
+            : status === 404 && error?.code === "CAPTURE_NOT_FOUND"
+              ? "CAPTURE_NOT_FOUND"
+              : "TINDER_VISIBLE_CHAT_SYNC_QUEUE_FAILED",
+        error: "Tinder visible-chat sync could not be queued."
+      });
+    }
+  };
+}
+
+/**
+ * This is the only dashboard path which may queue a one-shot standard Tinder
+ * launcher command. It is intentionally not a general Android-launch or
+ * Tinder-navigation route: source capture and device are derived server-side,
+ * while Android receives exactly an empty payload.
+ */
+function createTinderDashboardOfficialAppResumeQueueHandler(pool, {
+  createCaptureRepository = createPgTinderCaptureRepository,
+  createCaptureStore = createTinderCaptureStore,
+  createResumeRepository = createPgTinderOfficialAppResumeRepository,
+  createResumeService = createTinderOfficialAppResumeService
+} = {}) {
+  const captureStore = createCaptureStore(createCaptureRepository(pool));
+  const resumeService = createResumeService(createResumeRepository(pool));
+  return async function tinderDashboardOfficialAppResumeQueueHandler(req, res) {
+    try {
+      assertEmptyOfficialAppResumeBody(req.body);
+      const captureId = normalizeCaptureId(req.params.captureId);
+      const sourceCapture = await captureStore.getCapture(captureId);
+      if (!sourceCapture) {
+        const error = new Error("Capture was not found.");
+        error.statusCode = 404;
+        error.code = "CAPTURE_NOT_FOUND";
+        throw error;
+      }
+      const capture = normalizeCaptureRecord(sourceCapture);
+      if (capture.mapping_status !== "RESOLVED" || capture.human_review_status !== "CONFIRMED") {
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          resume: {
+            command_type: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE,
+            status: TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_NOT_AVAILABLE,
+            reason_code: TINDER_OFFICIAL_APP_RESUME_REASON.SOURCE_CAPTURE_NOT_CONFIRMED
+          }
+        });
+      }
+      const resume = boundedOfficialAppResumeQueueResult(await resumeService.queueOfficialAppResume({
+        deviceId: capture.device_id,
+        sourceCaptureId: capture.capture_id
+      }));
+      if (resume.status !== TINDER_OFFICIAL_APP_RESUME_STATUS.QUEUED) {
+        return res.status(409).json({ ok: false, conflict: true, resume });
+      }
+      // The device-bridge command identifier never becomes a dashboard/API
+      // input or output. The signed command path alone receives it.
+      return res.status(202).json({ ok: true, resume });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        return res.status(503).json({
+          ok: false,
+          code: "TINDER_OFFICIAL_APP_RESUME_FOUNDATION_NOT_READY",
+          error: "Official Tinder app resume foundation is not ready."
+        });
+      }
+      const status = Number(error?.statusCode)
+        || (error instanceof TinderOfficialAppResumeError ? error.statusCode : 500);
+      if (status === 500) console.error("Official Tinder app resume queue failed.");
+      return res.status(status).json({
+        ok: false,
+        code: status === 400 && error?.code === "INVALID_CAPTURE_ID"
+          ? "INVALID_CAPTURE_ID"
+          : status === 400 && error?.code === "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST"
+            ? "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST"
+            : status === 404 && error?.code === "CAPTURE_NOT_FOUND"
+              ? "CAPTURE_NOT_FOUND"
+              : "TINDER_OFFICIAL_APP_RESUME_QUEUE_FAILED",
+        error: "Official Tinder app resume could not be queued."
+      });
+    }
+  };
+}
+
 function createTinderDashboardCaptureReadHandler(pool, {
   createRepository = createPgTinderCaptureRepository,
   createStore = createTinderCaptureStore,
@@ -507,6 +770,75 @@ function createTinderDashboardDraftEligibleCaptureListHandler(pool, {
         error: status === 500
           ? "Tinder captures ready for a draft could not be loaded."
           : safeMessage(error, "Tinder captures ready for a draft could not be loaded.")
+      });
+    }
+  };
+}
+
+/**
+ * This product reader is deliberately separate from the legacy capture detail
+ * route above.  The latter remains a redacted mapping context; this one is the
+ * only dashboard read surface allowed to project confirmed conversation text.
+ */
+function createTinderDashboardLatestConfirmedConversationListHandler(pool, {
+  createRepository = createPgTinderConversationProductReadRepository,
+  createService = createTinderConversationProductReadService
+} = {}) {
+  const conversationReader = createService(createRepository(pool));
+  return async function tinderDashboardLatestConfirmedConversationListHandler(_req, res) {
+    try {
+      const conversations = normalizeTinderConversationProductList(
+        await conversationReader.listLatestConfirmedConversations()
+      );
+      return res.status(200).json({ ok: true, conversations });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        const notReady = conversationProductReadNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder dashboard latest conversation list failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_CONVERSATION_LIST_FAILED",
+        error: status === 500
+          ? "Tinder conversations could not be loaded."
+          : safeMessage(error, "Tinder conversations could not be loaded.")
+      });
+    }
+  };
+}
+
+function createTinderDashboardLatestConfirmedConversationReadHandler(pool, {
+  createRepository = createPgTinderConversationProductReadRepository,
+  createService = createTinderConversationProductReadService
+} = {}) {
+  const conversationReader = createService(createRepository(pool));
+  return async function tinderDashboardLatestConfirmedConversationReadHandler(req, res) {
+    try {
+      const conversation = await conversationReader.getLatestConfirmedConversation(
+        normalizeCaptureId(req.params.captureId)
+      );
+      if (!conversation) {
+        const error = new Error("Tinder conversation was not found.");
+        error.statusCode = 404;
+        error.code = "TINDER_CONVERSATION_NOT_FOUND";
+        throw error;
+      }
+      return res.status(200).json({ ok: true, conversation: normalizeTinderConversationProductDetail(conversation) });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        const notReady = conversationProductReadNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder dashboard latest conversation read failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_CONVERSATION_READ_FAILED",
+        error: status === 500
+          ? "Tinder conversation could not be loaded."
+          : safeMessage(error, "Tinder conversation could not be loaded.")
       });
     }
   };
@@ -706,12 +1038,16 @@ function registerTinderCaptureRoutes({
 }) {
   const listPendingCaptures = createTinderDashboardPendingCaptureListHandler(pool);
   const listDraftEligibleCaptures = createTinderDashboardDraftEligibleCaptureListHandler(pool);
+  const listLatestConfirmedConversations = createTinderDashboardLatestConfirmedConversationListHandler(pool);
+  const readLatestConfirmedConversation = createTinderDashboardLatestConfirmedConversationReadHandler(pool);
   const readCapture = createTinderDashboardCaptureReadHandler(pool);
   const mapCapture = createTinderDashboardMappingHandler(pool);
   const bindCaptureConversation = createTinderDashboardConversationBindingHandler(pool);
   const armCaptureConversation = createTinderDashboardHumanArmedBindingHandler(pool);
   const rearmCaptureConversation = createTinderDashboardHumanArmedRearmHandler(pool);
   const listHumanArmedBindings = createTinderDashboardHumanArmedBindingListHandler(pool);
+  const queueVisibleChatSync = createTinderDashboardVisibleChatSyncQueueHandler(pool);
+  const queueOfficialAppResume = createTinderDashboardOfficialAppResumeQueueHandler(pool);
   const dashboard = (handler) => async (req, res) => {
     if (!dashboardApiReady(res)) return;
     if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok: false, error: "Not authorized." });
@@ -721,11 +1057,15 @@ function registerTinderCaptureRoutes({
 
   app.get("/dashboard-api/tinder/captures/pending", dashboard(listPendingCaptures));
   app.get("/dashboard-api/tinder/captures/draft-eligible", dashboard(listDraftEligibleCaptures));
+  app.get("/dashboard-api/tinder/conversations/latest-confirmed", dashboard(listLatestConfirmedConversations));
+  app.get("/dashboard-api/tinder/conversations/:captureId", dashboard(readLatestConfirmedConversation));
   app.get("/dashboard-api/tinder/human-armed-conversation-bindings", dashboard(listHumanArmedBindings));
   app.get("/dashboard-api/tinder/captures/:captureId", dashboard(readCapture));
   app.post("/dashboard-api/tinder/captures/:captureId/mapping", dashboard(mapCapture));
   app.post("/dashboard-api/tinder/captures/:captureId/conversation-binding", dashboard(bindCaptureConversation));
   app.post("/dashboard-api/tinder/captures/:captureId/human-armed-binding", dashboard(armCaptureConversation));
+  app.post("/dashboard-api/tinder/captures/:captureId/visible-chat-sync", dashboard(queueVisibleChatSync));
+  app.post("/dashboard-api/tinder/captures/:captureId/resume-official-app", dashboard(queueOfficialAppResume));
   app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm", dashboard(rearmCaptureConversation));
 }
 
@@ -736,20 +1076,28 @@ export {
   TINDER_HUMAN_ARMED_REARM_BODY_FIELDS,
   TINDER_HUMAN_ARMED_BINDING_LIST_LIMIT,
   assertConversationBindingBody,
+  assertEmptyVisibleChatSyncBody,
   assertHumanArmedBindingBody,
   assertHumanArmedRearmBody,
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
   createTinderDashboardDraftEligibleCaptureListHandler,
+  createTinderDashboardLatestConfirmedConversationListHandler,
+  createTinderDashboardLatestConfirmedConversationReadHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
   createTinderDashboardConversationBindingHandler,
+  createTinderDashboardVisibleChatSyncQueueHandler,
+  createTinderDashboardOfficialAppResumeQueueHandler,
   createTinderDashboardHumanArmedBindingHandler,
   createTinderDashboardHumanArmedRearmHandler,
   createTinderDashboardHumanArmedBindingListHandler,
   isFoundationNotReadyError,
   normalizeBindingId,
+  boundedVisibleChatSyncQueueResult,
   normalizeCaptureRecord,
+  assertEmptyOfficialAppResumeBody,
+  boundedOfficialAppResumeQueueResult,
   normalizeDraftEligibleCaptureRecords,
   normalizeHumanArmedBindingRecords,
   normalizePendingCaptureRecords,

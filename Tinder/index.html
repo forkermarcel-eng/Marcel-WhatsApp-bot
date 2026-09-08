@@ -791,6 +791,7 @@
    @media(max-width:620px){.platform-layout{grid-template-columns:1fr}.platform-rail{height:auto;padding:10px 14px;display:grid;grid-template-columns:1fr auto}.platform-brand{padding:7px;font-size:15px}.platform-toggle{display:block;border:1px solid var(--border);background:#171e24;color:#fff;border-radius:8px;padding:7px 10px}.platform-nav{display:none;grid-column:1/-1;padding-top:8px}.platform-rail.open .platform-nav{display:grid}.platform-nav a{font-size:14px;text-align:left}.platform-secondary{margin-top:8px}.status-grid{grid-template-columns:1fr 1fr}}
     main{display:flex;flex-direction:column}.shell>header{padding-top:12px;padding-bottom:12px}.content-title{margin:0;font-size:22px}.status-grid{order:1;display:flex;flex-wrap:nowrap;gap:0;margin:0 0 8px;padding:5px 7px;border:1px solid var(--border);border-radius:12px;background:var(--panel);overflow-x:auto}.status-card{position:relative;min-height:0;flex:1 0 auto;padding:6px 10px;border:0;border-radius:0;background:transparent;box-shadow:none}.status-card+.status-card{border-left:1px solid var(--border)}.status-top{display:flex;align-items:center;justify-content:flex-start;gap:6px;white-space:nowrap}.status-value{display:inline;font-size:11px;margin-left:2px}.status-name{font-size:10px}.status-sub{display:none;position:absolute;z-index:8;top:calc(100% + 5px);left:8px;width:max-content;max-width:280px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#111820}.status-card:hover .status-sub,.status-card:focus-within .status-sub{display:block}.pending-capture-panel{order:2;margin:6px 0}.matches{order:2;margin:6px 0}.workspace{order:3}.technical{order:4;margin-top:10px}.technical>summary{padding:12px 15px}.status-grid .status-card:nth-child(2){display:none}@media(max-width:620px){.status-grid{display:flex;flex-wrap:nowrap}.status-card{border-radius:0}.status-sub{max-width:220px}}
     .tinder-draft-copy{margin:10px 0 0;padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.025);white-space:pre-wrap;overflow-wrap:anywhere}.tinder-draft-meta{margin-top:9px;color:var(--muted);font-size:12px}
+    .conversation-list{display:grid;gap:8px;padding:12px;max-height:490px;overflow:auto}.conversation-choice{width:100%;display:grid;gap:4px;padding:12px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.02);color:var(--text);font:inherit;text-align:left;cursor:pointer}.conversation-choice:hover,.conversation-choice:focus-visible,.conversation-choice.selected{border-color:rgba(105,167,255,.52);background:var(--blue-soft);outline:none}.conversation-choice-name{font-size:13px;font-weight:800;overflow-wrap:anywhere}.conversation-choice-time{color:var(--muted);font-size:11px;line-height:1.4}.conversation-list-empty{padding:12px;border:1px dashed var(--border);border-radius:12px;color:var(--muted);font-size:13px;line-height:1.45}.conversation-status{padding:0 12px 14px;color:var(--muted);font-size:12px;line-height:1.45}.conversation-detail{min-height:490px;padding:18px;overflow:auto}.conversation-detail-summary{padding-bottom:14px;border-bottom:1px solid var(--border)}.conversation-detail-name{font-size:16px;font-weight:800;overflow-wrap:anywhere}.conversation-detail-time{margin-top:4px;color:var(--muted);font-size:12px}.conversation-sync-action{display:grid;gap:8px;margin-top:16px;padding:12px;border:1px solid rgba(105,167,255,.3);border-radius:12px;background:var(--blue-soft)}.conversation-sync-copy{color:var(--muted);font-size:12px;line-height:1.5}.conversation-sync-message{color:var(--muted);font-size:12px;line-height:1.45}.conversation-sync-message.error{color:#ff9292}.conversation-transcript{margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}.conversation-transcript-heading{font-size:13px;font-weight:800}.conversation-transcript-copy{margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.45}.conversation-messages{display:grid;gap:10px;margin-top:16px}.conversation-message{max-width:88%;display:grid;gap:5px;padding:10px 12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025)}.conversation-message.incoming{justify-self:start;border-color:rgba(105,167,255,.28);background:var(--blue-soft)}.conversation-message.outgoing{justify-self:end;border-color:rgba(66,199,99,.3);background:var(--green-soft)}.conversation-message.unknown{justify-self:start;border-style:dashed}.conversation-message-direction{color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.45px;text-transform:uppercase}.conversation-message-text{color:var(--text);font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.conversation-detail-empty{min-height:420px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px;line-height:1.55}.conversation-detail-empty>div{max-width:320px}.conversation-detail-empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:16px}
  </style>
 </head>
 
@@ -1042,47 +1043,32 @@
      <section class="matches" aria-label="Matches"><h2>MATCHES</h2><div class="match-row"><div class="match-empty"><div class="match-circle">🔥</div><span>Noch keine echten Matchdaten vorhanden.</span></div></div></section>
 
      <section class="workspace" aria-label="Tinder Arbeitsbereich">
-       <aside class="panel">
+       <aside class="panel" aria-labelledby="confirmedConversationHeading">
          <div class="panel-header">
            <div class="panel-heading">
-             <h2>Matches & Chats</h2>
-             <p>Historischer Import ist bewusst pausiert</p>
+             <h2 id="confirmedConversationHeading">Bestätigte Conversations</h2>
+             <p>Nur die neuesten, sicher bestätigten Captures</p>
            </div>
-           <span class="badge">Pausiert</span>
+           <span class="badge">Begrenzt</span>
          </div>
 
-         <div class="empty-state">
-           <div class="empty-inner">
-             <div class="empty-icon" aria-hidden="true">🔥</div>
-             <h3>Kein automatischer Vollscan</h3>
-             <p>
-               Beim Verbinden werden nicht automatisch alle Matches, Chats oder Profile
-               ausgelesen. Der bisherige Read-only-Massenabruf ist in diesem Sicherheitsblock
-               serverseitig gesperrt.
-             </p>
-           </div>
-         </div>
+         <div class="conversation-list" id="confirmedConversationList" aria-live="polite"></div>
+         <p class="conversation-status" id="confirmedConversationMessage" role="status" aria-live="polite">
+           Bestätigte Conversations werden geladen. Nachrichtentext wird erst nach einer bewussten Auswahl geladen.
+         </p>
        </aside>
 
-       <section class="panel">
+       <section class="panel" aria-labelledby="conversationDetailHeading">
          <div class="panel-header">
            <div class="panel-heading">
-             <h2>Nachrichtenbetrieb</h2>
-             <p>Queue und langsamer Live-Betrieb folgen im nächsten Block</p>
+             <h2 id="conversationDetailHeading">Nachrichtenansicht</h2>
+             <p>Read-only Ansicht einer bewusst ausgewählten Conversation</p>
            </div>
-           <span class="badge">Noch aus</span>
+           <span class="badge">Kein Versand</span>
          </div>
 
-         <div class="empty-state">
-           <div class="empty-inner">
-             <div class="empty-icon" aria-hidden="true">💬</div>
-             <h3>Automation ist ein separates Gate</h3>
-             <p>
-               Der Nachrichtenbetrieb ist noch nicht aktiviert. Es existiert kein
-               automatischer Tinder-Lese- oder Sendeloop und es werden keine
-               Nachrichten automatisch verschickt.
-             </p>
-           </div>
+         <div class="conversation-detail" id="confirmedConversationDetail" aria-live="polite">
+           <div class="conversation-detail-empty"><div><strong>Conversation auswählen</strong>Wähle links eine bestätigte Conversation. Es wird keine Nachricht gesendet oder automatisch nachgeladen.</div></div>
          </div>
        </section>
 
@@ -1158,6 +1144,9 @@
        draftEligibleCaptureMessage: document.getElementById("draftEligibleCaptureMessage"),
        humanArmedBindingList: document.getElementById("humanArmedBindingList"),
        humanArmedBindingMessage: document.getElementById("humanArmedBindingMessage"),
+       confirmedConversationList: document.getElementById("confirmedConversationList"),
+       confirmedConversationMessage: document.getElementById("confirmedConversationMessage"),
+       confirmedConversationDetail: document.getElementById("confirmedConversationDetail"),
        captureDraftPanel: document.getElementById("captureDraftPanel"),
        createCaptureDraft: document.getElementById("createCaptureDraft"),
        captureDraftMessage: document.getElementById("captureDraftMessage"),
@@ -1201,6 +1190,16 @@
     let draftReview = null;
     let draftReviewBusy = false;
     let draftReviewLoadState = "idle";
+    let latestConfirmedConversations = [];
+    let selectedConversationCaptureId = null;
+    let conversationSelectionRequest = 0;
+    let visibleChatSyncBusy = false;
+    let visibleChatSyncQueuedCaptureId = null;
+    let visibleChatSyncRefreshGeneration = 0;
+    let officialAppResumeBusy = false;
+    let officialAppResumeQueuedCaptureId = null;
+    const VISIBLE_CHAT_SYNC_REFRESH_DELAY_MS = 5000;
+    const VISIBLE_CHAT_SYNC_REFRESH_MAX_ATTEMPTS = 45;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
@@ -2131,6 +2130,361 @@
      }
    }
 
+   function hasExactConversationFields(value, fields) {
+     return value && typeof value === "object" && !Array.isArray(value) &&
+       Object.keys(value).sort().join("|") === [...fields].sort().join("|");
+   }
+
+   function confirmedConversationIsSafeForSelection(conversation) {
+     const capturedAt = new Date(conversation?.captured_at || "");
+     return hasExactConversationFields(conversation, ["capture_id", "visible_name", "captured_at"]) &&
+       UUID_V4.test(String(conversation.capture_id || "")) &&
+       typeof conversation.visible_name === "string" && conversation.visible_name.trim().length > 0 &&
+       conversation.visible_name.trim().length <= 240 && !Number.isNaN(capturedAt.valueOf());
+   }
+
+   function confirmedConversationDetailIsSafe(conversation, captureId) {
+     const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(conversation || {}, "visible_chat_sync");
+     const detailFields = hasVisibleChatSync
+       ? ["capture_id", "visible_name", "captured_at", "messages", "visible_chat_sync"]
+       : ["capture_id", "visible_name", "captured_at", "messages"];
+     if (!hasExactConversationFields(conversation, detailFields)
+         || conversation.capture_id !== captureId || !confirmedConversationIsSafeForSelection({
+           capture_id: conversation.capture_id,
+           visible_name: conversation.visible_name,
+           captured_at: conversation.captured_at
+         }) || !Array.isArray(conversation.messages) || conversation.messages.length === 0
+         || conversation.messages.length > 100) {
+       return false;
+     }
+     const originalMessagesSafe = conversation.messages.every((message) =>
+       hasExactConversationFields(message, ["direction", "text"]) &&
+       ["INCOMING", "OUTGOING", "UNKNOWN"].includes(String(message.direction || "").toUpperCase()) &&
+       typeof message.text === "string" && message.text.trim().length > 0 && message.text.trim().length <= 4096
+     );
+     return originalMessagesSafe && (!hasVisibleChatSync || visibleChatSyncIsSafe(conversation.visible_chat_sync));
+   }
+
+   function visibleChatSyncIsSafe(sync) {
+     const receivedAt = new Date(sync?.received_at || "");
+     return hasExactConversationFields(sync, [
+       "received_at", "layout_schema_version", "segment_count", "overlap_count", "messages"
+     ]) && !Number.isNaN(receivedAt.valueOf())
+       && sync.layout_schema_version === "tinder-zte-visible-chat-scroll-v1"
+       && Number.isSafeInteger(sync.segment_count) && sync.segment_count >= 1 && sync.segment_count <= 8
+       && Number.isSafeInteger(sync.overlap_count) && sync.overlap_count >= 0 && sync.overlap_count <= 100
+       && Array.isArray(sync.messages) && sync.messages.length > 0 && sync.messages.length <= 100
+       && sync.messages.every((message) =>
+         hasExactConversationFields(message, ["direction", "text"])
+         && ["INCOMING", "OUTGOING", "UNKNOWN"].includes(String(message.direction || "").toUpperCase())
+         && typeof message.text === "string" && message.text.trim().length > 0 && message.text.trim().length <= 4096
+       );
+   }
+
+   function formatConversationCapturedAt(value) {
+     return new Intl.DateTimeFormat("de-DE", {
+       dateStyle: "medium",
+       timeStyle: "short"
+     }).format(new Date(value));
+   }
+
+   function setConversationDetailPlaceholder(title, message) {
+     elements.confirmedConversationDetail.replaceChildren();
+     const empty = document.createElement("div");
+     empty.className = "conversation-detail-empty";
+     const copy = document.createElement("div");
+     const heading = document.createElement("strong");
+     heading.textContent = title;
+     const body = document.createElement("span");
+     body.textContent = message;
+     copy.append(heading, body);
+     empty.append(copy);
+     elements.confirmedConversationDetail.append(empty);
+   }
+
+   function renderConfirmedConversationList(conversations) {
+     elements.confirmedConversationList.replaceChildren();
+     if (conversations.length === 0) {
+       const empty = document.createElement("div");
+       empty.className = "conversation-list-empty";
+       empty.textContent = "Derzeit liegt keine neueste sicher bestätigte Conversation für die Anzeige vor.";
+       elements.confirmedConversationList.append(empty);
+       elements.confirmedConversationMessage.textContent = "Keine bestätigte Conversation verfügbar.";
+       return;
+     }
+
+     for (const conversation of conversations) {
+       const choice = document.createElement("button");
+       choice.type = "button";
+       choice.className = `conversation-choice${conversation.capture_id === selectedConversationCaptureId ? " selected" : ""}`;
+       choice.setAttribute("aria-current", conversation.capture_id === selectedConversationCaptureId ? "true" : "false");
+       const name = document.createElement("span");
+       name.className = "conversation-choice-name";
+       name.textContent = conversation.visible_name.trim();
+       const capturedAt = document.createElement("span");
+       capturedAt.className = "conversation-choice-time";
+       capturedAt.textContent = `Erfasst am ${formatConversationCapturedAt(conversation.captured_at)}`;
+       choice.append(name, capturedAt);
+       choice.addEventListener("click", () => {
+         void selectConfirmedConversation(conversation.capture_id);
+       });
+       elements.confirmedConversationList.append(choice);
+     }
+     elements.confirmedConversationMessage.textContent =
+       `${conversations.length} bestätigte Conversation${conversations.length === 1 ? "" : "s"} verfügbar. Nachrichtentext wird nur für die Auswahl geladen.`;
+   }
+
+   function conversationDirectionLabel(direction) {
+     return direction === "INCOMING" ? "Eingehend" : direction === "OUTGOING" ? "Ausgehend" : "Unklare Richtung";
+   }
+
+   function renderConversationMessages(messages, className) {
+     const container = document.createElement("div");
+     container.className = className;
+     for (const message of messages) {
+       const direction = String(message.direction).toUpperCase();
+       const item = document.createElement("article");
+       item.className = `conversation-message ${direction === "INCOMING" ? "incoming" : direction === "OUTGOING" ? "outgoing" : "unknown"}`;
+       const label = document.createElement("span");
+       label.className = "conversation-message-direction";
+       label.textContent = conversationDirectionLabel(direction);
+       const text = document.createElement("div");
+       text.className = "conversation-message-text";
+       text.textContent = message.text.trim();
+       item.append(label, text);
+       container.append(item);
+     }
+     return container;
+   }
+
+   function visibleChatSyncStatusText(sync) {
+     if (sync.status === "QUEUED") return "Synchronisierung ist angefordert und wartet auf das verifizierte Gerät.";
+     return "Sichtbare Chat-Synchronisierung ist derzeit nicht verfügbar.";
+   }
+
+   /**
+    * Product-only refresh of the already selected Conversation. It never
+    * queues another command, does not inspect device diagnostics, and stops
+    * on a malformed/unavailable response rather than treating it as a new
+    * synchronization attempt.
+    */
+   function refreshVisibleChatSyncDetail(captureId, generation, attempt) {
+     window.setTimeout(async () => {
+       if (generation !== visibleChatSyncRefreshGeneration
+           || selectedConversationCaptureId !== captureId
+           || visibleChatSyncQueuedCaptureId !== captureId) return;
+       const conversation = await selectConfirmedConversation(captureId);
+       if (generation !== visibleChatSyncRefreshGeneration
+           || selectedConversationCaptureId !== captureId
+           || visibleChatSyncQueuedCaptureId !== captureId) return;
+       if (!conversation) return;
+       if (conversation.visible_chat_sync) {
+         visibleChatSyncQueuedCaptureId = null;
+         renderConfirmedConversationDetail(conversation);
+         return;
+       }
+       if (attempt + 1 < VISIBLE_CHAT_SYNC_REFRESH_MAX_ATTEMPTS) {
+         refreshVisibleChatSyncDetail(captureId, generation, attempt + 1);
+       }
+     }, VISIBLE_CHAT_SYNC_REFRESH_DELAY_MS);
+   }
+
+   function scheduleVisibleChatSyncDetailRefresh(captureId) {
+     const generation = ++visibleChatSyncRefreshGeneration;
+     refreshVisibleChatSyncDetail(captureId, generation, 0);
+   }
+
+   async function requestVisibleChatSync(captureId, button, message) {
+     if (visibleChatSyncBusy || visibleChatSyncQueuedCaptureId === captureId
+         || selectedConversationCaptureId !== captureId || !UUID_V4.test(String(captureId || ""))) return;
+     visibleChatSyncBusy = true;
+     button.disabled = true;
+     message.className = "conversation-sync-message";
+     message.textContent = "Synchronisierung wird vorbereitet …";
+     try {
+       const data = await requestJson(
+         `/api/tinder/captures?captureId=${encodeURIComponent(captureId)}&operation=visible-chat-sync`,
+         { method: "POST", body: JSON.stringify({}) }
+       );
+       const sync = data?.sync;
+       if (data?.ok !== true || !sync || sync.command_type !== "SYNC_TINDER_VISIBLE_CHAT" || sync.status !== "QUEUED") {
+         throw new Error("Das Backend hat keine gültige sichtbare Chat-Synchronisierung vorbereitet.");
+       }
+       visibleChatSyncQueuedCaptureId = captureId;
+       message.textContent = visibleChatSyncStatusText(sync);
+       scheduleVisibleChatSyncDetailRefresh(captureId);
+     } catch (error) {
+       message.className = "conversation-sync-message error";
+       message.textContent = error?.message || "Sichtbare Chat-Synchronisierung konnte nicht vorbereitet werden.";
+     } finally {
+       visibleChatSyncBusy = false;
+       button.disabled = visibleChatSyncQueuedCaptureId === captureId;
+     }
+   }
+
+   /**
+    * This remains a narrow human-triggered operation in the selected existing
+    * conversation panel. It cannot pick an Android package/component, a URI,
+    * a device, a chat, an opaque backend handle, or a payload; the server derives
+    * its one-time authority solely from the selected confirmed capture.
+    */
+   async function requestOfficialAppResume(captureId, button, message) {
+     if (officialAppResumeBusy || officialAppResumeQueuedCaptureId === captureId
+         || selectedConversationCaptureId !== captureId || !UUID_V4.test(String(captureId || ""))) return;
+     officialAppResumeBusy = true;
+     button.disabled = true;
+     message.className = "conversation-sync-message";
+     message.textContent = "Offizielle Tinder-App wird einmalig vorbereitet …";
+     try {
+       const data = await requestJson(
+         `/api/tinder/captures?captureId=${encodeURIComponent(captureId)}&operation=resume-official-app`,
+         { method: "POST", body: JSON.stringify({}) }
+       );
+       const resume = data?.resume;
+       if (data?.ok !== true || !resume
+           || resume.command_type !== "RESUME_OFFICIAL_TINDER_APP"
+           || resume.status !== "QUEUED") {
+         throw new Error("Das Backend hat keine gültige offizielle Tinder-App-Anfrage vorbereitet.");
+       }
+       officialAppResumeQueuedCaptureId = captureId;
+       message.textContent = "Einmalige offizielle Startanfrage ist an das verifizierte Gerät übergeben. Sie öffnet keinen Chat und versendet nichts.";
+     } catch (error) {
+       message.className = "conversation-sync-message error";
+       message.textContent = error?.message || "Offizielle Tinder-App konnte nicht vorbereitet werden.";
+     } finally {
+       officialAppResumeBusy = false;
+       button.disabled = officialAppResumeQueuedCaptureId === captureId;
+     }
+   }
+
+   function renderConfirmedConversationDetail(conversation) {
+     elements.confirmedConversationDetail.replaceChildren();
+     const summary = document.createElement("div");
+     summary.className = "conversation-detail-summary";
+     const name = document.createElement("div");
+     name.className = "conversation-detail-name";
+     name.textContent = conversation.visible_name.trim();
+     const capturedAt = document.createElement("div");
+     capturedAt.className = "conversation-detail-time";
+     capturedAt.textContent = `Erfasst am ${formatConversationCapturedAt(conversation.captured_at)}`;
+     summary.append(name, capturedAt);
+
+     const syncAction = document.createElement("div");
+     syncAction.className = "conversation-sync-action";
+     const syncCopy = document.createElement("div");
+     syncCopy.className = "conversation-sync-copy";
+     syncCopy.textContent = "Fordert genau eine begrenzte, verifizierte Synchronisierung des aktuell geöffneten Chats an. Der Vorgang öffnet keinen Chat, ordnet keine Person zu und versendet nichts.";
+     const syncButton = document.createElement("button");
+     syncButton.type = "button";
+     syncButton.className = "button info conversation-sync-button";
+     syncButton.textContent = "Sichtbaren geöffneten Chat synchronisieren";
+     syncButton.disabled = visibleChatSyncBusy || visibleChatSyncQueuedCaptureId === conversation.capture_id;
+     const syncMessage = document.createElement("span");
+     syncMessage.className = "conversation-sync-message";
+     if (visibleChatSyncQueuedCaptureId === conversation.capture_id) {
+       syncMessage.textContent = "Synchronisierung ist bereits angefordert und wartet auf das verifizierte Gerät.";
+     } else if (conversation.visible_chat_sync) {
+       syncMessage.textContent = "Synchronisierter sichtbarer Verlauf ist verfügbar.";
+     }
+     syncButton.addEventListener("click", () => {
+       void requestVisibleChatSync(conversation.capture_id, syncButton, syncMessage);
+     });
+     syncAction.append(syncCopy, syncButton, syncMessage);
+
+     const resumeAction = document.createElement("div");
+     resumeAction.className = "conversation-sync-action";
+     const resumeCopy = document.createElement("div");
+     resumeCopy.className = "conversation-sync-copy";
+     resumeCopy.textContent = "Öffnet ausschließlich einmalig die Standard-Launcher-Activity der offiziellen Tinder-App. Keine Login-Behandlung, keine Chat-Auswahl, kein Lesen, kein Upload und kein Versand.";
+     const resumeButton = document.createElement("button");
+     resumeButton.type = "button";
+     resumeButton.className = "button info conversation-sync-button";
+     resumeButton.textContent = "Offizielle Tinder-App einmal öffnen";
+     resumeButton.disabled = officialAppResumeBusy || officialAppResumeQueuedCaptureId === conversation.capture_id;
+     const resumeMessage = document.createElement("span");
+     resumeMessage.className = "conversation-sync-message";
+     if (officialAppResumeQueuedCaptureId === conversation.capture_id) {
+       resumeMessage.textContent = "Die einmalige offizielle Startanfrage ist bereits übergeben; es wird kein zweiter Versuch vorbereitet.";
+     }
+     resumeButton.addEventListener("click", () => {
+       void requestOfficialAppResume(conversation.capture_id, resumeButton, resumeMessage);
+     });
+     resumeAction.append(resumeCopy, resumeButton, resumeMessage);
+
+     const originalMessages = renderConversationMessages(conversation.messages, "conversation-messages");
+     elements.confirmedConversationDetail.append(summary, resumeAction, syncAction, originalMessages);
+
+     if (conversation.visible_chat_sync) {
+       const transcript = document.createElement("section");
+       transcript.className = "conversation-transcript";
+       const heading = document.createElement("h3");
+       heading.className = "conversation-transcript-heading";
+       heading.textContent = "Synchronisierter sichtbarer Verlauf";
+       const copy = document.createElement("p");
+       copy.className = "conversation-transcript-copy";
+       copy.textContent = `Getrennt vom bestätigten Capture · zuletzt synchronisiert am ${formatConversationCapturedAt(conversation.visible_chat_sync.received_at)}.`;
+       transcript.append(heading, copy, renderConversationMessages(conversation.visible_chat_sync.messages, "conversation-messages"));
+       elements.confirmedConversationDetail.append(transcript);
+     }
+   }
+
+   async function selectConfirmedConversation(captureId) {
+     if (!UUID_V4.test(String(captureId || ""))) return;
+     selectedConversationCaptureId = captureId;
+     const requestId = ++conversationSelectionRequest;
+     renderConfirmedConversationList(latestConfirmedConversations);
+     setConversationDetailPlaceholder("Conversation wird geladen", "Es wird nur die bewusst ausgewählte Conversation angefordert.");
+
+     try {
+       const data = await requestJson(`/api/tinder/captures?captureId=${encodeURIComponent(captureId)}&view=confirmed-conversation`);
+       if (requestId !== conversationSelectionRequest) return;
+       if (!confirmedConversationDetailIsSafe(data?.conversation, captureId)) {
+         throw new Error("Das Backend hat keine gültige bestätigte Conversation geliefert.");
+       }
+       renderConfirmedConversationDetail(data.conversation);
+       return data.conversation;
+     } catch (error) {
+       if (requestId !== conversationSelectionRequest) return;
+       setConversationDetailPlaceholder(
+         "Conversation nicht verfügbar",
+         error?.message || "Die ausgewählte Conversation konnte nicht sicher geladen werden."
+       );
+       return null;
+     }
+   }
+
+   async function loadLatestConfirmedConversationList() {
+     try {
+       const data = await requestJson("/api/tinder/captures?view=confirmed-conversations");
+       const conversations = Array.isArray(data?.conversations) ? data.conversations : null;
+       if (!conversations || conversations.length > 25
+           || conversations.some((conversation) => !confirmedConversationIsSafeForSelection(conversation))) {
+         throw new Error("Das Backend hat keine gültige Liste bestätigter Conversations geliefert.");
+       }
+       latestConfirmedConversations = conversations;
+       if (!conversations.some((conversation) => conversation.capture_id === selectedConversationCaptureId)) {
+         selectedConversationCaptureId = null;
+         conversationSelectionRequest += 1;
+         setConversationDetailPlaceholder(
+           "Conversation auswählen",
+           "Wähle links eine bestätigte Conversation. Es wird keine Nachricht gesendet oder automatisch nachgeladen."
+         );
+       }
+       renderConfirmedConversationList(conversations);
+     } catch (error) {
+       latestConfirmedConversations = [];
+       selectedConversationCaptureId = null;
+       conversationSelectionRequest += 1;
+       renderConfirmedConversationList([]);
+       elements.confirmedConversationMessage.textContent =
+         error?.message || "Bestätigte Tinder-Conversations konnten nicht geladen werden.";
+       setConversationDetailPlaceholder(
+         "Conversation nicht verfügbar",
+         "Bestätigte Conversations konnten nicht sicher geladen werden."
+       );
+     }
+   }
+
    function formatTimestamp(value) {
      if (!value) return "Kein Heartbeat";
 
@@ -2519,6 +2873,7 @@
      void loadOpenDraftReviewDiscovery();
      void loadDraftEligibleCaptureDiscovery();
      void loadHumanArmedBindingList();
+     void loadLatestConfirmedConversationList();
      void loadCaptureMappingFromLocation();
 
    window.setInterval(() => {

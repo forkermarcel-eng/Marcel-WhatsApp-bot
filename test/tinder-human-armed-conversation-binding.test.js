@@ -7,6 +7,7 @@ import {
   HUMAN_ARMED_CONVERSATION_REFERENCE_KIND,
   HUMAN_ARMED_CONVERSATION_STATUS,
   TinderHumanArmedConversationBindingError,
+  createPgTinderHumanArmedConversationBindingRepository,
   createTinderHumanArmedConversationBindingService
 } from "../services/tinder-human-armed-conversation-binding.js";
 import { T2_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
@@ -76,7 +77,8 @@ function fixtureRepository({
   contacts = [7],
   runtimeByDevice = new Map([[DEVICE_ID, runtime()]]),
   bindings = [],
-  permits = []
+  permits = [],
+  activeOfficialAppResume = false
 } = {}) {
   const captureRows = new Map(captures.map(row => [row.capture_id, { ...row }]));
   const contactIds = new Set(contacts);
@@ -145,6 +147,10 @@ function fixtureRepository({
       row.consumed_capture_id = input.captureId;
       row.consumed_at = input.consumedAt;
       return true;
+    },
+    async findActiveOfficialAppResumePermitForDevice(_tx, input) {
+      state.calls.push({ type: "find-v5-resume", input });
+      return activeOfficialAppResume;
     },
     async insertBindingAudit(_tx, audit) { state.audits.push(audit); }
   };
@@ -316,6 +322,131 @@ test("rearm blocks a revoked/non-human/WhatsApp binding and never queues a Tinde
     assert.equal(result.status, HUMAN_ARMED_CONVERSATION_STATUS.BINDING_NOT_READY);
     assert.equal(repository.state.commands.length, 0);
   }
+});
+
+test("V3 human-binding issuance refuses an active V4 visible-chat sync permit", async () => {
+  const repository = fixtureRepository({ bindings: [binding()] });
+  const calls = [];
+  repository.findActiveVisibleChatSyncPermitForDevice = async (_transaction, input) => {
+    calls.push(input);
+    return true;
+  };
+
+  assert.deepEqual(await service(repository).rearmExistingBinding({
+    bindingId: BINDING_ID,
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.VISIBLE_CHAT_SYNC_PERMIT_ACTIVE
+  });
+  assert.deepEqual(calls, [{
+    deviceId: DEVICE_ID,
+    now: NOW.toISOString()
+  }]);
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.calls.some(call => call.type === "create-permit"), false);
+});
+
+test("an active V4 permit blocks an initial V3 arm before any binding-side write", async () => {
+  const repository = fixtureRepository({ contacts: [] });
+  const calls = [];
+  repository.findActiveVisibleChatSyncPermitForDevice = async (_transaction, input) => {
+    calls.push(input);
+    return true;
+  };
+
+  assert.deepEqual(await service(repository).armInitialCapture({
+    captureId: CAPTURE_A,
+    action: "BIND_CREATE",
+    newContactName: "M Tinder Test",
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.VISIBLE_CHAT_SYNC_PERMIT_ACTIVE
+  });
+  assert.deepEqual(calls, [{ deviceId: DEVICE_ID, now: NOW.toISOString() }]);
+  assert.equal(repository.state.createdContacts.length, 0);
+  assert.equal(repository.state.bindings.size, 0);
+  assert.equal(repository.state.calls.length, 0);
+  assert.equal(repository.state.audits.length, 0);
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
+});
+
+test("an active ISSUED official-app resume permit blocks both V3 arm issuers before writes", async () => {
+  const rearmRepository = fixtureRepository({ bindings: [binding()] });
+  const rearmCalls = [];
+  rearmRepository.findActiveOfficialAppResumePermitForDevice = async (_transaction, input) => {
+    rearmCalls.push(input);
+    return true;
+  };
+
+  assert.deepEqual(await service(rearmRepository).rearmExistingBinding({
+    bindingId: BINDING_ID,
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.OFFICIAL_APP_RESUME_PERMIT_ACTIVE
+  });
+  assert.deepEqual(rearmCalls, [{ deviceId: DEVICE_ID, now: NOW.toISOString() }]);
+  assert.equal(rearmRepository.state.commands.length, 0);
+  assert.equal(rearmRepository.state.permits.size, 0);
+
+  const initialRepository = fixtureRepository({ contacts: [] });
+  initialRepository.findActiveOfficialAppResumePermitForDevice = async () => true;
+  assert.deepEqual(await service(initialRepository).armInitialCapture({
+    captureId: CAPTURE_A,
+    action: "BIND_CREATE",
+    newContactName: "M Tinder Test",
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.OFFICIAL_APP_RESUME_PERMIT_ACTIVE
+  });
+  assert.equal(initialRepository.state.createdContacts.length, 0);
+  assert.equal(initialRepository.state.bindings.size, 0);
+  assert.equal(initialRepository.state.commands.length, 0);
+  assert.equal(initialRepository.state.permits.size, 0);
+});
+
+test("an indeterminate V5 resume-permit lookup fails closed before V3 writes", async () => {
+  const repository = fixtureRepository({ bindings: [binding()] });
+  repository.findActiveOfficialAppResumePermitForDevice = async () => undefined;
+
+  await assert.rejects(
+    () => service(repository).rearmExistingBinding({ bindingId: BINDING_ID, confirmed: true }),
+    error => error instanceof TinderHumanArmedConversationBindingError
+      && error.code === "INVALID_OFFICIAL_APP_RESUME_PERMIT"
+  );
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
+});
+
+test("V3 PostgreSQL resume conflict lookup recognizes only a live ISSUED permit", async () => {
+  const calls = [];
+  const repository = createPgTinderHumanArmedConversationBindingRepository({
+    async connect() { throw new Error("not used by this focused repository query"); },
+    async query() { throw new Error("not used by this focused repository query"); }
+  });
+  const client = {
+    async query(sql, parameters) {
+      calls.push({ sql, parameters });
+      if (sql.includes("to_regclass")) {
+        return { rows: [{ relation_name: "tinder_official_app_resume_permits" }] };
+      }
+      return { rows: [{ active: true }] };
+    }
+  };
+
+  assert.equal(await repository.findActiveOfficialAppResumePermitForDevice(client, {
+    deviceId: DEVICE_ID,
+    now: NOW.toISOString()
+  }), true);
+  assert.match(calls[0].sql, /to_regclass\('tinder_official_app_resume_permits'\)/i);
+  assert.match(calls[1].sql, /permit_state='ISSUED'/i);
+  assert.doesNotMatch(calls[1].sql, /DISPATCHED|STAGED|CONSUMED/i);
+  assert.match(calls[1].sql, /expires_at>\$2/i);
+  assert.deepEqual(calls[1].parameters, [DEVICE_ID, NOW.toISOString()]);
 });
 
 test("the fixed server-owned arm window covers the measured manual hand-off, consumes once, and expires at its exact boundary", async () => {
@@ -501,6 +632,12 @@ test("constructor and input validation fail closed", async () => {
   assert.throws(
     () => createTinderHumanArmedConversationBindingService({}, {}),
     /repository\.withTransaction/
+  );
+  const missingResumeLookup = fixtureRepository();
+  delete missingResumeLookup.findActiveOfficialAppResumePermitForDevice;
+  assert.throws(
+    () => service(missingResumeLookup),
+    /repository\.findActiveOfficialAppResumePermitForDevice/
   );
   assert.doesNotThrow(
     () => service(fixtureRepository(), { armTtlMs: 15 * 60_000 })

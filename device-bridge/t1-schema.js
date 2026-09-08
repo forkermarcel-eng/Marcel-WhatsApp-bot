@@ -16,6 +16,14 @@ export const T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME =
 // may create it.
 export const T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME =
   "device_bridge_commands_command_type_check_v3";
+// V4 owns the next exact superset. It only adds the staged visible-chat sync
+// vocabulary; it must never reinterpret the V3 human-binding permit.
+export const T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME =
+  "device_bridge_commands_command_type_check_v4";
+// V5 adds only the separately authorized standard-official-app resume
+// vocabulary. It does not grant a device the T5 manual-send capability.
+export const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME =
+  "device_bridge_commands_command_type_check_v5";
 
 const LEGACY_T1_TINDER_STATE_CONSTRAINT_NAME = "device_bridge_devices_tinder_state_check";
 const LEGACY_T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_type_check";
@@ -51,6 +59,14 @@ const T5_TINDER_MANUAL_SEND_COMMAND_TYPES = Object.freeze([
   ...T2_HUMAN_ARMED_COMMAND_TYPES,
   "SEND_TINDER_DRAFT"
 ]);
+const T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPES = Object.freeze([
+  ...T5_TINDER_MANUAL_SEND_COMMAND_TYPES,
+  "SYNC_TINDER_VISIBLE_CHAT"
+]);
+export const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPES = Object.freeze([
+  ...T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPES,
+  "RESUME_OFFICIAL_TINDER_APP"
+]);
 
 export const T1_TINDER_STATE_CHECK_EXPRESSION = `
   tinder_state IN ('DISCONNECTED', 'CONNECTING', 'CONNECTED', 'AUTH_REQUIRED', 'REVIEW_REQUIRED', 'UNKNOWN')
@@ -66,6 +82,14 @@ export const T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION = `
 
 export const T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION = `
   command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT')
+`;
+
+export const T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CHECK_EXPRESSION = `
+  command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT')
+`;
+
+export const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION = `
+  command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT', 'RESUME_OFFICIAL_TINDER_APP')
 `;
 
 export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
@@ -91,7 +115,13 @@ export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
     forwardCompatibleValues: T2_HUMAN_ARMED_COMMAND_TYPES,
     futureCompatibleName: T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME,
     futureCompatibleExpression: T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION,
-    futureCompatibleValues: T5_TINDER_MANUAL_SEND_COMMAND_TYPES
+    futureCompatibleValues: T5_TINDER_MANUAL_SEND_COMMAND_TYPES,
+    latestCompatibleName: T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME,
+    latestCompatibleExpression: T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CHECK_EXPRESSION,
+    latestCompatibleValues: T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPES,
+    newestCompatibleName: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
+    newestCompatibleExpression: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION,
+    newestCompatibleValues: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPES
   })
 ]);
 
@@ -153,6 +183,24 @@ async function inspectColumnConstraint(client, specification) {
       state: "FINAL",
       constraintName: current.conname,
       compatibilityExpression: specification.futureCompatibleExpression
+    };
+  }
+  if (current.conname === specification.latestCompatibleName
+      && hasExactCheckDefinition(current.constraint_definition, specification.latestCompatibleExpression)) {
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.latestCompatibleExpression
+    };
+  }
+  if (current.conname === specification.newestCompatibleName
+      && hasExactCheckDefinition(current.constraint_definition, specification.newestCompatibleExpression)) {
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.newestCompatibleExpression
     };
   }
   const legacyExpression = `${specification.column} IN (${specification.legacyValues.map(value => `'${value}'`).join(", ")})`;

@@ -8,6 +8,8 @@ import {
   isTinderHumanArmedConversationBindingCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
+  isTinderOfficialAppResumeCapable,
+  isTinderVisibleChatSyncCapable,
   isExactUtcTimestamp,
   isUuidV4,
   protocolErrorBody
@@ -83,14 +85,26 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
   const t1Capable = isTinderManualGateCapable(capabilities);
   const humanArmedBindingCapable = isTinderHumanArmedConversationBindingCapable(capabilities);
   const t5Capable = isTinderManualSendCapable(capabilities);
-  const commandTypes = t5Capable
+  const visibleChatSyncCapable = isTinderVisibleChatSyncCapable(capabilities);
+  const officialAppResumeCapable = isTinderOfficialAppResumeCapable(capabilities);
+  const commandTypes = officialAppResumeCapable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP'"
+    : visibleChatSyncCapable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT'"
+    : t5Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SEND_TINDER_DRAFT'"
     : humanArmedBindingCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING'"
     : t1Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
     : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
-  const payloadPredicate = t5Capable
+  const payloadPredicate = officialAppResumeCapable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP') AND payload='{}'::jsonb)`
+    : visibleChatSyncCapable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT') AND payload='{}'::jsonb)`
+    : t5Capable
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING') AND payload='{}'::jsonb)
          OR command_type='SEND_TINDER_DRAFT'`

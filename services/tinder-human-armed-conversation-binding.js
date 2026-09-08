@@ -88,7 +88,13 @@ export const HUMAN_ARMED_CONVERSATION_REASON = Object.freeze({
   PERMIT_EXPIRED: "PERMIT_EXPIRED",
   PERMIT_ACK_NOT_CONFIRMED: "PERMIT_ACK_NOT_CONFIRMED",
   PERMIT_DEVICE_MISMATCH: "PERMIT_DEVICE_MISMATCH",
-  PERMIT_BINDING_MISMATCH: "PERMIT_BINDING_MISMATCH"
+  PERMIT_BINDING_MISMATCH: "PERMIT_BINDING_MISMATCH",
+  // V4 may stage an opaque visible-chat sync for this device. It is a
+  // separate authority and must never race or overlap an active V3 arm.
+  VISIBLE_CHAT_SYNC_PERMIT_ACTIVE: "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
+  // V5 may hold a separately issued, one-shot standard-launcher authority.
+  // V3 must never create a second device action while that authority is live.
+  OFFICIAL_APP_RESUME_PERMIT_ACTIVE: "OFFICIAL_APP_RESUME_PERMIT_ACTIVE"
 });
 
 export class TinderHumanArmedConversationBindingError extends Error {
@@ -439,7 +445,10 @@ function requireRepository(repository) {
     "getBindingForUpdate",
     "getArmPermitForUpdate",
     "markArmPermitConsumed",
-    "insertBindingAudit"
+    "insertBindingAudit",
+    // The adapter may safely return false when the separately migrated V5
+    // relation is absent, but an issuer must never silently omit this lookup.
+    "findActiveOfficialAppResumePermitForDevice"
   ]) {
     if (typeof repository?.[method] !== "function") {
       throw new TypeError(`repository.${method} must be a function`);
@@ -482,6 +491,51 @@ export function createTinderHumanArmedConversationBindingService(repository, {
       throw new TinderHumanArmedConversationBindingError("Die opaque Conversation-Referenz ist ungültig.", "INVALID_OPAQUE_REFERENCE");
     }
     return referenceHash;
+  }
+
+  async function concurrentDevicePermitConflict(transaction, deviceId, currentTime) {
+    // V4 and V5 foundations are optional during their separate release
+    // windows. The PostgreSQL repository supplies guarded lookups once their
+    // tables are present; older custom/test repositories remain V3-compatible.
+    // Both issuance paths lock the same device row before they reach these
+    // checks, so a live V3/V4/V5 authority cannot overlap another one.
+    if (typeof repository.findActiveVisibleChatSyncPermitForDevice === "function") {
+      const activeSyncPermit = await repository.findActiveVisibleChatSyncPermitForDevice(transaction, {
+        deviceId,
+        now: currentTime.toISOString()
+      });
+      if (activeSyncPermit !== true && activeSyncPermit !== false) {
+        throw new TinderHumanArmedConversationBindingError(
+          "Die Sync-Freigabe ist ungültig.",
+          "INVALID_VISIBLE_CHAT_SYNC_PERMIT",
+          500
+        );
+      }
+      if (activeSyncPermit === true) {
+        return Object.freeze({
+          status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+          reasonCode: HUMAN_ARMED_CONVERSATION_REASON.VISIBLE_CHAT_SYNC_PERMIT_ACTIVE
+        });
+      }
+    }
+    const activeResumePermit = await repository.findActiveOfficialAppResumePermitForDevice(transaction, {
+      deviceId,
+      now: currentTime.toISOString()
+    });
+    if (activeResumePermit !== true && activeResumePermit !== false) {
+      throw new TinderHumanArmedConversationBindingError(
+        "Die Launcher-Freigabe ist ungültig.",
+        "INVALID_OFFICIAL_APP_RESUME_PERMIT",
+        500
+      );
+    }
+    if (activeResumePermit === true) {
+      return Object.freeze({
+        status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+        reasonCode: HUMAN_ARMED_CONVERSATION_REASON.OFFICIAL_APP_RESUME_PERMIT_ACTIVE
+      });
+    }
+    return null;
   }
 
   async function issueArm(transaction, binding, actor, currentTime) {
@@ -542,6 +596,13 @@ export function createTinderHumanArmedConversationBindingService(repository, {
         await repository.getDeviceRuntimeForUpdate(transaction, capture.deviceId)
       );
       if (runtimeResult) return runtimeResult;
+      const currentTime = new Date(now());
+      const concurrentPermitConflict = await concurrentDevicePermitConflict(
+        transaction,
+        capture.deviceId,
+        currentTime
+      );
+      if (concurrentPermitConflict) return concurrentPermitConflict;
 
       let contactId;
       if (normalized.action === HUMAN_ARMED_CONVERSATION_ACTION.BIND_EXISTING) {
@@ -600,7 +661,7 @@ export function createTinderHumanArmedConversationBindingService(repository, {
         newBindingRevision: binding.bindingRevision,
         reasonCode: "HUMAN_ARMED_NO_PLATFORM_REFERENCE"
       }));
-      return issueArm(transaction, binding, normalized.actor, new Date(now()));
+      return issueArm(transaction, binding, normalized.actor, currentTime);
     });
   }
 
@@ -620,7 +681,14 @@ export function createTinderHumanArmedConversationBindingService(repository, {
         await repository.getDeviceRuntimeForUpdate(transaction, binding.deviceId)
       );
       if (runtimeResult) return runtimeResult;
-      return issueArm(transaction, binding, normalized.actor, new Date(now()));
+      const currentTime = new Date(now());
+      const concurrentPermitConflict = await concurrentDevicePermitConflict(
+        transaction,
+        binding.deviceId,
+        currentTime
+      );
+      if (concurrentPermitConflict) return concurrentPermitConflict;
+      return issueArm(transaction, binding, normalized.actor, currentTime);
     });
   }
 
@@ -1036,6 +1104,54 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
         [HUMAN_ARMED_CONVERSATION_REFERENCE_KIND]
       );
       return result.rows;
+    },
+
+    /**
+     * V4 is deliberately optional until its separately approved schema is
+     * installed. When present, this read is performed after the caller has
+     * locked the device row, which serializes V3/V4 permit issuance without
+     * using a display value, capture ID, or fingerprint.
+     */
+    async findActiveVisibleChatSyncPermitForDevice(client, { deviceId, now }) {
+      const relation = await client.query(
+        "SELECT to_regclass('tinder_visible_chat_sync_permits') AS relation_name"
+      );
+      if (!relation.rows[0]?.relation_name) return false;
+      const result = await client.query(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM tinder_visible_chat_sync_permits
+            WHERE device_id=$1
+              AND permit_state IN ('ISSUED','STAGED')
+              AND expires_at>$2
+         ) AS active`,
+        [deviceId, now]
+      );
+      return result.rows[0]?.active === true;
+    },
+
+    /**
+     * V5's launcher permit remains independently optional until its schema is
+     * installed. Once present, only a live ISSUED permit blocks a V3 arm;
+     * terminal launcher outcomes do not get reinterpreted as an active gate.
+     * The device row has already been locked by the issuer before this read.
+     */
+    async findActiveOfficialAppResumePermitForDevice(client, { deviceId, now }) {
+      const relation = await client.query(
+        "SELECT to_regclass('tinder_official_app_resume_permits') AS relation_name"
+      );
+      if (!relation.rows[0]?.relation_name) return false;
+      const result = await client.query(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM tinder_official_app_resume_permits
+            WHERE device_id=$1
+              AND permit_state='ISSUED'
+              AND expires_at>$2
+         ) AS active`,
+        [deviceId, now]
+      );
+      return result.rows[0]?.active === true;
     }
   });
 }

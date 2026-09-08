@@ -8,6 +8,10 @@ import {
   T1_TINDER_STATE_CONSTRAINT_NAME,
   T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION,
   T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME,
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION,
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
+  T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CHECK_EXPRESSION,
+  T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME,
   T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION,
   T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME,
   inspectDeviceBridgeT1Schema
@@ -135,8 +139,14 @@ function t1Constraint({ kind, mode }) {
   const finalExpression = tinder ? T1_TINDER_STATE_CHECK_EXPRESSION : T1_COMMAND_TYPE_CHECK_EXPRESSION;
   const isT2CommandConstraint = !tinder && mode === "T2";
   const isT5CommandConstraint = !tinder && mode === "T5";
-  const isFinal = mode === "FINAL" || isT2CommandConstraint || isT5CommandConstraint;
-  const base = isT5CommandConstraint
+  const isT4CommandConstraint = !tinder && mode === "T4";
+  const isOfficialAppResumeConstraint = !tinder && mode === "V5";
+  const isFinal = mode === "FINAL" || isT2CommandConstraint || isT5CommandConstraint || isT4CommandConstraint || isOfficialAppResumeConstraint;
+  const base = isOfficialAppResumeConstraint
+    ? TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION
+    : isT4CommandConstraint
+    ? T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CHECK_EXPRESSION
+    : isT5CommandConstraint
     ? T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CHECK_EXPRESSION
     : isT2CommandConstraint
     ? T2_HUMAN_ARMED_COMMAND_TYPE_CHECK_EXPRESSION
@@ -148,6 +158,10 @@ function t1Constraint({ kind, mode }) {
         ? T2_HUMAN_ARMED_COMMAND_TYPE_CONSTRAINT_NAME
         : isT5CommandConstraint
           ? T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME
+          : isT4CommandConstraint
+            ? T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME
+            : isOfficialAppResumeConstraint
+              ? TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME
         : isFinal ? finalName : legacyName,
     convalidated: mode !== "UNVALIDATED",
     condeferrable: false,
@@ -431,6 +445,26 @@ test("runtime T1 inspection accepts the exact named future T5 command superset w
   assert.equal(inspection.ready, true);
   const command = inspection.constraints.find(item => item.specification.column === "command_type");
   assert.equal(command.constraintName, T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME);
+  assert.equal(await migrateDeviceBridgeSchema(fake.pool).then(result => result.migrated), false);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
+});
+
+test("runtime T1 inspection accepts the exact named V4 visible-chat sync command superset without mutating it", async () => {
+  const fake = migrationClient({ tinder: "FINAL", command: "T4" });
+  const inspection = await inspectDeviceBridgeT1Schema(fake.client);
+  assert.equal(inspection.ready, true);
+  const command = inspection.constraints.find(item => item.specification.column === "command_type");
+  assert.equal(command.constraintName, T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME);
+  assert.equal(await migrateDeviceBridgeSchema(fake.pool).then(result => result.migrated), false);
+  assert.equal(ddlCalls(fake.client.calls).length, 0);
+});
+
+test("runtime T1 inspection accepts the exact named V5 official-app resume command superset without mutating it", async () => {
+  const fake = migrationClient({ tinder: "FINAL", command: "V5" });
+  const inspection = await inspectDeviceBridgeT1Schema(fake.client);
+  assert.equal(inspection.ready, true);
+  const command = inspection.constraints.find(item => item.specification.column === "command_type");
+  assert.equal(command.constraintName, TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME);
   assert.equal(await migrateDeviceBridgeSchema(fake.pool).then(result => result.migrated), false);
   assert.equal(ddlCalls(fake.client.calls).length, 0);
 });

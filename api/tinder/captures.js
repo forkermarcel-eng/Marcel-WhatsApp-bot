@@ -64,6 +64,55 @@ const PUBLIC_DRAFT_STATUS = "DRAFT";
 const DRAFT_REVIEW_VIEW = "draft-review";
 const OPEN_DRAFT_REVIEWS_VIEW = "open-draft-reviews";
 const OPEN_DRAFT_REVIEW_LIMIT = 25;
+// These remain on the existing captures proxy so the selected-detail reader
+// does not consume another Vercel Serverless Function slot.
+const CONFIRMED_CONVERSATIONS_VIEW = "confirmed-conversations";
+const CONFIRMED_CONVERSATION_VIEW = "confirmed-conversation";
+const VISIBLE_CHAT_SYNC_OPERATION = "visible-chat-sync";
+const OFFICIAL_APP_RESUME_OPERATION = "resume-official-app";
+const LATEST_CONFIRMED_CONVERSATION_LIMIT = 25;
+const CONVERSATION_MESSAGE_LIMIT = 100;
+const CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
+const CONVERSATION_MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING", "UNKNOWN"]);
+const PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE = "SYNC_TINDER_VISIBLE_CHAT";
+const PUBLIC_VISIBLE_CHAT_SYNC_STATUSES = new Set([
+  "QUEUED", "DEVICE_NOT_READY", "PERMIT_CONFLICT", "PERMIT_NOT_AVAILABLE"
+]);
+const PUBLIC_VISIBLE_CHAT_SYNC_REASONS = new Set([
+  "DEVICE_OFFLINE",
+  "DEVICE_ENROLLMENT_INACTIVE",
+  "BRIDGE_NOT_RUNNING",
+  "TINDER_NOT_CONNECTED",
+  "AUTOMATION_NOT_STOPPED",
+  "DEVICE_CAPABILITY_UNSUPPORTED",
+  "HUMAN_ARMED_PERMIT_ACTIVE",
+  "SYNC_PERMIT_ACTIVE",
+  "OFFICIAL_APP_RESUME_PERMIT_ACTIVE",
+  "PERMIT_NOT_FOUND",
+  "PERMIT_ALREADY_CONSUMED",
+  "PERMIT_NOT_STAGED",
+  "PERMIT_EXPIRED",
+  "PERMIT_ACK_NOT_STAGED",
+  "PERMIT_DEVICE_MISMATCH",
+  "SOURCE_CAPTURE_NOT_CONFIRMED"
+]);
+const PUBLIC_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
+const PUBLIC_OFFICIAL_APP_RESUME_STATUSES = new Set([
+  "QUEUED", "DEVICE_NOT_READY", "PERMIT_CONFLICT", "PERMIT_NOT_AVAILABLE"
+]);
+const PUBLIC_OFFICIAL_APP_RESUME_REASONS = new Set([
+  "DEVICE_OFFLINE",
+  "DEVICE_ENROLLMENT_INACTIVE",
+  "BRIDGE_NOT_RUNNING",
+  "TINDER_NOT_CONNECTED",
+  "AUTOMATION_NOT_STOPPED",
+  "DEVICE_CAPABILITY_UNSUPPORTED",
+  "HUMAN_ARMED_PERMIT_ACTIVE",
+  "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
+  "RESUME_PERMIT_ACTIVE",
+  "SOURCE_CAPTURE_NOT_CONFIRMED",
+  "SOURCE_CAPTURE_ALREADY_USED"
+]);
 const PUBLIC_OPEN_DRAFT_REVIEW_STATUSES = new Set(["DRAFT", "APPROVED", "STALE"]);
 const DRAFT_APPROVE_OPERATION = "draft-approve";
 const DRAFT_REJECT_OPERATION = "draft-reject";
@@ -289,6 +338,13 @@ function exactKeys(value, keys) {
 function captureRequestFromQuery(req) {
   const query = req.query || {};
   if (exactKeys(query, ["captureId", "view"]) && validCaptureId(query.captureId)
+      && query.view === CONFIRMED_CONVERSATION_VIEW) {
+    return Object.freeze({ type: "confirmed_conversation", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["view"]) && query.view === CONFIRMED_CONVERSATIONS_VIEW) {
+    return Object.freeze({ type: "confirmed_conversations" });
+  }
+  if (exactKeys(query, ["captureId", "view"]) && validCaptureId(query.captureId)
       && query.view === DRAFT_REVIEW_VIEW) {
     return Object.freeze({ type: "draft_review", captureId: query.captureId });
   }
@@ -313,6 +369,14 @@ function captureRequestFromQuery(req) {
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === DRAFT_CANCEL_OPERATION) {
     return Object.freeze({ type: "draft_cancel", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
+      && query.operation === VISIBLE_CHAT_SYNC_OPERATION) {
+    return Object.freeze({ type: "visible_chat_sync", captureId: query.captureId });
+  }
+  if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
+      && query.operation === OFFICIAL_APP_RESUME_OPERATION) {
+    return Object.freeze({ type: "official_app_resume", captureId: query.captureId });
   }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === HUMAN_ARM_OPERATION) {
@@ -392,6 +456,20 @@ function validHumanArmedRearmBody(body) {
 }
 
 function validEmptyDraftBody(body) {
+  return body === undefined || body === null || exactKeys(body, []);
+}
+
+// The browser never chooses a device, contact, thread, source capture, or
+// permit. This operation has no browser-owned input beyond the selected
+// opaque capture handle in the query string.
+function validEmptyVisibleChatSyncBody(body) {
+  return body === undefined || body === null || exactKeys(body, []);
+}
+
+// Kept separate by name even though both bounded operations accept the same
+// exact empty object. This prevents future resume changes from accidentally
+// inheriting a browser-owned sync field.
+function validEmptyOfficialAppResumeBody(body) {
   return body === undefined || body === null || exactKeys(body, []);
 }
 
@@ -491,6 +569,290 @@ function safeBackendError(data, fallback) {
     ...(result ? { result } : {}),
     error: fallback
   };
+}
+
+function normalizeConfirmedConversationTimestamp(value) {
+  const timestamp = normalizePublicTimestamp(value);
+  return timestamp || null;
+}
+
+/**
+ * List results deliberately contain no message content. This is the first
+ * guard against turning a bounded selected-detail reader into a bulk reader.
+ */
+function normalizePublicConfirmedConversationListItem(value) {
+  if (!exactKeys(value, ["capture_id", "visible_name", "captured_at"])
+      || !validCaptureId(value.capture_id) || !validBoundedText(value.visible_name, 240)) {
+    return null;
+  }
+  const capturedAt = normalizeConfirmedConversationTimestamp(value.captured_at);
+  if (!capturedAt) return null;
+  return Object.freeze({
+    capture_id: value.capture_id,
+    visible_name: value.visible_name.trim(),
+    captured_at: capturedAt
+  });
+}
+
+function normalizePublicConfirmedConversationList(value) {
+  if (!Array.isArray(value) || value.length > LATEST_CONFIRMED_CONVERSATION_LIMIT) return null;
+  const conversations = value.map(normalizePublicConfirmedConversationListItem);
+  return conversations.some((conversation) => conversation === null)
+    ? null
+    : Object.freeze(conversations);
+}
+
+function normalizePublicConfirmedConversationMessage(value) {
+  if (!exactKeys(value, ["direction", "text"])
+      || !validBoundedText(value.text, CONVERSATION_MESSAGE_TEXT_LIMIT)) {
+    return null;
+  }
+  const direction = String(value.direction || "").trim().toUpperCase();
+  if (!CONVERSATION_MESSAGE_DIRECTIONS.has(direction)) return null;
+  return Object.freeze({ direction, text: value.text.trim() });
+}
+
+function normalizePublicVisibleChatSyncMessage(value) {
+  const message = normalizePublicConfirmedConversationMessage(value);
+  return message && message.direction !== "UNKNOWN" ? message : null;
+}
+
+function normalizePublicVisibleChatSyncTranscript(value) {
+  if (!exactKeys(value, [
+    "received_at", "layout_schema_version", "segment_count", "overlap_count", "messages"
+  ]) || value.layout_schema_version !== "tinder-zte-visible-chat-scroll-v1"
+      || !Number.isSafeInteger(value.segment_count) || value.segment_count < 1 || value.segment_count > 8
+      || !Number.isSafeInteger(value.overlap_count) || value.overlap_count < 0 || value.overlap_count > 100
+      || !Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > CONVERSATION_MESSAGE_LIMIT) {
+    return null;
+  }
+  const receivedAt = normalizeConfirmedConversationTimestamp(value.received_at);
+  const messages = value.messages.map(normalizePublicVisibleChatSyncMessage);
+  if (!receivedAt || messages.some((message) => message === null)) return null;
+  return Object.freeze({
+    received_at: receivedAt,
+    layout_schema_version: "tinder-zte-visible-chat-scroll-v1",
+    segment_count: value.segment_count,
+    overlap_count: value.overlap_count,
+    messages: Object.freeze(messages)
+  });
+}
+
+/**
+ * Every backend property is allowlisted. In particular, an accidental
+ * capture/device/contact/fingerprint/provenance field cannot cross the
+ * Vercel boundary even if a backend response changes later.
+ */
+function normalizePublicConfirmedConversation(value, captureId) {
+  const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(value || {}, "visible_chat_sync");
+  const expectedFields = hasVisibleChatSync
+    ? ["capture_id", "visible_name", "captured_at", "messages", "visible_chat_sync"]
+    : ["capture_id", "visible_name", "captured_at", "messages"];
+  if (!exactKeys(value, expectedFields)
+      || value.capture_id !== captureId || !validCaptureId(value.capture_id)
+      || !validBoundedText(value.visible_name, 240)
+      || !Array.isArray(value.messages) || value.messages.length === 0
+      || value.messages.length > CONVERSATION_MESSAGE_LIMIT) {
+    return null;
+  }
+  const capturedAt = normalizeConfirmedConversationTimestamp(value.captured_at);
+  const messages = value.messages.map(normalizePublicConfirmedConversationMessage);
+  const visibleChatSync = hasVisibleChatSync
+    ? normalizePublicVisibleChatSyncTranscript(value.visible_chat_sync)
+    : null;
+  if (!capturedAt || messages.some((message) => message === null)
+      || (hasVisibleChatSync && visibleChatSync === null)) return null;
+  return Object.freeze({
+    capture_id: value.capture_id,
+    visible_name: value.visible_name.trim(),
+    captured_at: capturedAt,
+    messages: Object.freeze(messages),
+    ...(hasVisibleChatSync ? { visible_chat_sync: visibleChatSync } : {})
+  });
+}
+
+function normalizePublicVisibleChatSyncResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+      || value.command_type !== PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE
+      || !PUBLIC_VISIBLE_CHAT_SYNC_STATUSES.has(value.status)) {
+    return null;
+  }
+  const status = value.status;
+  const hasReason = Object.prototype.hasOwnProperty.call(value, "reason_code");
+  if (status === "QUEUED") {
+    return exactKeys(value, ["command_type", "status"])
+      ? Object.freeze({ command_type: PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE, status })
+      : null;
+  }
+  if (!hasReason || !exactKeys(value, ["command_type", "status", "reason_code"])
+      || !PUBLIC_VISIBLE_CHAT_SYNC_REASONS.has(value.reason_code)) {
+    return null;
+  }
+  return Object.freeze({
+    command_type: PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+    status,
+    reason_code: value.reason_code
+  });
+}
+
+function normalizePublicOfficialAppResumeResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+      || value.command_type !== PUBLIC_OFFICIAL_APP_RESUME_COMMAND_TYPE
+      || !PUBLIC_OFFICIAL_APP_RESUME_STATUSES.has(value.status)) {
+    return null;
+  }
+  const status = value.status;
+  const hasReason = Object.prototype.hasOwnProperty.call(value, "reason_code");
+  if (status === "QUEUED") {
+    return exactKeys(value, ["command_type", "status"])
+      ? Object.freeze({ command_type: PUBLIC_OFFICIAL_APP_RESUME_COMMAND_TYPE, status })
+      : null;
+  }
+  if (!hasReason || !exactKeys(value, ["command_type", "status", "reason_code"])
+      || !PUBLIC_OFFICIAL_APP_RESUME_REASONS.has(value.reason_code)) {
+    return null;
+  }
+  return Object.freeze({
+    command_type: PUBLIC_OFFICIAL_APP_RESUME_COMMAND_TYPE,
+    status,
+    reason_code: value.reason_code
+  });
+}
+
+function confirmedConversationBackendError(res, response, { detail = false } = {}) {
+  if (response.status === 401) {
+    return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+  }
+  const allowed = detail ? [400, 404, 409, 503] : [400, 409, 503];
+  const status = allowed.includes(response.status) ? response.status : 502;
+  return res.status(status).json({
+    ok: false,
+    error: detail ? "Tinder-Conversation konnte nicht geladen werden." : "Tinder-Conversations konnten nicht geladen werden."
+  });
+}
+
+async function forwardConfirmedConversationList(res, configuration) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/conversations/latest-confirmed`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) return confirmedConversationBackendError(res, response);
+    if (data?.ok !== true) {
+      return res.status(502).json({ ok: false, error: "UngÃ¼ltige Conversation-Antwort vom Backend." });
+    }
+    const conversations = normalizePublicConfirmedConversationList(data?.conversations);
+    if (!conversations) {
+      return res.status(502).json({ ok: false, error: "UngÃ¼ltige Conversation-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, conversations });
+  } catch {
+    console.error("Verbindung zum Tinder-Conversation-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardConfirmedConversationDetail(res, configuration, captureId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/conversations/${encodeURIComponent(captureId)}`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) return confirmedConversationBackendError(res, response, { detail: true });
+    if (data?.ok !== true) {
+      return res.status(502).json({ ok: false, error: "UngÃ¼ltige Conversation-Antwort vom Backend." });
+    }
+    const conversation = normalizePublicConfirmedConversation(data?.conversation, captureId);
+    if (!conversation) {
+      return res.status(502).json({ ok: false, error: "UngÃ¼ltige Conversation-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, conversation });
+  } catch {
+    console.error("Verbindung zum Tinder-Conversation-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardVisibleChatSync(res, configuration, captureId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/${encodeURIComponent(captureId)}/visible-chat-sync`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        // Do not forward a browser body. The backend derives every target and
+        // accepts only this exact empty object for the selected capture.
+        body: JSON.stringify({}),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const sync = normalizePublicVisibleChatSyncResult(data?.sync);
+    if (response.ok) {
+      if (data?.ok !== true || !sync || sync.status !== "QUEUED") {
+        return res.status(502).json({ ok: false, error: "Ungültige sichtbare Chat-Synchronisierung vom Backend." });
+      }
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(202).json({ ok: true, sync });
+    }
+
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    if (response.status === 409 && data?.ok === false && sync && sync.status !== "QUEUED") {
+      return res.status(409).json({ ok: false, conflict: true, sync, error: "Sichtbare Chat-Synchronisierung ist derzeit nicht verfügbar." });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Sichtbare Chat-Synchronisierung konnte nicht vorbereitet werden." });
+  } catch {
+    console.error("Verbindung zur sichtbaren Tinder-Chat-Synchronisierung fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardOfficialAppResume(res, configuration, captureId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/captures/${encodeURIComponent(captureId)}/resume-official-app`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        // Browser input never chooses a package, component, URI, device,
+        // command ID, expiry, thread, identity, or payload. The backend uses
+        // only the selected capture context and accepts this exact object.
+        body: JSON.stringify({}),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const resume = normalizePublicOfficialAppResumeResult(data?.resume);
+    if (response.ok) {
+      if (data?.ok !== true || !resume || resume.status !== "QUEUED") {
+        return res.status(502).json({ ok: false, error: "UngÃ¼ltige offizielle Tinder-App-Antwort vom Backend." });
+      }
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(202).json({ ok: true, resume });
+    }
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    if (response.status === 409 && data?.ok === false && resume && resume.status !== "QUEUED") {
+      return res.status(409).json({ ok: false, conflict: true, resume, error: "Offizielle Tinder-App kann derzeit nicht einmalig geöffnet werden." });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Offizielle Tinder-App konnte nicht vorbereitet werden." });
+  } catch {
+    console.error("Verbindung zum offiziellen Tinder-App-Resume fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
 }
 
 async function forwardCaptureRead(res, configuration, captureId) {
@@ -954,7 +1316,7 @@ export default async function handler(req, res) {
 
   const captureRequest = captureRequestFromQuery(req);
   if (!captureRequest || (req.method === "POST" && ![
-    "capture", "human_arm", "human_rearm", "draft", "draft_approve", "draft_reject", "draft_cancel"
+    "capture", "human_arm", "human_rearm", "draft", "draft_approve", "draft_reject", "draft_cancel", "visible_chat_sync", "official_app_resume"
   ].includes(captureRequest.type))) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
@@ -971,6 +1333,10 @@ export default async function handler(req, res) {
         ? "draft_reject"
       : captureRequest.type === "draft_cancel" && validEmptyDraftBody(req.body)
         ? "draft_cancel"
+      : captureRequest.type === "visible_chat_sync" && validEmptyVisibleChatSyncBody(req.body)
+        ? "visible_chat_sync"
+      : captureRequest.type === "official_app_resume" && validEmptyOfficialAppResumeBody(req.body)
+        ? "official_app_resume"
       : captureRequest.type === "capture" && validMappingBody(req.body)
           ? "profile_mapping"
           : captureRequest.type === "capture" && validConversationBindingBody(req.body)
@@ -982,6 +1348,12 @@ export default async function handler(req, res) {
 
   const configuration = backendConfiguration(res);
   if (!configuration) return;
+  if (req.method === "GET" && captureRequest.type === "confirmed_conversations") {
+    return forwardConfirmedConversationList(res, configuration);
+  }
+  if (req.method === "GET" && captureRequest.type === "confirmed_conversation") {
+    return forwardConfirmedConversationDetail(res, configuration, captureRequest.captureId);
+  }
   if (req.method === "GET" && captureRequest.type === "pending") {
     return forwardPendingCaptureRead(res, configuration);
   }
@@ -1018,6 +1390,12 @@ export default async function handler(req, res) {
   if (requestKind === "draft_cancel") {
     return forwardDraftReviewAction(res, configuration, captureRequest.captureId, "CANCEL");
   }
+  if (requestKind === "visible_chat_sync") {
+    return forwardVisibleChatSync(res, configuration, captureRequest.captureId);
+  }
+  if (requestKind === "official_app_resume") {
+    return forwardOfficialAppResume(res, configuration, captureRequest.captureId);
+  }
   return requestKind === "conversation_binding"
     ? forwardConversationBinding(req, res, configuration, captureRequest.captureId)
     : forwardHumanMapping(req, res, configuration, captureRequest.captureId);
@@ -1039,6 +1417,13 @@ export {
   DRAFT_APPROVE_OPERATION,
   DRAFT_REJECT_OPERATION,
   DRAFT_CANCEL_OPERATION,
+  CONFIRMED_CONVERSATION_VIEW,
+  CONFIRMED_CONVERSATIONS_VIEW,
+  VISIBLE_CHAT_SYNC_OPERATION,
+  OFFICIAL_APP_RESUME_OPERATION,
+  CONVERSATION_MESSAGE_LIMIT,
+  CONVERSATION_MESSAGE_TEXT_LIMIT,
+  LATEST_CONFIRMED_CONVERSATION_LIMIT,
   MAPPING_FIELDS,
   PENDING_CAPTURE_LIMIT,
   PENDING_CAPTURE_VIEW,
@@ -1059,10 +1444,20 @@ export {
   normalizePublicOpenDraftReviews,
   normalizePublicDraftActionResult,
   normalizePublicMappingResult,
+  normalizePublicConfirmedConversation,
+  normalizePublicConfirmedConversationList,
+  normalizePublicConfirmedConversationListItem,
+  normalizePublicConfirmedConversationMessage,
+  normalizePublicVisibleChatSyncMessage,
+  normalizePublicVisibleChatSyncTranscript,
+  normalizePublicVisibleChatSyncResult,
+  normalizePublicOfficialAppResumeResult,
+  validEmptyOfficialAppResumeBody,
   validCaptureId,
   validConversationBindingBody,
   validHumanArmedBindingBody,
   validHumanArmedRearmBody,
   validEmptyDraftBody,
+  validEmptyVisibleChatSyncBody,
   validMappingBody
 };

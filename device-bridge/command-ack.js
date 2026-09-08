@@ -2,6 +2,8 @@ import {
   BRIDGE_SERVICE_STATES,
   DEVICE_BRIDGE_COMMANDS,
   DeviceBridgeProtocolError,
+  T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS,
+  T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS,
   T5_TINDER_MANUAL_SEND_COMMANDS,
   T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS,
   T1_TINDER_MANUAL_GATE_COMMANDS,
@@ -9,6 +11,8 @@ import {
   isTinderHumanArmedConversationBindingCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
+  isTinderOfficialAppResumeCapable,
+  isTinderVisibleChatSyncCapable,
   isExactUtcTimestamp,
   isUuidV4,
   protocolErrorBody,
@@ -22,6 +26,18 @@ import {
   projectTinderManualSendCommandAck,
   TINDER_WRITER_NOT_IMPLEMENTED_CODE
 } from "./tinder-manual-send-command-ack.js";
+import {
+  projectTinderVisibleChatSyncCommandAck
+} from "./tinder-visible-chat-sync-command-ack.js";
+import {
+  projectTinderOfficialAppResumeCommandAck
+} from "./tinder-official-app-resume-command-ack.js";
+import {
+  isExactVisibleChatSyncStagedAcknowledgement
+} from "../services/tinder-visible-chat-sync.js";
+import {
+  isExactOfficialAppResumeIntentDispatchedAcknowledgement
+} from "../services/tinder-official-app-resume.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 COMMAND ACK
@@ -33,6 +49,8 @@ const SUPPORTED_COMMANDS = new Set(DEVICE_BRIDGE_COMMANDS);
 const TINDER_MANUAL_GATE_COMMANDS = new Set(T1_TINDER_MANUAL_GATE_COMMANDS);
 const TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS = new Set(T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS);
 const TINDER_MANUAL_SEND_COMMANDS = new Set(T5_TINDER_MANUAL_SEND_COMMANDS);
+const TINDER_VISIBLE_CHAT_SYNC_COMMANDS = new Set(T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS);
+const TINDER_OFFICIAL_APP_RESUME_COMMANDS = new Set(T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS);
 const BRIDGE_STATES = new Set(BRIDGE_SERVICE_STATES);
 const MAX_RESULT_BYTES = 1024;
 const MAX_ERROR_BYTES = 1024;
@@ -47,6 +65,20 @@ const T0_ERROR_MESSAGES = Object.freeze({
 export const TINDER_WRITER_NOT_IMPLEMENTED_ERROR = Object.freeze({
   code: TINDER_WRITER_NOT_IMPLEMENTED_CODE,
   message: "Tinder writer is not implemented"
+});
+// RESUME_OFFICIAL_TINDER_APP is acknowledged after the generic processor has
+// durably sent RECEIVED.  Its two physical-action failures therefore have to
+// be terminal FAILED outcomes, never a REJECTED transition that would be
+// impossible after RECEIVED.  These exact values reveal neither a launcher
+// target nor device-local diagnostics and are rejected for every other
+// command type below.
+export const TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR = Object.freeze({
+  code: "OFFICIAL_APP_RESUME_BLOCKED",
+  message: "Official app resume was blocked"
+});
+export const TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR = Object.freeze({
+  code: "COMMAND_OUTCOME_UNRESOLVED",
+  message: "Command outcome is unresolved"
 });
 
 function invalidAck(message = "Command acknowledgement is invalid") {
@@ -71,7 +103,9 @@ function validateSucceededResult(commandType, result, capabilities = null) {
   }
   if (result === null) {
     if (!TINDER_MANUAL_GATE_COMMANDS.has(commandType)
-        && !TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS.has(commandType)) return;
+        && !TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS.has(commandType)
+        && !TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(commandType)
+        && !TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)) return;
     throw invalidAck("Ack result is required for this Tinder command");
   }
   if (jsonBytes(result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
@@ -87,6 +121,10 @@ function validateSucceededResult(commandType, result, capabilities = null) {
   if (commandType === "ARM_TINDER_CONVERSATION_BINDING"
       && exactKeys(result, ["conversation_binding_permit"])
       && result.conversation_binding_permit === "ARMED") return;
+  if (TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(commandType)
+      && isExactVisibleChatSyncStagedAcknowledgement(result)) return;
+  if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
+      && isExactOfficialAppResumeIntentDispatchedAcknowledgement(result)) return;
   throw invalidAck("Ack result is not allowed for this T0 command");
 }
 
@@ -94,7 +132,11 @@ function validateTechnicalError(error) {
   if (!exactKeys(error, ["code", "message"]) ||
       (!(Object.hasOwn(T0_ERROR_MESSAGES, error.code) && error.message === T0_ERROR_MESSAGES[error.code]) &&
         !(error.code === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.code &&
-          error.message === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.message)) ||
+          error.message === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.message) &&
+        !(error.code === TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR.code &&
+          error.message === TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR.message) &&
+        !(error.code === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.code &&
+          error.message === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.message)) ||
       jsonBytes(error) > MAX_ERROR_BYTES) {
     throw invalidAck("Ack error is invalid or exceeds the T0 limit");
   }
@@ -103,6 +145,15 @@ function validateTechnicalError(error) {
 function isTinderWriterNotImplementedError(error) {
   return plainObject(error) && error.code === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.code &&
     error.message === TINDER_WRITER_NOT_IMPLEMENTED_ERROR.message;
+}
+
+function isTinderOfficialAppResumeTerminalError(error) {
+  return plainObject(error) && (
+    (error.code === TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR.code
+      && error.message === TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR.message)
+    || (error.code === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.code
+      && error.message === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.message)
+  );
 }
 
 function validateAckForCommand(ack, commandType, capabilities) {
@@ -114,8 +165,22 @@ function validateAckForCommand(ack, commandType, capabilities) {
     if (ack.status === "EXPIRED" && ack.result === null && ack.error === null) return;
     throw invalidAck("Tinder manual send requires a direct blocked-writer terminal acknowledgement");
   }
+  if (TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(commandType)
+      && !isTinderVisibleChatSyncCapable(capabilities)) {
+    throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support visible-chat sync staging");
+  }
+  if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
+      && !isTinderOfficialAppResumeCapable(capabilities)) {
+    throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support official Tinder app resume");
+  }
+  if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
+      && ack.status === "FAILED" && ack.result === null
+      && isTinderOfficialAppResumeTerminalError(ack.error)) return;
   if (isTinderWriterNotImplementedError(ack.error)) {
     throw invalidAck("Tinder writer error is not allowed for this command");
+  }
+  if (isTinderOfficialAppResumeTerminalError(ack.error)) {
+    throw invalidAck("Official Tinder app resume error is not allowed for this command");
   }
   if (ack.status === "SUCCEEDED") validateSucceededResult(commandType, ack.result, capabilities);
 }
@@ -137,8 +202,7 @@ export function parseAndValidateCommandAck(req, commandType = null, capabilities
     if (body.result !== null || body.error !== null) throw invalidAck(`${body.status} requires null result and error`);
   } else if (body.status === "SUCCEEDED") {
     if (body.error !== null) throw invalidAck("SUCCEEDED requires null error");
-    if (commandType) validateSucceededResult(commandType, body.result, capabilities);
-    else if (body.result !== null && jsonBytes(body.result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
+    if (!commandType && body.result !== null && jsonBytes(body.result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
   } else if (body.status === "FAILED") {
     if (body.result !== null) throw invalidAck("FAILED requires null result");
     validateTechnicalError(body.error);
@@ -146,6 +210,10 @@ export function parseAndValidateCommandAck(req, commandType = null, capabilities
     if (body.result !== null) throw invalidAck("REJECTED requires null result");
     if (body.error !== null) validateTechnicalError(body.error);
   }
+  // When the caller already knows the command type, apply the same exact
+  // command contract before any transaction. This keeps the resume-only
+  // terminal errors from becoming generic FAILED error vocabulary.
+  if (commandType) validateAckForCommand(body, commandType, capabilities);
   return body;
 }
 
@@ -215,6 +283,14 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         && !isTinderManualSendCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual send contract");
     }
+    if (TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(command.command_type)
+        && !isTinderVisibleChatSyncCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support visible-chat sync staging");
+    }
+    if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(command.command_type)
+        && !isTinderOfficialAppResumeCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support official Tinder app resume");
+    }
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
 
     validateAckForCommand(ack, command.command_type, device.capabilities);
@@ -233,6 +309,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     const currentStatus = command.terminal_status || (history.rows.some(row => row.status === "RECEIVED") ? "RECEIVED" : null);
     assertTransition(currentStatus, ack.status);
     const expired = new Date(command.expires_at).valueOf() <= now.valueOf();
+    if (expired && TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(command.command_type)
+        && ack.status === "SUCCEEDED") {
+      throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Official Tinder app resume command expired before terminal acknowledgement");
+    }
     if (expired && currentStatus === null && ack.status !== "EXPIRED") throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Command has expired");
     if (!expired && currentStatus === null && ack.status === "EXPIRED") throw new DeviceBridgeProtocolError(409, "INVALID_ACK_TRANSITION", "Command has not expired");
 
@@ -251,6 +331,8 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
       );
     }
     await projectTinderManualSendCommandAck(client, { command, ack });
+    await projectTinderVisibleChatSyncCommandAck(client, { command, ack });
+    await projectTinderOfficialAppResumeCommandAck(client, { command, ack });
     await client.query(
       `INSERT INTO device_bridge_audit_events
         (event_type, request_id, device_id, key_id, command_id, result_code, http_status, details)

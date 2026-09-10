@@ -59,11 +59,13 @@ test("selected detail has bounded one-shot official-app resume and visible-chat 
   assert.match(conversationCode, /visible_chat_sync/);
   assert.match(conversationCode, /official_app_resume/);
   assert.match(conversationCode, /OFFICIAL_APP_RESUME_OBSERVATION_STATUSES/);
+  assert.match(page, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES/);
   assert.match(
     conversationCode,
-    /officialAppResumeIsSafe\(conversation\.official_app_resume\)\s*&& conversation\.official_app_resume\.status === "NOT_REQUESTED"/
+    /officialAppResumeIsSafe\(conversation\.official_app_resume\)\s*&& OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\.has\(conversation\.official_app_resume\.status\)/
   );
-  assert.match(conversationCode, /resume\.status !== "NOT_REQUESTED"/);
+  assert.match(conversationCode, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\.has\(resume\.status\)/);
+  assert.match(page, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\s*=\s*new Set\(\[\s*"NOT_REQUESTED", "DISPATCHED", "CANCELLED", "EXPIRED"\s*\]\)/);
   assert.match(conversationCode, /officialAppResumeAttemptedCaptureId === captureId/);
   assert.match(conversationCode, /officialAppResumeAttemptedCaptureId === conversation\.capture_id/);
   assert.match(conversationCode, /Synchronisierter sichtbarer Verlauf/);
@@ -79,6 +81,19 @@ test("queued visible-chat sync refreshes only the selected product detail and ne
   assert.match(conversationCode, /if \(conversation\.visible_chat_sync\)/);
   assert.match(conversationCode, /refreshVisibleChatSyncDetail\(captureId, generation, attempt \+ 1\)/);
   assert.equal((conversationCode.match(/operation=visible-chat-sync/g) || []).length, 1);
+  assert.equal((conversationCode.match(/operation=resume-official-app/g) || []).length, 1);
+});
+
+test("a terminal official-app resume status clears only the local latch for a later separate permit", () => {
+  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
+
+  assert.match(conversationCode, /function scheduleOfficialAppResumeDetailRefresh\(captureId\)/);
+  assert.match(conversationCode, /await selectConfirmedConversation\(captureId\)/);
+  assert.match(conversationCode, /status === "PENDING"/);
+  assert.match(conversationCode, /OFFICIAL_APP_RESUME_TERMINAL_STATUSES\.has\(status\)/);
+  assert.match(conversationCode, /officialAppResumeQueuedCaptureId = null/);
+  assert.match(conversationCode, /officialAppResumeAttemptedCaptureId = null/);
+  assert.match(conversationCode, /scheduleOfficialAppResumeDetailRefresh\(captureId\)/);
   assert.equal((conversationCode.match(/operation=resume-official-app/g) || []).length, 1);
 });
 

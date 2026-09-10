@@ -262,7 +262,10 @@ test("Postgres reader selects only the latest safe resolved confirmed capture an
   assert.doesNotMatch(visibleChatSync.text, /s\.command_id/);
   assert.doesNotMatch(visibleChatSync.text, /s\.device_id/);
   assert.doesNotMatch(visibleChatSync.text, /s\.transcript_fingerprint/);
-  assert.match(officialAppResume.text, /LEFT JOIN tinder_official_app_resume_permits p/i);
+  assert.match(officialAppResume.text, /LEFT JOIN LATERAL/i);
+  assert.match(officialAppResume.text, /FROM tinder_official_app_resume_permits/i);
+  assert.match(officialAppResume.text, /ORDER BY created_at DESC, command_id DESC/i);
+  assert.match(officialAppResume.text, /LIMIT 1/i);
   assert.match(officialAppResume.text, /COALESCE\(p\.permit_state, 'NOT_REQUESTED'\)/i);
   assert.deepEqual(officialAppResume.values, [CAPTURE_ID]);
   const resumeColumns = officialAppResume.text.slice(0, officialAppResume.text.indexOf("FROM tinder_visible_chat_captures"));

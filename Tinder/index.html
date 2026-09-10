@@ -1209,8 +1209,11 @@
     let officialAppResumeBusy = false;
     let officialAppResumeQueuedCaptureId = null;
     let officialAppResumeAttemptedCaptureId = null;
+    let officialAppResumeRefreshGeneration = 0;
     const VISIBLE_CHAT_SYNC_REFRESH_DELAY_MS = 5000;
     const VISIBLE_CHAT_SYNC_REFRESH_MAX_ATTEMPTS = 45;
+    const OFFICIAL_APP_RESUME_REFRESH_DELAY_MS = 5000;
+    const OFFICIAL_APP_RESUME_REFRESH_MAX_ATTEMPTS = 45;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const INBOX_NAVIGATION_STAGES = new Set([
      "IDLE", "AWAITING_INBOX", "AWAITING_OFFICIAL_RESUME_HANDOFF",
@@ -1228,9 +1231,18 @@
      "ACCESSIBILITY_DESTROYED", "BRIDGE_NOT_RUNNING", "TINDER_GATE_NOT_CONNECTED",
      "LIFECYCLE_RESET", "LOCAL_STATE_UNAVAILABLE"
    ]);
-   const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
-     "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
-   ]);
+    const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
+      "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
+    ]);
+    // A terminal observation belongs only to its immutable historic permit.
+    // A deliberate later action may create one new, separately audited
+    // launcher-only permit; PENDING never enables that action.
+    const OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES = new Set([
+      "NOT_REQUESTED", "DISPATCHED", "CANCELLED", "EXPIRED"
+    ]);
+    const OFFICIAL_APP_RESUME_TERMINAL_STATUSES = new Set([
+      "DISPATCHED", "CANCELLED", "EXPIRED"
+    ]);
    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
      element.className = "dot";
@@ -2263,11 +2275,11 @@
        case "PENDING":
          return "Eine frühere offizielle Startanfrage wartet noch auf einen terminalen Ausgang. Kein zweiter Versuch wird vorbereitet.";
        case "DISPATCHED":
-         return "Die frühere offizielle Startanfrage ist terminal als Intent-Auslösung bestätigt. Dies bestätigt keinen Chat oder weitere Tinder-Aktion.";
+         return "Die frühere offizielle Startanfrage ist terminal als Intent-Auslösung bestätigt. Dies bestätigt keinen Chat oder weitere Tinder-Aktion; ein neuer Vorgang wäre separat auditierbar.";
        case "CANCELLED":
-         return "Die frühere offizielle Startanfrage ist terminal beendet. Kein zweiter Versuch wird vorbereitet.";
+         return "Die frühere offizielle Startanfrage ist terminal beendet. Ein neuer Vorgang wäre separat auditierbar; der alte wird nicht wiederverwendet.";
        case "EXPIRED":
-         return "Die frühere offizielle Startanfrage ist abgelaufen. Kein zweiter Versuch wird vorbereitet.";
+         return "Die frühere offizielle Startanfrage ist abgelaufen. Ein neuer Vorgang wäre separat auditierbar; der alte wird nicht wiederverwendet.";
        default:
          return "Status der einmaligen offiziellen Startanfrage ist nicht verfügbar. Kein neuer Versuch wird vorbereitet.";
      }
@@ -2402,6 +2414,38 @@
      refreshVisibleChatSyncDetail(captureId, generation, 0);
    }
 
+   async function refreshOfficialAppResumeDetail(captureId, generation, attempt) {
+     window.setTimeout(async () => {
+       if (generation !== officialAppResumeRefreshGeneration
+           || selectedConversationCaptureId !== captureId
+           || officialAppResumeQueuedCaptureId !== captureId) return;
+       const conversation = await selectConfirmedConversation(captureId);
+       if (!conversation || generation !== officialAppResumeRefreshGeneration
+           || selectedConversationCaptureId !== captureId
+           || officialAppResumeQueuedCaptureId !== captureId
+           || !officialAppResumeIsSafe(conversation.official_app_resume)) return;
+       const status = conversation.official_app_resume.status;
+       if (status === "PENDING") {
+         if (attempt + 1 < OFFICIAL_APP_RESUME_REFRESH_MAX_ATTEMPTS) {
+           refreshOfficialAppResumeDetail(captureId, generation, attempt + 1);
+         }
+         return;
+       }
+       // Only a freshly read terminal state clears the in-page click latch.
+      // It never mutates, resets, or reuses the historic server record.
+       if (OFFICIAL_APP_RESUME_TERMINAL_STATUSES.has(status)) {
+         officialAppResumeQueuedCaptureId = null;
+         officialAppResumeAttemptedCaptureId = null;
+         renderConfirmedConversationDetail(conversation);
+       }
+     }, OFFICIAL_APP_RESUME_REFRESH_DELAY_MS);
+   }
+
+   function scheduleOfficialAppResumeDetailRefresh(captureId) {
+     const generation = ++officialAppResumeRefreshGeneration;
+     refreshOfficialAppResumeDetail(captureId, generation, 0);
+   }
+
    async function requestVisibleChatSync(captureId, button, message) {
      if (visibleChatSyncBusy || visibleChatSyncQueuedCaptureId === captureId
          || selectedConversationCaptureId !== captureId || !UUID_V4.test(String(captureId || ""))) return;
@@ -2440,7 +2484,8 @@
      if (officialAppResumeBusy || officialAppResumeQueuedCaptureId === captureId
          || officialAppResumeAttemptedCaptureId === captureId
          || selectedConversationCaptureId !== captureId || !UUID_V4.test(String(captureId || ""))
-         || !officialAppResumeIsSafe(resume) || resume.status !== "NOT_REQUESTED") return;
+          || !officialAppResumeIsSafe(resume)
+          || !OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES.has(resume.status)) return;
      officialAppResumeBusy = true;
      officialAppResumeAttemptedCaptureId = captureId;
      button.disabled = true;
@@ -2458,6 +2503,7 @@
          throw new Error("Das Backend hat keine gültige offizielle Tinder-App-Anfrage vorbereitet.");
        }
        officialAppResumeQueuedCaptureId = captureId;
+       scheduleOfficialAppResumeDetailRefresh(captureId);
        message.textContent = "Einmalige offizielle Startanfrage ist an das verifizierte Gerät übergeben. Sie öffnet keinen Chat und versendet nichts.";
      } catch (error) {
        message.className = "conversation-sync-message error";
@@ -2512,8 +2558,8 @@
      resumeButton.type = "button";
      resumeButton.className = "button info conversation-sync-button";
      resumeButton.textContent = "Offizielle Tinder-App einmal öffnen";
-     const resumeAvailable = officialAppResumeIsSafe(conversation.official_app_resume)
-       && conversation.official_app_resume.status === "NOT_REQUESTED";
+      const resumeAvailable = officialAppResumeIsSafe(conversation.official_app_resume)
+        && OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES.has(conversation.official_app_resume.status);
      resumeButton.disabled = officialAppResumeBusy
        || officialAppResumeQueuedCaptureId === conversation.capture_id
        || officialAppResumeAttemptedCaptureId === conversation.capture_id

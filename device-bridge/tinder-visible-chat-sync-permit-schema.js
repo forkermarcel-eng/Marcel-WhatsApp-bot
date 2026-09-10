@@ -34,9 +34,25 @@ export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE = Object.freeze({
   INVALID: "INVALID"
 });
 
+// V2 is an additive, explicitly migrated upgrade of only the launcher-only
+// permit relation.  V4's sync and transcript contracts stay untouched.  The
+// version marker makes a new permit's binding snapshot auditable without
+// reinterpreting or mutating any historical V1 permit.
+export const TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION = Object.freeze({
+  V1: 1,
+  V2: 2
+});
+export const TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE = Object.freeze({
+  UPGRADE_REQUIRED: "UPGRADE_REQUIRED",
+  CANONICAL: "CANONICAL",
+  INVALID: "INVALID"
+});
+
 export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 export const TINDER_VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE = "tinder_visible_chat_sync_transcripts";
 export const TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE = "tinder_official_app_resume_permits";
+const TINDER_OFFICIAL_APP_RESUME_PERMIT_V1_SOURCE_CAPTURE_UNIQUE_CONSTRAINT =
+  "tinder_official_app_resume_permits_source_capture_id_key";
 
 const TARGET_RELATIONS = Object.freeze([
   TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE,
@@ -49,6 +65,7 @@ const TARGET_INDEX_NAMES = Object.freeze([
   "idx_tinder_visible_chat_sync_permit_source_capture",
   "idx_tinder_official_app_resume_permit_active_device",
   "idx_tinder_official_app_resume_permit_source_created",
+  "idx_tinder_official_app_resume_permit_binding_revision_created",
   "idx_tinder_visible_chat_sync_transcript_source_received",
   "idx_tinder_visible_chat_sync_transcript_device_received"
 ]);
@@ -88,10 +105,29 @@ const TRANSCRIPT_COLUMNS = Object.freeze({
   created_at: ["timestamp with time zone", true]
 });
 
-const OFFICIAL_APP_RESUME_PERMIT_COLUMNS = Object.freeze({
+const OFFICIAL_APP_RESUME_PERMIT_COLUMNS_V1 = Object.freeze({
   command_id: ["uuid", true],
   device_id: ["uuid", true],
   source_capture_id: ["uuid", true],
+  permit_state: ["text", true],
+  issued_at: ["timestamp with time zone", true],
+  expires_at: ["timestamp with time zone", true],
+  dispatched_at: ["timestamp with time zone", false],
+  closed_at: ["timestamp with time zone", false],
+  created_at: ["timestamp with time zone", true],
+  updated_at: ["timestamp with time zone", true]
+});
+
+const OFFICIAL_APP_RESUME_PERMIT_COLUMNS_V2 = Object.freeze({
+  command_id: ["uuid", true],
+  device_id: ["uuid", true],
+  source_capture_id: ["uuid", true],
+  // Historical V1 permits remain immutable and therefore have no binding
+  // snapshot.  The V2 check constraint requires these facts for every newly
+  // issued V2 permit.
+  binding_id: ["uuid", false],
+  binding_revision: ["integer", false],
+  permit_contract_version: ["smallint", true],
   permit_state: ["text", true],
   issued_at: ["timestamp with time zone", true],
   expires_at: ["timestamp with time zone", true],
@@ -113,11 +149,15 @@ const TRANSCRIPT_DEFAULTS = Object.freeze({
   created_at: TINDER_FOUNDATION_DEFAULT.NOW
 });
 
-const OFFICIAL_APP_RESUME_PERMIT_DEFAULTS = Object.freeze({
+const OFFICIAL_APP_RESUME_PERMIT_DEFAULTS_V1 = Object.freeze({
   permit_state: "'ISSUED'",
   issued_at: TINDER_FOUNDATION_DEFAULT.NOW,
   created_at: TINDER_FOUNDATION_DEFAULT.NOW,
   updated_at: TINDER_FOUNDATION_DEFAULT.NOW
+});
+
+const OFFICIAL_APP_RESUME_PERMIT_DEFAULTS_V2 = Object.freeze({
+  ...OFFICIAL_APP_RESUME_PERMIT_DEFAULTS_V1
 });
 
 export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_CONSTRAINT_CONTRACT = Object.freeze([
@@ -176,6 +216,26 @@ export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_CONSTRAINT_CONTRACT = Object.freeze
   tinderFoundationCheck(TINDER_VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE, "sync_completed_at >= sync_started_at")
 ]);
 
+export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_V2_CONSTRAINT_CONTRACT = Object.freeze([
+  ...TINDER_VISIBLE_CHAT_SYNC_PERMIT_CONSTRAINT_CONTRACT.filter(contract => !(
+    contract.table === TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE
+    && contract.type === "u"
+    && Array.isArray(contract.columns)
+    && contract.columns.length === 1
+    && contract.columns[0] === "source_capture_id"
+  )),
+  // The V1 source uniqueness is deliberately absent above.  A fresh V2
+  // permit is a new audit record, not a reuse of the historic source permit.
+  tinderFoundationKey(TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE, "f", ["binding_id"],
+    "FOREIGN KEY (binding_id) REFERENCES contact_human_armed_conversation_bindings(binding_id) ON DELETE RESTRICT", {
+      referenceTable: "contact_human_armed_conversation_bindings", referenceColumns: ["binding_id"], deleteAction: "r", updateAction: "a"
+    }),
+  tinderFoundationCheck(TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE,
+    "permit_contract_version IN (1, 2)"),
+  tinderFoundationCheck(TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE,
+    "(permit_contract_version = 1 AND binding_id IS NULL AND binding_revision IS NULL) OR (permit_contract_version = 2 AND binding_id IS NOT NULL AND binding_revision IS NOT NULL AND binding_revision > 0)")
+]);
+
 function mapColumns(rows, relation) {
   return new Map(rows.filter(row => row.relation_name === relation).map(row => [row.column_name, {
     dataType: row.data_type,
@@ -218,9 +278,9 @@ function indexMatches(row, { unique, columns, descending, predicate = "" }) {
     && canonicalSchemaPredicate(row.predicate) === canonicalSchemaPredicate(predicate);
 }
 
-function indexesCanonical(rows) {
+function indexesCanonical(rows, { resumePermitVersion = TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1 } = {}) {
   const indexes = indexMap(rows);
-  return indexMatches(indexes.get("idx_tinder_visible_chat_sync_permit_active_device"), {
+  const shared = indexMatches(indexes.get("idx_tinder_visible_chat_sync_permit_active_device"), {
     unique: true,
     columns: ["device_id"],
     descending: [false],
@@ -251,6 +311,18 @@ function indexesCanonical(rows) {
     columns: ["device_id", "received_at"],
     descending: [false, true]
   });
+  if (!shared) return false;
+  const bindingRevisionIndex = indexes.get("idx_tinder_official_app_resume_permit_binding_revision_created");
+  if (resumePermitVersion === TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1) {
+    return !bindingRevisionIndex;
+  }
+  return resumePermitVersion === TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V2
+    && indexMatches(bindingRevisionIndex, {
+      unique: false,
+      columns: ["binding_id", "binding_revision", "created_at"],
+      descending: [false, false, true],
+      predicate: "binding_id IS NOT NULL"
+    });
 }
 
 function indexesAbsent(rows) {
@@ -351,23 +423,42 @@ export async function inspectTinderVisibleChatSyncPermitSchema(client, {
     return { state: TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.ABSENT };
   }
 
-  const canonical = commandState === "V5"
+  const v1Canonical = commandState === "V5"
     && permitKind === "r"
     && resumePermitKind === "r"
     && transcriptKind === "r"
     && exactColumns(permit, PERMIT_COLUMNS, PERMIT_DEFAULTS)
-    && exactColumns(resumePermit, OFFICIAL_APP_RESUME_PERMIT_COLUMNS, OFFICIAL_APP_RESUME_PERMIT_DEFAULTS)
+    && exactColumns(resumePermit, OFFICIAL_APP_RESUME_PERMIT_COLUMNS_V1, OFFICIAL_APP_RESUME_PERMIT_DEFAULTS_V1)
     && exactColumns(transcript, TRANSCRIPT_COLUMNS, TRANSCRIPT_DEFAULTS)
-    && indexesCanonical(indexes.rows)
+    && indexesCanonical(indexes.rows, {
+      resumePermitVersion: TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1
+    })
     && hasExpectedTinderFoundationConstraints(
       constraints.rows,
       TINDER_VISIBLE_CHAT_SYNC_PERMIT_CONSTRAINT_CONTRACT,
       { exactTables: TARGET_RELATIONS }
     );
+  const v2Canonical = commandState === "V5"
+    && permitKind === "r"
+    && resumePermitKind === "r"
+    && transcriptKind === "r"
+    && exactColumns(permit, PERMIT_COLUMNS, PERMIT_DEFAULTS)
+    && exactColumns(resumePermit, OFFICIAL_APP_RESUME_PERMIT_COLUMNS_V2, OFFICIAL_APP_RESUME_PERMIT_DEFAULTS_V2)
+    && exactColumns(transcript, TRANSCRIPT_COLUMNS, TRANSCRIPT_DEFAULTS)
+    && indexesCanonical(indexes.rows, {
+      resumePermitVersion: TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V2
+    })
+    && hasExpectedTinderFoundationConstraints(
+      constraints.rows,
+      TINDER_VISIBLE_CHAT_SYNC_PERMIT_V2_CONSTRAINT_CONTRACT,
+      { exactTables: TARGET_RELATIONS }
+    );
   return {
-    state: canonical
+    state: v1Canonical || v2Canonical
       ? TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.CANONICAL
-      : TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.INVALID
+      : TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.INVALID,
+    ...(v1Canonical ? { official_app_resume_permit_schema_version: TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1 } : {}),
+    ...(v2Canonical ? { official_app_resume_permit_schema_version: TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V2 } : {})
   };
 }
 
@@ -383,6 +474,102 @@ export async function assertTinderVisibleChatSyncPermitSchemaReady(client, optio
   const inspection = await inspectTinderVisibleChatSyncPermitSchema(client, options);
   if (inspection.state !== TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.CANONICAL) {
     throw new Error("Tinder visible-chat sync permit schema is not ready.");
+  }
+  return inspection;
+}
+
+/**
+ * Read-only recognition of the narrow V2 launcher-permit upgrade.  It keeps
+ * V4's existing foundation valid in either reviewed version, while the V2
+ * runner itself may mutate only the canonical V1 predecessor.
+ */
+async function hasExpectedOfficialAppResumePermitV1SourceCaptureUniqueConstraint(client) {
+  const result = await client.query(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM pg_constraint constraint
+         JOIN pg_class relation ON relation.oid=constraint.conrelid
+         JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
+        WHERE namespace.nspname=current_schema()
+          AND relation.relname=$1
+          AND constraint.conname=$2
+          AND constraint.contype='u'
+     ) AS canonical`,
+    [
+      TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE,
+      TINDER_OFFICIAL_APP_RESUME_PERMIT_V1_SOURCE_CAPTURE_UNIQUE_CONSTRAINT
+    ]
+  );
+  return result.rows.length === 1 && result.rows[0]?.canonical === true;
+}
+
+function activeLegacyPermitError() {
+  const error = new Error("Tinder official-app resume permit V2 has an active legacy permit.");
+  error.code = "TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_ACTIVE_LEGACY_PERMIT";
+  return error;
+}
+
+async function countActiveOfficialAppResumePermitV1Rows(client) {
+  const result = await client.query(
+    `SELECT COUNT(*)::text AS active_count
+       FROM tinder_official_app_resume_permits
+      WHERE permit_state='ISSUED'
+        AND expires_at>NOW()`,
+    []
+  );
+  const count = Number(result.rows[0]?.active_count);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new Error("Tinder official-app resume permit V2 active legacy state is unresolved.");
+  }
+  return count;
+}
+
+export async function inspectTinderOfficialAppResumePermitV2Schema(client, {
+  hasExpectedV1SourceCaptureUniqueConstraint = hasExpectedOfficialAppResumePermitV1SourceCaptureUniqueConstraint,
+  ...visibleChatSyncOptions
+} = {}) {
+  const foundation = await inspectTinderVisibleChatSyncPermitSchema(client, visibleChatSyncOptions);
+  if (foundation.state !== TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.CANONICAL) {
+    return { state: TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.INVALID, foundation };
+  }
+  if (foundation.official_app_resume_permit_schema_version
+      === TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1
+      && !(await hasExpectedV1SourceCaptureUniqueConstraint(client))) {
+    // The fixed V2 migration must hard-drop this exact V1 constraint. A
+    // semantically similar renamed constraint is drift, not a safe upgrade.
+    return { state: TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.INVALID, foundation };
+  }
+  return {
+    state: foundation.official_app_resume_permit_schema_version
+      === TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V2
+      ? TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.CANONICAL
+      : TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.UPGRADE_REQUIRED,
+    foundation
+  };
+}
+
+export async function preflightTinderOfficialAppResumePermitV2Migration(client, options) {
+  const foundation = await inspectTinderOfficialAppResumePermitV2Schema(client, options);
+  if (foundation.state === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.INVALID) {
+    throw new Error("Tinder official-app resume permit V2 schema is incompatible.");
+  }
+  if (foundation.state === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.UPGRADE_REQUIRED
+      && await countActiveOfficialAppResumePermitV1Rows(client) > 0) {
+    // An unacknowledged V1 launcher must never be reinterpreted as V2. The
+    // caller waits for its finite expiry or terminal ACK, then re-runs a new
+    // read-only preflight; it may not reset or replay the legacy row.
+    throw activeLegacyPermitError();
+  }
+  return {
+    foundation,
+    mutate: foundation.state === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.UPGRADE_REQUIRED
+  };
+}
+
+export async function assertTinderOfficialAppResumePermitV2SchemaReady(client, options) {
+  const inspection = await inspectTinderOfficialAppResumePermitV2Schema(client, options);
+  if (inspection.state !== TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.CANONICAL) {
+    throw new Error("Tinder official-app resume permit V2 schema is not ready.");
   }
   return inspection;
 }

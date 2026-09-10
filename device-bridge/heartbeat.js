@@ -23,6 +23,9 @@ import {
 } from "../services/tinder-manual-send.js";
 import { hydrateTinderManualSendCommandForHeartbeat } from "./tinder-manual-send-command-hydration.js";
 
+const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
+const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conversation_v1";
+
 // This is deliberately a bounded, content-free diagnostic contract. It is
 // optional so an older installed Android release remains protocol-compatible,
 // but whenever it is present its shape must be exact before the signed
@@ -206,6 +209,60 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER') AND payload='{}'::jsonb)`
     : "";
+  const officialAppResumeDeliveryPredicate = officialAppResumeCapable
+    ? `
+       AND (
+         command_type <> '${TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE}'
+         OR EXISTS (
+           SELECT 1
+             FROM tinder_official_app_resume_permits resume_permit
+            WHERE resume_permit.command_id=device_bridge_commands.command_id
+              AND resume_permit.device_id=device_bridge_commands.device_id
+              AND resume_permit.permit_state='ISSUED'
+              AND resume_permit.expires_at>$2
+              -- V1 rows have no V2 snapshot keys and retain their historic
+              -- delivery semantics. The JSON row projection makes this safe before the
+              -- V2 columns exist, while V2 fails closed on any mismatch.
+              AND (
+                COALESCE(to_jsonb(resume_permit)->>'permit_contract_version', '1') = '1'
+                OR (
+                  to_jsonb(resume_permit)->>'permit_contract_version' = '2'
+                  AND EXISTS (
+                    SELECT 1
+                      FROM contact_human_armed_conversation_bindings binding
+                      JOIN contact_human_armed_conversation_binding_permits binding_permit
+                        ON binding_permit.binding_id=binding.binding_id
+                      JOIN tinder_visible_chat_captures source_capture
+                        ON source_capture.capture_id=binding_permit.consumed_capture_id
+                     WHERE binding.binding_id::text=to_jsonb(resume_permit)->>'binding_id'
+                       AND binding.binding_revision::text=to_jsonb(resume_permit)->>'binding_revision'
+                       AND binding.device_id=resume_permit.device_id
+                       AND binding.channel='tinder'
+                       AND binding.reference_kind='${TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+                       AND binding.binding_state='CONFIRMED'
+                       AND binding.human_verified=TRUE
+                       AND binding_permit.device_id=binding.device_id
+                       AND binding_permit.binding_revision=binding.binding_revision
+                       AND binding_permit.permit_state='CONSUMED'
+                       AND binding_permit.consumed_capture_id=resume_permit.source_capture_id
+                       AND source_capture.device_id=binding.device_id
+                       AND source_capture.source_package='com.tinder'
+                       AND source_capture.capture_safety_status='SAFE'
+                       AND source_capture.mapping_status='RESOLVED'
+                       AND source_capture.human_review_status='CONFIRMED'
+                       AND source_capture.resolved_contact_id=binding.contact_id
+                       AND source_capture.capture_revision = (
+                         SELECT MAX(newer.capture_revision)
+                           FROM tinder_visible_chat_captures newer
+                          WHERE newer.device_id=source_capture.device_id
+                            AND newer.runtime_thread_fingerprint=source_capture.runtime_thread_fingerprint
+                       )
+                  )
+                )
+              )
+         )
+       )`
+    : "";
   const result = await client.query(
     `SELECT command_id, protocol_version, command_type, issued_at, expires_at,
             configuration_revision, payload
@@ -217,6 +274,7 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
          OR (command_type='STOP_BRIDGE' AND payload='{"reason":"ADMIN_REQUEST"}'::jsonb)
          ${payloadPredicate}
        )
+       ${officialAppResumeDeliveryPredicate}
      ORDER BY issued_at ASC, command_id ASC
      LIMIT $3`,
     [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit]

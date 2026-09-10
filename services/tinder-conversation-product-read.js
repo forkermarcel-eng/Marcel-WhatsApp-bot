@@ -473,8 +473,13 @@ function createPgTinderConversationProductReadRepository(pool) {
           `SELECT COALESCE(p.permit_state, 'NOT_REQUESTED') AS permit_state,
                   p.expires_at
              FROM tinder_visible_chat_captures c
-             LEFT JOIN tinder_official_app_resume_permits p
-               ON p.source_capture_id=c.capture_id
+             LEFT JOIN LATERAL (
+               SELECT permit_state, expires_at
+                 FROM tinder_official_app_resume_permits
+                WHERE source_capture_id=c.capture_id
+                ORDER BY created_at DESC, command_id DESC
+                LIMIT 1
+             ) p ON TRUE
             WHERE c.capture_id=$1
               AND ${eligibleWhere}
             LIMIT 1`,

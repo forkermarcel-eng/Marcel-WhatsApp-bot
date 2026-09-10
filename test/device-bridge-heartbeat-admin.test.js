@@ -32,6 +32,11 @@ import {
   createAdminDeviceStatusHandler
 } from "../device-bridge/admin.js";
 
+const heartbeatSource = fs.readFileSync(
+  new URL("../device-bridge/heartbeat.js", import.meta.url),
+  "utf8"
+);
+
 const NOW = new Date("2026-09-01T12:34:56.000Z");
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
@@ -941,6 +946,19 @@ test("command insert and audit are atomic and audit contains no sensitive values
   assert.equal(fake.state.rollback, true);
   const audit = fake.calls.find(call => call.sql.includes("COMMAND_CREATED"));
   assert.equal(JSON.stringify(audit).match(/signature|public_key|enrollment_code|secret|cookie/i), null);
+});
+
+test("official-app resume delivery revalidates a V2 binding snapshot without requiring V2 columns before migration", () => {
+  assert.match(heartbeatSource, /COALESCE\(to_jsonb\(resume_permit\)->>'permit_contract_version', '1'\) = '1'/);
+  assert.match(heartbeatSource, /to_jsonb\(resume_permit\)->>'permit_contract_version' = '2'/);
+  assert.match(heartbeatSource, /binding\.binding_id::text=to_jsonb\(resume_permit\)->>'binding_id'/);
+  assert.match(heartbeatSource, /binding\.binding_revision::text=to_jsonb\(resume_permit\)->>'binding_revision'/);
+  assert.match(heartbeatSource, /binding\.binding_state='CONFIRMED'/);
+  assert.match(heartbeatSource, /binding_permit\.permit_state='CONSUMED'/);
+  assert.match(heartbeatSource, /binding_permit\.consumed_capture_id=resume_permit\.source_capture_id/);
+  assert.match(heartbeatSource, /source_capture\.human_review_status='CONFIRMED'/);
+  assert.match(heartbeatSource, /resume_permit\.expires_at>\$2/);
+  assert.doesNotMatch(heartbeatSource, /resume_permit\.(?:binding_id|binding_revision|permit_contract_version)/);
 });
 
 test("Block 3 admin routes reuse dashboard auth/readiness", () => {

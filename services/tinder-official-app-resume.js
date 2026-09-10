@@ -3,6 +3,11 @@ import { deriveDeviceStatus } from "../device-bridge/heartbeat.js";
 import {
   isTinderOfficialAppResumeCapable
 } from "../device-bridge/protocol-v1.js";
+import {
+  HUMAN_ARMED_CONVERSATION_BINDING_TABLE,
+  HUMAN_ARMED_CONVERSATION_PERMIT_TABLE,
+  HUMAN_ARMED_CONVERSATION_REFERENCE_KIND
+} from "./tinder-human-armed-conversation-binding.js";
 
 /* ==================================================
 TINDER OFFICIAL-APP RESUME \u2014 DURABLE ONE-SHOT PERMIT
@@ -19,6 +24,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 
 export const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 export const TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE = "tinder_official_app_resume_permits";
+export const TINDER_OFFICIAL_APP_RESUME_PERMIT_CONTRACT_VERSION = 2;
 export const TINDER_OFFICIAL_APP_RESUME_PERMIT_TTL_MS = 2 * 60_000;
 export const TINDER_OFFICIAL_APP_RESUME_ACK_RESULT = Object.freeze({
   official_tinder_app_resume: "INTENT_DISPATCHED"
@@ -101,6 +107,41 @@ function normalizeIssueInput(value) {
   });
 }
 
+function positiveInteger(value) {
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * The dashboard still supplies only the opaque selected source capture.  The
+ * repository derives this immutable snapshot from the current human-confirmed
+ * binding under the same transaction and lock.  No display value, thread hash,
+ * contact, or Android-provided value may enter this authority.
+ */
+function normalizeConfirmedHumanArmedSource(value, expected) {
+  if (!plainObject(value)) return null;
+  const sourceCaptureId = normalizeUuid(
+    sourceValue(value, "sourceCaptureId", "source_capture_id"),
+    "Confirmed source capture identifier",
+    "INVALID_CONFIRMED_TINDER_RESUME_SOURCE"
+  );
+  const bindingId = normalizeUuid(
+    sourceValue(value, "bindingId", "binding_id"),
+    "Confirmed conversation binding identifier",
+    "INVALID_CONFIRMED_TINDER_RESUME_BINDING"
+  );
+  const bindingRevision = positiveInteger(
+    sourceValue(value, "bindingRevision", "binding_revision")
+  );
+  if (!bindingRevision || sourceCaptureId !== expected.sourceCaptureId) {
+    throw new TinderOfficialAppResumeError(
+      "The confirmed Tinder resume source is invalid.",
+      "INVALID_CONFIRMED_TINDER_RESUME_SOURCE",
+      500
+    );
+  }
+  return Object.freeze({ sourceCaptureId, bindingId, bindingRevision });
+}
+
 function runtimeGateResult(row) {
   const runtime = plainObject(row) ? row : null;
   if (!runtime || sourceValue(runtime, "online", "online") !== true) {
@@ -150,8 +191,7 @@ function requireRepository(repository) {
     "findActiveHumanArmedPermitForDevice",
     "findActiveVisibleChatSyncPermitForDevice",
     "findActiveOfficialAppResumePermitForDevice",
-    "getConfirmedSourceCaptureForUpdate",
-    "findOfficialAppResumePermitForSourceCapture",
+    "getConfirmedHumanArmedSourceForUpdate",
     "queueOfficialAppResumeCommand",
     "createOfficialAppResumePermit"
   ]) {
@@ -237,25 +277,17 @@ export function createTinderOfficialAppResumeService(repository, {
         });
       }
 
-      if (strictBoolean(await repository.getConfirmedSourceCaptureForUpdate(transaction, {
+      const confirmedSource = normalizeConfirmedHumanArmedSource(
+        await repository.getConfirmedHumanArmedSourceForUpdate(transaction, {
         sourceCaptureId: normalized.sourceCaptureId,
         deviceId: normalized.deviceId
-      }), "getConfirmedSourceCaptureForUpdate") !== true) {
+        }),
+        normalized
+      );
+      if (!confirmedSource) {
         return Object.freeze({
           status: TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_NOT_AVAILABLE,
           reasonCode: TINDER_OFFICIAL_APP_RESUME_REASON.SOURCE_CAPTURE_NOT_CONFIRMED
-        });
-      }
-      // The source capture row is locked by the confirmation lookup above.
-      // This durable one-shot check therefore serializes concurrent attempts
-      // for the same server-side capture even if they originate from distinct
-      // dashboard sessions or device rows. Terminal outcomes remain used.
-      if (strictBoolean(await repository.findOfficialAppResumePermitForSourceCapture(transaction, {
-        sourceCaptureId: normalized.sourceCaptureId
-      }), "findOfficialAppResumePermitForSourceCapture")) {
-        return Object.freeze({
-          status: TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_NOT_AVAILABLE,
-          reasonCode: TINDER_OFFICIAL_APP_RESUME_REASON.SOURCE_CAPTURE_ALREADY_USED
         });
       }
 
@@ -275,7 +307,10 @@ export function createTinderOfficialAppResumeService(repository, {
       await repository.createOfficialAppResumePermit(transaction, Object.freeze({
         commandId,
         deviceId: normalized.deviceId,
-        sourceCaptureId: normalized.sourceCaptureId,
+        sourceCaptureId: confirmedSource.sourceCaptureId,
+        bindingId: confirmedSource.bindingId,
+        bindingRevision: confirmedSource.bindingRevision,
+        permitContractVersion: TINDER_OFFICIAL_APP_RESUME_PERMIT_CONTRACT_VERSION,
         permitState: "ISSUED",
         expiresAt
       }));
@@ -387,39 +422,43 @@ export function createPgTinderOfficialAppResumeRepository(pool) {
       return result.rows[0]?.active === true;
     },
 
-    async getConfirmedSourceCaptureForUpdate(client, { sourceCaptureId, deviceId }) {
+    async getConfirmedHumanArmedSourceForUpdate(client, { sourceCaptureId, deviceId }) {
       const result = await client.query(
-        `SELECT capture_id
-           FROM tinder_visible_chat_captures capture
-          WHERE capture.capture_id=$1
-            AND capture.device_id=$2
+        `SELECT binding.binding_id,
+                binding.binding_revision,
+                permit.consumed_capture_id AS source_capture_id
+           FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+           JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} permit
+             ON permit.binding_id=binding.binding_id
+           JOIN tinder_visible_chat_captures capture
+             ON capture.capture_id=permit.consumed_capture_id
+          WHERE permit.consumed_capture_id=$1
+            AND binding.device_id=$2
+            AND binding.channel='tinder'
+            AND binding.reference_kind=$3
+            AND binding.binding_state='CONFIRMED'
+            AND binding.human_verified=TRUE
+            AND binding.device_id IS NOT NULL
+            AND permit.device_id=binding.device_id
+            AND permit.binding_revision=binding.binding_revision
+            AND permit.permit_state='CONSUMED'
+            AND permit.consumed_capture_id IS NOT NULL
+            AND capture.device_id=binding.device_id
             AND capture.source_package='com.tinder'
             AND capture.capture_safety_status='SAFE'
             AND capture.mapping_status='RESOLVED'
             AND capture.human_review_status='CONFIRMED'
-            AND capture.resolved_contact_id IS NOT NULL
+            AND capture.resolved_contact_id=binding.contact_id
             AND capture.capture_revision = (
               SELECT MAX(newer.capture_revision)
                 FROM tinder_visible_chat_captures newer
                WHERE newer.device_id=capture.device_id
-                 AND newer.runtime_thread_fingerprint=capture.runtime_thread_fingerprint
+                  AND newer.runtime_thread_fingerprint=capture.runtime_thread_fingerprint
             )
-          FOR UPDATE`,
-        [sourceCaptureId, deviceId]
+          FOR UPDATE OF binding, permit, capture`,
+        [sourceCaptureId, deviceId, HUMAN_ARMED_CONVERSATION_REFERENCE_KIND]
       );
-      return result.rows.length === 1;
-    },
-
-    async findOfficialAppResumePermitForSourceCapture(client, { sourceCaptureId }) {
-      const result = await client.query(
-        `SELECT EXISTS (
-           SELECT 1
-             FROM ${TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE}
-            WHERE source_capture_id=$1
-         ) AS used`,
-        [sourceCaptureId]
-      );
-      return result.rows[0]?.used === true;
+      return result.rows.length === 1 ? result.rows[0] : null;
     },
 
     async queueOfficialAppResumeCommand(client, input) {
@@ -448,13 +487,21 @@ export function createPgTinderOfficialAppResumeRepository(pool) {
     },
 
     async createOfficialAppResumePermit(client, input) {
+      if (input.permitContractVersion !== TINDER_OFFICIAL_APP_RESUME_PERMIT_CONTRACT_VERSION) {
+        throw new TypeError("Official-app resume permit must use the current contract version");
+      }
       const result = await client.query(
         `INSERT INTO ${TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE} (
-           command_id, device_id, source_capture_id, permit_state,
+           command_id, device_id, source_capture_id, binding_id, binding_revision,
+           permit_contract_version, permit_state,
            issued_at, expires_at, created_at, updated_at
-         ) VALUES ($1,$2,$3,'ISSUED',NOW(),$4,NOW(),NOW())
-         RETURNING command_id`,
-        [input.commandId, input.deviceId, input.sourceCaptureId, input.expiresAt]
+         ) VALUES ($1,$2,$3,$4,$5,$6,'ISSUED',NOW(),$7,NOW(),NOW())
+          RETURNING command_id`,
+        [
+          input.commandId, input.deviceId, input.sourceCaptureId,
+          input.bindingId, input.bindingRevision, input.permitContractVersion,
+          input.expiresAt
+        ]
       );
       if (result.rows.length !== 1 || result.rows[0]?.command_id !== input.commandId) {
         throw new TinderOfficialAppResumeError(

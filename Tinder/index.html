@@ -991,6 +991,14 @@
        </div>
      </section>
 
+     <section class="enrollment-panel" aria-labelledby="inboxNavigationDiagnosticHeading">
+       <h2 id="inboxNavigationDiagnosticHeading">Inbox-Navigation</h2>
+       <p>Inhaltsfreier Status der zuletzt akzeptierten Android-Heartbeat-Beobachtung.</p>
+       <p class="enrollment-message" id="inboxNavigationStatus" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
+     </section>
+
      <section class="enrollment-panel capture-mapping-panel" id="captureMappingPanel" hidden aria-labelledby="captureMappingHeading">
        <h2 id="captureMappingHeading">Tinder-Kontakt zuordnen</h2>
        <p id="captureMappingIntro">Dieses sichere sichtbare Capture braucht eine ausdrückliche menschliche Zuordnung. Der sichtbare Tinder-Name ist kein Identifier und wird nicht automatisch zusammengeführt.</p>
@@ -1135,6 +1143,7 @@
      connectAndroidTinder: document.getElementById("connectAndroidTinder"),
      disconnectAndroidTinder: document.getElementById("disconnectAndroidTinder"),
       deviceCommandMessage: document.getElementById("deviceCommandMessage"),
+      inboxNavigationStatus: document.getElementById("inboxNavigationStatus"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        openDraftReviewList: document.getElementById("openDraftReviewList"),
@@ -1203,6 +1212,22 @@
     const VISIBLE_CHAT_SYNC_REFRESH_DELAY_MS = 5000;
     const VISIBLE_CHAT_SYNC_REFRESH_MAX_ATTEMPTS = 45;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
+   const INBOX_NAVIGATION_STAGES = new Set([
+     "IDLE", "AWAITING_INBOX", "AWAITING_OFFICIAL_RESUME_HANDOFF",
+     "AWAITING_INBOX_TAB_ACTION", "INBOX_READY", "AWAITING_ROW_OPEN",
+     "ROW_ACTION_ISSUED", "AWAITING_CHAT", "CHAT_VERIFIED", "BLOCKED"
+   ]);
+   const INBOX_NAVIGATION_REASONS = new Set([
+     "NONE", "RUNTIME_GATE", "HUMAN_CALIBRATION_ACTIVE", "OPERATION_IN_PROGRESS",
+     "ACCESSIBILITY_UNAVAILABLE", "OFFICIAL_RESUME_HANDOFF_FAILED", "FOREGROUND_WAIT_TIMEOUT",
+     "SENSITIVE_SCREEN", "DISCOVERY_STRUCTURE_REJECTED", "INBOX_TAB_TARGET_DRIFT",
+     "INBOX_TAB_ACTION_REJECTED", "INBOX_TRANSITION_TIMEOUT", "UNKNOWN_INBOX_STRUCTURE",
+     "NO_ELIGIBLE_CONVERSATION", "ROW_SELECTION_UNAVAILABLE", "SNAPSHOT_EXPIRED",
+     "ROW_TARGET_DRIFT", "ROW_ACTION_REJECTED", "CHAT_VERIFICATION_TIMEOUT",
+     "CHAT_STRUCTURE_REJECTED", "ACCESSIBILITY_INTERRUPTED", "ACCESSIBILITY_UNBOUND",
+     "ACCESSIBILITY_DESTROYED", "BRIDGE_NOT_RUNNING", "TINDER_GATE_NOT_CONNECTED",
+     "LIFECYCLE_RESET", "LOCAL_STATE_UNAVAILABLE"
+   ]);
    const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
      "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
    ]);
@@ -2593,7 +2618,37 @@
      }).format(date)}`;
    }
 
+   function inboxNavigationIsSafe(value) {
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|") === [
+         "observed_event_count", "reason", "stage", "visible_conversation_count"
+       ].join("|")
+       && INBOX_NAVIGATION_STAGES.has(value.stage)
+       && INBOX_NAVIGATION_REASONS.has(value.reason)
+       && Number.isSafeInteger(value.visible_conversation_count)
+       && value.visible_conversation_count >= 0 && value.visible_conversation_count <= 8
+       && Number.isSafeInteger(value.observed_event_count)
+       && value.observed_event_count >= 0 && value.observed_event_count <= 8;
+   }
+
+   function renderInboxNavigationStatus(device) {
+     const navigation = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.inbox_navigation
+       : null;
+     elements.inboxNavigationStatus.className = "enrollment-message";
+     if (!inboxNavigationIsSafe(navigation)) {
+       elements.inboxNavigationStatus.textContent =
+         "Nicht verfuegbar: keine aktuelle, gueltige Inbox-Navigation im akzeptierten Heartbeat.";
+       return;
+     }
+     elements.inboxNavigationStatus.textContent =
+       `STAGE: ${navigation.stage} · REASON: ${navigation.reason} · ` +
+       `VISIBLE_CONVERSATIONS: ${navigation.visible_conversation_count} · ` +
+       `OBSERVED_EVENTS: ${navigation.observed_event_count}`;
+   }
+
    function setUnavailableDeviceDetails(value) {
+     renderInboxNavigationStatus(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
      elements.bridgeSub.textContent = "Kein eindeutiger Gerätestatus";
@@ -2713,6 +2768,7 @@
        setCommandAvailability(null, "Mehrere Geräte – Auswahl erforderlich.");
      } else {
        const device = devices[0];
+       renderInboxNavigationStatus(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
        const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();

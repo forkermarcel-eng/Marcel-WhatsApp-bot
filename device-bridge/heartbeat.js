@@ -23,6 +23,60 @@ import {
 } from "../services/tinder-manual-send.js";
 import { hydrateTinderManualSendCommandForHeartbeat } from "./tinder-manual-send-command-hydration.js";
 
+// This is deliberately a bounded, content-free diagnostic contract. It is
+// optional so an older installed Android release remains protocol-compatible,
+// but whenever it is present its shape must be exact before the signed
+// heartbeat can be accepted.
+export const TINDER_INBOX_NAVIGATION_STAGES = Object.freeze([
+  "IDLE",
+  "AWAITING_INBOX",
+  "AWAITING_OFFICIAL_RESUME_HANDOFF",
+  "AWAITING_INBOX_TAB_ACTION",
+  "INBOX_READY",
+  "AWAITING_ROW_OPEN",
+  "ROW_ACTION_ISSUED",
+  "AWAITING_CHAT",
+  "CHAT_VERIFIED",
+  "BLOCKED"
+]);
+
+export const TINDER_INBOX_NAVIGATION_REASONS = Object.freeze([
+  "NONE",
+  "RUNTIME_GATE",
+  "HUMAN_CALIBRATION_ACTIVE",
+  "OPERATION_IN_PROGRESS",
+  "ACCESSIBILITY_UNAVAILABLE",
+  "OFFICIAL_RESUME_HANDOFF_FAILED",
+  "FOREGROUND_WAIT_TIMEOUT",
+  "SENSITIVE_SCREEN",
+  "DISCOVERY_STRUCTURE_REJECTED",
+  "INBOX_TAB_TARGET_DRIFT",
+  "INBOX_TAB_ACTION_REJECTED",
+  "INBOX_TRANSITION_TIMEOUT",
+  "UNKNOWN_INBOX_STRUCTURE",
+  "NO_ELIGIBLE_CONVERSATION",
+  "ROW_SELECTION_UNAVAILABLE",
+  "SNAPSHOT_EXPIRED",
+  "ROW_TARGET_DRIFT",
+  "ROW_ACTION_REJECTED",
+  "CHAT_VERIFICATION_TIMEOUT",
+  "CHAT_STRUCTURE_REJECTED",
+  "ACCESSIBILITY_INTERRUPTED",
+  "ACCESSIBILITY_UNBOUND",
+  "ACCESSIBILITY_DESTROYED",
+  "BRIDGE_NOT_RUNNING",
+  "TINDER_GATE_NOT_CONNECTED",
+  "LIFECYCLE_RESET",
+  "LOCAL_STATE_UNAVAILABLE"
+]);
+
+const TINDER_INBOX_NAVIGATION_STAGE_SET = new Set(TINDER_INBOX_NAVIGATION_STAGES);
+const TINDER_INBOX_NAVIGATION_REASON_SET = new Set(TINDER_INBOX_NAVIGATION_REASONS);
+const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
+  "stage", "reason", "visible_conversation_count", "observed_event_count"
+]);
+const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
+
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 HEARTBEAT
 ================================================== */
@@ -43,6 +97,40 @@ function nullableTimestamp(value) {
   return value === null || isExactUtcTimestamp(value);
 }
 
+function exactKeys(value, keys) {
+  return object(value)
+    && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
+}
+
+function isBoundedTinderInboxNavigationDiagnostic(value) {
+  return exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
+    && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
+    && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
+    && Number.isSafeInteger(value.visible_conversation_count)
+    && value.visible_conversation_count >= 0
+    && value.visible_conversation_count <= TINDER_INBOX_NAVIGATION_MAX_COUNT
+    && Number.isSafeInteger(value.observed_event_count)
+    && value.observed_event_count >= 0
+    && value.observed_event_count <= TINDER_INBOX_NAVIGATION_MAX_COUNT;
+}
+
+function heartbeatAuditDetails(heartbeat) {
+  const details = { sequence: heartbeat.sequence };
+  if (!Object.hasOwn(heartbeat, "tinder_inbox_navigation")) return details;
+  const navigation = heartbeat.tinder_inbox_navigation;
+  // Do not serialize the heartbeat object itself. This explicit allowlist
+  // prevents future local diagnostics from becoming durable audit metadata.
+  return {
+    ...details,
+    tinder_inbox_navigation: {
+      stage: navigation.stage,
+      reason: navigation.reason,
+      visible_conversation_count: navigation.visible_conversation_count,
+      observed_event_count: navigation.observed_event_count
+    }
+  };
+}
+
 export function parseAndValidateHeartbeat(req) {
   let body;
   try {
@@ -60,6 +148,9 @@ export function parseAndValidateHeartbeat(req) {
   if (!deviceBridgeCapabilityProfile(body.capabilities)) throw invalidHeartbeat("Heartbeat capabilities are invalid");
   if (!isKnownTinderStateForCapabilities(body.tinder_state, body.capabilities)) throw invalidHeartbeat("Heartbeat tinder_state is invalid for this capability profile");
   if (!AUTOMATION_STATES.includes(body.automation_state)) throw invalidHeartbeat("T1 automation_state must be STOPPED");
+  if (Object.hasOwn(body, "tinder_inbox_navigation") && !isBoundedTinderInboxNavigationDiagnostic(body.tinder_inbox_navigation)) {
+    throw invalidHeartbeat("Heartbeat inbox navigation diagnostic is invalid");
+  }
   return body;
 }
 
@@ -218,9 +309,9 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       );
       await client.query(
         `INSERT INTO device_bridge_audit_events
-          (event_type, request_id, device_id, key_id, result_code, http_status, details)
+         (event_type, request_id, device_id, key_id, result_code, http_status, details)
          VALUES ('HEARTBEAT_ACCEPTED',$1,$2,$3,'SUCCEEDED',200,$4::jsonb)`,
-        [auth.requestId, auth.deviceId, auth.keyId, JSON.stringify({ sequence: heartbeat.sequence })]
+        [auth.requestId, auth.deviceId, auth.keyId, JSON.stringify(heartbeatAuditDetails(heartbeat))]
       );
     } else {
       acceptedAt = new Date(device.last_accepted_heartbeat_at);

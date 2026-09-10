@@ -60,6 +60,26 @@ function backendResponse({ ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return JSON.stringify(body); } };
 }
 
+function deviceStatus({ inboxNavigation = null, extra = {} } = {}) {
+  return {
+    device_id: DEVICE_ID,
+    display_name: "ZTE",
+    enrollment_state: "ACTIVE",
+    device_status: "ONLINE",
+    enrolled_at: "2026-09-02T12:00:00.000Z",
+    last_heartbeat_accepted_at: "2026-09-02T12:00:03.000Z",
+    app_version: "1.0",
+    app_build: 1,
+    bridge_service_state: "RUNNING",
+    tinder_state: "CONNECTED",
+    automation_state: "STOPPED",
+    tinder_manual_gate_capable: true,
+    configuration_revision: 1,
+    inbox_navigation: inboxNavigation,
+    ...extra
+  };
+}
+
 async function withEnvironment(run) {
   const originalFetch = globalThis.fetch;
   const originalPassword = process.env.DASHBOARD_PASSWORD;
@@ -123,6 +143,91 @@ test("GET without command identifiers preserves the device-list proxy", async ()
   assert.deepEqual(res.body.devices, []);
   assert.equal(call.url, "https://backend.example/dashboard-api/device-bridge/devices");
   assert.equal(call.options.method, "GET");
+}));
+
+test("device-list proxy allowlists the bounded inbox navigation projection", async () => withEnvironment(async () => {
+  const inboxNavigation = {
+    stage: "BLOCKED",
+    reason: "ACCESSIBILITY_UNBOUND",
+    visible_conversation_count: 0,
+    observed_event_count: 3
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ inboxNavigation })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].inbox_navigation, inboxNavigation);
+  assert.deepEqual(Object.keys(res.body.devices[0]).sort(), [
+    "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
+    "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
+    "inbox_navigation", "last_heartbeat_accepted_at", "tinder_manual_gate_capable", "tinder_state"
+  ]);
+}));
+
+test("device-list proxy makes malformed inbox diagnostics unavailable and strips raw backend fields", async () => withEnvironment(async () => {
+  for (const device of [
+    deviceStatus({ inboxNavigation: { stage: "BLOCKED", reason: "ACCESSIBILITY_UNBOUND", visible_conversation_count: 0 } }),
+    deviceStatus({ inboxNavigation: { stage: "BLOCKED", reason: "ACCESSIBILITY_UNBOUND", visible_conversation_count: 0, observed_event_count: 0, raw_tree: "forbidden" } }),
+    deviceStatus({ extra: { raw_audit_details: "forbidden" } })
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          server_time: "2026-09-02T12:00:04.000Z",
+          devices: [device]
+        });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].inbox_navigation, null);
+    assert.equal(JSON.stringify(res.body).includes("raw_audit_details"), false);
+  }
+}));
+
+test("device-list proxy never projects inbox navigation from an offline device", async () => withEnvironment(async () => {
+  const inboxNavigation = {
+    stage: "BLOCKED",
+    reason: "ACCESSIBILITY_UNBOUND",
+    visible_conversation_count: 0,
+    observed_event_count: 3
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ inboxNavigation, extra: { device_status: "OFFLINE" } })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.devices[0].device_status, "OFFLINE");
+  assert.equal(res.body.devices[0].inbox_navigation, null);
 }));
 
 test("invalid device and command identifiers are rejected before backend access", async () => withEnvironment(async () => {

@@ -335,6 +335,49 @@ test("heartbeat validation preserves T0 and accepts only the exact T1 state prof
   ]) assert.throws(() => parseAndValidateHeartbeat(heartbeatRequest(payload).req), error => error.code === "INVALID_DEVICE_STATE");
 });
 
+test("optional Tinder inbox navigation heartbeat diagnostic is strict and content-free", async () => {
+  const diagnostic = {
+    stage: "AWAITING_INBOX",
+    reason: "NONE",
+    visible_conversation_count: 0,
+    observed_event_count: 2
+  };
+  const payload = heartbeatPayload({ tinder_inbox_navigation: diagnostic });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(parseAndValidateHeartbeat(request.req).tinder_inbox_navigation, diagnostic);
+
+  const fake = heartbeatPool({ request });
+  await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_inbox_navigation: diagnostic
+  });
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  assert.equal(JSON.stringify(update.params).includes("AWAITING_INBOX"), false);
+
+  for (const inboxNavigation of [
+    null,
+    {},
+    { ...diagnostic, stage: "UNBOUNDED" },
+    { ...diagnostic, reason: "UNBOUNDED" },
+    { ...diagnostic, visible_conversation_count: 9 },
+    { ...diagnostic, observed_event_count: -1 },
+    { ...diagnostic, extra: "forbidden" }
+  ]) {
+    const invalid = heartbeatPayload({ tinder_inbox_navigation: inboxNavigation });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("T1 heartbeat persists the local Tinder state without deriving it from online state", async () => {
   const payload = heartbeatPayload({ capabilities: T1_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" });
   const request = heartbeatRequest(payload);
@@ -695,13 +738,14 @@ test("T5 heartbeat omits a descriptor when freshly locked source shows newer cap
   }
 });
 
-function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN") {
+function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN", inboxNavigation = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
     last_accepted_heartbeat_at: lastAccepted, app_version_name: "1.0", app_version_code: "1",
     bridge_service_state: "RUNNING", tinder_state: tinderState, automation_state: "STOPPED", capabilities,
-    configuration_revision: 1
+    configuration_revision: 1,
+    inbox_navigation: inboxNavigation
   };
 }
 
@@ -726,6 +770,67 @@ test("admin status exposes only the derived T1 capability flag", async () => {
   await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
   assert.equal(res.body.device.tinder_manual_gate_capable, true);
   assert.equal(JSON.stringify(res.body).includes("TINDER_MANUAL_GATE_V1"), false);
+});
+
+test("admin status projects only the newest bounded inbox navigation heartbeat diagnostic", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "ACCESSIBILITY_UNBOUND",
+    visible_conversation_count: 0,
+    observed_event_count: 3
+  };
+  let sql = "";
+  const acceptedNow = new Date();
+  const pool = {
+    async query(query) {
+      sql = query;
+      return { rows: [statusRow(acceptedNow, T4_RESUME_DEVICE_CAPABILITIES, "CONNECTED", diagnostic)] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.inbox_navigation, diagnostic);
+  assert.match(sql, /device_bridge_audit_events/);
+  assert.match(sql, /HEARTBEAT_ACCEPTED/);
+  assert.match(sql, /tinder_inbox_navigation/);
+  assert.match(sql, /ORDER BY e\.created_at DESC, e\.audit_event_id DESC/);
+  assert.equal(JSON.stringify(res.body.device).includes("details"), false);
+});
+
+test("admin status never projects a stale inbox navigation diagnostic for an offline device", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "ACCESSIBILITY_UNBOUND",
+    visible_conversation_count: 0,
+    observed_event_count: 3
+  };
+  const offlineAt = new Date(Date.now() - 91_000);
+  const pool = {
+    async query() {
+      return { rows: [statusRow(offlineAt, T4_RESUME_DEVICE_CAPABILITIES, "CONNECTED", diagnostic)] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.equal(res.body.device.device_status, "OFFLINE");
+  assert.equal(res.body.device.inbox_navigation, null);
+});
+
+test("missing or malformed inbox navigation audit data is unavailable, never stale", async () => {
+  for (const diagnostic of [
+    undefined,
+    { stage: "BLOCKED", reason: "ACCESSIBILITY_UNBOUND", visible_conversation_count: 0 },
+    { stage: "BLOCKED", reason: "ACCESSIBILITY_UNBOUND", visible_conversation_count: 9, observed_event_count: 0 }
+  ]) {
+    const pool = {
+      async query() {
+        return { rows: [statusRow(NOW, T4_RESUME_DEVICE_CAPABILITIES, "CONNECTED", diagnostic)] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.inbox_navigation, null);
+  }
 });
 
 function commandPool({

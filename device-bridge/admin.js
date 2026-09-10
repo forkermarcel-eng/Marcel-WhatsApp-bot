@@ -5,7 +5,11 @@ import {
   isUuidV4,
   protocolErrorBody
 } from "./protocol-v1.js";
-import { deriveDeviceStatus } from "./heartbeat.js";
+import {
+  deriveDeviceStatus,
+  TINDER_INBOX_NAVIGATION_REASONS,
+  TINDER_INBOX_NAVIGATION_STAGES
+} from "./heartbeat.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
 import {
@@ -47,13 +51,54 @@ const ACK_PAYLOAD_OVERALL_CLASSIFICATIONS = new Set([
 const ACK_PAYLOAD_DIAGNOSTIC_STAGE_SET = new Set(ACK_PAYLOAD_DIAGNOSTIC_STAGES);
 const ACK_PAYLOAD_DIAGNOSTIC_REASON_SET = new Set(ACK_PAYLOAD_DIAGNOSTIC_REASON_CODES);
 const ACK_PAYLOAD_MAX_CANDIDATE_EVALUATIONS = ACK_PAYLOAD_STATUSES.length * 4;
+const TINDER_INBOX_NAVIGATION_STAGE_SET = new Set(TINDER_INBOX_NAVIGATION_STAGES);
+const TINDER_INBOX_NAVIGATION_REASON_SET = new Set(TINDER_INBOX_NAVIGATION_REASONS);
+const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
+  "stage", "reason", "visible_conversation_count", "observed_event_count"
+]);
+const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
+
+function plainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactKeys(value, keys) {
+  return plainObject(value)
+    && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
+}
+
+/**
+ * The current *accepted* heartbeat is the sole source of this optional,
+ * content-free projection. A missing or malformed audit value is deliberately
+ * unavailable instead of falling back to a stale observation.
+ */
+export function normalizeAdminInboxNavigationStatus(value) {
+  if (!exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
+      || !TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
+      || !TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
+      || !Number.isSafeInteger(value.visible_conversation_count)
+      || value.visible_conversation_count < 0
+      || value.visible_conversation_count > TINDER_INBOX_NAVIGATION_MAX_COUNT
+      || !Number.isSafeInteger(value.observed_event_count)
+      || value.observed_event_count < 0
+      || value.observed_event_count > TINDER_INBOX_NAVIGATION_MAX_COUNT) {
+    return null;
+  }
+  return Object.freeze({
+    stage: value.stage,
+    reason: value.reason,
+    visible_conversation_count: value.visible_conversation_count,
+    observed_event_count: value.observed_event_count
+  });
+}
 
 function statusRow(row, now) {
+  const deviceStatus = deriveDeviceStatus(row.last_accepted_heartbeat_at, now);
   return {
     device_id: row.device_id,
     display_name: row.display_name,
     enrollment_state: row.enrollment_state,
-    device_status: deriveDeviceStatus(row.last_accepted_heartbeat_at, now),
+    device_status: deviceStatus,
     enrolled_at: row.created_at ? new Date(row.created_at).toISOString() : null,
     last_heartbeat_accepted_at: row.last_accepted_heartbeat_at ? new Date(row.last_accepted_heartbeat_at).toISOString() : null,
     app_version: row.app_version_name,
@@ -62,20 +107,38 @@ function statusRow(row, now) {
     tinder_state: row.tinder_state,
     automation_state: row.automation_state,
     tinder_manual_gate_capable: isTinderManualGateCapable(row.capabilities),
-    configuration_revision: row.configuration_revision
+    configuration_revision: row.configuration_revision,
+    // A heartbeat diagnostic is meaningful only while the same device is
+    // currently ONLINE. Do not show an old accepted observation after the
+    // server's offline threshold has elapsed.
+    inbox_navigation: deviceStatus === "ONLINE"
+      ? normalizeAdminInboxNavigationStatus(row.inbox_navigation)
+      : null
   };
 }
 
-const STATUS_COLUMNS = `device_id, display_name, enrollment_state, created_at, last_accepted_heartbeat_at,
-  app_version_name, app_version_code, bridge_service_state, tinder_state,
-  automation_state, capabilities, configuration_revision`;
+const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.created_at, d.last_accepted_heartbeat_at,
+  d.app_version_name, d.app_version_code, d.bridge_service_state, d.tinder_state,
+  d.automation_state, d.capabilities, d.configuration_revision,
+  latest_heartbeat.details -> 'tinder_inbox_navigation' AS inbox_navigation`;
+
+const STATUS_FROM = `FROM device_bridge_devices d
+  LEFT JOIN LATERAL (
+    SELECT e.details
+      FROM device_bridge_audit_events e
+     WHERE e.device_id=d.device_id
+       AND e.event_type='HEARTBEAT_ACCEPTED'
+     ORDER BY e.created_at DESC, e.audit_event_id DESC
+     LIMIT 1
+  ) latest_heartbeat ON true`;
 
 export function createAdminDeviceListHandler(pool) {
   return async function adminDeviceListHandler(req, res) {
     try {
       const now = new Date();
       const result = await pool.query(
-        `SELECT ${STATUS_COLUMNS} FROM device_bridge_devices ORDER BY created_at ASC, device_id ASC LIMIT 100`
+        `SELECT ${STATUS_COLUMNS} ${STATUS_FROM}
+         ORDER BY d.created_at ASC, d.device_id ASC LIMIT 100`
       );
       return res.status(200).json({ ok: true, server_time: now.toISOString(), devices: result.rows.map(row => statusRow(row, now)) });
     } catch (error) {
@@ -91,7 +154,8 @@ export function createAdminDeviceStatusHandler(pool) {
       if (!isUuidV4(req.params.deviceId)) throw new DeviceBridgeProtocolError(400, "INVALID_IDENTIFIER", "Device identifier is invalid");
       const now = new Date();
       const result = await pool.query(
-        `SELECT ${STATUS_COLUMNS} FROM device_bridge_devices WHERE device_id=$1`,
+        `SELECT ${STATUS_COLUMNS} ${STATUS_FROM}
+         WHERE d.device_id=$1`,
         [req.params.deviceId]
       );
       if (!result.rows[0]) throw new DeviceBridgeProtocolError(404, "DEVICE_NOT_FOUND", "Device was not found");

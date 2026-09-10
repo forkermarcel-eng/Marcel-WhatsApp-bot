@@ -31,3 +31,15 @@ test("Android Tinder manual gate controls require a selected compatible device a
   assert.doesNotMatch(page, /connectAndroidTinder\.addEventListener\([\s\S]{0,200}runControl\(/);
   assert.doesNotMatch(page, /disconnectAndroidTinder\.addEventListener\([\s\S]{0,200}runControl\(/);
 });
+
+test("Tinder technical diagnostics render only a bounded selected-device inbox navigation heartbeat projection", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="inboxNavigationStatus"/);
+  assert.match(page, /function inboxNavigationIsSafe\(value\)/);
+  assert.match(page, /INBOX_NAVIGATION_STAGES\.has\(value\.stage\)/);
+  assert.match(page, /INBOX_NAVIGATION_REASONS\.has\(value\.reason\)/);
+  assert.match(page, /String\(device\?\.device_status \|\| ""\)\.toUpperCase\(\) === "ONLINE"/);
+  assert.match(page, /renderInboxNavigationStatus\(device\);/);
+  assert.match(page, /renderInboxNavigationStatus\(null\);/);
+  assert.doesNotMatch(page, /inbox_navigation\.raw/i);
+  assert.doesNotMatch(page, /inbox_navigation\.last_observation/i);
+});

@@ -2,6 +2,30 @@ import crypto from "crypto";
 
 const ALLOWED_COMMANDS = new Set(["PING", "REQUEST_STATUS", "CONNECT_TINDER", "DISCONNECT_TINDER"]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const INBOX_NAVIGATION_STAGES = new Set([
+  "IDLE", "AWAITING_INBOX", "AWAITING_OFFICIAL_RESUME_HANDOFF",
+  "AWAITING_INBOX_TAB_ACTION", "INBOX_READY", "AWAITING_ROW_OPEN",
+  "ROW_ACTION_ISSUED", "AWAITING_CHAT", "CHAT_VERIFIED", "BLOCKED"
+]);
+const INBOX_NAVIGATION_REASONS = new Set([
+  "NONE", "RUNTIME_GATE", "HUMAN_CALIBRATION_ACTIVE", "OPERATION_IN_PROGRESS",
+  "ACCESSIBILITY_UNAVAILABLE", "OFFICIAL_RESUME_HANDOFF_FAILED", "FOREGROUND_WAIT_TIMEOUT",
+  "SENSITIVE_SCREEN", "DISCOVERY_STRUCTURE_REJECTED", "INBOX_TAB_TARGET_DRIFT",
+  "INBOX_TAB_ACTION_REJECTED", "INBOX_TRANSITION_TIMEOUT", "UNKNOWN_INBOX_STRUCTURE",
+  "NO_ELIGIBLE_CONVERSATION", "ROW_SELECTION_UNAVAILABLE", "SNAPSHOT_EXPIRED",
+  "ROW_TARGET_DRIFT", "ROW_ACTION_REJECTED", "CHAT_VERIFICATION_TIMEOUT",
+  "CHAT_STRUCTURE_REJECTED", "ACCESSIBILITY_INTERRUPTED", "ACCESSIBILITY_UNBOUND",
+  "ACCESSIBILITY_DESTROYED", "BRIDGE_NOT_RUNNING", "TINDER_GATE_NOT_CONNECTED",
+  "LIFECYCLE_RESET", "LOCAL_STATE_UNAVAILABLE"
+]);
+const INBOX_NAVIGATION_FIELDS = Object.freeze([
+  "stage", "reason", "visible_conversation_count", "observed_event_count"
+]);
+const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
+  "device_id", "display_name", "enrollment_state", "device_status", "enrolled_at",
+  "last_heartbeat_accepted_at", "app_version", "app_build", "bridge_service_state",
+  "tinder_state", "automation_state", "tinder_manual_gate_capable", "configuration_revision"
+]);
 
 function getCookie(req, name) {
   const cookies = String(req.headers.cookie || "").split(";").map(cookie => cookie.trim());
@@ -57,6 +81,57 @@ function backendHeaders(configuration, withBody = false) {
   };
 }
 
+function plainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactKeys(value, keys) {
+  return plainObject(value)
+    && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
+}
+
+function normalizePublicInboxNavigation(value) {
+  if (value === null) return null;
+  if (!exactKeys(value, INBOX_NAVIGATION_FIELDS)
+      || !INBOX_NAVIGATION_STAGES.has(value.stage)
+      || !INBOX_NAVIGATION_REASONS.has(value.reason)
+      || !Number.isSafeInteger(value.visible_conversation_count)
+      || value.visible_conversation_count < 0 || value.visible_conversation_count > 8
+      || !Number.isSafeInteger(value.observed_event_count)
+      || value.observed_event_count < 0 || value.observed_event_count > 8) {
+    return null;
+  }
+  return Object.freeze({
+    stage: value.stage,
+    reason: value.reason,
+    visible_conversation_count: value.visible_conversation_count,
+    observed_event_count: value.observed_event_count
+  });
+}
+
+/**
+ * Preserve the pre-existing device-status fields without changing their
+ * validation semantics, while explicitly allowlisting the new optional
+ * heartbeat diagnostic. This prevents raw audit JSON from crossing the
+ * Vercel boundary without turning unrelated legacy status variation into an
+ * outage.
+ */
+function sanitizePublicDeviceStatus(value) {
+  if (!plainObject(value)) return null;
+  const hasInboxNavigation = Object.hasOwn(value, "inbox_navigation");
+  // The server only projects a heartbeat observation while the device is
+  // ONLINE. Keep that freshness boundary at the public proxy too, so an
+  // unexpected/stale upstream payload cannot make an offline observation
+  // visible in the dashboard.
+  const inboxNavigation = String(value.device_status || "").toUpperCase() === "ONLINE" && hasInboxNavigation
+    ? normalizePublicInboxNavigation(value.inbox_navigation)
+    : null;
+  return Object.freeze({
+    ...Object.fromEntries(LEGACY_DEVICE_STATUS_FIELDS.map(field => [field, value[field]])),
+    inbox_navigation: inboxNavigation
+  });
+}
+
 async function listDevices(res, configuration) {
   try {
     const railwayResponse = await fetch(
@@ -77,8 +152,12 @@ async function listDevices(res, configuration) {
     if (!Array.isArray(data?.devices)) {
       return res.status(502).json({ ok: false, error: "Ungültige Geräteantwort vom Backend." });
     }
+    const devices = data.devices.map(sanitizePublicDeviceStatus);
+    if (devices.some(device => device === null)) {
+      return res.status(502).json({ ok: false, error: "Ung\u00fcltige Ger\u00e4teantwort vom Backend." });
+    }
     res.setHeader("Cache-Control", "no-store, max-age=0");
-    return res.status(200).json({ ok: true, server_time: data.server_time, devices: data.devices });
+    return res.status(200).json({ ok: true, server_time: data.server_time, devices });
   } catch {
     console.error("Verbindung zum Device-Bridge-Status fehlgeschlagen.");
     return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });

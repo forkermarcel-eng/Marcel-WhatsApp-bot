@@ -1199,9 +1199,13 @@
     let visibleChatSyncRefreshGeneration = 0;
     let officialAppResumeBusy = false;
     let officialAppResumeQueuedCaptureId = null;
+    let officialAppResumeAttemptedCaptureId = null;
     const VISIBLE_CHAT_SYNC_REFRESH_DELAY_MS = 5000;
     const VISIBLE_CHAT_SYNC_REFRESH_MAX_ATTEMPTS = 45;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
+   const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
+     "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
+   ]);
    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
    function setDot(element, state) {
      element.className = "dot";
@@ -2194,9 +2198,12 @@
 
    function confirmedConversationDetailIsSafe(conversation, captureId) {
      const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(conversation || {}, "visible_chat_sync");
-     const detailFields = hasVisibleChatSync
-       ? ["capture_id", "visible_name", "captured_at", "messages", "visible_chat_sync"]
-       : ["capture_id", "visible_name", "captured_at", "messages"];
+     const hasOfficialAppResume = Object.prototype.hasOwnProperty.call(conversation || {}, "official_app_resume");
+     const detailFields = [
+       "capture_id", "visible_name", "captured_at", "messages",
+       ...(hasVisibleChatSync ? ["visible_chat_sync"] : []),
+       ...(hasOfficialAppResume ? ["official_app_resume"] : [])
+     ];
      if (!hasExactConversationFields(conversation, detailFields)
          || conversation.capture_id !== captureId || !confirmedConversationIsSafeForSelection({
            capture_id: conversation.capture_id,
@@ -2211,7 +2218,34 @@
        ["INCOMING", "OUTGOING", "UNKNOWN"].includes(String(message.direction || "").toUpperCase()) &&
        typeof message.text === "string" && message.text.trim().length > 0 && message.text.trim().length <= 4096
      );
-     return originalMessagesSafe && (!hasVisibleChatSync || visibleChatSyncIsSafe(conversation.visible_chat_sync));
+     return originalMessagesSafe
+       && (!hasVisibleChatSync || visibleChatSyncIsSafe(conversation.visible_chat_sync))
+       && (!hasOfficialAppResume || officialAppResumeIsSafe(conversation.official_app_resume));
+   }
+
+   function officialAppResumeIsSafe(resume) {
+     return hasExactConversationFields(resume, ["status"])
+       && OFFICIAL_APP_RESUME_OBSERVATION_STATUSES.has(resume.status);
+   }
+
+   function officialAppResumeStatusText(resume) {
+     if (!officialAppResumeIsSafe(resume)) {
+       return "Status der einmaligen offiziellen Startanfrage ist nicht verfügbar. Kein neuer Versuch wird vorbereitet.";
+     }
+     switch (resume.status) {
+       case "NOT_REQUESTED":
+         return "Eine einmalige offizielle Startanfrage kann bewusst vorbereitet werden.";
+       case "PENDING":
+         return "Eine frühere offizielle Startanfrage wartet noch auf einen terminalen Ausgang. Kein zweiter Versuch wird vorbereitet.";
+       case "DISPATCHED":
+         return "Die frühere offizielle Startanfrage ist terminal als Intent-Auslösung bestätigt. Dies bestätigt keinen Chat oder weitere Tinder-Aktion.";
+       case "CANCELLED":
+         return "Die frühere offizielle Startanfrage ist terminal beendet. Kein zweiter Versuch wird vorbereitet.";
+       case "EXPIRED":
+         return "Die frühere offizielle Startanfrage ist abgelaufen. Kein zweiter Versuch wird vorbereitet.";
+       default:
+         return "Status der einmaligen offiziellen Startanfrage ist nicht verfügbar. Kein neuer Versuch wird vorbereitet.";
+     }
    }
 
    function visibleChatSyncIsSafe(sync) {
@@ -2377,10 +2411,13 @@
     * a device, a chat, an opaque backend handle, or a payload; the server derives
     * its one-time authority solely from the selected confirmed capture.
     */
-   async function requestOfficialAppResume(captureId, button, message) {
+   async function requestOfficialAppResume(captureId, resume, button, message) {
      if (officialAppResumeBusy || officialAppResumeQueuedCaptureId === captureId
-         || selectedConversationCaptureId !== captureId || !UUID_V4.test(String(captureId || ""))) return;
+         || officialAppResumeAttemptedCaptureId === captureId
+         || selectedConversationCaptureId !== captureId || !UUID_V4.test(String(captureId || ""))
+         || !officialAppResumeIsSafe(resume) || resume.status !== "NOT_REQUESTED") return;
      officialAppResumeBusy = true;
+     officialAppResumeAttemptedCaptureId = captureId;
      button.disabled = true;
      message.className = "conversation-sync-message";
      message.textContent = "Offizielle Tinder-App wird einmalig vorbereitet …";
@@ -2399,10 +2436,11 @@
        message.textContent = "Einmalige offizielle Startanfrage ist an das verifizierte Gerät übergeben. Sie öffnet keinen Chat und versendet nichts.";
      } catch (error) {
        message.className = "conversation-sync-message error";
-       message.textContent = error?.message || "Offizielle Tinder-App konnte nicht vorbereitet werden.";
+       message.textContent = "Die einmalige offizielle Startanfrage wurde nicht angenommen. Kein zweiter Versuch wird vorbereitet.";
      } finally {
        officialAppResumeBusy = false;
-       button.disabled = officialAppResumeQueuedCaptureId === captureId;
+       button.disabled = officialAppResumeAttemptedCaptureId === captureId
+         || officialAppResumeQueuedCaptureId === captureId;
      }
    }
 
@@ -2449,14 +2487,23 @@
      resumeButton.type = "button";
      resumeButton.className = "button info conversation-sync-button";
      resumeButton.textContent = "Offizielle Tinder-App einmal öffnen";
-     resumeButton.disabled = officialAppResumeBusy || officialAppResumeQueuedCaptureId === conversation.capture_id;
+     const resumeAvailable = officialAppResumeIsSafe(conversation.official_app_resume)
+       && conversation.official_app_resume.status === "NOT_REQUESTED";
+     resumeButton.disabled = officialAppResumeBusy
+       || officialAppResumeQueuedCaptureId === conversation.capture_id
+       || officialAppResumeAttemptedCaptureId === conversation.capture_id
+       || !resumeAvailable;
      const resumeMessage = document.createElement("span");
      resumeMessage.className = "conversation-sync-message";
      if (officialAppResumeQueuedCaptureId === conversation.capture_id) {
        resumeMessage.textContent = "Die einmalige offizielle Startanfrage ist bereits übergeben; es wird kein zweiter Versuch vorbereitet.";
+     } else if (officialAppResumeAttemptedCaptureId === conversation.capture_id) {
+       resumeMessage.textContent = "Die einmalige offizielle Startanfrage wurde bereits ausgelöst; es wird kein zweiter Versuch vorbereitet.";
+     } else {
+       resumeMessage.textContent = officialAppResumeStatusText(conversation.official_app_resume);
      }
      resumeButton.addEventListener("click", () => {
-       void requestOfficialAppResume(conversation.capture_id, resumeButton, resumeMessage);
+       void requestOfficialAppResume(conversation.capture_id, conversation.official_app_resume, resumeButton, resumeMessage);
      });
      resumeAction.append(resumeCopy, resumeButton, resumeMessage);
 

@@ -38,7 +38,10 @@ test("conversation messages render only visible name/time and direction/text, ne
   assert.doesNotMatch(conversationCode, /textContent\s*=\s*conversation\.capture_id/);
   assert.doesNotMatch(conversationCode, /dataset\./);
   assert.doesNotMatch(conversationCode, /device_id|thread_fingerprint|capture_fingerprint|resolved_contact_id|visible_order|provenance/i);
-  assert.doesNotMatch(conversationCode, /draft|SEND_TINDER_DRAFT|dispatch|fetch\("\/api\/tinder\/(?:read|status|control)/i);
+  assert.doesNotMatch(conversationCode, /draft|SEND_TINDER_DRAFT|fetch\("\/api\/tinder\/(?:read|status|control)/i);
+  // The bounded launcher observation may name the terminal enum DISPATCHED;
+  // it must not introduce a separate dispatch path into this read surface.
+  assert.deepEqual(conversationCode.match(/\bdispatch\w*/gi), ["DISPATCHED"]);
   assert.doesNotMatch(conversationCode, /window\.location(?:\.href)?\s*=/);
 });
 
@@ -54,6 +57,15 @@ test("selected detail has bounded one-shot official-app resume and visible-chat 
   assert.match(conversationCode, /Sichtbaren geöffneten Chat synchronisieren/);
   assert.match(conversationCode, /Der Vorgang öffnet keinen Chat, ordnet keine Person zu und versendet nichts/);
   assert.match(conversationCode, /visible_chat_sync/);
+  assert.match(conversationCode, /official_app_resume/);
+  assert.match(conversationCode, /OFFICIAL_APP_RESUME_OBSERVATION_STATUSES/);
+  assert.match(
+    conversationCode,
+    /officialAppResumeIsSafe\(conversation\.official_app_resume\)\s*&& conversation\.official_app_resume\.status === "NOT_REQUESTED"/
+  );
+  assert.match(conversationCode, /resume\.status !== "NOT_REQUESTED"/);
+  assert.match(conversationCode, /officialAppResumeAttemptedCaptureId === captureId/);
+  assert.match(conversationCode, /officialAppResumeAttemptedCaptureId === conversation\.capture_id/);
   assert.match(conversationCode, /Synchronisierter sichtbarer Verlauf/);
   assert.doesNotMatch(conversationCode, /thread_fingerprint|capture_fingerprint|source_capture_id|command_id|permit/i);
   assert.doesNotMatch(conversationCode, /startActivity|ComponentName|setPackage|setData|ACTION_VIEW|performAction|GLOBAL_ACTION|ACTION_CLICK|setText|openChat/i);

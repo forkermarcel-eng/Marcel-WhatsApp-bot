@@ -8,6 +8,7 @@ import {
   createTinderConversationProductReadService,
   normalizeLatestConfirmedConversationDetail,
   normalizeLatestConfirmedConversationListItem,
+  normalizeLatestConfirmedOfficialAppResume,
   normalizeVisibleChatSync
 } from "../services/tinder-conversation-product-read.js";
 
@@ -105,6 +106,30 @@ test("selected detail may project a latest bounded V4 transcript without merging
   ]);
 });
 
+test("official app resume detail exposes only a bounded one-shot outcome", () => {
+  const now = new Date("2026-09-10T01:50:00.000Z");
+  const cases = [
+    [{ permit_state: "NOT_REQUESTED", expires_at: null }, "NOT_REQUESTED"],
+    [{ permit_state: "ISSUED", expires_at: "2026-09-10T01:50:01.000Z" }, "PENDING"],
+    [{ permit_state: "ISSUED", expires_at: "2026-09-10T01:50:00.000Z" }, "EXPIRED"],
+    [{ permit_state: "DISPATCHED", expires_at: "2026-09-10T01:50:01.000Z" }, "DISPATCHED"],
+    [{ permit_state: "CANCELLED", expires_at: "2026-09-10T01:50:01.000Z" }, "CANCELLED"],
+    [{ permit_state: "EXPIRED", expires_at: "2026-09-10T01:50:01.000Z" }, "EXPIRED"]
+  ];
+  for (const [row, status] of cases) {
+    assert.deepEqual(normalizeLatestConfirmedOfficialAppResume(row, now), { status });
+  }
+  assert.equal(normalizeLatestConfirmedOfficialAppResume(undefined, now), undefined);
+  assert.equal(normalizeLatestConfirmedOfficialAppResume(null, now), undefined);
+  for (const malformed of [
+    { permit_state: "ISSUED", expires_at: null },
+    { permit_state: "UNKNOWN", expires_at: "2026-09-10T01:50:01.000Z" },
+    { permit_state: "DISPATCHED", expires_at: "2026-09-10T01:50:01.000Z", command_id: "private" }
+  ]) {
+    assert.throws(() => normalizeLatestConfirmedOfficialAppResume(malformed, now), TinderConversationProductReadError);
+  }
+});
+
 test("conversation product reader rejects unconfirmed, stale-shape, and malformed message records", () => {
   for (const row of [
     capture({ mapping_status: "NEEDS_HUMAN_MAPPING" }),
@@ -179,6 +204,23 @@ test("conversation product service preserves bounds and does not make a list a m
   );
 });
 
+test("conversation product service keeps the launcher outcome bounded and optional", async () => {
+  const service = createTinderConversationProductReadService({
+    async findLatestConfirmedConversations() { return []; },
+    async findLatestConfirmedConversationByCaptureId() { return capture(); },
+    async findLatestConfirmedOfficialAppResumeByCaptureId(captureId) {
+      assert.equal(captureId, CAPTURE_ID);
+      return { permit_state: "DISPATCHED", expires_at: "2026-09-10T01:51:00.000Z" };
+    }
+  });
+  const detail = await service.getLatestConfirmedConversation(CAPTURE_ID);
+  assert.deepEqual(detail.official_app_resume, { status: "DISPATCHED" });
+  const rendered = JSON.stringify(detail.official_app_resume);
+  for (const forbidden of ["command_id", "device_id", "source_capture_id", "expires_at", "ack"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+});
+
 test("Postgres reader selects only the latest safe resolved confirmed capture and never selects technical fields", async () => {
   const calls = [];
   const repository = createPgTinderConversationProductReadRepository({
@@ -191,10 +233,11 @@ test("Postgres reader selects only the latest safe resolved confirmed capture an
   await repository.findLatestConfirmedConversations();
   await repository.findLatestConfirmedConversationByCaptureId(CAPTURE_ID);
   await repository.findLatestConfirmedVisibleChatSyncByCaptureId(CAPTURE_ID);
+  await repository.findLatestConfirmedOfficialAppResumeByCaptureId(CAPTURE_ID);
 
-  assert.equal(calls.length, 3);
-  const [list, detail, visibleChatSync] = calls;
-  for (const query of [list.text, detail.text, visibleChatSync.text]) {
+  assert.equal(calls.length, 4);
+  const [list, detail, visibleChatSync, officialAppResume] = calls;
+  for (const query of [list.text, detail.text, visibleChatSync.text, officialAppResume.text]) {
     assert.match(query, /capture_safety_status = 'SAFE'/);
     assert.match(query, /mapping_status = 'RESOLVED'/);
     assert.match(query, /human_review_status = 'CONFIRMED'/);
@@ -219,4 +262,22 @@ test("Postgres reader selects only the latest safe resolved confirmed capture an
   assert.doesNotMatch(visibleChatSync.text, /s\.command_id/);
   assert.doesNotMatch(visibleChatSync.text, /s\.device_id/);
   assert.doesNotMatch(visibleChatSync.text, /s\.transcript_fingerprint/);
+  assert.match(officialAppResume.text, /LEFT JOIN tinder_official_app_resume_permits p/i);
+  assert.match(officialAppResume.text, /COALESCE\(p\.permit_state, 'NOT_REQUESTED'\)/i);
+  assert.deepEqual(officialAppResume.values, [CAPTURE_ID]);
+  const resumeColumns = officialAppResume.text.slice(0, officialAppResume.text.indexOf("FROM tinder_visible_chat_captures"));
+  assert.doesNotMatch(resumeColumns, /p\.command_id/);
+  assert.doesNotMatch(resumeColumns, /p\.device_id/);
+  assert.doesNotMatch(resumeColumns, /p\.source_capture_id/);
+});
+
+test("missing optional launcher foundation remains unavailable rather than fresh", async () => {
+  const repository = createPgTinderConversationProductReadRepository({
+    async query() {
+      const error = new Error("relation unavailable");
+      error.code = "42P01";
+      throw error;
+    }
+  });
+  assert.equal(await repository.findLatestConfirmedOfficialAppResumeByCaptureId(CAPTURE_ID), undefined);
 });

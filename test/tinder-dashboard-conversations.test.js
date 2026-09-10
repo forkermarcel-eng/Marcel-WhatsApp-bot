@@ -100,6 +100,51 @@ test("dashboard conversation detail permits only the selected product reader and
   assert.equal(JSON.stringify(malformed.body).includes("must-not-be-returned"), false);
 });
 
+test("dashboard conversation detail exposes only the bounded official-app resume status", async () => {
+  const handler = createTinderDashboardLatestConfirmedConversationReadHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return {
+        async getLatestConfirmedConversation() {
+          return conversation({ official_app_resume: { status: "DISPATCHED" } });
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler({ params: { captureId: CAPTURE_ID } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.conversation.official_app_resume, { status: "DISPATCHED" });
+  const rendered = JSON.stringify(res.body.conversation.official_app_resume);
+  for (const forbidden of ["command_id", "device_id", "source_capture_id", "expires_at", "ack", "permit"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+
+  const malformedHandler = createTinderDashboardLatestConfirmedConversationReadHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return {
+        async getLatestConfirmedConversation() {
+          return conversation({
+            official_app_resume: { status: "DISPATCHED", command_id: "private-command" }
+          });
+        }
+      };
+    }
+  });
+  const malformed = responseRecorder();
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    await malformedHandler({ params: { captureId: CAPTURE_ID } }, malformed);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(malformed.statusCode, 500);
+  assert.equal(JSON.stringify(malformed.body).includes("private-command"), false);
+});
+
 test("dashboard conversation reader fails closed for malformed ids, unavailable reader, and foundation absence", async () => {
   const unavailable = createTinderDashboardLatestConfirmedConversationReadHandler({}, {
     createRepository() { return {}; },

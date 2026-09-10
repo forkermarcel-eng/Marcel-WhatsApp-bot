@@ -116,6 +116,9 @@ const PUBLIC_OFFICIAL_APP_RESUME_REASONS = new Set([
   "SOURCE_CAPTURE_NOT_CONFIRMED",
   "SOURCE_CAPTURE_ALREADY_USED"
 ]);
+const PUBLIC_OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
+  "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
+]);
 const PUBLIC_OPEN_DRAFT_REVIEW_STATUSES = new Set(["DRAFT", "APPROVED", "STALE"]);
 const DRAFT_APPROVE_OPERATION = "draft-approve";
 const DRAFT_REJECT_OPERATION = "draft-reject";
@@ -649,6 +652,14 @@ function normalizePublicVisibleChatSyncTranscript(value) {
   });
 }
 
+function normalizePublicOfficialAppResumeObservation(value) {
+  if (!exactKeys(value, ["status"])
+      || !PUBLIC_OFFICIAL_APP_RESUME_OBSERVATION_STATUSES.has(value.status)) {
+    return null;
+  }
+  return Object.freeze({ status: value.status });
+}
+
 /**
  * Every backend property is allowlisted. In particular, an accidental
  * capture/device/contact/fingerprint/provenance field cannot cross the
@@ -656,9 +667,12 @@ function normalizePublicVisibleChatSyncTranscript(value) {
  */
 function normalizePublicConfirmedConversation(value, captureId) {
   const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(value || {}, "visible_chat_sync");
-  const expectedFields = hasVisibleChatSync
-    ? ["capture_id", "visible_name", "captured_at", "messages", "visible_chat_sync"]
-    : ["capture_id", "visible_name", "captured_at", "messages"];
+  const hasOfficialAppResume = Object.prototype.hasOwnProperty.call(value || {}, "official_app_resume");
+  const expectedFields = [
+    "capture_id", "visible_name", "captured_at", "messages",
+    ...(hasVisibleChatSync ? ["visible_chat_sync"] : []),
+    ...(hasOfficialAppResume ? ["official_app_resume"] : [])
+  ];
   if (!exactKeys(value, expectedFields)
       || value.capture_id !== captureId || !validCaptureId(value.capture_id)
       || !validBoundedText(value.visible_name, 240)
@@ -671,14 +685,19 @@ function normalizePublicConfirmedConversation(value, captureId) {
   const visibleChatSync = hasVisibleChatSync
     ? normalizePublicVisibleChatSyncTranscript(value.visible_chat_sync)
     : null;
+  const officialAppResume = hasOfficialAppResume
+    ? normalizePublicOfficialAppResumeObservation(value.official_app_resume)
+    : null;
   if (!capturedAt || messages.some((message) => message === null)
-      || (hasVisibleChatSync && visibleChatSync === null)) return null;
+      || (hasVisibleChatSync && visibleChatSync === null)
+      || (hasOfficialAppResume && officialAppResume === null)) return null;
   return Object.freeze({
     capture_id: value.capture_id,
     visible_name: value.visible_name.trim(),
     captured_at: capturedAt,
     messages: Object.freeze(messages),
-    ...(hasVisibleChatSync ? { visible_chat_sync: visibleChatSync } : {})
+    ...(hasVisibleChatSync ? { visible_chat_sync: visibleChatSync } : {}),
+    ...(hasOfficialAppResume ? { official_app_resume: officialAppResume } : {})
   });
 }
 
@@ -1509,6 +1528,7 @@ export {
   normalizePublicConfirmedConversationMessage,
   normalizePublicVisibleChatSyncMessage,
   normalizePublicVisibleChatSyncTranscript,
+  normalizePublicOfficialAppResumeObservation,
   normalizePublicVisibleChatSyncResult,
   normalizePublicOfficialAppResumeResult,
   validEmptyOfficialAppResumeBody,

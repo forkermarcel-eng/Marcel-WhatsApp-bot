@@ -18,6 +18,9 @@ const TINDER_CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
 const MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING", "UNKNOWN"]);
 const VISIBLE_CHAT_SYNC_MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING"]);
 const VISIBLE_CHAT_SYNC_LAYOUT_SCHEMA_VERSION = "tinder-zte-visible-chat-scroll-v1";
+const OFFICIAL_APP_RESUME_PRODUCT_STATUSES = new Set([
+  "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
+]);
 
 class TinderConversationProductReadError extends Error {
   constructor(message, code = "INVALID_TINDER_CONVERSATION_PRODUCT_READ") {
@@ -169,6 +172,58 @@ function normalizeVisibleChatSync(value) {
 }
 
 /**
+ * Bounded, read-only state for the separately durable official-app launcher.
+ * It deliberately excludes command, device, source, expiry, ACK, and any
+ * Tinder-screen information.  `undefined` means its optional foundation is
+ * unavailable; callers must fail closed rather than mistake that for a fresh
+ * one-shot authority.
+ */
+function normalizeLatestConfirmedOfficialAppResume(row, now = new Date()) {
+  // The repository emits an explicit NOT_REQUESTED row through COALESCE when
+  // the selected eligible capture has no durable permit. A missing row is a
+  // concurrent-read/eligibility ambiguity, so it must remain unavailable.
+  if (row === undefined || row === null) return undefined;
+  if (!exactKeys(row, ["permit_state", "expires_at"])) {
+    invalid("Invalid official Tinder app resume record.", "INVALID_TINDER_OFFICIAL_APP_RESUME_PRODUCT_PROJECTION");
+  }
+
+  const storedState = String(row.permit_state || "").trim().toUpperCase();
+  if (storedState === "NOT_REQUESTED") {
+    if (row.expires_at !== null) {
+      invalid("Invalid official Tinder app resume record.", "INVALID_TINDER_OFFICIAL_APP_RESUME_PRODUCT_PROJECTION");
+    }
+    return normalizeOfficialAppResumeObservation({ status: "NOT_REQUESTED" });
+  }
+  if (!["ISSUED", "DISPATCHED", "CANCELLED", "EXPIRED"].includes(storedState)) {
+    invalid("Invalid official Tinder app resume record.", "INVALID_TINDER_OFFICIAL_APP_RESUME_PRODUCT_PROJECTION");
+  }
+
+  const expiresAt = new Date(normalizeCapturedAt(row.expires_at));
+  const referenceTime = now instanceof Date ? new Date(now.valueOf()) : new Date(now);
+  if (Number.isNaN(referenceTime.valueOf())) {
+    invalid("Invalid official Tinder app resume time.", "INVALID_TINDER_OFFICIAL_APP_RESUME_PRODUCT_PROJECTION");
+  }
+
+  const status = storedState === "ISSUED"
+    ? (expiresAt.valueOf() <= referenceTime.valueOf() ? "EXPIRED" : "PENDING")
+    : storedState;
+  return normalizeOfficialAppResumeObservation({ status });
+}
+
+/**
+ * Re-validate the already bounded public observation at every server-side
+ * serialization boundary. This is deliberately separate from the database
+ * row mapper above: the product shape must not be mistaken for a permit row.
+ */
+function normalizeOfficialAppResumeObservation(value) {
+  if (!exactKeys(value, ["status"])
+      || !OFFICIAL_APP_RESUME_PRODUCT_STATUSES.has(value.status)) {
+    invalid("Invalid official Tinder app resume observation.", "INVALID_TINDER_OFFICIAL_APP_RESUME_PRODUCT_PROJECTION");
+  }
+  return Object.freeze({ status: value.status });
+}
+
+/**
  * The database row has a deliberately different, server-internal field name
  * (`visible_messages`).  Convert it through an exact allowlist before the
  * public product normalizer sees it, so a selected detail cannot accidentally
@@ -234,7 +289,13 @@ function normalizeTinderConversationProductMessage(value) {
 function normalizeTinderConversationProductDetail(value) {
   const baseKeys = ["capture_id", "visible_name", "captured_at", "messages"];
   const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(value || {}, "visible_chat_sync");
-  if (!exactKeys(value, hasVisibleChatSync ? [...baseKeys, "visible_chat_sync"] : baseKeys)
+  const hasOfficialAppResume = Object.prototype.hasOwnProperty.call(value || {}, "official_app_resume");
+  const expectedKeys = [
+    ...baseKeys,
+    ...(hasVisibleChatSync ? ["visible_chat_sync"] : []),
+    ...(hasOfficialAppResume ? ["official_app_resume"] : [])
+  ];
+  if (!exactKeys(value, expectedKeys)
       || !Array.isArray(value.messages) || value.messages.length === 0
       || value.messages.length > TINDER_CONVERSATION_MESSAGE_LIMIT) {
     invalid("Invalid Tinder conversation detail projection.", "INVALID_TINDER_CONVERSATION_PRODUCT_PROJECTION");
@@ -248,6 +309,9 @@ function normalizeTinderConversationProductDetail(value) {
     messages: Object.freeze(value.messages.map(normalizeTinderConversationProductMessage)),
     ...(hasVisibleChatSync
       ? { visible_chat_sync: normalizeVisibleChatSync(value.visible_chat_sync) }
+      : {}),
+    ...(hasOfficialAppResume
+      ? { official_app_resume: normalizeOfficialAppResumeObservation(value.official_app_resume) }
       : {})
   });
 }
@@ -256,12 +320,15 @@ function normalizeLatestConfirmedConversationListItem(row) {
   return normalizeConversationIdentity(row);
 }
 
-function normalizeLatestConfirmedConversationDetail(row, visibleChatSync = null) {
+function normalizeLatestConfirmedConversationDetail(row, visibleChatSync = null, officialAppResume = undefined, now = new Date()) {
   const identity = normalizeConversationIdentity(row);
   return Object.freeze({
     ...identity,
     messages: normalizeConversationMessages(sourceValue(row, "visibleMessages", "visible_messages")),
-    ...(visibleChatSync === null ? {} : { visible_chat_sync: normalizeLatestConfirmedVisibleChatSync(visibleChatSync) })
+    ...(visibleChatSync === null ? {} : { visible_chat_sync: normalizeLatestConfirmedVisibleChatSync(visibleChatSync) }),
+    ...(officialAppResume === undefined
+      ? {}
+      : { official_app_resume: normalizeLatestConfirmedOfficialAppResume(officialAppResume, now) })
   });
 }
 
@@ -290,7 +357,10 @@ function createTinderConversationProductReadService(repository) {
     const visibleChatSync = typeof repository.findLatestConfirmedVisibleChatSyncByCaptureId === "function"
       ? await repository.findLatestConfirmedVisibleChatSyncByCaptureId(normalizedCaptureId)
       : null;
-    return normalizeLatestConfirmedConversationDetail(row, visibleChatSync ?? null);
+    const officialAppResume = typeof repository.findLatestConfirmedOfficialAppResumeByCaptureId === "function"
+      ? await repository.findLatestConfirmedOfficialAppResumeByCaptureId(normalizedCaptureId)
+      : undefined;
+    return normalizeLatestConfirmedConversationDetail(row, visibleChatSync ?? null, officialAppResume);
   }
 
   return Object.freeze({
@@ -389,6 +459,32 @@ function createPgTinderConversationProductReadRepository(pool) {
         if (error?.code === "42P01") return null;
         throw error;
       }
+    },
+
+    /**
+     * This optional product projection makes the one-shot launcher outcome
+     * inspectable without exposing its permit or command.  A missing optional
+     * relation intentionally remains unavailable to the caller, rather than
+     * being misreported as a fresh launcher authority.
+     */
+    async findLatestConfirmedOfficialAppResumeByCaptureId(captureId) {
+      try {
+        const result = await pool.query(
+          `SELECT COALESCE(p.permit_state, 'NOT_REQUESTED') AS permit_state,
+                  p.expires_at
+             FROM tinder_visible_chat_captures c
+             LEFT JOIN tinder_official_app_resume_permits p
+               ON p.source_capture_id=c.capture_id
+            WHERE c.capture_id=$1
+              AND ${eligibleWhere}
+            LIMIT 1`,
+          [captureId]
+        );
+        return result.rows[0] || null;
+      } catch (error) {
+        if (error?.code === "42P01") return undefined;
+        throw error;
+      }
     }
   });
 }
@@ -402,6 +498,8 @@ export {
   createTinderConversationProductReadService,
   normalizeLatestConfirmedConversationDetail,
   normalizeLatestConfirmedConversationListItem,
+  normalizeLatestConfirmedOfficialAppResume,
+  normalizeOfficialAppResumeObservation,
   normalizeLatestConfirmedVisibleChatSync,
   normalizeConversationMessages,
   normalizeVisibleChatSync,

@@ -376,6 +376,33 @@ test("conversation detail proxy permits a separately bounded V4 visible-chat tra
   assert.equal(JSON.stringify(malformed.body).includes("d565e8a7"), false);
 }));
 
+test("conversation detail proxy permits only a bounded official-app resume observation", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    conversation: detail({ official_app_resume: { status: "DISPATCHED" } })
+  });
+  const res = responseRecorder();
+  await handler(request({ query: { captureId: CAPTURE_ID, view: "confirmed-conversation" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.conversation.official_app_resume, { status: "DISPATCHED" });
+  const rendered = JSON.stringify(res.body.conversation.official_app_resume);
+  for (const forbidden of ["command_id", "device_id", "source_capture_id", "expires_at", "ack", "permit"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    conversation: detail({
+      official_app_resume: { status: "DISPATCHED", command_id: "private-command" }
+    })
+  });
+  const malformed = responseRecorder();
+  await handler(request({ query: { captureId: CAPTURE_ID, view: "confirmed-conversation" } }), malformed);
+  assert.equal(malformed.statusCode, 502);
+  assert.equal(JSON.stringify(malformed.body).includes("private-command"), false);
+}));
+
 test("conversation proxy fails closed on extra technical fields and strips backend/network errors", async () => withEnvironment(async () => {
   globalThis.fetch = async () => backendResponse({
     ok: true,

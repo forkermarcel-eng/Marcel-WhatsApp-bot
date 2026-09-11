@@ -349,7 +349,8 @@ test("real loopback V2 operational preflight is repeatable-read/read-only and ro
       foundation_state: "UPGRADE_REQUIRED",
       migration_required: true,
       transaction: "READ_ONLY_REPEATABLE_READ",
-      rollback: "COMPLETED"
+      rollback: "COMPLETED",
+      stage: "VALIDATION_UNCLASSIFIED"
     });
     assert.equal(trace.records[0]?.sql.trim(), "BEGIN");
     assert.equal(trace.records[1]?.sql.trim(), "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
@@ -375,7 +376,8 @@ test("real loopback V2 operational preflight blocks an active legacy V1 permit b
       foundation_state: "UNRESOLVED",
       migration_required: "UNRESOLVED",
       transaction: "READ_ONLY_REPEATABLE_READ",
-      rollback: "COMPLETED"
+      rollback: "COMPLETED",
+      stage: "ACTIVE_LEGACY_PERMIT_CHECK"
     });
     assert.equal(trace.records.some(record => /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|LOCK)\b/i.test(record.sql)), false);
     assert.equal(trace.records.at(-1)?.sql.trim(), "ROLLBACK");

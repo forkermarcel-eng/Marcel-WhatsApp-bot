@@ -84,6 +84,34 @@ test("V2 operational preflight reports an active legacy permit with a bounded re
   assert.equal(log.lines.join("\n").includes("test-database-url"), false);
 });
 
+test("V2 operational preflight keeps V1 constraint inspection failure bounded", async () => {
+  let closed = false;
+  const log = logger();
+  const result = await runTinderOfficialAppResumePermitV2PreflightCli({
+    environment: { DATABASE_URL: "test-database-url" },
+    logger: log,
+    async createPool() { return { async end() { closed = true; } }; },
+    async readOnlyTransaction(_pool, work) { return work({ readonly: true }); },
+    async preflight() {
+      const error = new Error("fixture catalog query failure");
+      error.code = "TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_V1_CONSTRAINT_INSPECTION_FAILED";
+      throw error;
+    }
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "OFFICIAL_APP_RESUME_PERMIT_V2_V1_CONSTRAINT_INSPECTION_FAILED",
+    foundation_state: "UNRESOLVED",
+    migration_required: "UNRESOLVED",
+    transaction: "READ_ONLY_REPEATABLE_READ",
+    rollback: "COMPLETED",
+    stage: "V1_CONSTRAINT_INSPECTION"
+  });
+  assert.equal(closed, true);
+  assert.equal(log.lines.join("\n").includes("test-database-url"), false);
+  assert.equal(log.lines.join("\n").includes("fixture catalog query failure"), false);
+});
+
 test("V2 operational preflight validates its fixed SQL before any pool and reports bounded validation stages", async () => {
   let pools = 0;
   const log = logger();

@@ -150,7 +150,7 @@ function canonicalClient(version, {
       this.queries.push(text);
       if (text.includes("a.attname AS column_name")) return { rows: columns };
       if (text.includes("FROM pg_index i")) return { rows: indexes };
-      if (text.includes("constraint.conname=$2")) {
+      if (text.includes("c.conname=$2")) {
         return { rows: [{ canonical: version === 1 && expectedLegacySourceCaptureConstraint }] };
       }
       if (text.includes("COUNT(*)::text AS active_count")) {
@@ -181,13 +181,18 @@ test("V4 stays canonical across the reviewed V1/V2 resume-permit shapes while V2
     state: TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.CANONICAL,
     official_app_resume_permit_schema_version: TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1
   });
-  assert.deepEqual(await inspectTinderOfficialAppResumePermitV2Schema(canonicalClient(1), inspectionOptions), {
+  const v1Upgrade = canonicalClient(1);
+  assert.deepEqual(await inspectTinderOfficialAppResumePermitV2Schema(v1Upgrade, inspectionOptions), {
     state: TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.UPGRADE_REQUIRED,
     foundation: {
       state: TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.CANONICAL,
       official_app_resume_permit_schema_version: TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1
     }
   });
+  const v1ConstraintQuery = v1Upgrade.queries.find(sql => String(sql).includes("c.conname=$2"));
+  assert.match(v1ConstraintQuery, /FROM pg_constraint c\b/i);
+  assert.match(v1ConstraintQuery, /ARRAY\['source_capture_id'\]::text\[\]/i);
+  assert.doesNotMatch(v1ConstraintQuery, /\bpg_constraint\s+constraint\b/i);
 
   const v2 = canonicalClient(2);
   assert.deepEqual(await inspectTinderVisibleChatSyncPermitSchema(v2, inspectionOptions), {

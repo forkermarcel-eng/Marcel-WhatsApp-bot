@@ -499,13 +499,24 @@ async function hasExpectedOfficialAppResumePermitV1SourceCaptureUniqueConstraint
   const result = await client.query(
     `SELECT EXISTS (
        SELECT 1
-         FROM pg_constraint constraint
-         JOIN pg_class relation ON relation.oid=constraint.conrelid
+         FROM pg_constraint c
+         JOIN pg_class relation ON relation.oid=c.conrelid
          JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
         WHERE namespace.nspname=current_schema()
           AND relation.relname=$1
-          AND constraint.conname=$2
-          AND constraint.contype='u'
+          AND c.conname=$2
+          AND c.contype='u'
+          AND c.convalidated
+          AND NOT c.condeferrable
+          AND NOT c.condeferred
+          AND ARRAY(
+            SELECT attribute.attname::text
+              FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+              JOIN pg_attribute attribute
+                ON attribute.attrelid=c.conrelid
+               AND attribute.attnum=key.attnum
+             ORDER BY key.ordinality
+          ) = ARRAY['source_capture_id']::text[]
      ) AS canonical`,
     [
       TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE,

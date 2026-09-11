@@ -13,6 +13,7 @@ import {
 import { canonicalSchemaPredicate } from "./schema-contract.js";
 import {
   inspectDeviceBridgeT1Schema,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
   TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
   T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME,
   T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME
@@ -407,6 +408,7 @@ async function commandConstraintState(client, inspectDeviceBridgeSchema) {
   if (command?.constraintName === T5_TINDER_MANUAL_SEND_COMMAND_TYPE_CONSTRAINT_NAME) return "V3";
   if (command?.constraintName === T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME) return "V4";
   if (command?.constraintName === TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME) return "V5";
+  if (command?.constraintName === TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME) return "V6";
   return "INVALID";
 }
 
@@ -435,6 +437,10 @@ export async function inspectTinderVisibleChatSyncPermitSchema(client, {
     return { state: TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.ABSENT };
   }
 
+  // V6 is an attestation extension with additional V4-permit columns and
+  // constraints. This legacy inspector must never treat a V6 command
+  // vocabulary plus an old V4 shape as canonical: the dedicated local
+  // attestation inspector owns that exact extended contract.
   const v1Canonical = commandState === "V5"
     && permitKind === "r"
     && resumePermitKind === "r"

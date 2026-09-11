@@ -24,6 +24,11 @@ export const T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CONSTRAINT_NAME =
 // vocabulary. It does not grant a device the T5 manual-send capability.
 export const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME =
   "device_bridge_commands_command_type_check_v5";
+// V6 adds the separate local-conversation-attestation bootstrap command. It
+// is a bounded identity/continuity proof only; it adds no reader, sender or
+// navigation authority to the earlier command vocabulary.
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME =
+  "device_bridge_commands_command_type_check_v6";
 
 const LEGACY_T1_TINDER_STATE_CONSTRAINT_NAME = "device_bridge_devices_tinder_state_check";
 const LEGACY_T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_type_check";
@@ -67,6 +72,10 @@ export const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPES = Object.freeze([
   ...T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPES,
   "RESUME_OFFICIAL_TINDER_APP"
 ]);
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPES = Object.freeze([
+  ...TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPES,
+  "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"
+]);
 
 export const T1_TINDER_STATE_CHECK_EXPRESSION = `
   tinder_state IN ('DISCONNECTED', 'CONNECTING', 'CONNECTED', 'AUTH_REQUIRED', 'REVIEW_REQUIRED', 'UNKNOWN')
@@ -90,6 +99,10 @@ export const T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE_CHECK_EXPRESSION = `
 
 export const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION = `
   command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT', 'RESUME_OFFICIAL_TINDER_APP')
+`;
+
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CHECK_EXPRESSION = `
+  command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT', 'RESUME_OFFICIAL_TINDER_APP', 'STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION')
 `;
 
 export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
@@ -121,7 +134,10 @@ export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
     latestCompatibleValues: T4_TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPES,
     newestCompatibleName: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
     newestCompatibleExpression: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CHECK_EXPRESSION,
-    newestCompatibleValues: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPES
+    newestCompatibleValues: TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPES,
+    attestationCompatibleName: TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
+    attestationCompatibleExpression: TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CHECK_EXPRESSION,
+    attestationCompatibleValues: TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPES
   })
 ]);
 
@@ -201,6 +217,15 @@ async function inspectColumnConstraint(client, specification) {
       state: "FINAL",
       constraintName: current.conname,
       compatibilityExpression: specification.newestCompatibleExpression
+    };
+  }
+  if (current.conname === specification.attestationCompatibleName
+      && hasExactCheckDefinition(current.constraint_definition, specification.attestationCompatibleExpression)) {
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.attestationCompatibleExpression
     };
   }
   const legacyExpression = `${specification.column} IN (${specification.legacyValues.map(value => `'${value}'`).join(", ")})`;

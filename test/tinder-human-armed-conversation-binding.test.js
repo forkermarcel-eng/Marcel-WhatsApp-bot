@@ -78,7 +78,8 @@ function fixtureRepository({
   runtimeByDevice = new Map([[DEVICE_ID, runtime()]]),
   bindings = [],
   permits = [],
-  activeOfficialAppResume = false
+  activeOfficialAppResume = false,
+  activeLocalConversationAttestation = false
 } = {}) {
   const captureRows = new Map(captures.map(row => [row.capture_id, { ...row }]));
   const contactIds = new Set(contacts);
@@ -138,6 +139,9 @@ function fixtureRepository({
     async queueArmCommand(_tx, input) {
       state.commands.push(input);
     },
+    async lookupBindingDeviceId(_tx, bindingId) {
+      return bindingRows.get(bindingId)?.device_id || null;
+    },
     async getBindingForUpdate(_tx, bindingId) { return bindingRows.get(bindingId) || null; },
     async getArmPermitForUpdate(_tx, commandId) { return permitRows.get(commandId) || null; },
     async markArmPermitConsumed(_tx, input) {
@@ -151,6 +155,10 @@ function fixtureRepository({
     async findActiveOfficialAppResumePermitForDevice(_tx, input) {
       state.calls.push({ type: "find-v5-resume", input });
       return activeOfficialAppResume;
+    },
+    async findActiveLocalConversationAttestationPermitForDevice(_tx, input) {
+      state.calls.push({ type: "find-local-attestation", input });
+      return activeLocalConversationAttestation;
     },
     async insertBindingAudit(_tx, audit) { state.audits.push(audit); }
   };
@@ -409,6 +417,38 @@ test("an active ISSUED official-app resume permit blocks both V3 arm issuers bef
   assert.equal(initialRepository.state.permits.size, 0);
 });
 
+test("a live local conversation attestation blocks every new V3 identity arm on that device", async () => {
+  const rearmRepository = fixtureRepository({
+    bindings: [binding()],
+    activeLocalConversationAttestation: true
+  });
+  assert.deepEqual(await service(rearmRepository).rearmExistingBinding({
+    bindingId: BINDING_ID,
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.LOCAL_CONVERSATION_ATTESTATION_ACTIVE
+  });
+  assert.equal(rearmRepository.state.commands.length, 0);
+
+  const initialRepository = fixtureRepository({
+    contacts: [],
+    activeLocalConversationAttestation: true
+  });
+  assert.deepEqual(await service(initialRepository).armInitialCapture({
+    captureId: CAPTURE_A,
+    action: "BIND_CREATE",
+    newContactName: "M Tinder Test",
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.LOCAL_CONVERSATION_ATTESTATION_ACTIVE
+  });
+  assert.equal(initialRepository.state.createdContacts.length, 0);
+  assert.equal(initialRepository.state.bindings.size, 0);
+  assert.equal(initialRepository.state.commands.length, 0);
+});
+
 test("an indeterminate V5 resume-permit lookup fails closed before V3 writes", async () => {
   const repository = fixtureRepository({ bindings: [binding()] });
   repository.findActiveOfficialAppResumePermitForDevice = async () => undefined;
@@ -447,6 +487,37 @@ test("V3 PostgreSQL resume conflict lookup recognizes only a live ISSUED permit"
   assert.doesNotMatch(calls[1].sql, /DISPATCHED|STAGED|CONSUMED/i);
   assert.match(calls[1].sql, /expires_at>\$2/i);
   assert.deepEqual(calls[1].parameters, [DEVICE_ID, NOW.toISOString()]);
+});
+
+test("a stale V2 reader tuple does not block a new V3 human-binding arm", async () => {
+  const calls = [];
+  const repository = createPgTinderHumanArmedConversationBindingRepository({
+    async connect() { throw new Error("not used by this focused repository query"); },
+    async query() { throw new Error("not used by this focused repository query"); }
+  });
+  const client = {
+    async query(sql, parameters) {
+      calls.push({ sql: String(sql), parameters });
+      if (String(sql).includes("to_regclass")) {
+        return { rows: [{ relation_name: "tinder_visible_chat_sync_permits" }] };
+      }
+      return { rows: [{ active: false }] };
+    }
+  };
+  assert.equal(await repository.findActiveVisibleChatSyncPermitForDevice(client, {
+    deviceId: DEVICE_ID,
+    now: NOW.toISOString()
+  }), false);
+  const sql = calls.at(-1).sql;
+  for (const required of [
+    /attestation\.permit_state='ATTESTED'/,
+    /attestation_command\.command_type='STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'/,
+    /binding\.binding_revision=sync_permit\.binding_revision/,
+    /binding_permit\.permit_state='CONSUMED'/,
+    /binding_permit\.consumed_capture_id=sync_permit\.source_capture_id/,
+    /source_capture\.resolved_contact_id=binding\.contact_id/,
+    /MAX\(newer\.capture_revision\)/
+  ]) assert.match(sql, required);
 });
 
 test("the fixed server-owned arm window covers the measured manual hand-off, consumes once, and expires at its exact boundary", async () => {

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { deriveDeviceStatus } from "../device-bridge/heartbeat.js";
 import {
+  isTinderLocalConversationAttestationCapable,
   isTinderVisibleChatSyncCapable
 } from "../device-bridge/protocol-v1.js";
 import {
@@ -8,6 +9,12 @@ import {
   HUMAN_ARMED_CONVERSATION_PERMIT_TABLE,
   HUMAN_ARMED_CONVERSATION_REFERENCE_KIND
 } from "./tinder-human-armed-conversation-binding.js";
+import {
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_CONTRACT_VERSION,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_V4_PAYLOAD_FIELD
+} from "./tinder-local-conversation-attestation.js";
 
 /* ==================================================
 TINDER V4 VISIBLE-CHAT SYNC PERMIT
@@ -26,6 +33,8 @@ export const TINDER_VISIBLE_CHAT_SYNC_CAPABILITY = "TINDER_VISIBLE_CHAT_SYNC_V1"
 export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 export const TINDER_VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE = "tinder_visible_chat_sync_transcripts";
 export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TTL_MS = 10 * 60_000;
+export const TINDER_VISIBLE_CHAT_SYNC_LEGACY_PERMIT_CONTRACT_VERSION = 1;
+export const TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION = 2;
 export const TINDER_VISIBLE_CHAT_SYNC_ACK_RESULT = Object.freeze({
   tinder_visible_chat_sync: "STAGED"
 });
@@ -56,7 +65,10 @@ export const TINDER_VISIBLE_CHAT_SYNC_REASON = Object.freeze({
   PERMIT_ACK_NOT_STAGED: "PERMIT_ACK_NOT_STAGED",
   PERMIT_DEVICE_MISMATCH: "PERMIT_DEVICE_MISMATCH",
   SOURCE_CAPTURE_NOT_CONFIRMED: "SOURCE_CAPTURE_NOT_CONFIRMED",
-  HUMAN_ARMED_BINDING_NOT_CONFIRMED: "HUMAN_ARMED_BINDING_NOT_CONFIRMED"
+  HUMAN_ARMED_BINDING_NOT_CONFIRMED: "HUMAN_ARMED_BINDING_NOT_CONFIRMED",
+  LOCAL_CONVERSATION_ATTESTATION_REQUIRED: "LOCAL_CONVERSATION_ATTESTATION_REQUIRED",
+  LOCAL_CONVERSATION_ATTESTATION_NOT_ATTESTED: "LOCAL_CONVERSATION_ATTESTATION_NOT_ATTESTED",
+  LOCAL_CONVERSATION_ATTESTATION_INVALID: "LOCAL_CONVERSATION_ATTESTATION_INVALID"
 });
 
 export class TinderVisibleChatSyncError extends Error {
@@ -85,6 +97,10 @@ function uuid(value) {
   return UUID_V4.test(normalized) ? normalized : null;
 }
 
+function positiveInteger(value) {
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 function normalizeUuid(value, field, code) {
   const normalized = uuid(value);
   if (!normalized) throw new TinderVisibleChatSyncError(`${field} ist ungültig.`, code);
@@ -98,6 +114,15 @@ function exactKeys(value, keys) {
 
 function exactEmptyPayload(value) {
   return exactKeys(value, []);
+}
+
+function exactAttestedPayload(value, attestationCommandId, bindingRevision) {
+  return exactKeys(value, [
+    TINDER_LOCAL_CONVERSATION_ATTESTATION_V4_PAYLOAD_FIELD,
+    "binding_revision"
+  ])
+    && value[TINDER_LOCAL_CONVERSATION_ATTESTATION_V4_PAYLOAD_FIELD] === attestationCommandId
+    && value.binding_revision === String(bindingRevision);
 }
 
 function normalizeIssueInput(value) {
@@ -204,6 +229,23 @@ function syncPermitFromRow(row) {
   if (!commandId || !deviceId || !sourceCaptureId || Number.isNaN(expiresAt.valueOf())) return null;
   const commandType = String(sourceValue(row, "commandType", "command_type") || "").trim();
   if (commandType && commandType !== TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE) return null;
+  const permitContractVersion = positiveInteger(
+    sourceValue(row, "permitContractVersion", "permit_contract_version")
+  );
+  const attestationCommandId = sourceValue(row, "attestationCommandId", "attestation_command_id") === null
+    || sourceValue(row, "attestationCommandId", "attestation_command_id") === undefined
+    ? null : uuid(sourceValue(row, "attestationCommandId", "attestation_command_id"));
+  const bindingId = sourceValue(row, "bindingId", "binding_id") === null
+    || sourceValue(row, "bindingId", "binding_id") === undefined
+    ? null : uuid(sourceValue(row, "bindingId", "binding_id"));
+  const bindingRevision = sourceValue(row, "bindingRevision", "binding_revision") === null
+    || sourceValue(row, "bindingRevision", "binding_revision") === undefined
+    ? null : positiveInteger(sourceValue(row, "bindingRevision", "binding_revision"));
+  const legacyPermit = permitContractVersion === TINDER_VISIBLE_CHAT_SYNC_LEGACY_PERMIT_CONTRACT_VERSION
+    && attestationCommandId === null && bindingId === null && bindingRevision === null;
+  const attestedPermit = permitContractVersion === TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION
+    && Boolean(attestationCommandId) && Boolean(bindingId) && Boolean(bindingRevision);
+  if (!legacyPermit && !attestedPermit) return null;
   return Object.freeze({
     commandId,
     deviceId,
@@ -212,15 +254,22 @@ function syncPermitFromRow(row) {
     expiresAt,
     commandTerminalStatus: normalizedStatus(sourceValue(row, "commandTerminalStatus", "terminal_status")),
     acknowledgementStatus: normalizedStatus(sourceValue(row, "acknowledgementStatus", "ack_status")),
-    acknowledgementResult: sourceValue(row, "acknowledgementResult", "ack_result")
+    acknowledgementResult: sourceValue(row, "acknowledgementResult", "ack_result"),
+    permitContractVersion,
+    attestationCommandId,
+    bindingId,
+    bindingRevision
   });
 }
 
 function humanBindingSourceFromRow(row) {
   const deviceId = uuid(sourceValue(row, "deviceId", "device_id"));
   const sourceCaptureId = uuid(sourceValue(row, "sourceCaptureId", "source_capture_id"));
-  return deviceId && sourceCaptureId
-    ? Object.freeze({ deviceId, sourceCaptureId })
+  const attestationCommandId = uuid(sourceValue(row, "attestationCommandId", "attestation_command_id"));
+  const bindingId = uuid(sourceValue(row, "bindingId", "binding_id"));
+  const bindingRevision = positiveInteger(sourceValue(row, "bindingRevision", "binding_revision"));
+  return deviceId && sourceCaptureId && attestationCommandId && bindingId && bindingRevision
+    ? Object.freeze({ deviceId, sourceCaptureId, attestationCommandId, bindingId, bindingRevision })
     : null;
 }
 
@@ -276,6 +325,7 @@ function requireRepository(repository) {
     "getConfirmedSourceCaptureForUpdate",
     "queueVisibleChatSyncCommand",
     "createVisibleChatSyncPermit",
+    "lookupVisibleChatSyncPermitForAuthorization",
     "getVisibleChatSyncPermitForUpdate",
     "markVisibleChatSyncPermitConsumed"
   ]) {
@@ -303,24 +353,77 @@ export function createTinderVisibleChatSyncService(repository, {
   }
   // An internal-only handle gives a later, separately approved capture seam a
   // way to prove that it observed this exact staged permit. It carries no
-  // person, visible UI value, capture ID, or fingerprint.
+  // person, visible UI value, Tinder identifier, or fingerprint. Its
+  // server-side source-capture reference never crosses the device or HTTP
+  // boundary.
   const stagedPermitHandles = new WeakSet();
+  // The public-shaped handle intentionally stays identity-free. Its bounded
+  // V2 scope is held only in this process so the final ingress recheck can
+  // prove that the already-staged permit still points at the same confirmed
+  // binding/revision/consumed V3 source without giving that tuple to Android.
+  const stagedPermitContexts = new WeakMap();
 
   function newCommandId() {
     return normalizeUuid(createCommandId(), "Die Sync-Command-ID", "INVALID_SYNC_COMMAND_ID");
   }
 
-  async function queueVisibleChatSync(input = {}, existingTransaction = null) {
-    const normalized = normalizeIssueInput(input);
+  function normalizeAttestedHumanBindingSource(source) {
+    const attestationCommandId = normalizeUuid(
+      source?.attestationCommandId,
+      "Die lokale Conversation-Attestation",
+      "INVALID_LOCAL_CONVERSATION_ATTESTATION"
+    );
+    const bindingId = normalizeUuid(
+      source?.bindingId,
+      "Die Conversation-Bindung",
+      "INVALID_HUMAN_BINDING_ID"
+    );
+    const bindingRevision = positiveInteger(source?.bindingRevision);
+    if (!bindingRevision) {
+      throw new TinderVisibleChatSyncError(
+        "Die Conversation-Bindungsrevision ist ungültig.",
+        "INVALID_HUMAN_BINDING_REVISION"
+      );
+    }
+    return Object.freeze({ attestationCommandId, bindingId, bindingRevision });
+  }
+
+  async function queueFromNormalizedSource(normalized, existingTransaction = null, {
+    attestation = null,
+    sourceAlreadyValidated = false
+  } = {}) {
+    const normalizedAttestation = attestation === null
+      ? null : normalizeAttestedHumanBindingSource(attestation);
+    if (normalizedAttestation === null) {
+      // V1 rows remain readable/auditable, but after the V6 canonical schema
+      // no service path may issue a fresh empty-payload V1 reader command.
+      return Object.freeze({
+        status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+        reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.LOCAL_CONVERSATION_ATTESTATION_REQUIRED
+      });
+    }
     const queue = async transaction => {
       const currentTime = new Date(now());
       if (Number.isNaN(currentTime.valueOf())) {
         throw new TinderVisibleChatSyncError("Die Sync-Zeit ist ungültig.", "INVALID_SYNC_TIME", 500);
       }
-      const runtimeResult = runtimeGateResult(
-        await repository.getDeviceRuntimeForUpdate(transaction, normalized.deviceId)
-      );
+      const runtime = await repository.getDeviceRuntimeForUpdate(transaction, normalized.deviceId);
+      const runtimeResult = runtimeGateResult(runtime);
       if (runtimeResult) return runtimeResult;
+      // A V2 reader command carries an attestation handle and therefore must
+      // never be issued to a runtime that can only understand legacy V4.
+      // This does not grant the reader any new authority; it only prevents a
+      // capability downgrade from receiving an opaque V2 contract it cannot
+      // revalidate locally.
+      if (normalizedAttestation !== null
+          && !isTinderLocalConversationAttestationCapable(
+            sourceValue(runtime, "capabilities", "capabilities")
+          )) {
+        return Object.freeze({
+          status: TINDER_VISIBLE_CHAT_SYNC_STATUS.DEVICE_NOT_READY,
+          reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.DEVICE_CAPABILITY_UNSUPPORTED
+        });
+      }
 
       await repository.expireVisibleChatSyncPermits(transaction, {
         deviceId: normalized.deviceId,
@@ -354,7 +457,7 @@ export function createTinderVisibleChatSyncService(repository, {
         });
       }
 
-      if (strictBoolean(await repository.getConfirmedSourceCaptureForUpdate(transaction, {
+      if (!sourceAlreadyValidated && strictBoolean(await repository.getConfirmedSourceCaptureForUpdate(transaction, {
         sourceCaptureId: normalized.sourceCaptureId,
         deviceId: normalized.deviceId
       }), "getConfirmedSourceCaptureForUpdate") !== true) {
@@ -370,10 +473,25 @@ export function createTinderVisibleChatSyncService(repository, {
         commandId,
         deviceId: normalized.deviceId,
         commandType: TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
-        payload: Object.freeze({}),
+        payload: normalizedAttestation === null
+          ? Object.freeze({})
+          : Object.freeze({
+            [TINDER_LOCAL_CONVERSATION_ATTESTATION_V4_PAYLOAD_FIELD]: normalizedAttestation.attestationCommandId,
+            binding_revision: String(normalizedAttestation.bindingRevision)
+          }),
+        permitContractVersion: normalizedAttestation === null
+          ? TINDER_VISIBLE_CHAT_SYNC_LEGACY_PERMIT_CONTRACT_VERSION
+          : TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION,
+        attestationCommandId: normalizedAttestation?.attestationCommandId ?? null,
+        bindingRevision: normalizedAttestation?.bindingRevision ?? null,
         expiresAt
       });
-      if (!exactEmptyPayload(command.payload)) {
+      if ((normalizedAttestation === null && !exactEmptyPayload(command.payload))
+          || (normalizedAttestation !== null && !exactAttestedPayload(
+            command.payload,
+            normalizedAttestation.attestationCommandId,
+            normalizedAttestation.bindingRevision
+          ))) {
         throw new TinderVisibleChatSyncError("Der sichtbare Chat-Sync-Command ist ungültig.", "INVALID_SYNC_COMMAND", 500);
       }
       await repository.queueVisibleChatSyncCommand(transaction, command);
@@ -382,7 +500,13 @@ export function createTinderVisibleChatSyncService(repository, {
         deviceId: normalized.deviceId,
         sourceCaptureId: normalized.sourceCaptureId,
         permitState: "ISSUED",
-        expiresAt
+        expiresAt,
+        permitContractVersion: normalizedAttestation === null
+          ? TINDER_VISIBLE_CHAT_SYNC_LEGACY_PERMIT_CONTRACT_VERSION
+          : TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION,
+        attestationCommandId: normalizedAttestation?.attestationCommandId ?? null,
+        bindingId: normalizedAttestation?.bindingId ?? null,
+        bindingRevision: normalizedAttestation?.bindingRevision ?? null
       }));
       // Deliberately do not disclose the opaque command/permit UUID from this
       // creation result. The authenticated device receives it only through
@@ -392,6 +516,16 @@ export function createTinderVisibleChatSyncService(repository, {
     return existingTransaction ? queue(existingTransaction) : repository.withTransaction(queue);
   }
 
+  // The older direct capture route is retained only as a fail-closed public
+  // compatibility seam. It must never mint a new V1 empty-payload permit.
+  async function queueVisibleChatSync(input = {}, existingTransaction = null) {
+    normalizeIssueInput(input);
+    return Object.freeze({
+      status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+      reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.LOCAL_CONVERSATION_ATTESTATION_REQUIRED
+    });
+  }
+
   /**
    * The only current-view bridge permitted when Tinder exposes no stable
    * platform reference. A human explicitly confirms the already-visible
@@ -399,27 +533,68 @@ export function createTinderVisibleChatSyncService(repository, {
    * one eligible consumed capture without accepting a name, timestamp,
    * fingerprint, message, device, or capture choice from the caller.
    */
-  async function queueVisibleChatSyncForHumanBinding(input = {}) {
+  async function queueVisibleChatSyncForHumanBinding(input = {}, existingTransaction = null) {
     const normalized = normalizeHumanBindingIssueInput(input);
-    if (typeof repository.getConfirmedSourceCaptureForHumanBindingForUpdate !== "function") {
+    if (typeof repository.lookupHumanBindingDeviceId !== "function"
+        || typeof repository.getConfirmedSourceCaptureForAttestedHumanBindingForUpdate !== "function") {
       throw new TinderVisibleChatSyncError(
         "Die menschlich best\u00e4tigte Conversation-Quelle ist nicht verf\u00fcgbar.",
         "INVALID_SYNC_REPOSITORY",
         500
       );
     }
-    return repository.withTransaction(async transaction => {
-      const source = humanBindingSourceFromRow(
-        await repository.getConfirmedSourceCaptureForHumanBindingForUpdate(transaction, normalized)
+    const queue = async transaction => {
+      const currentTime = new Date(now());
+      if (Number.isNaN(currentTime.valueOf())) {
+        throw new TinderVisibleChatSyncError("Die Sync-Zeit ist ungültig.", "INVALID_SYNC_TIME", 500);
+      }
+      const preliminaryDeviceId = uuid(
+        await repository.lookupHumanBindingDeviceId(transaction, normalized.bindingId)
       );
-      if (!source) {
+      if (!preliminaryDeviceId) {
         return Object.freeze({
           status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
           reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.HUMAN_ARMED_BINDING_NOT_CONFIRMED
         });
       }
-      return queueVisibleChatSync(source, transaction);
-    });
+      const runtimeResult = runtimeGateResult(
+        await repository.getDeviceRuntimeForUpdate(transaction, preliminaryDeviceId)
+      );
+      if (runtimeResult) return runtimeResult;
+      const source = humanBindingSourceFromRow(
+        await repository.getConfirmedSourceCaptureForAttestedHumanBindingForUpdate(transaction, {
+          bindingId: normalized.bindingId,
+          now: currentTime.toISOString()
+        })
+      );
+      if (!source) {
+        const attestationState = typeof repository.getLocalConversationAttestationStateForBindingForUpdate === "function"
+          ? normalizedStatus(await repository.getLocalConversationAttestationStateForBindingForUpdate(transaction, {
+            bindingId: normalized.bindingId,
+            deviceId: preliminaryDeviceId
+          }))
+          : "";
+        return Object.freeze({
+          status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+          reasonCode: ["ISSUED", "STAGED"].includes(attestationState)
+            ? TINDER_VISIBLE_CHAT_SYNC_REASON.LOCAL_CONVERSATION_ATTESTATION_NOT_ATTESTED
+            : ["INVALIDATED", "EXPIRED", "CANCELLED"].includes(attestationState)
+              ? TINDER_VISIBLE_CHAT_SYNC_REASON.LOCAL_CONVERSATION_ATTESTATION_INVALID
+              : TINDER_VISIBLE_CHAT_SYNC_REASON.HUMAN_ARMED_BINDING_NOT_CONFIRMED
+        });
+      }
+      if (source.deviceId !== preliminaryDeviceId) {
+        return Object.freeze({
+          status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+          reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.HUMAN_ARMED_BINDING_NOT_CONFIRMED
+        });
+      }
+      return queueFromNormalizedSource(source, transaction, {
+        attestation: source,
+        sourceAlreadyValidated: true
+      });
+    };
+    return existingTransaction ? queue(existingTransaction) : repository.withTransaction(queue);
   }
 
   /**
@@ -428,6 +603,79 @@ export function createTinderVisibleChatSyncService(repository, {
    */
   async function authorizeStagedVisibleChatSyncPermit(transaction, input = {}) {
     const normalized = normalizePermitInput(input);
+    // Discovery is explicitly non-authoritative. It establishes the device
+    // lock before the local proof and, finally, the V4 permit.
+    const discovered = await repository.lookupVisibleChatSyncPermitForAuthorization(
+      transaction,
+      normalized.commandId
+    );
+    const discoveredDeviceId = uuid(sourceValue(discovered, "deviceId", "device_id"));
+    const discoveredContractVersion = positiveInteger(
+      sourceValue(discovered, "permitContractVersion", "permit_contract_version")
+    );
+    const discoveredAttestationCommandId = sourceValue(discovered, "attestationCommandId", "attestation_command_id") === null
+      || sourceValue(discovered, "attestationCommandId", "attestation_command_id") === undefined
+      ? null : uuid(sourceValue(discovered, "attestationCommandId", "attestation_command_id"));
+    const discoveredBindingId = sourceValue(discovered, "bindingId", "binding_id") === null
+      || sourceValue(discovered, "bindingId", "binding_id") === undefined
+      ? null : uuid(sourceValue(discovered, "bindingId", "binding_id"));
+    const discoveredBindingRevision = sourceValue(discovered, "bindingRevision", "binding_revision") === null
+      || sourceValue(discovered, "bindingRevision", "binding_revision") === undefined
+      ? null : positiveInteger(sourceValue(discovered, "bindingRevision", "binding_revision"));
+    if (!discoveredDeviceId || !discoveredContractVersion) {
+      return Object.freeze({
+        status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+        reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.PERMIT_NOT_FOUND
+      });
+    }
+    const attestedDiscovery = discoveredContractVersion === TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION;
+    if (attestedDiscovery && (!discoveredAttestationCommandId || !discoveredBindingId || !discoveredBindingRevision)) {
+      return Object.freeze({
+        status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+        reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.LOCAL_CONVERSATION_ATTESTATION_INVALID
+      });
+    }
+    const runtime = await repository.getDeviceRuntimeForUpdate(transaction, discoveredDeviceId);
+    if (!runtime) {
+      return Object.freeze({
+        status: TINDER_VISIBLE_CHAT_SYNC_STATUS.DEVICE_NOT_READY,
+        reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.DEVICE_OFFLINE
+      });
+    }
+    if (attestedDiscovery && !isTinderLocalConversationAttestationCapable(
+      sourceValue(runtime, "capabilities", "capabilities")
+    )) {
+      return Object.freeze({
+        status: TINDER_VISIBLE_CHAT_SYNC_STATUS.DEVICE_NOT_READY,
+        reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.DEVICE_CAPABILITY_UNSUPPORTED
+      });
+    }
+    if (attestedDiscovery) {
+      if (typeof repository.revalidateAttestedLocalConversationForSyncPermitForUpdate !== "function") {
+        throw new TinderVisibleChatSyncError(
+          "Local conversation attestation repository is unavailable.",
+          "INVALID_SYNC_REPOSITORY",
+          500
+        );
+      }
+      const attestationCurrent = strictBoolean(
+        await repository.revalidateAttestedLocalConversationForSyncPermitForUpdate(transaction, {
+          commandId: normalized.commandId,
+          deviceId: discoveredDeviceId,
+          attestationCommandId: discoveredAttestationCommandId,
+          bindingId: discoveredBindingId,
+          bindingRevision: discoveredBindingRevision,
+          now: new Date(now()).toISOString()
+        }),
+        "revalidateAttestedLocalConversationForSyncPermitForUpdate"
+      );
+      if (!attestationCurrent) {
+        return Object.freeze({
+          status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+          reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.LOCAL_CONVERSATION_ATTESTATION_INVALID
+        });
+      }
+    }
     const permit = syncPermitFromRow(
       await repository.getVisibleChatSyncPermitForUpdate(transaction, normalized.commandId)
     );
@@ -439,16 +687,81 @@ export function createTinderVisibleChatSyncService(repository, {
         reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.PERMIT_DEVICE_MISMATCH
       });
     }
+    if (permit.deviceId !== discoveredDeviceId
+        || permit.permitContractVersion !== discoveredContractVersion
+        || (attestedDiscovery && (permit.attestationCommandId !== discoveredAttestationCommandId
+          || permit.bindingId !== discoveredBindingId
+          || permit.bindingRevision !== discoveredBindingRevision))) {
+      return Object.freeze({
+        status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,
+        reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.LOCAL_CONVERSATION_ATTESTATION_INVALID
+      });
+    }
     const authorization = Object.freeze({
       commandId: permit.commandId,
       deviceId: permit.deviceId,
       sourceCaptureId: permit.sourceCaptureId
     });
     stagedPermitHandles.add(authorization);
+    stagedPermitContexts.set(authorization, Object.freeze({
+      permitContractVersion: permit.permitContractVersion,
+      attestationCommandId: permit.attestationCommandId,
+      bindingId: permit.bindingId,
+      bindingRevision: permit.bindingRevision
+    }));
     return Object.freeze({
       status: TINDER_VISIBLE_CHAT_SYNC_STATUS.STAGED,
       authorization
     });
+  }
+
+  /**
+   * Final server-side source recheck immediately before transcript storage.
+   * A V1 row may finish its historic lifecycle with the original generic
+   * source proof. A V2 row must additionally still be the consumed V3 source
+   * of its current confirmed binding revision and contact. This closes the
+   * remap race between STAGED acknowledgement and signed ingress.
+   */
+  async function revalidateAuthorizedStagedVisibleChatSyncSource(transaction, authorization) {
+    if (!plainObject(authorization) || !stagedPermitHandles.has(authorization)) {
+      throw new TinderVisibleChatSyncError(
+        "Die sichtbare Chat-Sync-Autorisierung ist ungÃ¼ltig.",
+        "INVALID_SYNC_PERMIT_AUTHORIZATION",
+        500
+      );
+    }
+    const context = stagedPermitContexts.get(authorization);
+    if (!context) {
+      throw new TinderVisibleChatSyncError(
+        "Der lokale Chat-Sync-Kontext ist nicht verfÃ¼gbar.",
+        "INVALID_SYNC_PERMIT_AUTHORIZATION",
+        500
+      );
+    }
+    if (context.permitContractVersion === TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION) {
+      if (typeof repository.getConfirmedSourceCaptureForAttestedSyncPermitForUpdate !== "function") {
+        return false;
+      }
+      return strictBoolean(
+        await repository.getConfirmedSourceCaptureForAttestedSyncPermitForUpdate(transaction, {
+          commandId: authorization.commandId,
+          deviceId: authorization.deviceId,
+          sourceCaptureId: authorization.sourceCaptureId,
+          attestationCommandId: context.attestationCommandId,
+          bindingId: context.bindingId,
+          bindingRevision: context.bindingRevision,
+          now: new Date(now()).toISOString()
+        }),
+        "getConfirmedSourceCaptureForAttestedSyncPermitForUpdate"
+      );
+    }
+    return strictBoolean(
+      await repository.getConfirmedSourceCaptureForUpdate(transaction, {
+        sourceCaptureId: authorization.sourceCaptureId,
+        deviceId: authorization.deviceId
+      }),
+      "getConfirmedSourceCaptureForUpdate"
+    );
   }
 
   /**
@@ -487,6 +800,7 @@ export function createTinderVisibleChatSyncService(repository, {
     queueVisibleChatSync,
     queueVisibleChatSyncForHumanBinding,
     authorizeStagedVisibleChatSyncPermit,
+    revalidateAuthorizedStagedVisibleChatSyncSource,
     consumeAuthorizedStagedVisibleChatSyncPermit,
     isAuthorizedStagedVisibleChatSyncPermit
   });
@@ -564,13 +878,74 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
     },
 
     async findActiveVisibleChatSyncPermitForDevice(client, { deviceId, now: currentTime }) {
+      const attestationRelation = await client.query(
+        "SELECT to_regclass('tinder_local_conversation_attestation_permits') AS relation_name"
+      );
+      if (!attestationRelation.rows[0]?.relation_name) {
+        const legacy = await client.query(
+          `SELECT EXISTS (
+             SELECT 1
+               FROM ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE}
+              WHERE device_id=$1
+                AND permit_state IN ('ISSUED','STAGED')
+                AND expires_at>$2
+           ) AS active`,
+          [deviceId, currentTime]
+        );
+        return legacy.rows[0]?.active === true;
+      }
       const result = await client.query(
         `SELECT EXISTS (
            SELECT 1
-             FROM ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE}
-            WHERE device_id=$1
-              AND permit_state IN ('ISSUED','STAGED')
-              AND expires_at>$2
+             FROM ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE} sync_permit
+        LEFT JOIN ${TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE} attestation
+               ON attestation.command_id=sync_permit.attestation_command_id
+        LEFT JOIN device_bridge_commands attestation_command
+               ON attestation_command.command_id=attestation.command_id
+        LEFT JOIN ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+               ON binding.binding_id=sync_permit.binding_id
+        LEFT JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} binding_permit
+               ON binding_permit.binding_id=binding.binding_id
+        LEFT JOIN tinder_visible_chat_captures source_capture
+               ON source_capture.capture_id=binding_permit.consumed_capture_id
+            WHERE sync_permit.device_id=$1
+              AND sync_permit.permit_state IN ('ISSUED','STAGED')
+              AND sync_permit.expires_at>$2
+              AND (
+                sync_permit.permit_contract_version=1
+                OR (
+                  sync_permit.permit_contract_version=2
+                  AND attestation.device_id=sync_permit.device_id
+                  AND attestation.binding_id=sync_permit.binding_id
+                  AND attestation.binding_revision=sync_permit.binding_revision
+                  AND attestation.permit_contract_version=1
+                  AND attestation.permit_state='ATTESTED'
+                  AND attestation.expires_at>$2
+                  AND attestation_command.command_type='STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'
+                  AND binding.device_id=sync_permit.device_id
+                  AND binding.binding_revision=sync_permit.binding_revision
+                  AND binding.channel='tinder'
+                  AND binding.reference_kind='${HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+                  AND binding.binding_state='CONFIRMED'
+                  AND binding.human_verified=TRUE
+                  AND binding_permit.device_id=binding.device_id
+                  AND binding_permit.binding_revision=binding.binding_revision
+                  AND binding_permit.permit_state='CONSUMED'
+                  AND binding_permit.consumed_capture_id=sync_permit.source_capture_id
+                  AND source_capture.device_id=binding.device_id
+                  AND source_capture.source_package='com.tinder'
+                  AND source_capture.capture_safety_status='SAFE'
+                  AND source_capture.mapping_status='RESOLVED'
+                  AND source_capture.human_review_status='CONFIRMED'
+                  AND source_capture.resolved_contact_id=binding.contact_id
+                  AND source_capture.capture_revision = (
+                    SELECT MAX(newer.capture_revision)
+                      FROM tinder_visible_chat_captures newer
+                     WHERE newer.device_id=source_capture.device_id
+                       AND newer.runtime_thread_fingerprint=source_capture.runtime_thread_fingerprint
+                  )
+                )
+              )
          ) AS active`,
         [deviceId, currentTime]
       );
@@ -595,21 +970,40 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
       return result.rows[0]?.active === true;
     },
 
+    // Discovery only: authorization comes from the subsequent locked source
+    // query.  Taking the device lock first keeps V2 issuance aligned with the
+    // command ACK and signed ingress transaction order.
+    async lookupHumanBindingDeviceId(client, bindingId) {
+      const result = await client.query(
+        `SELECT device_id
+           FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE}
+          WHERE binding_id=$1`,
+        [bindingId]
+      );
+      return result.rows[0]?.device_id || null;
+    },
+
     async queueVisibleChatSyncCommand(client, input) {
-      if (!exactEmptyPayload(input.payload)
-          || input.commandType !== TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE) {
-        throw new TypeError("Visible-chat sync command payload must be exact empty object");
+      const legacy = input.permitContractVersion === TINDER_VISIBLE_CHAT_SYNC_LEGACY_PERMIT_CONTRACT_VERSION
+        && input.attestationCommandId === null && input.bindingRevision === null
+        && exactEmptyPayload(input.payload);
+      const attested = input.permitContractVersion === TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION
+        && Boolean(uuid(input.attestationCommandId))
+        && Boolean(positiveInteger(input.bindingRevision))
+        && exactAttestedPayload(input.payload, input.attestationCommandId, input.bindingRevision);
+      if ((!legacy && !attested) || input.commandType !== TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE) {
+        throw new TypeError("Visible-chat sync command payload is not a valid permit contract");
       }
       const result = await client.query(
         `INSERT INTO device_bridge_commands
           (command_id, device_id, protocol_version, command_type, payload,
            configuration_revision, issued_at, expires_at)
-         SELECT $1, d.device_id, 1, $3, '{}'::jsonb,
-                d.configuration_revision, NOW(), $4
+          SELECT $1, d.device_id, 1, $3, $4::jsonb,
+                 d.configuration_revision, NOW(), $5
            FROM device_bridge_devices d
           WHERE d.device_id=$2
          RETURNING command_id`,
-        [input.commandId, input.deviceId, input.commandType, input.expiresAt]
+        [input.commandId, input.deviceId, input.commandType, JSON.stringify(input.payload), input.expiresAt]
       );
       if (result.rows.length !== 1 || result.rows[0]?.command_id !== input.commandId) {
         throw new TinderVisibleChatSyncError("Der sichtbare Chat-Sync-Command konnte nicht angelegt werden.", "SYNC_COMMAND_WRITE_FAILED", 500);
@@ -617,22 +1011,48 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
     },
 
     async createVisibleChatSyncPermit(client, input) {
+      const legacy = input.permitContractVersion === TINDER_VISIBLE_CHAT_SYNC_LEGACY_PERMIT_CONTRACT_VERSION
+        && input.attestationCommandId === null && input.bindingId === null && input.bindingRevision === null;
+      const attested = input.permitContractVersion === TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION
+        && Boolean(uuid(input.attestationCommandId)) && Boolean(uuid(input.bindingId))
+        && Boolean(positiveInteger(input.bindingRevision));
+      if (!legacy && !attested) {
+        throw new TypeError("Visible-chat sync permit contract is invalid");
+      }
       const result = await client.query(
         `INSERT INTO ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE} (
-           command_id, device_id, source_capture_id, permit_state, issued_at, expires_at,
-           created_at, updated_at
-         ) VALUES ($1,$2,$3,'ISSUED',NOW(),$4,NOW(),NOW())
-         RETURNING command_id`,
-        [input.commandId, input.deviceId, input.sourceCaptureId, input.expiresAt]
+            command_id, device_id, source_capture_id, permit_state, issued_at, expires_at,
+            permit_contract_version, attestation_command_id, binding_id, binding_revision,
+            created_at, updated_at
+          ) VALUES ($1,$2,$3,'ISSUED',NOW(),$4,$5,$6,$7,$8,NOW(),NOW())
+          RETURNING command_id`,
+        [input.commandId, input.deviceId, input.sourceCaptureId, input.expiresAt,
+          input.permitContractVersion, input.attestationCommandId, input.bindingId, input.bindingRevision]
       );
       if (result.rows.length !== 1 || result.rows[0]?.command_id !== input.commandId) {
         throw new TinderVisibleChatSyncError("Die sichtbare Chat-Sync-Freigabe konnte nicht angelegt werden.", "SYNC_PERMIT_WRITE_FAILED", 500);
       }
     },
 
+    // Discovery only. The authorization flow locks the discovered device,
+    // then the attestation/binding tuple, then performs the locked permit
+    // re-read. This query must never be used as authority by itself.
+    async lookupVisibleChatSyncPermitForAuthorization(client, commandId) {
+      const result = await client.query(
+        `SELECT command_id, device_id, permit_contract_version,
+                attestation_command_id, binding_id, binding_revision
+           FROM ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE}
+          WHERE command_id=$1`,
+        [commandId]
+      );
+      return result.rows[0] || null;
+    },
+
     async getVisibleChatSyncPermitForUpdate(client, commandId) {
       const result = await client.query(
         `SELECT permit.command_id, permit.device_id, permit.source_capture_id, permit.permit_state,
+                permit.permit_contract_version, permit.attestation_command_id,
+                permit.binding_id, permit.binding_revision,
                 permit.expires_at, command.command_type, command.terminal_status,
                 acknowledgement.status AS ack_status,
                 acknowledgement.result AS ack_result
@@ -676,29 +1096,53 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
     },
 
     /**
-     * A V3 human-arm may have produced several historical permits. Do not
-     * choose one by name, time, fingerprint, or recency: the only admissible
-     * bridge is exactly one consumed capture from the same current binding
-     * revision that still passes every existing V4 source gate.
+     * V2's final ingress gate.  This is intentionally stricter than the
+     * historic generic source check: the staged V4 permit must still point to
+     * the consumed V3 capture of the same currently confirmed binding
+     * revision, and that capture must still resolve to that binding's contact.
+     * The caller already owns device -> attestation/binding -> V4 locks; this
+     * acquires only the remaining binding-permit/capture facts in that order.
      */
-    async getConfirmedSourceCaptureForHumanBindingForUpdate(client, { bindingId }) {
+    async getConfirmedSourceCaptureForAttestedSyncPermitForUpdate(client, input) {
       const result = await client.query(
-        `SELECT binding.device_id, permit.consumed_capture_id AS source_capture_id
-           FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
-           JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} permit
-             ON permit.binding_id=binding.binding_id
+        `SELECT permit.command_id
+           FROM ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE} permit
+           JOIN ${TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE} attestation
+             ON attestation.command_id=permit.attestation_command_id
+           JOIN device_bridge_commands attestation_command
+             ON attestation_command.command_id=attestation.command_id
+           JOIN ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+             ON binding.binding_id=permit.binding_id
+           JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} binding_permit
+             ON binding_permit.binding_id=binding.binding_id
            JOIN tinder_visible_chat_captures capture
-             ON capture.capture_id=permit.consumed_capture_id
-          WHERE binding.binding_id=$1
+             ON capture.capture_id=binding_permit.consumed_capture_id
+          WHERE permit.command_id=$1
+            AND permit.device_id=$2
+            AND permit.source_capture_id=$3
+            AND permit.permit_contract_version=$4
+            AND permit.attestation_command_id=$5
+            AND permit.binding_id=$6
+            AND permit.binding_revision=$7
+            AND permit.permit_state='STAGED'
+            AND permit.expires_at>$8
+            AND attestation.device_id=permit.device_id
+            AND attestation.binding_id=permit.binding_id
+            AND attestation.binding_revision=permit.binding_revision
+            AND attestation.permit_contract_version=$9
+            AND attestation.permit_state='ATTESTED'
+            AND attestation.expires_at>$8
+            AND attestation_command.command_type=$10
+            AND binding.device_id=permit.device_id
+            AND binding.binding_revision=permit.binding_revision
             AND binding.channel='tinder'
-            AND binding.reference_kind=$2
+            AND binding.reference_kind=$11
             AND binding.binding_state='CONFIRMED'
             AND binding.human_verified=TRUE
-            AND binding.device_id IS NOT NULL
-            AND permit.device_id=binding.device_id
-            AND permit.binding_revision=binding.binding_revision
-            AND permit.permit_state='CONSUMED'
-            AND permit.consumed_capture_id IS NOT NULL
+            AND binding_permit.device_id=binding.device_id
+            AND binding_permit.binding_revision=binding.binding_revision
+            AND binding_permit.permit_state='CONSUMED'
+            AND binding_permit.consumed_capture_id=permit.source_capture_id
             AND capture.device_id=binding.device_id
             AND capture.source_package='com.tinder'
             AND capture.capture_schema_version='tinder-visible-chat-v3'
@@ -712,10 +1156,139 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
                WHERE newer.device_id=capture.device_id
                  AND newer.runtime_thread_fingerprint=capture.runtime_thread_fingerprint
             )
-          FOR UPDATE OF binding, permit, capture`,
-        [bindingId, HUMAN_ARMED_CONVERSATION_REFERENCE_KIND]
+          FOR UPDATE OF attestation, binding, permit, binding_permit, capture`,
+        [input.commandId, input.deviceId, input.sourceCaptureId,
+          TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION,
+          input.attestationCommandId, input.bindingId, input.bindingRevision,
+          input.now, TINDER_LOCAL_CONVERSATION_ATTESTATION_CONTRACT_VERSION,
+          TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
+          HUMAN_ARMED_CONVERSATION_REFERENCE_KIND]
+      );
+      return result.rows.length === 1;
+    },
+
+    // Bounded sequencing read only. It exposes no attestation handle or
+    // binding data to a caller and merely distinguishes a confirmed binding
+    // waiting for its local proof from one whose proof is terminally invalid.
+    async getLocalConversationAttestationStateForBindingForUpdate(client, { bindingId, deviceId }) {
+      const result = await client.query(
+        `SELECT permit_state
+           FROM ${TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE}
+          WHERE binding_id=$1 AND device_id=$2
+          ORDER BY issued_at DESC, command_id ASC
+          LIMIT 1
+          FOR UPDATE`,
+        [bindingId, deviceId]
+      );
+      return result.rows[0]?.permit_state || null;
+    },
+
+    /**
+     * V2 does not select a conversation from a Tinder/UI identifier. The only
+     * admissible source is the one consumed V3 capture already bound to the
+     * current human-confirmed binding revision *and* an unexpired local
+     * attestation for that exact revision. No name, time, fingerprint or
+     * content-derived value participates in this selection.
+     */
+    async getConfirmedSourceCaptureForAttestedHumanBindingForUpdate(client, { bindingId, now: currentTime }) {
+      const result = await client.query(
+        `SELECT binding.device_id, permit.consumed_capture_id AS source_capture_id,
+                attestation.command_id AS attestation_command_id,
+                binding.binding_id, binding.binding_revision
+           FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+           JOIN ${TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE} attestation
+             ON attestation.binding_id=binding.binding_id
+            AND attestation.binding_revision=binding.binding_revision
+            AND attestation.device_id=binding.device_id
+           JOIN device_bridge_commands attestation_command
+             ON attestation_command.command_id=attestation.command_id
+            JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} permit
+              ON permit.binding_id=binding.binding_id
+           JOIN tinder_visible_chat_captures capture
+             ON capture.capture_id=permit.consumed_capture_id
+          WHERE binding.binding_id=$1
+            AND binding.channel='tinder'
+            AND binding.reference_kind=$2
+            AND binding.binding_state='CONFIRMED'
+             AND binding.human_verified=TRUE
+             AND binding.device_id IS NOT NULL
+             AND attestation.permit_contract_version=$3
+             AND attestation.permit_state='ATTESTED'
+             AND attestation.expires_at>$4
+             AND attestation_command.command_type=$5
+             AND permit.device_id=binding.device_id
+            AND permit.binding_revision=binding.binding_revision
+            AND permit.permit_state='CONSUMED'
+            AND permit.consumed_capture_id IS NOT NULL
+            AND capture.device_id=binding.device_id
+            AND capture.source_package='com.tinder'
+            AND capture.capture_schema_version='tinder-visible-chat-v3'
+             AND capture.capture_safety_status='SAFE'
+             AND capture.mapping_status='RESOLVED'
+             AND capture.human_review_status='CONFIRMED'
+             AND capture.resolved_contact_id=binding.contact_id
+             -- This is the pre-existing V4 freshness guard for the already
+             -- server-bound source capture. It is not used to identify or
+             -- select a Tinder conversation: that authority is the confirmed
+             -- binding revision plus local attestation above.
+             AND capture.capture_revision = (
+               SELECT MAX(newer.capture_revision)
+                 FROM tinder_visible_chat_captures newer
+                WHERE newer.device_id=capture.device_id
+                  AND newer.runtime_thread_fingerprint=capture.runtime_thread_fingerprint
+             )
+          FOR UPDATE OF binding, attestation, permit, capture`,
+         [bindingId, HUMAN_ARMED_CONVERSATION_REFERENCE_KIND,
+           TINDER_LOCAL_CONVERSATION_ATTESTATION_CONTRACT_VERSION, currentTime,
+           TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE]
       );
       return result.rows.length === 1 ? result.rows[0] : null;
+    },
+
+    /**
+     * The signed V4 ingress rechecks this immediately before it accepts a
+     * transcript. The caller already owns the device lock; this locks the
+     * local attestation/binding before the separate V4 permit lock, so a
+     * proof invalidation and transcript ingress cannot invert each other.
+     */
+    async revalidateAttestedLocalConversationForSyncPermitForUpdate(client, input) {
+      const result = await client.query(
+        `SELECT permit.command_id
+           FROM ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE} permit
+           JOIN ${TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE} attestation
+             ON attestation.command_id=permit.attestation_command_id
+           JOIN device_bridge_commands attestation_command
+             ON attestation_command.command_id=attestation.command_id
+           JOIN ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+             ON binding.binding_id=permit.binding_id
+          WHERE permit.command_id=$1
+            AND permit.device_id=$2
+            AND permit.permit_contract_version=$3
+            AND permit.attestation_command_id=$4
+            AND permit.binding_id=$5
+            AND permit.binding_revision=$6
+            AND attestation.device_id=permit.device_id
+            AND attestation.binding_id=permit.binding_id
+            AND attestation.binding_revision=permit.binding_revision
+            AND attestation.permit_contract_version=$7
+            AND attestation.permit_state='ATTESTED'
+            AND attestation.expires_at>$8
+            AND attestation_command.command_type=$9
+            AND binding.device_id=permit.device_id
+            AND binding.binding_revision=permit.binding_revision
+            AND binding.channel='tinder'
+            AND binding.reference_kind=$10
+            AND binding.binding_state='CONFIRMED'
+            AND binding.human_verified=TRUE
+          FOR UPDATE OF attestation, binding`,
+        [input.commandId, input.deviceId,
+          TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION,
+          input.attestationCommandId, input.bindingId, input.bindingRevision,
+          TINDER_LOCAL_CONVERSATION_ATTESTATION_CONTRACT_VERSION,
+          input.now, TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
+          HUMAN_ARMED_CONVERSATION_REFERENCE_KIND]
+      );
+      return result.rows.length === 1;
     },
 
     async markVisibleChatSyncPermitConsumed(client, { commandId, deviceId, consumedAt }) {

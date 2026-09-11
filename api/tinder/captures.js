@@ -22,6 +22,7 @@ const HUMAN_ARMED_BINDING_FIELDS = new Set([
 ]);
 const HUMAN_ARMED_REARM_FIELDS = new Set(["confirmed"]);
 const HUMAN_ARMED_VISIBLE_CHAT_SYNC_FIELDS = new Set(["confirmed"]);
+const HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_FIELDS = new Set(["confirmed"]);
 const PUBLIC_CAPTURE_MAPPING_STATUSES = new Set(["NEEDS_HUMAN_MAPPING", "RESOLVED", "CONFLICT"]);
 const PUBLIC_CAPTURE_REVIEW_STATUSES = new Set(["PENDING", "CONFIRMED", "REJECTED"]);
 const PUBLIC_MAPPING_SUCCESS_STATUSES = new Set(["RESOLVED", "NEW_CONTACT_CONFIRMED"]);
@@ -52,6 +53,12 @@ const PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES = new Set([
   "PERMIT_NOT_AVAILABLE",
   "CONFLICT"
 ]);
+const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_DASHBOARD_STATUSES = new Set([
+  "NOT_REQUESTED", "PENDING", "ATTESTED", "INVALIDATED"
+]);
+const PUBLIC_LOCAL_CONVERSATION_READER_STATUSES = new Set([
+  "NOT_REQUESTED", "READER_QUEUED"
+]);
 const PENDING_CAPTURE_VIEW = "pending";
 const PENDING_CAPTURE_LIMIT = 25;
 const DRAFT_ELIGIBLE_CAPTURE_VIEW = "draft-eligible";
@@ -61,6 +68,8 @@ const HUMAN_ARMED_BINDING_LIMIT = 25;
 const HUMAN_ARM_OPERATION = "human-arm";
 const HUMAN_REARM_OPERATION = "human-rearm";
 const HUMAN_ARMED_VISIBLE_CHAT_SYNC_OPERATION = "human-armed-visible-chat-sync";
+const HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_OPERATION =
+  "human-armed-local-conversation-attestation";
 const DRAFT_OPERATION = "draft";
 const PUBLIC_DRAFT_STATUS = "DRAFT";
 const DRAFT_REVIEW_VIEW = "draft-review";
@@ -97,7 +106,41 @@ const PUBLIC_VISIBLE_CHAT_SYNC_REASONS = new Set([
   "PERMIT_ACK_NOT_STAGED",
   "PERMIT_DEVICE_MISMATCH",
   "SOURCE_CAPTURE_NOT_CONFIRMED",
-  "HUMAN_ARMED_BINDING_NOT_CONFIRMED"
+  "HUMAN_ARMED_BINDING_NOT_CONFIRMED",
+  "LOCAL_CONVERSATION_ATTESTATION_REQUIRED",
+  "LOCAL_CONVERSATION_ATTESTATION_NOT_ATTESTED",
+  "LOCAL_CONVERSATION_ATTESTATION_INVALID"
+]);
+const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE =
+  "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
+const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_STATUSES = new Set([
+  "QUEUED", "DEVICE_NOT_READY", "PERMIT_CONFLICT", "PERMIT_NOT_AVAILABLE"
+]);
+const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_REASONS = new Set([
+  "DEVICE_OFFLINE",
+  "DEVICE_ENROLLMENT_INACTIVE",
+  "BRIDGE_NOT_RUNNING",
+  "TINDER_NOT_CONNECTED",
+  "AUTOMATION_NOT_STOPPED",
+  "DEVICE_CAPABILITY_UNSUPPORTED",
+  "HUMAN_ARMED_PERMIT_ACTIVE",
+  "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
+  "OFFICIAL_APP_RESUME_PERMIT_ACTIVE",
+  "ATTESTATION_ACTIVE",
+  "LOCAL_CONVERSATION_ATTESTATION_DEVICE_BUSY",
+  "BINDING_NOT_FOUND",
+  "BINDING_NOT_CONFIRMED",
+  "BINDING_NOT_HUMAN_VERIFIED",
+  "BINDING_DEVICE_INVALID",
+  "BINDING_REVISION_CHANGED",
+  "PERMIT_NOT_FOUND",
+  "PERMIT_NOT_STAGED",
+  "PERMIT_EXPIRED",
+  "PERMIT_ACK_NOT_STAGED",
+  "PERMIT_DEVICE_MISMATCH",
+  "PERMIT_BINDING_MISMATCH",
+  "READER_QUEUE_NOT_AVAILABLE",
+  "INVALIDATION_NOT_ALLOWED"
 ]);
 const PUBLIC_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const PUBLIC_OFFICIAL_APP_RESUME_STATUSES = new Set([
@@ -396,6 +439,10 @@ function captureRequestFromQuery(req) {
       && query.operation === HUMAN_ARMED_VISIBLE_CHAT_SYNC_OPERATION) {
     return Object.freeze({ type: "human_armed_visible_chat_sync", bindingId: query.bindingId });
   }
+  if (exactKeys(query, ["bindingId", "operation"]) && validCaptureId(query.bindingId)
+      && query.operation === HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_OPERATION) {
+    return Object.freeze({ type: "human_armed_local_conversation_attestation", bindingId: query.bindingId });
+  }
   if (exactKeys(query, ["captureId"]) && validCaptureId(query.captureId)) {
     return Object.freeze({ type: "capture", captureId: query.captureId });
   }
@@ -467,6 +514,10 @@ function validHumanArmedRearmBody(body) {
 
 function validHumanArmedVisibleChatSyncBody(body) {
   return exactKeys(body, HUMAN_ARMED_VISIBLE_CHAT_SYNC_FIELDS) && body.confirmed === true;
+}
+
+function validHumanArmedLocalConversationAttestationBody(body) {
+  return exactKeys(body, HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_FIELDS) && body.confirmed === true;
 }
 
 function validEmptyDraftBody(body) {
@@ -545,14 +596,27 @@ function normalizePublicHumanArmedBindings(value) {
   if (!Array.isArray(value) || value.length > HUMAN_ARMED_BINDING_LIMIT) return null;
   const bindings = value.map((binding) => {
     if (!binding || typeof binding !== "object" || Array.isArray(binding) ||
-        !validCaptureId(binding.binding_id) || typeof binding.contact_name !== "string") {
+        !exactKeys(binding, [
+          "binding_id", "contact_name", "local_conversation_attestation_status", "reader_status"
+        ]) || !validCaptureId(binding.binding_id) || typeof binding.contact_name !== "string") {
       return null;
     }
     const contactName = binding.contact_name.trim().replace(/\s+/g, " ");
-    if (!contactName || contactName.length > 160) return null;
+    const localConversationAttestationStatus = String(
+      binding.local_conversation_attestation_status || ""
+    ).trim().toUpperCase();
+    const readerStatus = String(binding.reader_status || "").trim().toUpperCase();
+    if (!contactName || contactName.length > 160
+        || !PUBLIC_LOCAL_CONVERSATION_ATTESTATION_DASHBOARD_STATUSES.has(localConversationAttestationStatus)
+        || !PUBLIC_LOCAL_CONVERSATION_READER_STATUSES.has(readerStatus)) return null;
     // binding_id is an opaque JavaScript-only handle for the separate rearm
     // operation. It is intentionally not rendered or put in a URL.
-    return Object.freeze({ binding_id: binding.binding_id, contact_name: contactName });
+    return Object.freeze({
+      binding_id: binding.binding_id,
+      contact_name: contactName,
+      local_conversation_attestation_status: localConversationAttestationStatus,
+      reader_status: readerStatus
+    });
   });
   return bindings.some((binding) => !binding) ? null : Object.freeze(bindings);
 }
@@ -720,6 +784,33 @@ function normalizePublicVisibleChatSyncResult(value) {
   }
   return Object.freeze({
     command_type: PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+    status,
+    reason_code: value.reason_code
+  });
+}
+
+// This public result deliberately contains only a command type, terminal
+// queue state, and bounded reason.  In particular it must not turn the
+// opaque device command handle or binding facts into dashboard data.
+function normalizePublicLocalConversationAttestationResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+      || value.command_type !== PUBLIC_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE
+      || !PUBLIC_LOCAL_CONVERSATION_ATTESTATION_STATUSES.has(value.status)) {
+    return null;
+  }
+  const status = value.status;
+  const hasReason = Object.prototype.hasOwnProperty.call(value, "reason_code");
+  if (status === "QUEUED") {
+    return exactKeys(value, ["command_type", "status"])
+      ? Object.freeze({ command_type: PUBLIC_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE, status })
+      : null;
+  }
+  if (!hasReason || !exactKeys(value, ["command_type", "status", "reason_code"])
+      || !PUBLIC_LOCAL_CONVERSATION_ATTESTATION_REASONS.has(value.reason_code)) {
+    return null;
+  }
+  return Object.freeze({
+    command_type: PUBLIC_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
     status,
     reason_code: value.reason_code
   });
@@ -1200,6 +1291,51 @@ async function forwardHumanArmedVisibleChatSync(req, res, configuration, binding
   }
 }
 
+/**
+ * The browser can request only the human-confirmed bootstrap.  It cannot
+ * select a Tinder row, capture, device, or technical attestation handle;
+ * those facts remain inside the authenticated Railway/device contract.
+ */
+async function forwardHumanArmedLocalConversationAttestation(req, res, configuration, bindingId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/human-armed-conversation-bindings/${encodeURIComponent(bindingId)}/local-conversation-attestation`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        body: JSON.stringify({ confirmed: true }),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const attestation = normalizePublicLocalConversationAttestationResult(data?.attestation);
+    if (response.ok) {
+      if (data?.ok !== true || !attestation || attestation.status !== "QUEUED") {
+        return res.status(502).json({ ok: false, error: "Ung\u00fcltige lokale Conversation-Best\u00e4tigung vom Backend." });
+      }
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(202).json({ ok: true, attestation });
+    }
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    if (response.status === 409 && data?.ok === false && attestation && attestation.status !== "QUEUED") {
+      return res.status(409).json({
+        ok: false,
+        conflict: true,
+        attestation,
+        error: "Lokale Conversation-Best\u00e4tigung ist derzeit nicht verf\u00fcgbar."
+      });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Lokale Conversation-Best\u00e4tigung konnte nicht vorbereitet werden." });
+  } catch {
+    console.error("Verbindung zur lokalen Tinder-Conversation-Best\u00e4tigung fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Dashboard-Backend ist momentan nicht erreichbar." });
+  }
+}
+
 async function forwardDraftCreation(res, configuration, captureId) {
   try {
     const response = await fetch(
@@ -1389,7 +1525,9 @@ export default async function handler(req, res) {
 
   const captureRequest = captureRequestFromQuery(req);
   if (!captureRequest || (req.method === "POST" && ![
-    "capture", "human_arm", "human_rearm", "human_armed_visible_chat_sync", "draft", "draft_approve", "draft_reject", "draft_cancel", "visible_chat_sync", "official_app_resume"
+    "capture", "human_arm", "human_rearm", "human_armed_visible_chat_sync",
+    "human_armed_local_conversation_attestation", "draft", "draft_approve",
+    "draft_reject", "draft_cancel", "visible_chat_sync", "official_app_resume"
   ].includes(captureRequest.type))) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
@@ -1400,6 +1538,9 @@ export default async function handler(req, res) {
       ? "human_rearm"
       : captureRequest.type === "human_armed_visible_chat_sync" && validHumanArmedVisibleChatSyncBody(req.body)
         ? "human_armed_visible_chat_sync"
+      : captureRequest.type === "human_armed_local_conversation_attestation"
+          && validHumanArmedLocalConversationAttestationBody(req.body)
+        ? "human_armed_local_conversation_attestation"
       : captureRequest.type === "draft" && validEmptyDraftBody(req.body)
         ? "draft"
       : captureRequest.type === "draft_approve" && validEmptyDraftBody(req.body)
@@ -1456,6 +1597,9 @@ export default async function handler(req, res) {
   if (requestKind === "human_armed_visible_chat_sync") {
     return forwardHumanArmedVisibleChatSync(req, res, configuration, captureRequest.bindingId);
   }
+  if (requestKind === "human_armed_local_conversation_attestation") {
+    return forwardHumanArmedLocalConversationAttestation(req, res, configuration, captureRequest.bindingId);
+  }
   if (requestKind === "draft") {
     return forwardDraftCreation(res, configuration, captureRequest.captureId);
   }
@@ -1484,8 +1628,10 @@ export {
   HUMAN_ARMED_BINDING_FIELDS,
   HUMAN_ARMED_BINDINGS_VIEW,
   HUMAN_ARMED_REARM_FIELDS,
+  HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_FIELDS,
   HUMAN_ARM_OPERATION,
   HUMAN_REARM_OPERATION,
+  HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_OPERATION,
   DRAFT_OPERATION,
   DRAFT_ELIGIBLE_CAPTURE_LIMIT,
   DRAFT_ELIGIBLE_CAPTURE_VIEW,
@@ -1530,6 +1676,7 @@ export {
   normalizePublicVisibleChatSyncTranscript,
   normalizePublicOfficialAppResumeObservation,
   normalizePublicVisibleChatSyncResult,
+  normalizePublicLocalConversationAttestationResult,
   normalizePublicOfficialAppResumeResult,
   validEmptyOfficialAppResumeBody,
   validCaptureId,
@@ -1537,6 +1684,7 @@ export {
   validHumanArmedBindingBody,
   validHumanArmedRearmBody,
   validHumanArmedVisibleChatSyncBody,
+  validHumanArmedLocalConversationAttestationBody,
   validEmptyDraftBody,
   validEmptyVisibleChatSyncBody,
   validMappingBody

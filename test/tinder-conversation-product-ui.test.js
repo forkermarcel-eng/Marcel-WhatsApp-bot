@@ -84,6 +84,16 @@ test("queued visible-chat sync refreshes only the selected product detail and ne
   assert.equal((conversationCode.match(/operation=resume-official-app/g) || []).length, 1);
 });
 
+test("selected Conversation detail cannot bypass the confirmed-binding local-attestation flow", () => {
+  const detailCode = sourceBetween("function renderConfirmedConversationDetail", "async function selectConfirmedConversation");
+
+  assert.match(detailCode, /syncButton\.hidden = true/);
+  assert.match(detailCode, /syncButton\.disabled = true/);
+  assert.match(detailCode, /bestehenden Binding-Karte/);
+  assert.doesNotMatch(detailCode, /requestVisibleChatSync\(/);
+  assert.doesNotMatch(detailCode, /operation=visible-chat-sync/);
+});
+
 test("a terminal official-app resume status clears only the local latch for a later separate permit", () => {
   const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
 

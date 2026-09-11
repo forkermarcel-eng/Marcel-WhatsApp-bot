@@ -8,6 +8,7 @@ import {
   T2_DEVICE_CAPABILITIES,
   T4_DEVICE_CAPABILITIES,
   T4_RESUME_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -41,6 +42,7 @@ const NOW = new Date("2026-09-01T12:34:56.000Z");
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
 const REQUEST_ID = "d2675347-0888-4548-9feb-ae4d71a972cf";
+const LOCAL_ATTESTATION_COMMAND_ID = "4dbf2bd9-3d7c-4925-89de-fc0dc62a2fe1";
 const INSTALLATION_ID = "c7cb0b92-ad3c-4ec6-88dc-d149ef536c3d";
 const CAPABILITIES = T0_DEVICE_CAPABILITIES;
 
@@ -959,6 +961,46 @@ test("official-app resume delivery revalidates a V2 binding snapshot without req
   assert.match(heartbeatSource, /source_capture\.human_review_status='CONFIRMED'/);
   assert.match(heartbeatSource, /resume_permit\.expires_at>\$2/);
   assert.doesNotMatch(heartbeatSource, /resume_permit\.(?:binding_id|binding_revision|permit_contract_version)/);
+});
+
+test("attestation-capable heartbeat remains healthy before the local-proof schema exists", async () => {
+  const request = heartbeatRequest(heartbeatPayload({
+    capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED"
+  }));
+  const staged = commandRow("STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", NOW, LOCAL_ATTESTATION_COMMAND_ID, {
+    payload: { binding_revision: "3" }
+  });
+  const fake = heartbeatPool({ request, commands: [staged] });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    heartbeatPayload({ capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" }),
+    NOW
+  );
+  assert.deepEqual(response.commands, []);
+  assert.equal(fake.state.commits, 1);
+  assert.equal(fake.calls.some(call => /FROM\s+tinder_local_conversation_attestation_permits/i.test(String(call.sql))), false);
+  assert.equal(fake.calls.some(call => String(call.sql).includes("to_regclass('tinder_local_conversation_attestation_permits')")), true);
+});
+
+test("attested heartbeat delivery is bound to a live dedicated proof and the current source", () => {
+  // These predicates are intentionally in the single command-selection query:
+  // Android must not even observe a V2 reader command for an invalidated,
+  // expired, rebound, non-attested, or malformed bootstrap proof.
+  for (const required of [
+    /attestation_permit\.permit_state='ISSUED'/,
+    /attestation_permit\.permit_state='ATTESTED'/,
+    /attestation_permit\.expires_at>\$2/,
+    /attestation_command\.command_type='\$\{TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE\}'/,
+    /sync_permit\.permit_contract_version=2/,
+    /attestation_permit\.binding_revision=sync_permit\.binding_revision/,
+    /binding\.binding_revision=sync_permit\.binding_revision/,
+    /binding\.binding_state='CONFIRMED'/,
+    /binding_permit\.permit_state='CONSUMED'/,
+    /source_capture\.capture_revision = \(\s*SELECT MAX\(newer\.capture_revision\)/,
+    /device_bridge_commands\.payload=jsonb_build_object\(\s*'local_conversation_attestation', sync_permit\.attestation_command_id::text,\s*'binding_revision', sync_permit\.binding_revision::text\s*\)/s
+  ]) assert.match(heartbeatSource, required);
 });
 
 test("Block 3 admin routes reuse dashboard auth/readiness", () => {

@@ -19,7 +19,8 @@ function fixturePool({ onDdl = () => {} } = {}) {
   const client = {
     async query(sql, values = []) {
       calls.push({ sql, values });
-      if (sql === "BEGIN" || sql === "ROLLBACK" || sql === "COMMIT" || sql.startsWith("SET LOCAL ")) return { rows: [] };
+      if (/^BEGIN(?: ISOLATION LEVEL READ COMMITTED)?$/.test(sql)
+          || sql === "ROLLBACK" || sql === "COMMIT" || sql.startsWith("SET LOCAL ")) return { rows: [] };
       if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ acquired: true }] };
       if (sql.startsWith("LOCK TABLE")) return { rows: [] };
       if (sql === FIXED_SOURCE) {
@@ -33,7 +34,7 @@ function fixturePool({ onDdl = () => {} } = {}) {
   return { calls, pool: { async connect() { return client; } } };
 }
 
-function createRunner({ preflight, postcheck, diagnosticReasonCodes }) {
+function createRunner({ preflight, postcheck, diagnosticReasonCodes, transactionIsolation = null }) {
   return createExplicitTinderFoundationMigrationRunner({
     label: "Fixture",
     migrationSql: FIXED_SOURCE,
@@ -45,7 +46,8 @@ function createRunner({ preflight, postcheck, diagnosticReasonCodes }) {
     postcheck,
     lockRelations: () => ["contacts"],
     advisoryLock: { namespace: 7421, key: 99 },
-    diagnosticReasonCodes
+    diagnosticReasonCodes,
+    transactionIsolation
   });
 }
 
@@ -81,6 +83,25 @@ test("rollback-only pre-DDL validation never executes fixed DDL", async () => {
   assert.equal(fixture.calls.some(call => call.sql.includes("ACCESS SHARE MODE")), false);
   assert.equal(fixture.calls.some(call => call.sql === "ROLLBACK"), true);
   assert.equal(fixture.calls.some(call => call.sql === "COMMIT"), false);
+});
+
+test("a migration that uses a locked recheck can explicitly choose READ COMMITTED", async () => {
+  const runner = createRunner({
+    preflight: async () => ({ mutate: false }),
+    postcheck: async () => ({ mutate: false }),
+    transactionIsolation: "READ COMMITTED"
+  });
+  const fixture = fixturePool();
+  await runner.validatePreDdl(fixture.pool);
+  assert.equal(fixture.calls[0]?.sql, "BEGIN ISOLATION LEVEL READ COMMITTED");
+});
+
+test("the fixed migration runner rejects caller-supplied isolation SQL", () => {
+  assert.throws(() => createRunner({
+    preflight: async () => ({ mutate: false }),
+    postcheck: async () => ({ mutate: false }),
+    transactionIsolation: "READ COMMITTED; DROP TABLE contacts"
+  }), /isolation/i);
 });
 
 test("explicit apply performs fixed DDL only after two successful preflights and commits only after postcheck", async () => {

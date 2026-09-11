@@ -1064,7 +1064,12 @@ test("human-armed binding list stays bounded and exposes only the opaque rearm h
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, {
     ok: true,
-    bindings: [{ binding_id: bindingId, contact_name: "M Tinder Test" }]
+    bindings: [{
+      binding_id: bindingId,
+      contact_name: "M Tinder Test",
+      local_conversation_attestation_status: "NOT_REQUESTED",
+      reader_status: "NOT_REQUESTED"
+    }]
   });
   assert.equal(JSON.stringify(res.body).includes("contactId"), false);
   assert.equal(JSON.stringify(res.body).includes("referenceHash"), false);

@@ -292,12 +292,20 @@ export function createExplicitTinderFoundationMigrationRunner({
   postcheck,
   lockRelations: relationsForPreflight,
   advisoryLock = { namespace: 7421, key: 3 },
-  diagnosticReasonCodes
+  diagnosticReasonCodes,
+  transactionIsolation = null
 } = {}) {
   if (!label || typeof migrationSql !== "string" || typeof validateSource !== "function"
       || typeof preflight !== "function" || typeof postcheck !== "function"
       || typeof relationsForPreflight !== "function") {
     throw new TypeError("A complete fixed Tinder foundation migration runner contract is required.");
+  }
+  // The locked recheck must observe writes that committed while waiting for
+  // the SHARE locks.  Keep this fixed and opt-in rather than accepting a
+  // caller-supplied SQL fragment; the read-only preflight path remains its
+  // separate REPEATABLE READ contract.
+  if (transactionIsolation !== null && transactionIsolation !== "READ COMMITTED") {
+    throw new TypeError("Migration transaction isolation must be null or READ COMMITTED.");
   }
   const allowedDiagnosticReasons = fixedDiagnosticReasons(diagnosticReasonCodes);
 
@@ -332,7 +340,9 @@ export function createExplicitTinderFoundationMigrationRunner({
       state.stage = "DATABASE_CONNECTION";
       client = await pool.connect();
       state.stage = "TRANSACTION_BEGIN";
-      await client.query("BEGIN");
+      await client.query(transactionIsolation === "READ COMMITTED"
+        ? "BEGIN ISOLATION LEVEL READ COMMITTED"
+        : "BEGIN");
       state.transactionStarted = true;
       const lockedPreflight = await runPreDdlPath(client, nextStage => { state.stage = nextStage; });
       if (apply && lockedPreflight.mutate) {

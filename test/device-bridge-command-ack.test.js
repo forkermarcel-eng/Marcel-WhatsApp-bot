@@ -17,6 +17,7 @@ import {
   T2_DEVICE_CAPABILITIES,
   T4_DEVICE_CAPABILITIES,
   T4_RESUME_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -354,6 +355,42 @@ test("V4 visible-chat sync acknowledgement atomically stages only its separate p
     ),
     error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
   );
+});
+
+test("an attested V4 payload rejects a capability downgrade before it can stage", async () => {
+  const attestedPayload = {
+    local_conversation_attestation: "4dbf2bd9-3d7c-4925-89de-fc0dc62a2fe1",
+    binding_revision: "3"
+  };
+  await assert.rejects(
+    () => processCommandAckTransaction(
+      ackPool({
+        commandType: "SYNC_TINDER_VISIBLE_CHAT",
+        commandPayload: attestedPayload,
+        capabilities: T4_RESUME_DEVICE_CAPABILITIES,
+        visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" }
+      }).pool,
+      auth(),
+      visibleChatSyncAckPayload("RECEIVED"),
+      NOW
+    ),
+    error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
+  );
+
+  const compatible = ackPool({
+    commandType: "SYNC_TINDER_VISIBLE_CHAT",
+    commandPayload: attestedPayload,
+    capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+    visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" }
+  });
+  const response = await processCommandAckTransaction(
+    compatible.pool,
+    auth(),
+    visibleChatSyncAckPayload("RECEIVED"),
+    NOW
+  );
+  assert.equal(response.status, "RECEIVED");
+  assert.equal(compatible.state.commits, 1);
 });
 
 test("official Tinder app resume ACK is exact, capability-gated, and projects only its dedicated permit", async () => {

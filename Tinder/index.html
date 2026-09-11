@@ -1499,10 +1499,14 @@
     }
 
     function humanArmedBindingIsSafeForSelection(binding) {
+      const localAttestationStatus = String(binding?.local_conversation_attestation_status || "").toUpperCase();
+      const readerStatus = String(binding?.reader_status || "").toUpperCase();
       return binding && typeof binding === "object" &&
         UUID_V4.test(String(binding.binding_id || "")) &&
         typeof binding.contact_name === "string" && binding.contact_name.trim() &&
-        binding.contact_name.trim().length <= 160;
+        binding.contact_name.trim().length <= 160 &&
+        ["NOT_REQUESTED", "PENDING", "ATTESTED", "INVALIDATED"].includes(localAttestationStatus) &&
+        ["NOT_REQUESTED", "READER_QUEUED"].includes(readerStatus);
     }
 
     function renderHumanArmedBindingList(bindings) {
@@ -1529,6 +1533,18 @@
         meta.textContent = "Menschlich bestätigte Conversation · keine automatische Wiedererkennung";
         copy.append(name, meta);
 
+        const localAttestationStatus = binding.local_conversation_attestation_status;
+        const readerStatus = binding.reader_status;
+        const localAttestationLabel = localAttestationStatus === "PENDING"
+          ? "Lokale Conversation-Pr\u00fcfung ausstehend"
+          : localAttestationStatus === "ATTESTED" && readerStatus === "READER_QUEUED"
+            ? "Lokal best\u00e4tigt · Reader vorbereitet"
+            : localAttestationStatus === "ATTESTED"
+              ? "Lokal best\u00e4tigt"
+              : localAttestationStatus === "INVALIDATED"
+                ? "Lokale Conversation-Pr\u00fcfung beendet"
+                : "Lokale Conversation-Pr\u00fcfung noch nicht vorbereitet";
+        meta.textContent = `Menschlich best\u00e4tigte Conversation · ${localAttestationLabel} · keine automatische Wiedererkennung`;
         const actions = document.createElement("div");
         actions.className = "notice-actions";
         const confirmation = document.createElement("label");
@@ -1551,8 +1567,8 @@
           humanArmedBindingActionBusy = true;
           rearm.disabled = true;
           checkbox.disabled = true;
-          syncCurrentChat.disabled = true;
-          currentChatCheckbox.disabled = true;
+          localConversationAttestation.disabled = true;
+          localConversationAttestationCheckbox.disabled = true;
           elements.humanArmedBindingMessage.className = "enrollment-message";
           elements.humanArmedBindingMessage.textContent = "Einmalfreigabe wird vorbereitet …";
           try {
@@ -1568,55 +1584,78 @@
           } catch (error) {
             humanArmedBindingActionBusy = false;
             checkbox.disabled = false;
-            currentChatCheckbox.disabled = false;
-            syncCurrentChat.disabled = currentChatCheckbox.checked !== true;
+            localConversationAttestationCheckbox.disabled = false;
+            localConversationAttestation.disabled = !localConversationAttestationAvailable
+              || localConversationAttestationCheckbox.checked !== true;
             elements.humanArmedBindingMessage.className = "enrollment-message enrollment-error";
             elements.humanArmedBindingMessage.textContent = error?.message || "Einmalfreigabe konnte nicht vorbereitet werden.";
           }
         });
 
-        const currentChatConfirmation = document.createElement("label");
-        currentChatConfirmation.className = "capture-mapping-confirmation";
-        const currentChatCheckbox = document.createElement("input");
-        currentChatCheckbox.type = "checkbox";
-        const currentChatConfirmationText = document.createElement("span");
-        currentChatConfirmationText.textContent =
-          "Ich best\u00e4tige: Der aktuell sichtbar ge\u00f6ffnete offizielle Tinder-Chat geh\u00f6rt zu dieser bewusst gebundenen Conversation. Danach den Chat nicht wechseln.";
-        currentChatConfirmation.append(currentChatCheckbox, currentChatConfirmationText);
-        const syncCurrentChat = document.createElement("button");
-        syncCurrentChat.type = "button";
-        syncCurrentChat.className = "button info";
-        syncCurrentChat.textContent = "Aktuell sichtbaren Chat synchronisieren";
-        syncCurrentChat.disabled = true;
-        currentChatCheckbox.addEventListener("change", () => {
-          syncCurrentChat.disabled = humanArmedBindingActionBusy || currentChatCheckbox.checked !== true;
+        const localConversationAttestationConfirmation = document.createElement("label");
+        localConversationAttestationConfirmation.className = "capture-mapping-confirmation";
+        const localConversationAttestationCheckbox = document.createElement("input");
+        localConversationAttestationCheckbox.type = "checkbox";
+        const localConversationAttestationConfirmationText = document.createElement("span");
+        localConversationAttestationConfirmationText.textContent =
+          "Ich best\u00e4tige: Die aktuell sichtbare offizielle Tinder-Conversation geh\u00f6rt zu dieser bereits menschlich gebundenen Conversation. Die technische Pr\u00fcfung erfolgt nur lokal auf dem Ger\u00e4t.";
+        localConversationAttestationConfirmation.append(
+          localConversationAttestationCheckbox,
+          localConversationAttestationConfirmationText
+        );
+        const localConversationAttestation = document.createElement("button");
+        localConversationAttestation.type = "button";
+        localConversationAttestation.className = "button info";
+        localConversationAttestation.textContent = "Lokale Conversation-Best\u00e4tigung vorbereiten";
+        localConversationAttestation.disabled = true;
+        const localConversationAttestationAvailable = ["NOT_REQUESTED", "INVALIDATED"]
+          .includes(localAttestationStatus);
+        if (!localConversationAttestationAvailable) {
+          localConversationAttestationCheckbox.disabled = true;
+          localConversationAttestation.disabled = true;
+        }
+        localConversationAttestationCheckbox.addEventListener("change", () => {
+          localConversationAttestation.disabled = !localConversationAttestationAvailable
+            || humanArmedBindingActionBusy
+            || localConversationAttestationCheckbox.checked !== true;
         });
-        syncCurrentChat.addEventListener("click", async () => {
-          if (currentChatCheckbox.checked !== true || syncCurrentChat.disabled || humanArmedBindingActionBusy) return;
+        localConversationAttestation.addEventListener("click", async () => {
+          if (localConversationAttestationCheckbox.checked !== true
+              || localConversationAttestation.disabled || humanArmedBindingActionBusy) return;
           humanArmedBindingActionBusy = true;
           for (const control of elements.humanArmedBindingList.querySelectorAll("input, button")) {
             control.disabled = true;
           }
           elements.humanArmedBindingMessage.className = "enrollment-message";
           elements.humanArmedBindingMessage.textContent =
-            "Human-best\u00e4tigte Synchronisierung des aktuell sichtbaren Chats wird vorbereitet …";
+            "Lokale Conversation-Best\u00e4tigung wird vorbereitet …";
           try {
             const data = await requestJson(
-              `/api/tinder/captures?bindingId=${encodeURIComponent(binding.binding_id)}&operation=human-armed-visible-chat-sync`,
+              `/api/tinder/captures?bindingId=${encodeURIComponent(binding.binding_id)}&operation=human-armed-local-conversation-attestation`,
               { method: "POST", body: JSON.stringify({ confirmed: true }) }
             );
-            if (data?.sync?.command_type !== "SYNC_TINDER_VISIBLE_CHAT" || data?.sync?.status !== "QUEUED") {
-              throw new Error("Das Backend hat keine g\u00fcltige human-best\u00e4tigte Chat-Synchronisierung best\u00e4tigt.");
+            if (data?.attestation?.command_type !== "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"
+                || data?.attestation?.status !== "QUEUED") {
+              throw new Error("Das Backend hat keine g\u00fcltige lokale Conversation-Best\u00e4tigung best\u00e4tigt.");
             }
             elements.humanArmedBindingMessage.textContent =
-              "Eine einzelne Synchronisierung f\u00fcr den aktuell menschlich best\u00e4tigten sichtbaren Chat wurde vorbereitet. Keine automatische Personen-Erkennung, Chat-Auswahl oder Nachricht wurde ausgel\u00f6st.";
+              "Eine einzelne lokale Conversation-Best\u00e4tigung wurde vorbereitet. Es wurden keine Chatdaten, technischen Kennungen oder Nachrichten im Dashboard angezeigt oder automatisch zugeordnet.";
           } catch (error) {
+            // A failed bootstrap is never replayed. Re-render bounded server
+            // state so any later explicit action starts from a fresh card.
+            humanArmedBindingActionBusy = false;
+            renderHumanArmedBindingList(bindings);
             elements.humanArmedBindingMessage.className = "enrollment-message enrollment-error";
             elements.humanArmedBindingMessage.textContent =
-              "Synchronisierungsstatus unklar oder nicht verf\u00fcgbar. Keine automatische Wiederholung; den serverseitigen Status pr\u00fcfen.";
+              "Lokale Conversation-Best\u00e4tigung ist nicht verf\u00fcgbar. Keine automatische Wiederholung; den serverseitigen Status pr\u00fcfen.";
           }
         });
-        actions.append(confirmation, rearm, currentChatConfirmation, syncCurrentChat);
+        actions.append(
+          confirmation,
+          rearm,
+          localConversationAttestationConfirmation,
+          localConversationAttestation
+        );
         item.append(copy, actions);
         elements.humanArmedBindingList.append(item);
       }
@@ -2533,8 +2572,14 @@
      syncCopy.className = "conversation-sync-copy";
      syncCopy.textContent = "Fordert genau eine begrenzte, verifizierte Synchronisierung des aktuell geöffneten Chats an. Der Vorgang öffnet keinen Chat, ordnet keine Person zu und versendet nichts.";
      const syncButton = document.createElement("button");
+     syncCopy.textContent = "Der sichtbare Verlauf wird erst nach der bewusst bestätigten lokalen Conversation-Prüfung auf der bestehenden Binding-Karte vorbereitet. Diese Detailansicht kann keine direkte Synchronisierung auslösen.";
      syncButton.type = "button";
      syncButton.className = "button info conversation-sync-button";
+     // New V4 issuance is deliberately unreachable from this selected detail.
+     // The authenticated binding card owns the single human bootstrap; after
+     // local ATTESTED it queues its separate reader command server-side.
+     syncButton.hidden = true;
+     syncButton.disabled = true;
      syncButton.textContent = "Sichtbaren geöffneten Chat synchronisieren";
      syncButton.disabled = visibleChatSyncBusy || visibleChatSyncQueuedCaptureId === conversation.capture_id;
      const syncMessage = document.createElement("span");
@@ -2544,10 +2589,7 @@
      } else if (conversation.visible_chat_sync) {
        syncMessage.textContent = "Synchronisierter sichtbarer Verlauf ist verfügbar.";
      }
-     syncButton.addEventListener("click", () => {
-       void requestVisibleChatSync(conversation.capture_id, syncButton, syncMessage);
-     });
-     syncAction.append(syncCopy, syncButton, syncMessage);
+     syncAction.append(syncCopy, syncMessage);
 
      const resumeAction = document.createElement("div");
      resumeAction.className = "conversation-sync-action";

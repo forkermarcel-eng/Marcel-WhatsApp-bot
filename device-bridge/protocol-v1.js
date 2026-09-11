@@ -23,6 +23,12 @@ export const TINDER_VISIBLE_CHAT_SYNC_CAPABILITY = "TINDER_VISIBLE_CHAT_SYNC_V1"
 // official launcher intent.  It is deliberately additive to the reader
 // profile and never implies a Tinder write, a chat selection, or a capture.
 export const TINDER_OFFICIAL_APP_RESUME_CAPABILITY = "TINDER_OFFICIAL_APP_RESUME_V1";
+// This capability is deliberately narrower than the visible-chat reader.  It
+// permits an already human-selected local Conversation screen to attest its
+// continuity to one opaque, server-bound binding revision.  It never carries
+// a Tinder identifier and grants no reader, navigation or write authority.
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_CAPABILITY =
+  "TINDER_LOCAL_CONVERSATION_ATTESTATION_V1";
 
 export const T1_DEVICE_CAPABILITIES = Object.freeze([
   ...T0_DEVICE_CAPABILITIES,
@@ -62,6 +68,16 @@ export const T4_RESUME_DEVICE_CAPABILITIES = Object.freeze([
 ]);
 export const TINDER_OFFICIAL_APP_RESUME_DEVICE_CAPABILITIES = T4_RESUME_DEVICE_CAPABILITIES;
 
+// Keep the attestation profile explicitly additive.  Older reader/resume
+// builds must not receive a bootstrap command they cannot validate, while an
+// attestation-capable device retains every pre-existing read-only capability.
+export const T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES = Object.freeze([
+  ...T4_RESUME_DEVICE_CAPABILITIES,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_CAPABILITY
+]);
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_DEVICE_CAPABILITIES =
+  T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES;
+
 export const T0_DEVICE_BRIDGE_COMMANDS = Object.freeze([
   "PING",
   "REQUEST_STATUS",
@@ -89,13 +105,18 @@ export const T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS = Object.freeze([
   "RESUME_OFFICIAL_TINDER_APP"
 ]);
 
+export const T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS = Object.freeze([
+  "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"
+]);
+
 export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
   ...T0_DEVICE_BRIDGE_COMMANDS,
   ...T1_TINDER_MANUAL_GATE_COMMANDS,
   ...T2_TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS,
   ...T5_TINDER_MANUAL_SEND_COMMANDS,
   ...T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS,
-  ...T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS
+  ...T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS,
+  ...T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS
 ]);
 
 export const BRIDGE_SERVICE_STATES = Object.freeze([
@@ -151,17 +172,18 @@ export function deviceBridgeCapabilityProfile(capabilities) {
   if (exactArray(capabilities, T5_DEVICE_CAPABILITIES)) return "T5";
   if (exactArray(capabilities, T4_DEVICE_CAPABILITIES)) return "T4";
   if (exactArray(capabilities, T4_RESUME_DEVICE_CAPABILITIES)) return "T4_RESUME";
+  if (exactArray(capabilities, T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION";
   return null;
 }
 
 export function isTinderManualGateCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME";
+  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
 }
 
 export function isTinderHumanArmedConversationBindingCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME";
+  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
 }
 
 export function isTinderManualSendCapable(capabilities) {
@@ -170,11 +192,16 @@ export function isTinderManualSendCapable(capabilities) {
 
 export function isTinderVisibleChatSyncCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4" || profile === "T4_RESUME";
+  return profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
 }
 
 export function isTinderOfficialAppResumeCapable(capabilities) {
-  return deviceBridgeCapabilityProfile(capabilities) === "T4_RESUME";
+  const profile = deviceBridgeCapabilityProfile(capabilities);
+  return profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
+}
+
+export function isTinderLocalConversationAttestationCapable(capabilities) {
+  return deviceBridgeCapabilityProfile(capabilities) === "T4_RESUME_ATTESTATION";
 }
 
 export function isKnownTinderStateForCapabilities(state, capabilities) {

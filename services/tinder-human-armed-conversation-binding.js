@@ -92,6 +92,7 @@ export const HUMAN_ARMED_CONVERSATION_REASON = Object.freeze({
   // V4 may stage an opaque visible-chat sync for this device. It is a
   // separate authority and must never race or overlap an active V3 arm.
   VISIBLE_CHAT_SYNC_PERMIT_ACTIVE: "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
+  LOCAL_CONVERSATION_ATTESTATION_ACTIVE: "LOCAL_CONVERSATION_ATTESTATION_ACTIVE",
   // V5 may hold a separately issued, one-shot standard-launcher authority.
   // V3 must never create a second device action while that authority is live.
   OFFICIAL_APP_RESUME_PERMIT_ACTIVE: "OFFICIAL_APP_RESUME_PERMIT_ACTIVE"
@@ -442,6 +443,7 @@ function requireRepository(repository) {
     "updateCaptureMapping",
     "createArmPermit",
     "queueArmCommand",
+    "lookupBindingDeviceId",
     "getBindingForUpdate",
     "getArmPermitForUpdate",
     "markArmPermitConsumed",
@@ -534,6 +536,25 @@ export function createTinderHumanArmedConversationBindingService(repository, {
         status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
         reasonCode: HUMAN_ARMED_CONVERSATION_REASON.OFFICIAL_APP_RESUME_PERMIT_ACTIVE
       });
+    }
+    if (typeof repository.findActiveLocalConversationAttestationPermitForDevice === "function") {
+      const activeAttestation = await repository.findActiveLocalConversationAttestationPermitForDevice(
+        transaction,
+        { deviceId, now: currentTime.toISOString() }
+      );
+      if (activeAttestation !== true && activeAttestation !== false) {
+        throw new TinderHumanArmedConversationBindingError(
+          "Die lokale Conversation-PrÃ¼fung ist ungÃ¼ltig.",
+          "INVALID_LOCAL_CONVERSATION_ATTESTATION_PERMIT",
+          500
+        );
+      }
+      if (activeAttestation === true) {
+        return Object.freeze({
+          status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+          reasonCode: HUMAN_ARMED_CONVERSATION_REASON.LOCAL_CONVERSATION_ATTESTATION_ACTIVE
+        });
+      }
     }
     return null;
   }
@@ -674,13 +695,31 @@ export function createTinderHumanArmedConversationBindingService(repository, {
       });
     }
     return repository.withTransaction(async transaction => {
+      // Align every device-scoped authorization transaction on device first,
+      // then its binding. The lookup is only a discovery hint and is checked
+      // again after the durable locks are held.
+      const preliminaryDeviceId = uuid(
+        await repository.lookupBindingDeviceId(transaction, normalized.bindingId)
+      );
+      if (!preliminaryDeviceId) {
+        return Object.freeze({
+          status: HUMAN_ARMED_CONVERSATION_STATUS.BINDING_NOT_READY,
+          reasonCode: HUMAN_ARMED_CONVERSATION_REASON.BINDING_NOT_FOUND
+        });
+      }
+      const runtimeResult = runtimeGateResult(
+        await repository.getDeviceRuntimeForUpdate(transaction, preliminaryDeviceId)
+      );
+      if (runtimeResult) return runtimeResult;
       const binding = bindingFromRow(await repository.getBindingForUpdate(transaction, normalized.bindingId));
       const bindingResult = bindingStateResult(binding);
       if (bindingResult) return bindingResult;
-      const runtimeResult = runtimeGateResult(
-        await repository.getDeviceRuntimeForUpdate(transaction, binding.deviceId)
-      );
-      if (runtimeResult) return runtimeResult;
+      if (binding.deviceId !== preliminaryDeviceId) {
+        return Object.freeze({
+          status: HUMAN_ARMED_CONVERSATION_STATUS.BINDING_NOT_READY,
+          reasonCode: HUMAN_ARMED_CONVERSATION_REASON.BINDING_DEVICE_INVALID
+        });
+      }
       const currentTime = new Date(now());
       const concurrentPermitConflict = await concurrentDevicePermitConflict(
         transaction,
@@ -838,7 +877,16 @@ export function createTinderHumanArmedConversationBindingService(repository, {
     return Object.freeze(rows.map(row => {
       const binding = bindingFromRow(row);
       const displayName = String(sourceValue(row, "contactName", "contact_name") || "").trim();
-      if (!binding || bindingStateResult(binding) || !displayName || displayName.length > 160) {
+      const localConversationAttestationStatus = normalizedStatus(
+        sourceValue(row, "localConversationAttestationStatus", "local_conversation_attestation_status")
+        || "NOT_REQUESTED"
+      );
+      const readerStatus = normalizedStatus(
+        sourceValue(row, "readerStatus", "reader_status") || "NOT_REQUESTED"
+      );
+      if (!binding || bindingStateResult(binding) || !displayName || displayName.length > 160
+          || !new Set(["NOT_REQUESTED", "PENDING", "ATTESTED", "INVALIDATED"]).has(localConversationAttestationStatus)
+          || !new Set(["NOT_REQUESTED", "READER_QUEUED"]).has(readerStatus)) {
         throw new TinderHumanArmedConversationBindingError(
           "Die Human-Armed-Bindings sind ungÃ¼ltig.",
           "INVALID_HUMAN_ARMED_BINDING_LIST",
@@ -848,7 +896,9 @@ export function createTinderHumanArmedConversationBindingService(repository, {
       return Object.freeze({
         bindingId: binding.bindingId,
         contactName: displayName,
-        state: binding.bindingState
+        state: binding.bindingState,
+        localConversationAttestationStatus,
+        readerStatus
       });
     }));
   }
@@ -1033,6 +1083,18 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
       }
     },
 
+    // Discovery only. Callers lock the resulting device first and then
+    // re-read this binding FOR UPDATE before issuing any authority.
+    async lookupBindingDeviceId(client, bindingId) {
+      const result = await client.query(
+        `SELECT device_id
+           FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE}
+          WHERE binding_id=$1`,
+        [bindingId]
+      );
+      return result.rows[0]?.device_id || null;
+    },
+
     async getBindingForUpdate(client, bindingId) {
       const result = await client.query(
         `SELECT ${bindingColumns}
@@ -1090,12 +1152,62 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
     },
 
     async listHumanArmedBindings() {
+      const relation = await pool.query(
+        `SELECT to_regclass('tinder_local_conversation_attestation_permits') AS attestation_relation,
+                to_regclass('tinder_visible_chat_sync_permits') AS sync_relation`
+      );
+      const attestationReady = Boolean(relation.rows[0]?.attestation_relation)
+        && Boolean(relation.rows[0]?.sync_relation);
+      const statusProjection = attestationReady
+        ? `,
+                COALESCE(local_attestation.local_conversation_attestation_status, 'NOT_REQUESTED')
+                  AS local_conversation_attestation_status,
+                COALESCE(local_attestation.reader_status, 'NOT_REQUESTED') AS reader_status`
+        : `, 'NOT_REQUESTED'::text AS local_conversation_attestation_status,
+                'NOT_REQUESTED'::text AS reader_status`;
+      const statusJoin = attestationReady
+        ? `
+           LEFT JOIN LATERAL (
+             SELECT CASE
+                      -- A dashboard projection must never strand a human
+                      -- behind a stale active-looking permit when a normal
+                      -- expiry sweep has not yet run.  The next bootstrap
+                      -- transaction records the durable EXPIRED transition
+                      -- and audit before issuing any new authority.
+                      WHEN attestation.expires_at <= NOW() THEN 'INVALIDATED'
+                      WHEN attestation.permit_state IN ('ISSUED','STAGED') THEN 'PENDING'
+                      WHEN attestation.permit_state='ATTESTED' THEN 'ATTESTED'
+                      WHEN attestation.permit_state IN ('INVALIDATED','EXPIRED','CANCELLED') THEN 'INVALIDATED'
+                      ELSE 'NOT_REQUESTED'
+                    END AS local_conversation_attestation_status,
+                    CASE WHEN attestation.permit_state='ATTESTED'
+                               AND attestation.expires_at > NOW() AND EXISTS (
+                      SELECT 1
+                        FROM tinder_visible_chat_sync_permits sync_permit
+                       WHERE sync_permit.attestation_command_id=attestation.command_id
+                         AND sync_permit.binding_id=b.binding_id
+                         AND sync_permit.binding_revision=b.binding_revision
+                         AND sync_permit.device_id=b.device_id
+                         AND sync_permit.permit_contract_version=2
+                         AND sync_permit.permit_state IN ('ISSUED','STAGED')
+                         AND sync_permit.expires_at > NOW()
+                    ) THEN 'READER_QUEUED' ELSE 'NOT_REQUESTED' END AS reader_status
+               FROM tinder_local_conversation_attestation_permits attestation
+              WHERE attestation.binding_id=b.binding_id
+                AND attestation.binding_revision=b.binding_revision
+                AND attestation.device_id=b.device_id
+              ORDER BY attestation.issued_at DESC, attestation.command_id ASC
+              LIMIT 1
+           ) local_attestation ON TRUE`
+        : "";
       const result = await pool.query(
         `SELECT ${bindingSelectColumns},
                 COALESCE(NULLIF(c.canonical_name, ''), NULLIF(c.display_name, '')) AS contact_name
+                ${statusProjection}
            FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} b
            JOIN contacts c ON c.id = b.contact_id
-          WHERE b.channel = 'tinder'
+           ${statusJoin}
+           WHERE b.channel = 'tinder'
             AND b.reference_kind = $1
             AND b.binding_state = 'CONFIRMED'
             AND b.human_verified = TRUE
@@ -1117,12 +1229,98 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
         "SELECT to_regclass('tinder_visible_chat_sync_permits') AS relation_name"
       );
       if (!relation.rows[0]?.relation_name) return false;
+      const attestationRelation = await client.query(
+        "SELECT to_regclass('tinder_local_conversation_attestation_permits') AS relation_name"
+      );
+      // Before V6 the V4 permit table has no local-proof tuple. Preserve the
+      // historical V4 conflict behavior until the attestation foundation is
+      // actually present, rather than issuing a versioned-column query
+      // against a pre-migration release.
+      if (!attestationRelation.rows[0]?.relation_name) {
+        const legacy = await client.query(
+          `SELECT EXISTS (
+             SELECT 1
+               FROM tinder_visible_chat_sync_permits
+              WHERE device_id=$1
+                AND permit_state IN ('ISSUED','STAGED')
+                AND expires_at>$2
+           ) AS active`,
+          [deviceId, now]
+        );
+        return legacy.rows[0]?.active === true;
+      }
       const result = await client.query(
         `SELECT EXISTS (
            SELECT 1
-             FROM tinder_visible_chat_sync_permits
+             FROM tinder_visible_chat_sync_permits sync_permit
+        LEFT JOIN tinder_local_conversation_attestation_permits attestation
+               ON attestation.command_id=sync_permit.attestation_command_id
+        LEFT JOIN device_bridge_commands attestation_command
+               ON attestation_command.command_id=attestation.command_id
+        LEFT JOIN ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+               ON binding.binding_id=sync_permit.binding_id
+        LEFT JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} binding_permit
+               ON binding_permit.binding_id=binding.binding_id
+        LEFT JOIN tinder_visible_chat_captures source_capture
+               ON source_capture.capture_id=binding_permit.consumed_capture_id
+            WHERE sync_permit.device_id=$1
+              AND sync_permit.permit_state IN ('ISSUED','STAGED')
+              AND sync_permit.expires_at>$2
+              AND (
+                sync_permit.permit_contract_version=1
+                OR (
+                  sync_permit.permit_contract_version=2
+                  AND attestation.device_id=sync_permit.device_id
+                  AND attestation.binding_id=sync_permit.binding_id
+                  AND attestation.binding_revision=sync_permit.binding_revision
+                  AND attestation.permit_contract_version=1
+                  AND attestation.permit_state='ATTESTED'
+                  AND attestation.expires_at>$2
+                  AND attestation_command.command_type='STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'
+                  AND binding.device_id=sync_permit.device_id
+                  AND binding.binding_revision=sync_permit.binding_revision
+                  AND binding.channel='tinder'
+                  AND binding.reference_kind='${HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+                  AND binding.binding_state='CONFIRMED'
+                  AND binding.human_verified=TRUE
+                  AND binding_permit.device_id=binding.device_id
+                  AND binding_permit.binding_revision=binding.binding_revision
+                  AND binding_permit.permit_state='CONSUMED'
+                  AND binding_permit.consumed_capture_id=sync_permit.source_capture_id
+                  AND source_capture.device_id=binding.device_id
+                  AND source_capture.source_package='com.tinder'
+                  AND source_capture.capture_safety_status='SAFE'
+                  AND source_capture.mapping_status='RESOLVED'
+                  AND source_capture.human_review_status='CONFIRMED'
+                  AND source_capture.resolved_contact_id=binding.contact_id
+                  AND source_capture.capture_revision = (
+                    SELECT MAX(newer.capture_revision)
+                      FROM tinder_visible_chat_captures newer
+                     WHERE newer.device_id=source_capture.device_id
+                       AND newer.runtime_thread_fingerprint=source_capture.runtime_thread_fingerprint
+                  )
+                )
+              )
+         ) AS active`,
+        [deviceId, now]
+      );
+      return result.rows[0]?.active === true;
+    },
+
+    // The local-attestation foundation is separately migrated. Until it is
+    // present, V3 behavior remains schema-absent compatible; once present,
+    // any live local proof owns the device and blocks a competing V3 arm.
+    async findActiveLocalConversationAttestationPermitForDevice(client, { deviceId, now }) {
+      const relation = await client.query(
+        "SELECT to_regclass('tinder_local_conversation_attestation_permits') AS relation_name"
+      );
+      if (!relation.rows[0]?.relation_name) return false;
+      const result = await client.query(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM tinder_local_conversation_attestation_permits
             WHERE device_id=$1
-              AND permit_state IN ('ISSUED','STAGED')
+              AND permit_state IN ('ISSUED','STAGED','ATTESTED')
               AND expires_at>$2
          ) AS active`,
         [deviceId, now]

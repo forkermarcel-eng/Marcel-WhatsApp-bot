@@ -832,10 +832,8 @@ test("human-armed binding GET keeps the UUID as a bounded browser handle and str
       bindings: [{
         binding_id: bindingId,
         contact_name: "M Tinder Test",
-        contact_id: 7,
-        device_id: DEVICE_ID,
-        reference_hash: "d".repeat(64),
-        permit_id: "0a3699ca-2b77-48bf-8563-2022f8a3e2a5"
+        local_conversation_attestation_status: "NOT_REQUESTED",
+        reader_status: "NOT_REQUESTED"
       }]
     });
   };
@@ -846,7 +844,12 @@ test("human-armed binding GET keeps the UUID as a bounded browser handle and str
   assert.equal(call.options.method, "GET");
   assert.deepEqual(res.body, {
     ok: true,
-    bindings: [{ binding_id: bindingId, contact_name: "M Tinder Test" }]
+    bindings: [{
+      binding_id: bindingId,
+      contact_name: "M Tinder Test",
+      local_conversation_attestation_status: "NOT_REQUESTED",
+      reader_status: "NOT_REQUESTED"
+    }]
   });
   assert.equal(JSON.stringify(res.body).includes("contact_id"), false);
   assert.equal(JSON.stringify(res.body).includes("device_id"), false);

@@ -44,6 +44,14 @@ import {
   createPgTinderOfficialAppResumeRepository,
   createTinderOfficialAppResumeService
 } from "../services/tinder-official-app-resume.js";
+import {
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS,
+  TinderLocalConversationAttestationError,
+  createPgTinderLocalConversationAttestationRepository,
+  createTinderLocalConversationAttestationService
+} from "../services/tinder-local-conversation-attestation.js";
 import { TINDER_IDENTITY_RESOLUTION_STATUS } from "../services/tinder-identity-resolution.js";
 
 /* ==================================================
@@ -76,6 +84,7 @@ const TINDER_HUMAN_ARMED_BINDING_BODY_FIELDS = new Set([
 ]);
 const TINDER_HUMAN_ARMED_REARM_BODY_FIELDS = new Set(["confirmed"]);
 const TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_BODY_FIELDS = new Set(["confirmed"]);
+const TINDER_HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_BODY_FIELDS = new Set(["confirmed"]);
 const TINDER_HUMAN_ARMED_BINDING_LIST_LIMIT = 25;
 const PUBLIC_CONVERSATION_BINDING_STATUSES = new Set(Object.values(CHANNEL_CONVERSATION_BINDING_STATUS));
 const PUBLIC_VISIBLE_CHAT_SYNC_QUEUE_STATUSES = new Set([
@@ -92,6 +101,15 @@ const PUBLIC_OFFICIAL_APP_RESUME_QUEUE_STATUSES = new Set([
   TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_NOT_AVAILABLE
 ]);
 const PUBLIC_OFFICIAL_APP_RESUME_REASONS = new Set(Object.values(TINDER_OFFICIAL_APP_RESUME_REASON));
+const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_QUEUE_STATUSES = new Set([
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.QUEUED,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.DEVICE_NOT_READY,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_CONFLICT,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_NOT_AVAILABLE
+]);
+const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_REASONS = new Set(
+  Object.values(TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON)
+);
 const PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES = new Set([
   HUMAN_ARMED_CONVERSATION_STATUS.UNSAFE_CAPTURE,
   HUMAN_ARMED_CONVERSATION_STATUS.PENDING_CAPTURE_REQUIRED,
@@ -422,7 +440,14 @@ function normalizeHumanArmedBindingRecords(rows) {
     const bindingId = normalizeBindingId(row?.bindingId ?? row?.binding_id);
     const contactName = String(row?.contactName ?? row?.contact_name ?? "").trim();
     const bindingState = String(row?.bindingState ?? row?.binding_state ?? row?.state ?? "").trim().toUpperCase();
-    if (!contactName || contactName.length > 160 || bindingState !== "CONFIRMED") {
+    const localConversationAttestationStatus = String(
+      row?.localConversationAttestationStatus ?? row?.local_conversation_attestation_status ?? "NOT_REQUESTED"
+    ).trim().toUpperCase();
+    const readerStatus = String(row?.readerStatus ?? row?.reader_status ?? "NOT_REQUESTED").trim().toUpperCase();
+    if (!contactName || contactName.length > 160 || bindingState !== "CONFIRMED"
+        || !new Set(["NOT_REQUESTED", "PENDING", "ATTESTED", "INVALIDATED"])
+          .has(localConversationAttestationStatus)
+        || !new Set(["NOT_REQUESTED", "READER_QUEUED"]).has(readerStatus)) {
       const error = new Error("Invalid human-armed binding record.");
       error.statusCode = 500;
       error.code = "INVALID_HUMAN_ARMED_BINDING_LIST";
@@ -430,7 +455,12 @@ function normalizeHumanArmedBindingRecords(rows) {
     }
     // binding_id is an opaque in-memory browser handle for the explicit
     // rearm POST only. It is never rendered, copied, or placed in a URL.
-    return Object.freeze({ binding_id: bindingId, contact_name: contactName });
+    return Object.freeze({
+      binding_id: bindingId,
+      contact_name: contactName,
+      local_conversation_attestation_status: localConversationAttestationStatus,
+      reader_status: readerStatus
+    });
   }));
 }
 
@@ -476,6 +506,23 @@ function assertHumanArmedVisibleChatSyncBody(body) {
 }
 
 /**
+ * This dashboard action is only the explicit human bootstrap for a local
+ * Conversation proof. It accepts no UI target, Tinder identifier, name,
+ * capture, timestamp or fingerprint; the opaque binding handle is resolved
+ * and revalidated exclusively in the service transaction.
+ */
+function assertHumanArmedLocalConversationAttestationBody(body) {
+  if (exactKeys(body, TINDER_HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_BODY_FIELDS)
+      && body.confirmed === true) {
+    return Object.freeze({ confirmed: true });
+  }
+  const error = new Error("Human confirmation is required for local conversation attestation.");
+  error.statusCode = 400;
+  error.code = "INVALID_TINDER_HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_REQUEST";
+  throw error;
+}
+
+/**
  * The standard-launcher action has no browser-controlled target, package,
  * component, URI, device, command, expiry, thread, or identity input. The
  * selected capture context is the only server-side correlation handle.
@@ -504,6 +551,27 @@ function boundedVisibleChatSyncQueueResult(result) {
   }
   return Object.freeze({
     command_type: TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+    status,
+    ...(reasonCode === null ? {} : { reason_code: reasonCode })
+  });
+}
+
+function boundedLocalConversationAttestationQueueResult(result) {
+  const status = String(result?.status || "").trim().toUpperCase();
+  const reasonCode = result?.reasonCode === undefined
+    ? null
+    : String(result.reasonCode || "").trim().toUpperCase();
+  if (!PUBLIC_LOCAL_CONVERSATION_ATTESTATION_QUEUE_STATUSES.has(status)
+      || (reasonCode !== null && !PUBLIC_LOCAL_CONVERSATION_ATTESTATION_REASONS.has(reasonCode))
+      || (status === TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.QUEUED && reasonCode !== null)
+      || (status !== TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.QUEUED && reasonCode === null)) {
+    const error = new Error("Invalid local conversation attestation result.");
+    error.statusCode = 500;
+    error.code = "INVALID_TINDER_LOCAL_CONVERSATION_ATTESTATION_RESULT";
+    throw error;
+  }
+  return Object.freeze({
+    command_type: TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
     status,
     ...(reasonCode === null ? {} : { reason_code: reasonCode })
   });
@@ -650,6 +718,55 @@ function createTinderDashboardHumanArmedVisibleChatSyncQueueHandler(pool, {
             ? "INVALID_TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_REQUEST"
             : "TINDER_HUMAN_ARMED_VISIBLE_CHAT_SYNC_QUEUE_FAILED",
         error: "Human-confirmed current-chat synchronization could not be queued."
+      });
+    }
+  };
+}
+
+/**
+ * Starts the one-time, separately audited local Conversation attestation for
+ * an already human-confirmed binding. The server emits only the opaque command
+ * handle over the signed channel; this dashboard route never receives or
+ * records a Tinder/UI identity value.
+ */
+function createTinderDashboardHumanArmedLocalConversationAttestationQueueHandler(pool, {
+  createAttestationRepository = createPgTinderLocalConversationAttestationRepository,
+  createAttestationService = createTinderLocalConversationAttestationService
+} = {}) {
+  const attestationService = createAttestationService(createAttestationRepository(pool));
+  return async function tinderDashboardHumanArmedLocalConversationAttestationQueueHandler(req, res) {
+    try {
+      assertHumanArmedLocalConversationAttestationBody(req.body);
+      const attestation = boundedLocalConversationAttestationQueueResult(
+        await attestationService.queueBootstrap({
+          bindingId: normalizeBindingId(req.params.bindingId),
+          confirmed: true,
+          actor: "DASHBOARD_HUMAN"
+        })
+      );
+      if (attestation.status !== TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.QUEUED) {
+        return res.status(409).json({ ok: false, conflict: true, attestation });
+      }
+      return res.status(202).json({ ok: true, attestation });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        return res.status(503).json({
+          ok: false,
+          code: "TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_NOT_READY",
+          error: "Local conversation attestation foundation is not ready."
+        });
+      }
+      const status = Number(error?.statusCode)
+        || (error instanceof TinderLocalConversationAttestationError ? error.statusCode : 500);
+      if (status === 500) console.error("Tinder local conversation attestation queue failed.");
+      return res.status(status).json({
+        ok: false,
+        code: status === 400 && ["INVALID_HUMAN_BINDING_ID", "INVALID_HUMAN_ARMED_BINDING_ID"].includes(error?.code)
+          ? "INVALID_HUMAN_BINDING_ID"
+          : status === 400 && error?.code === "INVALID_TINDER_HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_REQUEST"
+            ? "INVALID_TINDER_HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_REQUEST"
+            : "TINDER_LOCAL_CONVERSATION_ATTESTATION_QUEUE_FAILED",
+        error: "Local conversation attestation could not be queued."
       });
     }
   };
@@ -1112,6 +1229,8 @@ function registerTinderCaptureRoutes({
   const listHumanArmedBindings = createTinderDashboardHumanArmedBindingListHandler(pool);
   const queueVisibleChatSync = createTinderDashboardVisibleChatSyncQueueHandler(pool);
   const queueHumanArmedVisibleChatSync = createTinderDashboardHumanArmedVisibleChatSyncQueueHandler(pool);
+  const queueHumanArmedLocalConversationAttestation =
+    createTinderDashboardHumanArmedLocalConversationAttestationQueueHandler(pool);
   const queueOfficialAppResume = createTinderDashboardOfficialAppResumeQueueHandler(pool);
   const dashboard = (handler) => async (req, res) => {
     if (!dashboardApiReady(res)) return;
@@ -1133,6 +1252,7 @@ function registerTinderCaptureRoutes({
   app.post("/dashboard-api/tinder/captures/:captureId/resume-official-app", dashboard(queueOfficialAppResume));
   app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm", dashboard(rearmCaptureConversation));
   app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/visible-chat-sync", dashboard(queueHumanArmedVisibleChatSync));
+  app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/local-conversation-attestation", dashboard(queueHumanArmedLocalConversationAttestation));
 }
 
 export {
@@ -1140,10 +1260,12 @@ export {
   TINDER_CAPTURE_CONVERSATION_BINDING_BODY_FIELDS,
   TINDER_HUMAN_ARMED_BINDING_BODY_FIELDS,
   TINDER_HUMAN_ARMED_REARM_BODY_FIELDS,
+  TINDER_HUMAN_ARMED_LOCAL_CONVERSATION_ATTESTATION_BODY_FIELDS,
   TINDER_HUMAN_ARMED_BINDING_LIST_LIMIT,
   assertConversationBindingBody,
   assertEmptyVisibleChatSyncBody,
   assertHumanArmedVisibleChatSyncBody,
+  assertHumanArmedLocalConversationAttestationBody,
   assertHumanArmedBindingBody,
   assertHumanArmedRearmBody,
   assertMappingBody,
@@ -1156,6 +1278,7 @@ export {
   createTinderDashboardConversationBindingHandler,
   createTinderDashboardVisibleChatSyncQueueHandler,
   createTinderDashboardHumanArmedVisibleChatSyncQueueHandler,
+  createTinderDashboardHumanArmedLocalConversationAttestationQueueHandler,
   createTinderDashboardOfficialAppResumeQueueHandler,
   createTinderDashboardHumanArmedBindingHandler,
   createTinderDashboardHumanArmedRearmHandler,
@@ -1163,6 +1286,7 @@ export {
   isFoundationNotReadyError,
   normalizeBindingId,
   boundedVisibleChatSyncQueueResult,
+  boundedLocalConversationAttestationQueueResult,
   normalizeCaptureRecord,
   assertEmptyOfficialAppResumeBody,
   boundedOfficialAppResumeQueueResult,

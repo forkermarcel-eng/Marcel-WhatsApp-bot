@@ -10,11 +10,16 @@ import {
   createPgTinderVisibleChatSyncRepository
 } from "../services/tinder-visible-chat-sync.js";
 import { createTinderVisibleChatSyncStore } from "../services/tinder-visible-chat-sync-store.js";
-import { T4_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
+import {
+  T4_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES
+} from "../device-bridge/protocol-v1.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const COMMAND_ID = "d565e8a7-ef60-42d0-b19d-26e7904390fa";
 const CAPTURE_ID = "6ebb6d37-8b69-444a-b22d-390b81860026";
+const BINDING_ID = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
+const ATTESTATION_COMMAND_ID = "d8e7f31b-90f8-4b37-8aa8-88e6a6efc2b5";
 const SYNC_ID = "17b6d374-8b69-444a-b22d-390b81860026";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
 const NOW = new Date("2026-09-07T14:00:00.000Z");
@@ -58,7 +63,7 @@ function responseRecorder() {
   };
 }
 
-function stagedPermit() {
+function stagedPermit(overrides = {}) {
   return {
     command_id: COMMAND_ID,
     device_id: DEVICE_ID,
@@ -66,20 +71,38 @@ function stagedPermit() {
     permit_state: "STAGED",
     expires_at: "2026-09-07T14:10:00.000Z",
     command_type: "SYNC_TINDER_VISIBLE_CHAT",
+    // Historical V1 permits may complete their already-issued lifecycle;
+    // only fresh issuance is prohibited by the V6 service contract.
+    permit_contract_version: 1,
+    attestation_command_id: null,
+    binding_id: null,
+    binding_revision: null,
     terminal_status: "SUCCEEDED",
     ack_status: "SUCCEEDED",
-    ack_result: { tinder_visible_chat_sync: "STAGED" }
+    ack_result: { tinder_visible_chat_sync: "STAGED" },
+    ...overrides
   };
 }
 
-function storeRepository({ sourceReady = true } = {}) {
-  const permit = stagedPermit();
+function storeRepository({
+  sourceReady = true,
+  attestedSourceReady = true,
+  permit = stagedPermit()
+} = {}) {
   const state = { calls: [], inserted: null, permit };
   return {
     state,
     async withTransaction(work) { state.calls.push("BEGIN"); try { const value = await work({}); state.calls.push("COMMIT"); return value; } catch (error) { state.calls.push("ROLLBACK"); throw error; } },
     async getDeviceRuntimeForUpdate() {
-      return { online: true, enrollment_state: "ACTIVE", bridge_service_state: "RUNNING", tinder_state: "CONNECTED", automation_state: "STOPPED", capabilities: T4_DEVICE_CAPABILITIES };
+      return {
+        online: true,
+        enrollment_state: "ACTIVE",
+        bridge_service_state: "RUNNING",
+        tinder_state: "CONNECTED",
+        automation_state: "STOPPED",
+        capabilities: permit.permit_contract_version === 2
+          ? T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES : T4_DEVICE_CAPABILITIES
+      };
     },
     async expireVisibleChatSyncPermits() {},
     async findActiveHumanArmedPermitForDevice() { return false; },
@@ -89,9 +112,32 @@ function storeRepository({ sourceReady = true } = {}) {
       state.calls.push({ type: "source", input });
       return sourceReady && input.sourceCaptureId === CAPTURE_ID && input.deviceId === DEVICE_ID;
     },
+    async getConfirmedSourceCaptureForAttestedSyncPermitForUpdate(_transaction, input) {
+      state.calls.push({ type: "attested-source", input });
+      return attestedSourceReady
+        && input.commandId === COMMAND_ID
+        && input.deviceId === DEVICE_ID
+        && input.sourceCaptureId === CAPTURE_ID
+        && input.attestationCommandId === ATTESTATION_COMMAND_ID
+        && input.bindingId === BINDING_ID
+        && input.bindingRevision === 3;
+    },
     async queueVisibleChatSyncCommand() {},
     async createVisibleChatSyncPermit() {},
+    async lookupVisibleChatSyncPermitForAuthorization() {
+      return {
+        command_id: permit.command_id,
+        device_id: permit.device_id,
+        permit_contract_version: permit.permit_contract_version,
+        attestation_command_id: permit.attestation_command_id,
+        binding_id: permit.binding_id,
+        binding_revision: permit.binding_revision
+      };
+    },
     async getVisibleChatSyncPermitForUpdate() { return permit; },
+    async revalidateAttestedLocalConversationForSyncPermitForUpdate() {
+      return true;
+    },
     async insertVisibleChatSyncTranscript(_transaction, input) {
       state.calls.push("INSERT");
       state.inserted = input;
@@ -163,6 +209,32 @@ test("V4 rechecks the source immediately before persistence and blocks a now-sta
     type: "source",
     input: { sourceCaptureId: CAPTURE_ID, deviceId: DEVICE_ID }
   });
+});
+
+test("V4 V2 ingress rejects a source remapped away from the current confirmed binding", async () => {
+  const repository = storeRepository({
+    attestedSourceReady: false,
+    permit: stagedPermit({
+      permit_contract_version: 2,
+      attestation_command_id: ATTESTATION_COMMAND_ID,
+      binding_id: BINDING_ID,
+      binding_revision: 3
+    })
+  });
+  const store = createTinderVisibleChatSyncStore(repository, {
+    now: () => NOW,
+    createSyncId: () => SYNC_ID
+  });
+
+  assert.deepEqual(await store.storeStagedVisibleChatSync({ deviceId: DEVICE_ID, sync: syncBody() }), {
+    status: "PERMIT_NOT_AVAILABLE",
+    reasonCode: "SOURCE_CAPTURE_NOT_CONFIRMED"
+  });
+  assert.equal(repository.state.calls.some(call => call?.type === "source"), false);
+  assert.equal(repository.state.calls.some(call => call?.type === "attested-source"), true);
+  assert.equal(repository.state.calls.includes("INSERT"), false);
+  assert.equal(repository.state.calls.includes("CONSUME"), false);
+  assert.equal(repository.state.permit.permit_state, "STAGED");
 });
 
 test("V4 PostgreSQL insert persists only the command-scoped transcript fingerprint and bound tuple", async () => {

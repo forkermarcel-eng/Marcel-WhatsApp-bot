@@ -6,6 +6,7 @@ import {
   deviceBridgeCapabilityProfile,
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
+  isTinderLocalConversationAttestationCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
@@ -24,6 +25,9 @@ import {
 import { hydrateTinderManualSendCommandForHeartbeat } from "./tinder-manual-send-command-hydration.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
+const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
+const TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE = "tinder_local_conversation_attestation_permits";
+const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conversation_v1";
 
 // This is deliberately a bounded, content-free diagnostic contract. It is
@@ -181,7 +185,22 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
   const t5Capable = isTinderManualSendCapable(capabilities);
   const visibleChatSyncCapable = isTinderVisibleChatSyncCapable(capabilities);
   const officialAppResumeCapable = isTinderOfficialAppResumeCapable(capabilities);
-  const commandTypes = officialAppResumeCapable
+  const advertisedLocalConversationAttestationCapability =
+    isTinderLocalConversationAttestationCapable(capabilities);
+  // A newer device can heartbeat during a rolling backend deployment. Do not
+  // turn a schema-absent V6 foundation into a heartbeat 42P01: omit only the
+  // new local-proof commands until the migration has made their table real.
+  // Existing T4-resume/read-only commands retain their normal profile path.
+  let localConversationAttestationCapable = false;
+  if (advertisedLocalConversationAttestationCapability) {
+    const foundation = await client.query(
+      "SELECT to_regclass('tinder_local_conversation_attestation_permits') AS relation_name"
+    );
+    localConversationAttestationCapable = Boolean(foundation.rows[0]?.relation_name);
+  }
+  const commandTypes = localConversationAttestationCapable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP','STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'"
+    : officialAppResumeCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP'"
     : visibleChatSyncCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT'"
@@ -192,7 +211,26 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
     : t1Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
     : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
-  const payloadPredicate = officialAppResumeCapable
+  const payloadPredicate = localConversationAttestationCapable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','RESUME_OFFICIAL_TINDER_APP') AND payload='{}'::jsonb)
+         OR (
+           command_type='SYNC_TINDER_VISIBLE_CHAT'
+           AND jsonb_typeof(payload)='object'
+           AND payload ? 'local_conversation_attestation'
+           AND payload ? 'binding_revision'
+           AND (payload - 'local_conversation_attestation' - 'binding_revision')='{}'::jsonb
+           AND payload->>'local_conversation_attestation' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           AND payload->>'binding_revision' ~ '^[1-9][0-9]*$'
+         )
+         OR (
+           command_type='${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
+           AND jsonb_typeof(payload)='object'
+           AND payload ? 'binding_revision'
+           AND (payload - 'binding_revision')='{}'::jsonb
+           AND payload->>'binding_revision' ~ '^[1-9][0-9]*$'
+         )`
+    : officialAppResumeCapable
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP') AND payload='{}'::jsonb)`
     : visibleChatSyncCapable
@@ -263,6 +301,90 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
          )
        )`
     : "";
+  const localConversationAttestationDeliveryPredicate = localConversationAttestationCapable
+    ? `
+        AND (
+          command_type <> '${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
+          OR EXISTS (
+            SELECT 1
+              FROM ${TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE} attestation_permit
+              JOIN contact_human_armed_conversation_bindings binding
+                ON binding.binding_id=attestation_permit.binding_id
+             WHERE attestation_permit.command_id=device_bridge_commands.command_id
+               AND attestation_permit.device_id=device_bridge_commands.device_id
+               AND attestation_permit.permit_contract_version=1
+               AND attestation_permit.permit_state='ISSUED'
+               AND attestation_permit.expires_at>$2
+               AND binding.device_id=attestation_permit.device_id
+               AND binding.binding_revision=attestation_permit.binding_revision
+               AND binding.channel='tinder'
+               AND binding.reference_kind='${TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+               AND binding.binding_state='CONFIRMED'
+               AND binding.human_verified=TRUE
+               AND device_bridge_commands.payload=jsonb_build_object(
+                 'binding_revision', attestation_permit.binding_revision::text
+               )
+          )
+        )
+        AND (
+          command_type <> 'SYNC_TINDER_VISIBLE_CHAT'
+          OR EXISTS (
+            SELECT 1
+              FROM ${TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE} sync_permit
+              JOIN ${TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE} attestation_permit
+                ON attestation_permit.command_id=sync_permit.attestation_command_id
+              -- The FK proves only that a command-shaped row exists.  The
+              -- delivery gate must also prove it is the dedicated bootstrap
+              -- command before Android observes a reader command.
+              JOIN device_bridge_commands attestation_command
+                ON attestation_command.command_id=attestation_permit.command_id
+              JOIN contact_human_armed_conversation_bindings binding
+                ON binding.binding_id=sync_permit.binding_id
+              JOIN contact_human_armed_conversation_binding_permits binding_permit
+                ON binding_permit.binding_id=binding.binding_id
+              JOIN tinder_visible_chat_captures source_capture
+                ON source_capture.capture_id=binding_permit.consumed_capture_id
+             WHERE sync_permit.command_id=device_bridge_commands.command_id
+               AND sync_permit.device_id=device_bridge_commands.device_id
+               AND sync_permit.permit_contract_version=2
+               AND sync_permit.permit_state='ISSUED'
+               AND sync_permit.expires_at>$2
+               AND attestation_permit.device_id=sync_permit.device_id
+               AND attestation_permit.binding_id=sync_permit.binding_id
+               AND attestation_permit.binding_revision=sync_permit.binding_revision
+               AND attestation_permit.permit_contract_version=1
+               AND attestation_permit.permit_state='ATTESTED'
+               AND attestation_permit.expires_at>$2
+               AND attestation_command.command_type='${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
+               AND binding.device_id=sync_permit.device_id
+               AND binding.binding_revision=sync_permit.binding_revision
+               AND binding.channel='tinder'
+               AND binding.reference_kind='${TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+               AND binding.binding_state='CONFIRMED'
+               AND binding.human_verified=TRUE
+               AND binding_permit.device_id=binding.device_id
+               AND binding_permit.binding_revision=binding.binding_revision
+               AND binding_permit.permit_state='CONSUMED'
+               AND binding_permit.consumed_capture_id=sync_permit.source_capture_id
+               AND source_capture.device_id=binding.device_id
+               AND source_capture.source_package='com.tinder'
+               AND source_capture.capture_safety_status='SAFE'
+               AND source_capture.mapping_status='RESOLVED'
+               AND source_capture.human_review_status='CONFIRMED'
+               AND source_capture.resolved_contact_id=binding.contact_id
+               AND source_capture.capture_revision = (
+                 SELECT MAX(newer.capture_revision)
+                   FROM tinder_visible_chat_captures newer
+                  WHERE newer.device_id=source_capture.device_id
+                    AND newer.runtime_thread_fingerprint=source_capture.runtime_thread_fingerprint
+               )
+               AND device_bridge_commands.payload=jsonb_build_object(
+                 'local_conversation_attestation', sync_permit.attestation_command_id::text,
+                 'binding_revision', sync_permit.binding_revision::text
+               )
+          )
+        )`
+    : "";
   const result = await client.query(
     `SELECT command_id, protocol_version, command_type, issued_at, expires_at,
             configuration_revision, payload
@@ -273,8 +395,9 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
          (command_type IN ('PING','REQUEST_STATUS') AND payload='{}'::jsonb)
          OR (command_type='STOP_BRIDGE' AND payload='{"reason":"ADMIN_REQUEST"}'::jsonb)
          ${payloadPredicate}
-       )
-       ${officialAppResumeDeliveryPredicate}
+        )
+        ${officialAppResumeDeliveryPredicate}
+        ${localConversationAttestationDeliveryPredicate}
      ORDER BY issued_at ASC, command_id ASC
      LIMIT $3`,
     [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit]

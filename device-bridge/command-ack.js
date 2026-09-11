@@ -2,6 +2,7 @@ import {
   BRIDGE_SERVICE_STATES,
   DEVICE_BRIDGE_COMMANDS,
   DeviceBridgeProtocolError,
+  T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS,
   T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS,
   T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS,
   T5_TINDER_MANUAL_SEND_COMMANDS,
@@ -9,6 +10,7 @@ import {
   T1_TINDER_MANUAL_GATE_COMMANDS,
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
+  isTinderLocalConversationAttestationCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
@@ -33,11 +35,17 @@ import {
   projectTinderOfficialAppResumeCommandAck
 } from "./tinder-official-app-resume-command-ack.js";
 import {
+  projectTinderLocalConversationAttestationCommandAck
+} from "./tinder-local-conversation-attestation-command-ack.js";
+import {
   isExactVisibleChatSyncStagedAcknowledgement
 } from "../services/tinder-visible-chat-sync.js";
 import {
   isExactOfficialAppResumeIntentDispatchedAcknowledgement
 } from "../services/tinder-official-app-resume.js";
+import {
+  isExactLocalConversationAttestationStagedAcknowledgement
+} from "../services/tinder-local-conversation-attestation.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 COMMAND ACK
@@ -51,6 +59,9 @@ const TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS = new Set(T2_TINDER_HUMAN_ARMED_C
 const TINDER_MANUAL_SEND_COMMANDS = new Set(T5_TINDER_MANUAL_SEND_COMMANDS);
 const TINDER_VISIBLE_CHAT_SYNC_COMMANDS = new Set(T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS);
 const TINDER_OFFICIAL_APP_RESUME_COMMANDS = new Set(T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS);
+const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS = new Set(
+  T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS
+);
 const BRIDGE_STATES = new Set(BRIDGE_SERVICE_STATES);
 const MAX_RESULT_BYTES = 1024;
 const MAX_ERROR_BYTES = 1024;
@@ -105,7 +116,8 @@ function validateSucceededResult(commandType, result, capabilities = null) {
     if (!TINDER_MANUAL_GATE_COMMANDS.has(commandType)
         && !TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS.has(commandType)
         && !TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(commandType)
-        && !TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)) return;
+        && !TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
+        && !TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)) return;
     throw invalidAck("Ack result is required for this Tinder command");
   }
   if (jsonBytes(result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
@@ -125,6 +137,8 @@ function validateSucceededResult(commandType, result, capabilities = null) {
       && isExactVisibleChatSyncStagedAcknowledgement(result)) return;
   if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
       && isExactOfficialAppResumeIntentDispatchedAcknowledgement(result)) return;
+  if (TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)
+      && isExactLocalConversationAttestationStagedAcknowledgement(result)) return;
   throw invalidAck("Ack result is not allowed for this T0 command");
 }
 
@@ -156,6 +170,18 @@ function isTinderOfficialAppResumeTerminalError(error) {
   );
 }
 
+// V2 is distinguishable at the command boundary without exposing a permit
+// row to Android: it is the only sync envelope with the opaque local-proof
+// handle plus a positive decimal binding revision.  Legacy V1 commands stay
+// readable/auditable, while this exact shape cannot be staged by a runtime
+// that lacks the local-attestation contract.
+function isExactAttestedVisibleChatSyncPayload(payload) {
+  return exactKeys(payload, ["local_conversation_attestation", "binding_revision"])
+    && isUuidV4(payload.local_conversation_attestation)
+    && typeof payload.binding_revision === "string"
+    && /^[1-9][0-9]*$/.test(payload.binding_revision);
+}
+
 function validateAckForCommand(ack, commandType, capabilities) {
   if (TINDER_MANUAL_SEND_COMMANDS.has(commandType)) {
     if (!isTinderManualSendCapable(capabilities)) {
@@ -172,6 +198,10 @@ function validateAckForCommand(ack, commandType, capabilities) {
   if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
       && !isTinderOfficialAppResumeCapable(capabilities)) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support official Tinder app resume");
+  }
+  if (TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)
+      && !isTinderLocalConversationAttestationCapable(capabilities)) {
+    throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support local conversation attestation");
   }
   if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
       && ack.status === "FAILED" && ack.result === null
@@ -287,9 +317,18 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         && !isTinderVisibleChatSyncCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support visible-chat sync staging");
     }
+    if (TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(command.command_type)
+        && isExactAttestedVisibleChatSyncPayload(command.payload)
+        && !isTinderLocalConversationAttestationCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support attested visible-chat sync staging");
+    }
     if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(command.command_type)
         && !isTinderOfficialAppResumeCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support official Tinder app resume");
+    }
+    if (TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(command.command_type)
+        && !isTinderLocalConversationAttestationCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support local conversation attestation");
     }
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
 
@@ -313,6 +352,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         && ack.status === "SUCCEEDED") {
       throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Official Tinder app resume command expired before terminal acknowledgement");
     }
+    if (expired && TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(command.command_type)
+        && ack.status === "SUCCEEDED") {
+      throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Local conversation attestation command expired before terminal acknowledgement");
+    }
     if (expired && currentStatus === null && ack.status !== "EXPIRED") throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Command has expired");
     if (!expired && currentStatus === null && ack.status === "EXPIRED") throw new DeviceBridgeProtocolError(409, "INVALID_ACK_TRANSITION", "Command has not expired");
 
@@ -333,6 +376,7 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     await projectTinderManualSendCommandAck(client, { command, ack });
     await projectTinderVisibleChatSyncCommandAck(client, { command, ack });
     await projectTinderOfficialAppResumeCommandAck(client, { command, ack });
+    await projectTinderLocalConversationAttestationCommandAck(client, { command, ack });
     await client.query(
       `INSERT INTO device_bridge_audit_events
         (event_type, request_id, device_id, key_id, command_id, result_code, http_status, details)

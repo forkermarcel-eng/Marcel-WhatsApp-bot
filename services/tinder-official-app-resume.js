@@ -409,13 +409,74 @@ export function createPgTinderOfficialAppResumeRepository(pool) {
     },
 
     async findActiveVisibleChatSyncPermitForDevice(client, { deviceId, now: currentTime }) {
+      const attestationRelation = await client.query(
+        "SELECT to_regclass('tinder_local_conversation_attestation_permits') AS relation_name"
+      );
+      if (!attestationRelation.rows[0]?.relation_name) {
+        const legacy = await client.query(
+          `SELECT EXISTS (
+             SELECT 1
+               FROM tinder_visible_chat_sync_permits
+              WHERE device_id=$1
+                AND permit_state IN ('ISSUED','STAGED')
+                AND expires_at>$2
+           ) AS active`,
+          [deviceId, currentTime]
+        );
+        return legacy.rows[0]?.active === true;
+      }
       const result = await client.query(
         `SELECT EXISTS (
            SELECT 1
-             FROM tinder_visible_chat_sync_permits
-            WHERE device_id=$1
-              AND permit_state IN ('ISSUED','STAGED')
-              AND expires_at>$2
+             FROM tinder_visible_chat_sync_permits sync_permit
+        LEFT JOIN tinder_local_conversation_attestation_permits attestation
+               ON attestation.command_id=sync_permit.attestation_command_id
+        LEFT JOIN device_bridge_commands attestation_command
+               ON attestation_command.command_id=attestation.command_id
+        LEFT JOIN ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} binding
+               ON binding.binding_id=sync_permit.binding_id
+        LEFT JOIN ${HUMAN_ARMED_CONVERSATION_PERMIT_TABLE} binding_permit
+               ON binding_permit.binding_id=binding.binding_id
+        LEFT JOIN tinder_visible_chat_captures source_capture
+               ON source_capture.capture_id=binding_permit.consumed_capture_id
+            WHERE sync_permit.device_id=$1
+              AND sync_permit.permit_state IN ('ISSUED','STAGED')
+              AND sync_permit.expires_at>$2
+              AND (
+                sync_permit.permit_contract_version=1
+                OR (
+                  sync_permit.permit_contract_version=2
+                  AND attestation.device_id=sync_permit.device_id
+                  AND attestation.binding_id=sync_permit.binding_id
+                  AND attestation.binding_revision=sync_permit.binding_revision
+                  AND attestation.permit_contract_version=1
+                  AND attestation.permit_state='ATTESTED'
+                  AND attestation.expires_at>$2
+                  AND attestation_command.command_type='STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'
+                  AND binding.device_id=sync_permit.device_id
+                  AND binding.binding_revision=sync_permit.binding_revision
+                  AND binding.channel='tinder'
+                  AND binding.reference_kind='${HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+                  AND binding.binding_state='CONFIRMED'
+                  AND binding.human_verified=TRUE
+                  AND binding_permit.device_id=binding.device_id
+                  AND binding_permit.binding_revision=binding.binding_revision
+                  AND binding_permit.permit_state='CONSUMED'
+                  AND binding_permit.consumed_capture_id=sync_permit.source_capture_id
+                  AND source_capture.device_id=binding.device_id
+                  AND source_capture.source_package='com.tinder'
+                  AND source_capture.capture_safety_status='SAFE'
+                  AND source_capture.mapping_status='RESOLVED'
+                  AND source_capture.human_review_status='CONFIRMED'
+                  AND source_capture.resolved_contact_id=binding.contact_id
+                  AND source_capture.capture_revision = (
+                    SELECT MAX(newer.capture_revision)
+                      FROM tinder_visible_chat_captures newer
+                     WHERE newer.device_id=source_capture.device_id
+                       AND newer.runtime_thread_fingerprint=source_capture.runtime_thread_fingerprint
+                  )
+                )
+              )
          ) AS active`,
         [deviceId, currentTime]
       );

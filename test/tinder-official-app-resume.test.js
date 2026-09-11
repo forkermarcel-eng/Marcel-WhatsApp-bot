@@ -231,6 +231,40 @@ test("official-app resume PostgreSQL adapter locks the current human-confirmed b
   assert.deepEqual(calls[0].parameters, [CAPTURE_ID, DEVICE_ID, "tinder_human_armed_conversation_v1"]);
 });
 
+test("a stale V2 reader tuple does not block a fresh launcher-only Resume permit", async () => {
+  const calls = [];
+  const repository = createPgTinderOfficialAppResumeRepository({
+    async connect() { throw new Error("not used by this focused repository query"); },
+    async query() { throw new Error("not used by this focused repository query"); }
+  });
+  const client = {
+    async query(sql, parameters) {
+      calls.push({ sql: String(sql), parameters });
+      if (String(sql).includes("to_regclass")) {
+        return { rows: [{ relation_name: "tinder_local_conversation_attestation_permits" }] };
+      }
+      return { rows: [{ active: false }] };
+    }
+  };
+  assert.equal(await repository.findActiveVisibleChatSyncPermitForDevice(client, {
+    deviceId: DEVICE_ID,
+    now: NOW.toISOString()
+  }), false);
+  const sql = calls.at(-1).sql;
+  // V1 remains a live conflict. V2 is one only when its proof *and* the
+  // currently confirmed source tuple remain valid; a stale/rebound proof is
+  // reader-denied elsewhere and must not strand launcher-only Resume.
+  for (const required of [
+    /sync_permit\.permit_contract_version=1/,
+    /sync_permit\.permit_contract_version=2/,
+    /attestation\.permit_state='ATTESTED'/,
+    /binding\.binding_revision=sync_permit\.binding_revision/,
+    /binding\.binding_state='CONFIRMED'/,
+    /binding_permit\.consumed_capture_id=sync_permit\.source_capture_id/,
+    /source_capture\.capture_revision = \(\s*SELECT MAX\(newer\.capture_revision\)/s
+  ]) assert.match(sql, required);
+});
+
 test("official-app resume acknowledgement accepts only the exact dispatch receipt", () => {
   assert.equal(isExactOfficialAppResumeIntentDispatchedAcknowledgement(
     TINDER_OFFICIAL_APP_RESUME_ACK_RESULT

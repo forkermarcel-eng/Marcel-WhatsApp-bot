@@ -221,10 +221,10 @@ export function createTinderVisibleChatSyncStore(repository, {
       }
 
       const authorization = staged.authorization;
-      const sourceReady = await repository.getConfirmedSourceCaptureForUpdate(transaction, {
-        sourceCaptureId: authorization.sourceCaptureId,
-        deviceId: authorization.deviceId
-      });
+      const sourceReady = await syncService.revalidateAuthorizedStagedVisibleChatSyncSource(
+        transaction,
+        authorization
+      );
       if (sourceReady !== true) {
         return Object.freeze({
           status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_NOT_AVAILABLE,

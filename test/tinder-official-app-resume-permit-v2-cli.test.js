@@ -51,7 +51,8 @@ test("V2 operational preflight uses its injected read-only transaction and retur
     foundation_state: "UPGRADE_REQUIRED",
     migration_required: true,
     transaction: "READ_ONLY_REPEATABLE_READ",
-    rollback: "COMPLETED"
+    rollback: "COMPLETED",
+    stage: "VALIDATION_UNCLASSIFIED"
   });
   assert.equal(closed, true);
   assert.equal(log.lines.join("\n").includes("test-database-url"), false);
@@ -76,9 +77,56 @@ test("V2 operational preflight reports an active legacy permit with a bounded re
     foundation_state: "UNRESOLVED",
     migration_required: "UNRESOLVED",
     transaction: "READ_ONLY_REPEATABLE_READ",
-    rollback: "COMPLETED"
+    rollback: "COMPLETED",
+    stage: "ACTIVE_LEGACY_PERMIT_CHECK"
   });
   assert.match(log.lines.join("\n"), /OFFICIAL_APP_RESUME_PERMIT_V2_ACTIVE_LEGACY_PERMIT/);
+  assert.equal(log.lines.join("\n").includes("test-database-url"), false);
+});
+
+test("V2 operational preflight validates its fixed SQL before any pool and reports bounded validation stages", async () => {
+  let pools = 0;
+  const log = logger();
+  const sourceInvalid = await runTinderOfficialAppResumePermitV2PreflightCli({
+    environment: { DATABASE_URL: "test-database-url" },
+    logger: log,
+    readMigrationSource: () => "not reviewed SQL",
+    validateMigrationSource() { throw new Error("fixed source mismatch"); },
+    async createPool() { pools += 1; throw new Error("must not connect"); }
+  });
+  assert.deepEqual(sourceInvalid, {
+    ok: false,
+    reason: "MIGRATION_SOURCE_INVALID",
+    foundation_state: "UNRESOLVED",
+    migration_required: "UNRESOLVED",
+    transaction: "NOT_STARTED",
+    rollback: "NOT_ATTEMPTED",
+    stage: "SOURCE_VALIDATION"
+  });
+  assert.equal(pools, 0);
+
+  const prerequisite = await runTinderOfficialAppResumePermitV2PreflightCli({
+    environment: { DATABASE_URL: "test-database-url" },
+    logger: log,
+    readMigrationSource: () => "reviewed SQL",
+    validateMigrationSource() {},
+    async createPool() { return { async end() {} }; },
+    async readOnlyTransaction(_pool, work) { return work({ readonly: true }); },
+    async preflight() {
+      const error = new Error("prerequisite inspection failed");
+      error.code = "TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREREQUISITE_INSPECTION_FAILED";
+      throw error;
+    }
+  });
+  assert.deepEqual(prerequisite, {
+    ok: false,
+    reason: "OFFICIAL_APP_RESUME_PERMIT_V2_PREREQUISITE_INSPECTION_FAILED",
+    foundation_state: "UNRESOLVED",
+    migration_required: "UNRESOLVED",
+    transaction: "READ_ONLY_REPEATABLE_READ",
+    rollback: "COMPLETED",
+    stage: "PREREQUISITE_INSPECTION"
+  });
   assert.equal(log.lines.join("\n").includes("test-database-url"), false);
 });
 

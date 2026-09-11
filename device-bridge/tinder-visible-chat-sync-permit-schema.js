@@ -47,6 +47,18 @@ export const TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE = Object.free
   CANONICAL: "CANONICAL",
   INVALID: "INVALID"
 });
+// These codes are intentionally finite and content-free. They let the
+// explicit read-only V2 preflight distinguish its fixed validation boundaries
+// without exposing catalog definitions, rows, identifiers, or database error
+// text to its operational output.
+export const TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE = Object.freeze({
+  PREREQUISITE_INSPECTION_FAILED:
+    "TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREREQUISITE_INSPECTION_FAILED",
+  V1_CONSTRAINT_INSPECTION_FAILED:
+    "TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_V1_CONSTRAINT_INSPECTION_FAILED",
+  ACTIVE_LEGACY_PERMIT_CHECK_FAILED:
+    "TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_ACTIVE_LEGACY_PERMIT_CHECK_FAILED"
+});
 
 export const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 export const TINDER_VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE = "tinder_visible_chat_sync_transcripts";
@@ -509,6 +521,16 @@ function activeLegacyPermitError() {
   return error;
 }
 
+function preflightInspectionError(code, message, error) {
+  // The read-only guard is already a bounded operational reason. Do not hide
+  // it behind a catalog stage if a future fixed query accidentally violates
+  // that guard.
+  if (error?.code === "READ_ONLY_QUERY_REJECTED") throw error;
+  const diagnostic = new Error(message);
+  diagnostic.code = code;
+  throw diagnostic;
+}
+
 async function countActiveOfficialAppResumePermitV1Rows(client) {
   const result = await client.query(
     `SELECT COUNT(*)::text AS active_count
@@ -528,13 +550,35 @@ export async function inspectTinderOfficialAppResumePermitV2Schema(client, {
   hasExpectedV1SourceCaptureUniqueConstraint = hasExpectedOfficialAppResumePermitV1SourceCaptureUniqueConstraint,
   ...visibleChatSyncOptions
 } = {}) {
-  const foundation = await inspectTinderVisibleChatSyncPermitSchema(client, visibleChatSyncOptions);
+  let foundation;
+  try {
+    foundation = await inspectTinderVisibleChatSyncPermitSchema(client, visibleChatSyncOptions);
+  } catch (error) {
+    preflightInspectionError(
+      TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE.PREREQUISITE_INSPECTION_FAILED,
+      "Tinder official-app resume permit V2 prerequisite inspection failed.",
+      error
+    );
+  }
   if (foundation.state !== TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE.CANONICAL) {
     return { state: TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.INVALID, foundation };
   }
+  let hasExpectedV1SourceCaptureConstraint = false;
+  if (foundation.official_app_resume_permit_schema_version
+      === TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1) {
+    try {
+      hasExpectedV1SourceCaptureConstraint = await hasExpectedV1SourceCaptureUniqueConstraint(client);
+    } catch (error) {
+      preflightInspectionError(
+        TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE.V1_CONSTRAINT_INSPECTION_FAILED,
+        "Tinder official-app resume permit V2 V1 constraint inspection failed.",
+        error
+      );
+    }
+  }
   if (foundation.official_app_resume_permit_schema_version
       === TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION.V1
-      && !(await hasExpectedV1SourceCaptureUniqueConstraint(client))) {
+      && !hasExpectedV1SourceCaptureConstraint) {
     // The fixed V2 migration must hard-drop this exact V1 constraint. A
     // semantically similar renamed constraint is drift, not a safe upgrade.
     return { state: TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.INVALID, foundation };
@@ -553,8 +597,20 @@ export async function preflightTinderOfficialAppResumePermitV2Migration(client, 
   if (foundation.state === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.INVALID) {
     throw new Error("Tinder official-app resume permit V2 schema is incompatible.");
   }
+  let activeLegacyPermitCount = 0;
+  if (foundation.state === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.UPGRADE_REQUIRED) {
+    try {
+      activeLegacyPermitCount = await countActiveOfficialAppResumePermitV1Rows(client);
+    } catch (error) {
+      preflightInspectionError(
+        TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE.ACTIVE_LEGACY_PERMIT_CHECK_FAILED,
+        "Tinder official-app resume permit V2 active legacy permit check failed.",
+        error
+      );
+    }
+  }
   if (foundation.state === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.UPGRADE_REQUIRED
-      && await countActiveOfficialAppResumePermitV1Rows(client) > 0) {
+      && activeLegacyPermitCount > 0) {
     // An unacknowledged V1 launcher must never be reinterpreted as V2. The
     // caller waits for its finite expiry or terminal ACK, then re-runs a new
     // read-only preflight; it may not reset or replay the legacy row.

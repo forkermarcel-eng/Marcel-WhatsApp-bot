@@ -7,6 +7,7 @@ import {
   inspectTinderVisibleChatSyncPermitSchema,
   preflightTinderOfficialAppResumePermitV2Migration,
   TINDER_OFFICIAL_APP_RESUME_PERMIT_SCHEMA_VERSION,
+  TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE,
   TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE,
   TINDER_VISIBLE_CHAT_SYNC_PERMIT_CONSTRAINT_CONTRACT,
   TINDER_VISIBLE_CHAT_SYNC_PERMIT_FOUNDATION_STATE,
@@ -221,6 +222,36 @@ test("V2 preflight is catalog-read-only, mutates only from exact V1, and rejects
       canonicalClient(1, { activeLegacyPermitCount: 1 }), inspectionOptions
     ),
     /active legacy permit/i
+  );
+});
+
+test("V2 preflight keeps prerequisite, V1 constraint, and active-permit inspection failures bounded", async () => {
+  const prerequisiteError = new Error("fixture prerequisite failure");
+  await assert.rejects(
+    () => inspectTinderOfficialAppResumePermitV2Schema(canonicalClient(1), {
+      ...inspectionOptions,
+      assertHumanArmedFoundationReady: async () => { throw prerequisiteError; }
+    }),
+    error => error?.code === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE.PREREQUISITE_INSPECTION_FAILED
+  );
+
+  await assert.rejects(
+    () => inspectTinderOfficialAppResumePermitV2Schema(canonicalClient(1), {
+      ...inspectionOptions,
+      hasExpectedV1SourceCaptureUniqueConstraint: async () => { throw new Error("fixture catalog failure"); }
+    }),
+    error => error?.code === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE.V1_CONSTRAINT_INSPECTION_FAILED
+  );
+
+  const activeCountFailure = canonicalClient(1);
+  const originalQuery = activeCountFailure.query.bind(activeCountFailure);
+  activeCountFailure.query = async sql => {
+    if (String(sql).includes("COUNT(*)::text AS active_count")) throw new Error("fixture count failure");
+    return originalQuery(sql);
+  };
+  await assert.rejects(
+    () => preflightTinderOfficialAppResumePermitV2Migration(activeCountFailure, inspectionOptions),
+    error => error?.code === TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_PREFLIGHT_ERROR_CODE.ACTIVE_LEGACY_PERMIT_CHECK_FAILED
   );
 });
 

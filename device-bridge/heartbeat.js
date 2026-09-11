@@ -6,12 +6,13 @@ import {
   deviceBridgeCapabilityProfile,
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
-  isTinderLocalConversationAttestationCapable,
+  isTinderLocalConversationAttestationPostChatCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
   isTinderVisibleChatSyncCapable,
   isExactUtcTimestamp,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION,
   isUuidV4,
   protocolErrorBody
 } from "./protocol-v1.js";
@@ -109,7 +110,7 @@ function exactKeys(value, keys) {
     && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
 }
 
-function isBoundedTinderInboxNavigationDiagnostic(value) {
+export function isBoundedTinderInboxNavigationDiagnostic(value) {
   return exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
@@ -185,20 +186,20 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
   const t5Capable = isTinderManualSendCapable(capabilities);
   const visibleChatSyncCapable = isTinderVisibleChatSyncCapable(capabilities);
   const officialAppResumeCapable = isTinderOfficialAppResumeCapable(capabilities);
-  const advertisedLocalConversationAttestationCapability =
-    isTinderLocalConversationAttestationCapable(capabilities);
+  const advertisedPostChatLocalConversationAttestationCapability =
+    isTinderLocalConversationAttestationPostChatCapable(capabilities);
   // A newer device can heartbeat during a rolling backend deployment. Do not
   // turn a schema-absent V6 foundation into a heartbeat 42P01: omit only the
   // new local-proof commands until the migration has made their table real.
   // Existing T4-resume/read-only commands retain their normal profile path.
-  let localConversationAttestationCapable = false;
-  if (advertisedLocalConversationAttestationCapability) {
+  let postChatLocalConversationAttestationCapable = false;
+  if (advertisedPostChatLocalConversationAttestationCapability) {
     const foundation = await client.query(
       "SELECT to_regclass('tinder_local_conversation_attestation_permits') AS relation_name"
     );
-    localConversationAttestationCapable = Boolean(foundation.rows[0]?.relation_name);
+    postChatLocalConversationAttestationCapable = Boolean(foundation.rows[0]?.relation_name);
   }
-  const commandTypes = localConversationAttestationCapable
+  const commandTypes = postChatLocalConversationAttestationCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP','STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'"
     : officialAppResumeCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP'"
@@ -211,7 +212,7 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
     : t1Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
     : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
-  const payloadPredicate = localConversationAttestationCapable
+  const payloadPredicate = postChatLocalConversationAttestationCapable
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','RESUME_OFFICIAL_TINDER_APP') AND payload='{}'::jsonb)
          OR (
@@ -227,8 +228,10 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
            command_type='${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
            AND jsonb_typeof(payload)='object'
            AND payload ? 'binding_revision'
-           AND (payload - 'binding_revision')='{}'::jsonb
+           AND payload ? 'attestation_contract_version'
+           AND (payload - 'binding_revision' - 'attestation_contract_version')='{}'::jsonb
            AND payload->>'binding_revision' ~ '^[1-9][0-9]*$'
+           AND payload->>'attestation_contract_version'='${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
          )`
     : officialAppResumeCapable
     ? `
@@ -301,7 +304,7 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
          )
        )`
     : "";
-  const localConversationAttestationDeliveryPredicate = localConversationAttestationCapable
+  const localConversationAttestationDeliveryPredicate = postChatLocalConversationAttestationCapable
     ? `
         AND (
           command_type <> '${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
@@ -322,7 +325,8 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
                AND binding.binding_state='CONFIRMED'
                AND binding.human_verified=TRUE
                AND device_bridge_commands.payload=jsonb_build_object(
-                 'binding_revision', attestation_permit.binding_revision::text
+                 'binding_revision', attestation_permit.binding_revision::text,
+                 'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
                )
           )
         )
@@ -356,6 +360,10 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
                AND attestation_permit.permit_state='ATTESTED'
                AND attestation_permit.expires_at>$2
                AND attestation_command.command_type='${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
+               AND attestation_command.payload=jsonb_build_object(
+                 'binding_revision', attestation_permit.binding_revision::text,
+                 'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+               )
                AND binding.device_id=sync_permit.device_id
                AND binding.binding_revision=sync_permit.binding_revision
                AND binding.channel='tinder'

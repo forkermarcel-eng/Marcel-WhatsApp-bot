@@ -13,6 +13,7 @@ import {
 } from "../services/tinder-visible-chat-sync.js";
 import {
   T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
   T4_RESUME_DEVICE_CAPABILITIES
 } from "../device-bridge/protocol-v1.js";
 
@@ -31,7 +32,7 @@ function runtime(overrides = {}) {
     bridge_service_state: "RUNNING",
     tinder_state: "CONNECTED",
     automation_state: "STOPPED",
-    capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
     ...overrides
   };
 }
@@ -220,6 +221,21 @@ test("V4 human-bound current-chat sync derives its only source server-side and e
   assert.equal(JSON.stringify(result).includes(DEVICE_ID), false);
 });
 
+test("a legacy V1 attestation runtime cannot issue an attested V4 reader command", async () => {
+  const repository = fixtureRepository({
+    runtimeByDevice: new Map([[DEVICE_ID, runtime({
+      capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES
+    })]])
+  });
+  const result = await service(repository).queueVisibleChatSyncForHumanBinding({ bindingId: BINDING_ID });
+  assert.deepEqual(result, {
+    status: TINDER_VISIBLE_CHAT_SYNC_STATUS.DEVICE_NOT_READY,
+    reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.DEVICE_CAPABILITY_UNSUPPORTED
+  });
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
+});
+
 test("V4 human-bound current-chat sync rejects browser capture, identity, timing, and content input before a transaction", async () => {
   const repository = fixtureRepository();
   for (const input of [
@@ -364,6 +380,7 @@ test("V4 V2 final source lock requires the current binding's consumed V3 capture
   assert.match(calls[0].sql, /binding_permit\.consumed_capture_id\s*=\s*permit\.source_capture_id/i);
   assert.match(calls[0].sql, /capture\.resolved_contact_id\s*=\s*binding\.contact_id/i);
   assert.match(calls[0].sql, /capture\.capture_schema_version='tinder-visible-chat-v3'/i);
+  assert.match(calls[0].sql, /attestation_command\.payload=jsonb_build_object\(\s*'binding_revision', attestation\.binding_revision::text,\s*'attestation_contract_version', '2'\s*\)/s);
   assert.match(calls[0].sql, /FOR UPDATE OF attestation, binding, permit, binding_permit, capture/i);
 });
 
@@ -406,6 +423,7 @@ test("V4 PostgreSQL human-binding source lock requires the exact live local-atte
   assert.match(calls[0].sql, /attestation\.permit_state='ATTESTED'/i);
   assert.match(calls[0].sql, /attestation\.expires_at>\$4/i);
   assert.match(calls[0].sql, /attestation_command\.command_type=\$5/i);
+  assert.match(calls[0].sql, /attestation_command\.payload=jsonb_build_object\(\s*'binding_revision', attestation\.binding_revision::text,\s*'attestation_contract_version', '2'\s*\)/s);
   assert.match(calls[0].sql, /capture\.capture_schema_version='tinder-visible-chat-v3'/i);
   assert.match(calls[0].sql, /capture\.capture_safety_status='SAFE'/i);
   assert.match(calls[0].sql, /capture\.mapping_status='RESOLVED'/i);
@@ -578,30 +596,35 @@ test("V4 staged authorization fails closed for an unconfirmed ACK, wrong device,
   });
   assert.equal(incompatible.state.commands.length, 0);
 
-  const attestedPermitOnDowngradedRuntime = fixtureRepository({
-    runtimeByDevice: new Map([[DEVICE_ID, runtime({ capabilities: T4_RESUME_DEVICE_CAPABILITIES })]]),
-    permits: [{
-      command_id: COMMAND_ID,
-      device_id: DEVICE_ID,
-      source_capture_id: CAPTURE_ID,
-      permit_state: "STAGED",
-      expires_at: "2026-09-07T12:10:00.000Z",
-      command_type: TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
-      permit_contract_version: TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION,
-      attestation_command_id: ATTESTATION_COMMAND_ID,
-      binding_id: BINDING_ID,
-      binding_revision: 3,
-      terminal_status: "SUCCEEDED",
-      ack_status: "SUCCEEDED",
-      ack_result: TINDER_VISIBLE_CHAT_SYNC_ACK_RESULT
-    }]
-  });
-  assert.deepEqual(await service(attestedPermitOnDowngradedRuntime).authorizeStagedVisibleChatSyncPermit({}, {
-    commandId: COMMAND_ID,
-    deviceId: DEVICE_ID
-  }), {
-    status: TINDER_VISIBLE_CHAT_SYNC_STATUS.DEVICE_NOT_READY,
-    reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.DEVICE_CAPABILITY_UNSUPPORTED
-  });
-  assert.equal(attestedPermitOnDowngradedRuntime.state.calls.some(call => call.type === "revalidate-attestation"), false);
+  for (const capabilities of [
+    T4_RESUME_DEVICE_CAPABILITIES,
+    T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES
+  ]) {
+    const attestedPermitOnDowngradedRuntime = fixtureRepository({
+      runtimeByDevice: new Map([[DEVICE_ID, runtime({ capabilities })]]),
+      permits: [{
+        command_id: COMMAND_ID,
+        device_id: DEVICE_ID,
+        source_capture_id: CAPTURE_ID,
+        permit_state: "STAGED",
+        expires_at: "2026-09-07T12:10:00.000Z",
+        command_type: TINDER_VISIBLE_CHAT_SYNC_COMMAND_TYPE,
+        permit_contract_version: TINDER_VISIBLE_CHAT_SYNC_ATTESTED_PERMIT_CONTRACT_VERSION,
+        attestation_command_id: ATTESTATION_COMMAND_ID,
+        binding_id: BINDING_ID,
+        binding_revision: 3,
+        terminal_status: "SUCCEEDED",
+        ack_status: "SUCCEEDED",
+        ack_result: TINDER_VISIBLE_CHAT_SYNC_ACK_RESULT
+      }]
+    });
+    assert.deepEqual(await service(attestedPermitOnDowngradedRuntime).authorizeStagedVisibleChatSyncPermit({}, {
+      commandId: COMMAND_ID,
+      deviceId: DEVICE_ID
+    }), {
+      status: TINDER_VISIBLE_CHAT_SYNC_STATUS.DEVICE_NOT_READY,
+      reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.DEVICE_CAPABILITY_UNSUPPORTED
+    });
+    assert.equal(attestedPermitOnDowngradedRuntime.state.calls.some(call => call.type === "revalidate-attestation"), false);
+  }
 });

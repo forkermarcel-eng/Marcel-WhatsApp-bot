@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import {
   DeviceBridgeProtocolError,
+  isTinderLocalConversationAttestationPostChatCapable,
   isTinderManualGateCapable,
   isUuidV4,
   protocolErrorBody
@@ -107,6 +108,12 @@ function statusRow(row, now) {
     tinder_state: row.tinder_state,
     automation_state: row.automation_state,
     tinder_manual_gate_capable: isTinderManualGateCapable(row.capabilities),
+    // This derived boolean is deliberately narrower than the historical V1
+    // attestation profile. It carries no capability array, identity, or UI
+    // observation; it only lets the dashboard avoid offering a V2-only
+    // post-chat bootstrap to a legacy runtime.
+    tinder_local_conversation_attestation_post_chat_capable:
+      isTinderLocalConversationAttestationPostChatCapable(row.capabilities),
     configuration_revision: row.configuration_revision,
     // A heartbeat diagnostic is meaningful only while the same device is
     // currently ONLINE. Do not show an old accepted observation after the

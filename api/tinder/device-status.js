@@ -24,7 +24,8 @@ const INBOX_NAVIGATION_FIELDS = Object.freeze([
 const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "device_id", "display_name", "enrollment_state", "device_status", "enrolled_at",
   "last_heartbeat_accepted_at", "app_version", "app_build", "bridge_service_state",
-  "tinder_state", "automation_state", "tinder_manual_gate_capable", "configuration_revision"
+  "tinder_state", "automation_state", "tinder_manual_gate_capable",
+  "tinder_local_conversation_attestation_post_chat_capable", "configuration_revision"
 ]);
 
 function getCookie(req, name) {
@@ -128,6 +129,10 @@ function sanitizePublicDeviceStatus(value) {
     : null;
   return Object.freeze({
     ...Object.fromEntries(LEGACY_DEVICE_STATUS_FIELDS.map(field => [field, value[field]])),
+    // This is a bounded derived compatibility bit, not the raw capability
+    // array. Missing/legacy upstream values are conservatively false.
+    tinder_local_conversation_attestation_post_chat_capable:
+      value.tinder_local_conversation_attestation_post_chat_capable === true,
     inbox_navigation: inboxNavigation
   });
 }

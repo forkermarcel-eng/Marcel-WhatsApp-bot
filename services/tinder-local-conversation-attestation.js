@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
-import { deriveDeviceStatus } from "../device-bridge/heartbeat.js";
 import {
-  isTinderLocalConversationAttestationCapable
+  deriveDeviceStatus,
+  isBoundedTinderInboxNavigationDiagnostic
+} from "../device-bridge/heartbeat.js";
+import {
+  isTinderLocalConversationAttestationPostChatCapable,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION
 } from "../device-bridge/protocol-v1.js";
 import {
   HUMAN_ARMED_CONVERSATION_BINDING_TABLE,
@@ -37,6 +41,8 @@ export const TINDER_LOCAL_CONVERSATION_ATTESTATION_CONTRACT_VERSION = 1;
 // binding itself never crosses the command channel.
 export const TINDER_LOCAL_CONVERSATION_ATTESTATION_BOOTSTRAP_PAYLOAD_FIELD =
   "binding_revision";
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_FIELD =
+  "attestation_contract_version";
 export const TINDER_LOCAL_CONVERSATION_ATTESTATION_V4_PAYLOAD_FIELD =
   "local_conversation_attestation";
 
@@ -61,6 +67,7 @@ export const TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON = Object.freeze({
   TINDER_NOT_CONNECTED: "TINDER_NOT_CONNECTED",
   AUTOMATION_NOT_STOPPED: "AUTOMATION_NOT_STOPPED",
   DEVICE_CAPABILITY_UNSUPPORTED: "DEVICE_CAPABILITY_UNSUPPORTED",
+  CHAT_VERIFICATION_REQUIRED: "CHAT_VERIFICATION_REQUIRED",
   HUMAN_ARMED_PERMIT_ACTIVE: "HUMAN_ARMED_PERMIT_ACTIVE",
   VISIBLE_CHAT_SYNC_PERMIT_ACTIVE: "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
   OFFICIAL_APP_RESUME_PERMIT_ACTIVE: "OFFICIAL_APP_RESUME_PERMIT_ACTIVE",
@@ -233,13 +240,29 @@ function runtimeGateResult(row) {
       reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.AUTOMATION_NOT_STOPPED
     });
   }
-  if (!isTinderLocalConversationAttestationCapable(sourceValue(runtime, "capabilities", "capabilities"))) {
+  if (!isTinderLocalConversationAttestationPostChatCapable(sourceValue(runtime, "capabilities", "capabilities"))) {
     return Object.freeze({
       status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.DEVICE_NOT_READY,
       reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.DEVICE_CAPABILITY_UNSUPPORTED
     });
   }
   return null;
+}
+
+// This is deliberately a narrow, content-free readiness signal.  It says
+// only that the newest *accepted* heartbeat for this device reported a safe
+// local Conversation screen.  It does not contain, derive, or compare a
+// Tinder/contact/thread/capture identity.
+function isCurrentChatVerifiedInboxDiagnostic(row) {
+  const navigation = sourceValue(row, "inboxNavigation", "inbox_navigation");
+  return isBoundedTinderInboxNavigationDiagnostic(navigation)
+    && navigation.stage === "CHAT_VERIFIED"
+    && navigation.reason === "NONE";
+}
+
+function heartbeatSequence(value) {
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null;
 }
 
 function bindingFromRow(row) {
@@ -304,6 +327,7 @@ function attestationPermitFromRow(row) {
     commandTerminalStatus: normalizedStatus(sourceValue(row, "commandTerminalStatus", "terminal_status")),
     acknowledgementStatus: normalizedStatus(sourceValue(row, "acknowledgementStatus", "ack_status")),
     acknowledgementResult: sourceValue(row, "acknowledgementResult", "ack_result"),
+    commandPayload: sourceValue(row, "commandPayload", "command_payload"),
     binding: bindingFromRow({
       bindingId,
       deviceId: sourceValue(row, "bindingDeviceId", "binding_device_id"),
@@ -316,9 +340,14 @@ function attestationPermitFromRow(row) {
   });
 }
 
-function exactBootstrapPayload(value, revision) {
-  return exactKeys(value, [TINDER_LOCAL_CONVERSATION_ATTESTATION_BOOTSTRAP_PAYLOAD_FIELD])
-    && value.binding_revision === String(revision);
+export function isExactLocalConversationAttestationPostChatBootstrapPayload(value, revision) {
+  return exactKeys(value, [
+    TINDER_LOCAL_CONVERSATION_ATTESTATION_BOOTSTRAP_PAYLOAD_FIELD,
+    TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_FIELD
+  ])
+    && value.binding_revision === String(revision)
+    && value.attestation_contract_version
+      === TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION;
 }
 
 export function isExactLocalConversationAttestationStagedAcknowledgement(value) {
@@ -344,6 +373,20 @@ function stagedPermitResult(permit, currentTime) {
     return Object.freeze({
       status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_NOT_AVAILABLE,
       reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.PERMIT_NOT_FOUND
+    });
+  }
+  // Permit contract V1 is intentionally immutable historical storage.  New
+  // post-chat authority is instead proven by this exact, signed command
+  // payload marker, which survives issue -> heartbeat -> ACK -> ingress.
+  // A historical one-field V1 bootstrap can therefore never be upgraded by
+  // a later runtime capability advertisement.
+  if (!isExactLocalConversationAttestationPostChatBootstrapPayload(
+    permit.commandPayload,
+    permit.bindingRevision
+  )) {
+    return Object.freeze({
+      status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_NOT_AVAILABLE,
+      reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.PERMIT_NOT_STAGED
     });
   }
   if (permit.permitState !== "STAGED") {
@@ -396,6 +439,7 @@ function requireRepository(repository) {
   for (const method of [
     "withTransaction",
     "getDeviceRuntimeForUpdate",
+    "getCurrentAcceptedInboxNavigationForDevice",
     "expireLocalConversationAttestationPermits",
     "findActiveHumanArmedPermitForDevice",
     "findActiveVisibleChatSyncPermitForDevice",
@@ -546,9 +590,8 @@ export function createTinderLocalConversationAttestationService(repository, {
           reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.BINDING_NOT_FOUND
         });
       }
-      const runtimeResult = runtimeGateResult(
-        await repository.getDeviceRuntimeForUpdate(transaction, preliminaryDeviceId)
-      );
+      const runtime = await repository.getDeviceRuntimeForUpdate(transaction, preliminaryDeviceId);
+      const runtimeResult = runtimeGateResult(runtime);
       if (runtimeResult) return runtimeResult;
       const binding = bindingFromRow(
         await repository.getConfirmedHumanBindingForUpdate(transaction, normalized.bindingId)
@@ -559,6 +602,29 @@ export function createTinderLocalConversationAttestationService(repository, {
         return Object.freeze({
           status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_NOT_AVAILABLE,
           reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.BINDING_DEVICE_INVALID
+        });
+      }
+
+      // The device row is already locked, so a concurrent accepted heartbeat
+      // cannot replace its sequence while this reads the corresponding latest
+      // immutable audit observation.  Requiring that exact sequence prevents
+      // an older CHAT_VERIFIED heartbeat from authorizing a later non-chat
+      // screen.  This is intentionally not a dashboard-click nonce: current
+      // source has no such correlation value, so it fails closed on anything
+      // other than the current accepted content-free observation.
+      const currentHeartbeatSequence = heartbeatSequence(
+        sourceValue(runtime, "lastHeartbeatSequence", "last_heartbeat_sequence")
+      );
+      const navigation = currentHeartbeatSequence === null
+        ? null
+        : await repository.getCurrentAcceptedInboxNavigationForDevice(transaction, {
+          deviceId: binding.deviceId,
+          heartbeatSequence: currentHeartbeatSequence
+        });
+      if (!isCurrentChatVerifiedInboxDiagnostic(navigation)) {
+        return Object.freeze({
+          status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_NOT_AVAILABLE,
+          reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.CHAT_VERIFICATION_REQUIRED
         });
       }
 
@@ -605,8 +671,15 @@ export function createTinderLocalConversationAttestationService(repository, {
 
       const commandId = newCommandId();
       const expiresAt = new Date(currentTime.valueOf() + bootstrapTtlMs).toISOString();
-      const payload = Object.freeze({ binding_revision: String(binding.bindingRevision) });
-      if (!exactBootstrapPayload(payload, binding.bindingRevision)) {
+      const payload = Object.freeze({
+        binding_revision: String(binding.bindingRevision),
+        attestation_contract_version:
+          TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION
+      });
+      if (!isExactLocalConversationAttestationPostChatBootstrapPayload(
+        payload,
+        binding.bindingRevision
+      )) {
         throw new TinderLocalConversationAttestationError(
           "Local conversation attestation command payload is invalid.",
           "INVALID_LOCAL_CONVERSATION_ATTESTATION_COMMAND",
@@ -852,7 +925,7 @@ export function createPgTinderLocalConversationAttestationRepository(pool) {
     async getDeviceRuntimeForUpdate(client, deviceId) {
       const result = await client.query(
         `SELECT device_id, enrollment_state, revoked_at,
-                last_accepted_heartbeat_at, bridge_service_state,
+                last_heartbeat_sequence, last_accepted_heartbeat_at, bridge_service_state,
                 tinder_state, automation_state, capabilities
            FROM device_bridge_devices
           WHERE device_id=$1
@@ -862,6 +935,20 @@ export function createPgTinderLocalConversationAttestationRepository(pool) {
       const row = result.rows[0] || null;
       if (!row || row.revoked_at) return null;
       return { ...row, online: deriveDeviceStatus(row.last_accepted_heartbeat_at) === "ONLINE" };
+    },
+
+    async getCurrentAcceptedInboxNavigationForDevice(client, { deviceId, heartbeatSequence: sequence }) {
+      const result = await client.query(
+        `SELECT e.details -> 'tinder_inbox_navigation' AS inbox_navigation
+           FROM device_bridge_audit_events e
+          WHERE e.device_id=$1
+            AND e.event_type='HEARTBEAT_ACCEPTED'
+            AND e.details ->> 'sequence' = $2
+          ORDER BY e.created_at DESC, e.audit_event_id DESC
+          LIMIT 1`,
+        [deviceId, String(sequence)]
+      );
+      return result.rows[0] || null;
     },
 
     async expireLocalConversationAttestationPermits(client, { deviceId, expiredAt }) {
@@ -935,6 +1022,10 @@ export function createPgTinderLocalConversationAttestationRepository(pool) {
                   AND attestation.permit_state='ATTESTED'
                   AND attestation.expires_at>$2
                   AND attestation_command.command_type='STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'
+                  AND attestation_command.payload=jsonb_build_object(
+                    'binding_revision', attestation.binding_revision::text,
+                    'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+                  )
                   AND binding.device_id=sync_permit.device_id
                   AND binding.binding_revision=sync_permit.binding_revision
                   AND binding.channel='tinder'
@@ -1018,7 +1109,10 @@ export function createPgTinderLocalConversationAttestationRepository(pool) {
 
     async queueLocalConversationAttestationCommand(client, input) {
       if (input.commandType !== TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE
-          || !exactBootstrapPayload(input.payload, Number(input.payload?.binding_revision))) {
+          || !isExactLocalConversationAttestationPostChatBootstrapPayload(
+            input.payload,
+            Number(input.payload?.binding_revision)
+          )) {
         throw new TypeError("Local conversation attestation command payload must be exact");
       }
       const result = await client.query(
@@ -1075,7 +1169,8 @@ export function createPgTinderLocalConversationAttestationRepository(pool) {
                 permit.binding_revision AS permit_binding_revision,
                 permit.device_id, permit.permit_state,
                 permit.permit_contract_version, permit.expires_at,
-                command.command_type, command.terminal_status,
+                command.command_type, command.payload AS command_payload,
+                command.terminal_status,
                 acknowledgement.status AS ack_status, acknowledgement.result AS ack_result,
                 binding.binding_state, binding.human_verified, binding.channel,
                 binding.reference_kind, binding.device_id AS binding_device_id,

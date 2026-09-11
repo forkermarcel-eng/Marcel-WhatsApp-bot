@@ -164,6 +164,13 @@ test("human-armed fallback keeps rearm separate from an explicit current-visible
   assert.match(humanListCode, /body: JSON\.stringify\(\{ confirmed: true \}\)/);
   assert.match(humanListCode, /operation=human-rearm/);
   assert.match(humanListCode, /operation=human-armed-local-conversation-attestation/);
+  assert.match(humanListCode, /function selectedDeviceHasCurrentChatVerification\(\)/);
+  assert.match(humanListCode, /navigation\.stage === "CHAT_VERIFIED"/);
+  assert.match(humanListCode, /navigation\.reason === "NONE"/);
+  assert.match(humanListCode, /tinder_local_conversation_attestation_post_chat_capable === true/);
+  assert.match(humanListCode, /const localConversationAttestationAvailable = \["NOT_REQUESTED", "INVALIDATED"\]/);
+  assert.match(humanListCode, /&& selectedDeviceHasCurrentChatVerification\(\)/);
+  assert.match(humanListCode, /presentation-only/);
   assert.match(humanListCode, /lokal auf dem Ger/);
   assert.match(humanListCode, /Lokale Conversation-Best/);
   assert.match(humanListCode, /humanArmedBindingActionBusy/);
@@ -177,6 +184,16 @@ test("human-armed fallback keeps rearm separate from an explicit current-visible
   assert.doesNotMatch(page, /id="captureMappingId"|id="captureDeviceId"|id="captureRevision"/);
   assert.doesNotMatch(mappingCode, /capture\.visible_name.*newContactName\.value|newContactName\.value.*capture\.visible_name/);
   assert.doesNotMatch(mappingCode, /threadFingerprint|thread_fingerprint|captureFingerprint|capture_fingerprint|uniqueId/);
+});
+
+test("local-attestation bootstrap advisory fails closed when device status is stale or V2 capability is absent", () => {
+  const humanListCode = sourceBetween("function humanArmedBindingIsSafeForSelection", "function captureMappingStatus");
+  const errorCode = sourceBetween("function renderDeviceStatusError(error)", "function wait(milliseconds)");
+  assert.match(humanListCode, /selectedDevice\?\.tinder_local_conversation_attestation_post_chat_capable === true/);
+  assert.match(errorCode, /selectedDevice = null/);
+  assert.match(errorCode, /void loadHumanArmedBindingList\(\)/);
+  assert.doesNotMatch(humanListCode, /capabilities\s*:/);
+  assert.doesNotMatch(humanListCode, /binding_id.*textContent|textContent.*binding_id/);
 });
 
 test("T4 draft UI is opt-in for a resolved confirmed capture and never sends browser-owned context", () => {

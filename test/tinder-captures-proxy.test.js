@@ -822,6 +822,49 @@ test("human-armed current-chat sync rejects injected browser data and redacts bo
   }
 }));
 
+test("local conversation bootstrap forwards the exact confirmation and keeps CHAT_VERIFIED gating bounded", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: false,
+      conflict: true,
+      attestation: {
+        command_type: "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION",
+        status: "PERMIT_NOT_AVAILABLE",
+        reason_code: "CHAT_VERIFICATION_REQUIRED"
+      },
+      binding_id: BINDING_ID,
+      device_id: DEVICE_ID,
+      visible_name: "must-not-reach-browser"
+    }, { ok: false, status: 409 });
+  };
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-local-conversation-attestation" },
+    body: { confirmed: true }
+  }), res);
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(call.url, `https://shared-backend.example/dashboard-api/tinder/human-armed-conversation-bindings/${BINDING_ID}/local-conversation-attestation`);
+  assert.deepEqual(JSON.parse(call.options.body), { confirmed: true });
+  assert.deepEqual(res.body, {
+    ok: false,
+    conflict: true,
+    attestation: {
+      command_type: "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "CHAT_VERIFICATION_REQUIRED"
+    },
+    error: "Lokale Conversation-Bestätigung ist derzeit nicht verfügbar."
+  });
+  const rendered = JSON.stringify(res.body);
+  for (const forbidden of [BINDING_ID, DEVICE_ID, "visible_name", "must-not-reach-browser"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+}));
+
 test("human-armed binding GET keeps the UUID as a bounded browser handle and strips raw server fields", async () => withEnvironment(async () => {
   const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
   let call;

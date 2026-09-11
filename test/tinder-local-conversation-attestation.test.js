@@ -4,6 +4,7 @@ import {
   createPgTinderLocalConversationAttestationRepository,
   createTinderLocalConversationAttestationService,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_FIELD,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS
 } from "../services/tinder-local-conversation-attestation.js";
@@ -12,7 +13,10 @@ import {
   parseSignedLocalConversationAttestationRequest
 } from "../device-bridge/tinder-local-conversation-attestation-ingress.js";
 import { projectTinderLocalConversationAttestationCommandAck } from "../device-bridge/tinder-local-conversation-attestation-command-ack.js";
-import { T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
+import {
+  T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES
+} from "../device-bridge/protocol-v1.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const BINDING_ID = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
@@ -28,7 +32,8 @@ function runtime(overrides = {}) {
     bridge_service_state: "RUNNING",
     tinder_state: "CONNECTED",
     automation_state: "STOPPED",
-    capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+    last_heartbeat_sequence: 1,
     ...overrides
   };
 }
@@ -56,6 +61,7 @@ function stagedPermit(overrides = {}) {
     permit_contract_version: 1,
     expires_at: "2026-09-11T12:10:00.000Z",
     command_type: TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE,
+    command_payload: { binding_revision: "3", attestation_contract_version: "2" },
     terminal_status: "SUCCEEDED",
     ack_status: "SUCCEEDED",
     ack_result: { local_conversation_attestation: "STAGED" },
@@ -73,7 +79,14 @@ function fixtureRepository({
   runtimeRow = runtime(),
   bindingRow = binding(),
   permitRows = [],
-  activeLocal = null
+  activeLocal = null,
+  inboxNavigation = {
+    stage: "CHAT_VERIFIED",
+    reason: "NONE",
+    visible_conversation_count: 1,
+    observed_event_count: 1
+  },
+  acceptedHeartbeatSequence = 1
 } = {}) {
   const permits = new Map(permitRows.map(row => [row.command_id, { ...row }]));
   const state = {
@@ -90,6 +103,12 @@ function fixtureRepository({
     async getDeviceRuntimeForUpdate(_transaction, deviceId) {
       state.calls.push({ type: "device", deviceId });
       return deviceId === DEVICE_ID ? runtimeRow : null;
+    },
+    async getCurrentAcceptedInboxNavigationForDevice(_transaction, { deviceId, heartbeatSequence }) {
+      state.calls.push({ type: "inbox-navigation", deviceId, heartbeatSequence });
+      return deviceId === DEVICE_ID && heartbeatSequence === acceptedHeartbeatSequence && inboxNavigation !== null
+        ? { inbox_navigation: inboxNavigation }
+        : null;
     },
     async expireLocalConversationAttestationPermits(_transaction, { deviceId, expiredAt }) {
       const expired = [];
@@ -186,7 +205,7 @@ function service(repository, options = {}) {
   });
 }
 
-test("bootstrap emits only an opaque command with the exact flat revision payload", async () => {
+test("bootstrap emits only the opaque exact V2 post-chat payload", async () => {
   const repository = fixtureRepository();
   const result = await service(repository).queueBootstrap({
     bindingId: BINDING_ID,
@@ -196,7 +215,10 @@ test("bootstrap emits only an opaque command with the exact flat revision payloa
 
   assert.deepEqual(result, { status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.QUEUED });
   assert.equal(repository.state.commands.length, 1);
-  assert.deepEqual(repository.state.commands[0].payload, { binding_revision: "3" });
+  assert.deepEqual(repository.state.commands[0].payload, {
+    binding_revision: "3",
+    [TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_FIELD]: "2"
+  });
   assert.equal(repository.state.commands[0].commandType, TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE);
   assert.deepEqual(Object.keys(repository.state.audits[0]).sort(), [
     "action", "actor", "auditId", "bindingId", "bindingRevision", "commandId", "details", "deviceId", "reasonCode", "source"
@@ -204,6 +226,65 @@ test("bootstrap emits only an opaque command with the exact flat revision payloa
   assert.deepEqual(repository.state.audits[0].details, {});
   assert.equal(JSON.stringify(result).includes(BINDING_ID), false);
   assert.equal(JSON.stringify(result).includes(DEVICE_ID), false);
+});
+
+test("bootstrap requires the latest accepted content-free CHAT_VERIFIED/NONE observation", async () => {
+  for (const [runtimeRow, inboxNavigation] of [
+    [runtime(), null],
+    [runtime(), {
+      stage: "BLOCKED",
+      reason: "CHAT_STRUCTURE_REJECTED",
+      visible_conversation_count: 0,
+      observed_event_count: 2
+    }],
+    [runtime(), {
+      stage: "CHAT_VERIFIED",
+      reason: "CHAT_STRUCTURE_REJECTED",
+      visible_conversation_count: 1,
+      observed_event_count: 2
+    }],
+    [runtime({ last_heartbeat_sequence: 2 }), {
+      stage: "CHAT_VERIFIED",
+      reason: "NONE",
+      visible_conversation_count: 1,
+      observed_event_count: 1
+    }]
+  ]) {
+    const repository = fixtureRepository({
+      runtimeRow,
+      inboxNavigation,
+      acceptedHeartbeatSequence: 1
+    });
+    const result = await service(repository).queueBootstrap({
+      bindingId: BINDING_ID,
+      confirmed: true,
+      actor: "DASHBOARD_HUMAN"
+    });
+    assert.deepEqual(result, {
+      status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_NOT_AVAILABLE,
+      reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.CHAT_VERIFICATION_REQUIRED
+    });
+    assert.equal(repository.state.commands.length, 0);
+    assert.equal(repository.state.audits.length, 0);
+  }
+});
+
+test("legacy V1 attestation profile remains recognized but cannot mint a post-chat bootstrap", async () => {
+  const repository = fixtureRepository({
+    runtimeRow: runtime({ capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES })
+  });
+  const result = await service(repository).queueBootstrap({
+    bindingId: BINDING_ID,
+    confirmed: true,
+    actor: "DASHBOARD_HUMAN"
+  });
+  assert.deepEqual(result, {
+    status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.DEVICE_NOT_READY,
+    reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.DEVICE_CAPABILITY_UNSUPPORTED
+  });
+  assert.equal(repository.state.calls.some(call => call.type === "inbox-navigation"), false);
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.audits.length, 0);
 });
 
 test("one active local proof per device fails closed without replacing the existing permit", async () => {
@@ -237,6 +318,42 @@ test("staged proof atomically becomes ATTESTED and queues one separate reader au
   assert.equal(repository.state.readerQueues, 1);
   assert.equal(repository.state.audits.at(-1).action, "ATTESTED");
   assert.equal(repository.state.audits.at(-1).actor, "ANDROID_RUNTIME");
+});
+
+test("legacy V1 attestation profile cannot positively attest a staged post-chat permit", async () => {
+  const repository = fixtureRepository({
+    runtimeRow: runtime({ capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES }),
+    permitRows: [stagedPermit()]
+  });
+  const result = await service(repository).attestLocalConversation({
+    commandId: COMMAND_ID,
+    deviceId: DEVICE_ID,
+    status: "ATTESTED"
+  });
+  assert.deepEqual(result, {
+    status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.DEVICE_NOT_READY,
+    reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.DEVICE_CAPABILITY_UNSUPPORTED
+  });
+  assert.equal(repository.state.permits.get(COMMAND_ID).permit_state, "STAGED");
+  assert.equal(repository.state.audits.length, 0);
+});
+
+test("a legacy one-field bootstrap cannot become ATTESTED after a V2 profile upgrade", async () => {
+  const repository = fixtureRepository({
+    permitRows: [stagedPermit({ command_payload: { binding_revision: "3" } })]
+  });
+  const result = await service(repository).attestLocalConversation({
+    commandId: COMMAND_ID,
+    deviceId: DEVICE_ID,
+    status: "ATTESTED"
+  });
+  assert.deepEqual(result, {
+    status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_NOT_AVAILABLE,
+    reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.PERMIT_NOT_STAGED
+  });
+  assert.equal(repository.state.permits.get(COMMAND_ID).permit_state, "STAGED");
+  assert.equal(repository.state.readerQueues, 0);
+  assert.equal(repository.state.audits.length, 0);
 });
 
 test("an ATTESTED replay cannot queue a duplicate reader command", async () => {
@@ -328,6 +445,8 @@ test("a stale V2 reader tuple does not keep the device busy for a new local boot
     /sync_permit\.permit_contract_version=1/,
     /sync_permit\.permit_contract_version=2/,
     /attestation\.permit_state='ATTESTED'/,
+    /attestation_command\.payload=jsonb_build_object\(/,
+    /'attestation_contract_version', '2'/,
     /binding\.binding_revision=sync_permit\.binding_revision/,
     /binding_permit\.consumed_capture_id=sync_permit\.source_capture_id/,
     /source_capture\.capture_safety_status='SAFE'/,

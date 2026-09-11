@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { deriveDeviceStatus } from "../device-bridge/heartbeat.js";
 import {
-  isTinderHumanArmedConversationBindingCapable
+  isTinderHumanArmedConversationBindingCapable,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION
 } from "../device-bridge/protocol-v1.js";
 
 /* ==================================================
@@ -1277,6 +1278,10 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
                   AND attestation.permit_state='ATTESTED'
                   AND attestation.expires_at>$2
                   AND attestation_command.command_type='STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'
+                  AND attestation_command.payload=jsonb_build_object(
+                    'binding_revision', attestation.binding_revision::text,
+                    'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+                  )
                   AND binding.device_id=sync_permit.device_id
                   AND binding.binding_revision=sync_permit.binding_revision
                   AND binding.channel='tinder'

@@ -74,6 +74,7 @@ function deviceStatus({ inboxNavigation = null, extra = {} } = {}) {
     tinder_state: "CONNECTED",
     automation_state: "STOPPED",
     tinder_manual_gate_capable: true,
+    tinder_local_conversation_attestation_post_chat_capable: false,
     configuration_revision: 1,
     inbox_navigation: inboxNavigation,
     ...extra
@@ -172,8 +173,34 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
   assert.deepEqual(Object.keys(res.body.devices[0]).sort(), [
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
-    "inbox_navigation", "last_heartbeat_accepted_at", "tinder_manual_gate_capable", "tinder_state"
+    "inbox_navigation", "last_heartbeat_accepted_at", "tinder_local_conversation_attestation_post_chat_capable",
+    "tinder_manual_gate_capable", "tinder_state"
   ]);
+}));
+
+test("device-list proxy preserves only the bounded post-chat capability bit", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ extra: {
+          tinder_local_conversation_attestation_post_chat_capable: true,
+          capabilities: ["TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_V2"]
+        } })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.devices[0].tinder_local_conversation_attestation_post_chat_capable, true);
+  assert.equal(JSON.stringify(res.body).includes("TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_V2"), false);
+  assert.equal(JSON.stringify(res.body).includes("capabilities"), false);
 }));
 
 test("device-list proxy makes malformed inbox diagnostics unavailable and strips raw backend fields", async () => withEnvironment(async () => {

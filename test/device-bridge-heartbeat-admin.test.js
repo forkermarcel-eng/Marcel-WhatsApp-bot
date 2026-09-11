@@ -9,6 +9,7 @@ import {
   T4_DEVICE_CAPABILITIES,
   T4_RESUME_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -244,7 +245,7 @@ function t5HydrationRow(command, { snapshot: snapshotOverrides = {}, approval: a
   };
 }
 
-function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt = null, commands = [], hydrationRows = new Map(), failUpdate = false, nonceReplay = false } = {}) {
+function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt = null, commands = [], hydrationRows = new Map(), failUpdate = false, nonceReplay = false, localAttestationFoundation = false } = {}) {
   const calls = [];
   const state = { updates: 0, audits: 0, commits: 0, rollbacks: 0, nonceInserts: 0, hydrationQueries: 0 };
   const authRow = {
@@ -278,13 +279,19 @@ function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt =
         state.updates += 1; return { rowCount: 1, rows: [] };
       }
       if (sql.includes("INSERT INTO device_bridge_audit_events")) { state.audits += 1; return { rowCount: 1, rows: [] }; }
+      if (sql.includes("to_regclass('tinder_local_conversation_attestation_permits')")) {
+        return { rows: [{ relation_name: localAttestationFoundation ? "tinder_local_conversation_attestation_permits" : null }] };
+      }
       if (sql.includes("FROM device_bridge_commands")) {
         const deliversT1 = sql.includes("CONNECT_TINDER") && sql.includes("DISCONNECT_TINDER");
         const deliversT2 = deliversT1 && sql.includes("ARM_TINDER_CONVERSATION_BINDING");
         const deliversT5 = deliversT2 && sql.includes("SEND_TINDER_DRAFT");
         const deliversT4 = deliversT2 && sql.includes("SYNC_TINDER_VISIBLE_CHAT");
         const deliversT4Resume = deliversT4 && sql.includes("RESUME_OFFICIAL_TINDER_APP");
-        const allowed = deliversT4Resume
+        const deliversPostChat = deliversT4Resume && sql.includes("STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION");
+        const allowed = deliversPostChat
+          ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SYNC_TINDER_VISIBLE_CHAT", "RESUME_OFFICIAL_TINDER_APP", "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"])
+          : deliversT4Resume
           ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SYNC_TINDER_VISIBLE_CHAT", "RESUME_OFFICIAL_TINDER_APP"])
           : deliversT4
           ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SYNC_TINDER_VISIBLE_CHAT"])
@@ -296,7 +303,11 @@ function heartbeatPool({ request, sequence = null, bodyHash = null, acceptedAt =
           ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER"])
           : new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE"]);
         return {
-          rows: commands.filter(command => allowed.has(command.command_type))
+          rows: commands.filter(command => allowed.has(command.command_type)
+            && (!deliversPostChat
+              || command.command_type !== "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"
+              || (command.payload?.binding_revision && command.payload?.attestation_contract_version === "2"
+                && Object.keys(command.payload).length === 2)))
         };
       }
       return { rows: [] };
@@ -779,6 +790,20 @@ test("admin status exposes only the derived T1 capability flag", async () => {
   assert.equal(JSON.stringify(res.body).includes("TINDER_MANUAL_GATE_V1"), false);
 });
 
+test("admin status projects the bounded post-chat compatibility bit without raw capability data", async () => {
+  for (const [capabilities, expected] of [
+    [T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES, false],
+    [T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES, true]
+  ]) {
+    const pool = { async query() { return { rows: [statusRow(NOW, capabilities, "CONNECTED")] }; } };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.tinder_local_conversation_attestation_post_chat_capable, expected);
+    assert.equal(JSON.stringify(res.body).includes("TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_V2"), false);
+    assert.equal(JSON.stringify(res.body).includes("capabilities"), false);
+  }
+});
+
 test("admin status projects only the newest bounded inbox navigation heartbeat diagnostic", async () => {
   const diagnostic = {
     stage: "BLOCKED",
@@ -963,25 +988,96 @@ test("official-app resume delivery revalidates a V2 binding snapshot without req
   assert.doesNotMatch(heartbeatSource, /resume_permit\.(?:binding_id|binding_revision|permit_contract_version)/);
 });
 
-test("attestation-capable heartbeat remains healthy before the local-proof schema exists", async () => {
+test("post-chat attestation heartbeat remains healthy before the local-proof schema exists", async () => {
   const request = heartbeatRequest(heartbeatPayload({
-    capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
     tinder_state: "CONNECTED"
   }));
   const staged = commandRow("STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", NOW, LOCAL_ATTESTATION_COMMAND_ID, {
-    payload: { binding_revision: "3" }
+    payload: { binding_revision: "3", attestation_contract_version: "2" }
   });
   const fake = heartbeatPool({ request, commands: [staged] });
   const response = await processHeartbeatTransaction(
     fake.pool,
     { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
-    heartbeatPayload({ capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" }),
+    heartbeatPayload({ capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES, tinder_state: "CONNECTED" }),
     NOW
   );
   assert.deepEqual(response.commands, []);
   assert.equal(fake.state.commits, 1);
   assert.equal(fake.calls.some(call => /FROM\s+tinder_local_conversation_attestation_permits/i.test(String(call.sql))), false);
   assert.equal(fake.calls.some(call => String(call.sql).includes("to_regclass('tinder_local_conversation_attestation_permits')")), true);
+});
+
+test("legacy V1 attestation profile cannot receive a new post-chat command even when the foundation exists", async () => {
+  const payload = heartbeatPayload({
+    capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED"
+  });
+  const request = heartbeatRequest(payload);
+  const staged = commandRow("STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", NOW, LOCAL_ATTESTATION_COMMAND_ID, {
+    payload: { binding_revision: "3", attestation_contract_version: "2" }
+  });
+  const fake = heartbeatPool({ request, commands: [staged], localAttestationFoundation: true });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  assert.deepEqual(response.commands, []);
+  assert.equal(fake.calls.some(call => String(call.sql).includes("to_regclass('tinder_local_conversation_attestation_permits')")), false);
+  assert.equal(fake.calls.some(call => /FROM\s+tinder_local_conversation_attestation_permits/i.test(String(call.sql))), false);
+});
+
+test("exact post-chat profile can receive the exact opaque bootstrap after the foundation is present", async () => {
+  const payload = heartbeatPayload({
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED"
+  });
+  const request = heartbeatRequest(payload);
+  const staged = commandRow("STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", NOW, LOCAL_ATTESTATION_COMMAND_ID, {
+    payload: { binding_revision: "3", attestation_contract_version: "2" }
+  });
+  const fake = heartbeatPool({ request, commands: [staged], localAttestationFoundation: true });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  assert.deepEqual(response.commands, [{
+    command_id: LOCAL_ATTESTATION_COMMAND_ID,
+    protocol_version: 1,
+    type: "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION",
+    issued_at: NOW.toISOString(),
+    expires_at: new Date(NOW.valueOf() + 300_000).toISOString(),
+    configuration_revision: 1,
+    payload: { binding_revision: "3", attestation_contract_version: "2" }
+  }]);
+  assert.equal(fake.calls.some(call => /FROM\s+tinder_local_conversation_attestation_permits/i.test(String(call.sql))), true);
+});
+
+test("a V2-capable heartbeat does not deliver a historical one-field bootstrap", async () => {
+  const payload = heartbeatPayload({
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED"
+  });
+  const request = heartbeatRequest(payload);
+  const historic = commandRow("STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", NOW, LOCAL_ATTESTATION_COMMAND_ID, {
+    payload: { binding_revision: "3" }
+  });
+  const fake = heartbeatPool({ request, commands: [historic], localAttestationFoundation: true });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  assert.deepEqual(response.commands, []);
+  const selection = fake.calls.find(call => String(call.sql).includes("FROM device_bridge_commands"));
+  assert.match(selection.sql, /payload \? 'attestation_contract_version'/);
+  assert.match(selection.sql, /payload->>'attestation_contract_version'='2'/);
 });
 
 test("attested heartbeat delivery is bound to a live dedicated proof and the current source", () => {
@@ -993,6 +1089,7 @@ test("attested heartbeat delivery is bound to a live dedicated proof and the cur
     /attestation_permit\.permit_state='ATTESTED'/,
     /attestation_permit\.expires_at>\$2/,
     /attestation_command\.command_type='\$\{TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE\}'/,
+    /attestation_command\.payload=jsonb_build_object\(\s*'binding_revision', attestation_permit\.binding_revision::text,\s*'attestation_contract_version', '\$\{TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION\}'\s*\)/s,
     /sync_permit\.permit_contract_version=2/,
     /attestation_permit\.binding_revision=sync_permit\.binding_revision/,
     /binding\.binding_revision=sync_permit\.binding_revision/,

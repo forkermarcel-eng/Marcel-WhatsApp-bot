@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { deriveDeviceStatus } from "../device-bridge/heartbeat.js";
 import {
-  isTinderLocalConversationAttestationCapable,
-  isTinderVisibleChatSyncCapable
+  isTinderLocalConversationAttestationPostChatCapable,
+  isTinderVisibleChatSyncCapable,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION
 } from "../device-bridge/protocol-v1.js";
 import {
   HUMAN_ARMED_CONVERSATION_BINDING_TABLE,
@@ -416,7 +417,7 @@ export function createTinderVisibleChatSyncService(repository, {
       // capability downgrade from receiving an opaque V2 contract it cannot
       // revalidate locally.
       if (normalizedAttestation !== null
-          && !isTinderLocalConversationAttestationCapable(
+          && !isTinderLocalConversationAttestationPostChatCapable(
             sourceValue(runtime, "capabilities", "capabilities")
           )) {
         return Object.freeze({
@@ -642,7 +643,7 @@ export function createTinderVisibleChatSyncService(repository, {
         reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.DEVICE_OFFLINE
       });
     }
-    if (attestedDiscovery && !isTinderLocalConversationAttestationCapable(
+    if (attestedDiscovery && !isTinderLocalConversationAttestationPostChatCapable(
       sourceValue(runtime, "capabilities", "capabilities")
     )) {
       return Object.freeze({
@@ -922,6 +923,10 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
                   AND attestation.permit_state='ATTESTED'
                   AND attestation.expires_at>$2
                   AND attestation_command.command_type='STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'
+                  AND attestation_command.payload=jsonb_build_object(
+                    'binding_revision', attestation.binding_revision::text,
+                    'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+                  )
                   AND binding.device_id=sync_permit.device_id
                   AND binding.binding_revision=sync_permit.binding_revision
                   AND binding.channel='tinder'
@@ -1133,6 +1138,10 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
             AND attestation.permit_state='ATTESTED'
             AND attestation.expires_at>$8
             AND attestation_command.command_type=$10
+            AND attestation_command.payload=jsonb_build_object(
+              'binding_revision', attestation.binding_revision::text,
+              'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+            )
             AND binding.device_id=permit.device_id
             AND binding.binding_revision=permit.binding_revision
             AND binding.channel='tinder'
@@ -1216,6 +1225,10 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
              AND attestation.permit_state='ATTESTED'
              AND attestation.expires_at>$4
              AND attestation_command.command_type=$5
+             AND attestation_command.payload=jsonb_build_object(
+               'binding_revision', attestation.binding_revision::text,
+               'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+             )
              AND permit.device_id=binding.device_id
             AND permit.binding_revision=binding.binding_revision
             AND permit.permit_state='CONSUMED'
@@ -1274,6 +1287,10 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
             AND attestation.permit_state='ATTESTED'
             AND attestation.expires_at>$8
             AND attestation_command.command_type=$9
+            AND attestation_command.payload=jsonb_build_object(
+              'binding_revision', attestation.binding_revision::text,
+              'attestation_contract_version', '${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+            )
             AND binding.device_id=permit.device_id
             AND binding.binding_revision=permit.binding_revision
             AND binding.channel='tinder'

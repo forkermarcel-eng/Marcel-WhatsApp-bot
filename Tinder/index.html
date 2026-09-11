@@ -1509,6 +1509,23 @@
         ["NOT_REQUESTED", "READER_QUEUED"].includes(readerStatus);
     }
 
+    // This is presentation-only. The Railway bootstrap route independently
+    // re-reads the bound device's latest accepted heartbeat under lock before
+    // it can mint a permit. The dashboard never treats this status as an
+    // identity, target selection, or a causal proof of a particular click.
+    function selectedDeviceHasCurrentChatVerification() {
+      const navigation = String(selectedDevice?.device_status || "").toUpperCase() === "ONLINE"
+        ? selectedDevice?.inbox_navigation
+        : null;
+      return inboxNavigationIsSafe(navigation)
+        && navigation.stage === "CHAT_VERIFIED"
+        && navigation.reason === "NONE"
+        // This bounded bit is derived server-side from the exact capability
+        // profile. It is not a raw capability list and cannot establish
+        // identity or establish the origin of an earlier observation.
+        && selectedDevice?.tinder_local_conversation_attestation_post_chat_capable === true;
+    }
+
     function renderHumanArmedBindingList(bindings) {
       elements.humanArmedBindingList.replaceChildren();
       if (bindings.length === 0) {
@@ -1609,7 +1626,8 @@
         localConversationAttestation.textContent = "Lokale Conversation-Best\u00e4tigung vorbereiten";
         localConversationAttestation.disabled = true;
         const localConversationAttestationAvailable = ["NOT_REQUESTED", "INVALIDATED"]
-          .includes(localAttestationStatus);
+          .includes(localAttestationStatus)
+          && selectedDeviceHasCurrentChatVerification();
         if (!localConversationAttestationAvailable) {
           localConversationAttestationCheckbox.disabled = true;
           localConversationAttestation.disabled = true;
@@ -1660,7 +1678,7 @@
         elements.humanArmedBindingList.append(item);
       }
       elements.humanArmedBindingMessage.textContent =
-        `${bindings.length} menschlich bestätigte Conversation${bindings.length === 1 ? "" : "s"} kann bewusst einmal freigegeben werden.`;
+        `${bindings.length} menschlich bestätigte Conversation${bindings.length === 1 ? "" : "s"} kann nach aktueller lokaler CHAT_VERIFIED-Beobachtung bewusst einmal freigegeben werden.`;
     }
 
     async function loadHumanArmedBindingList() {
@@ -2916,18 +2934,27 @@
      }
 
      elements.lastChecked.textContent = formatNow();
+     // The binding card deliberately follows the newly accepted bounded
+     // device observation. This is only an advisory disable; the backend
+     // revalidates the same bound device before any permit is created.
+     void loadHumanArmedBindingList();
    }
 
-   function renderDeviceStatusError(error) {
+  function renderDeviceStatusError(error) {
+    // A failed refresh must never leave a prior device observation eligible
+    // for the presentation-only bootstrap affordance. Re-rendering the
+    // binding cards keeps the UI disabled without replaying any command.
+    selectedDevice = null;
      setDot(elements.deviceDot, "bad");
      elements.deviceValue.textContent = "Nicht verfügbar";
      elements.deviceSub.textContent = error?.message || "Device-Bridge-Status konnte nicht geladen werden";
      setUnavailableDeviceDetails("Unbekannt");
      setCommandAvailability(null, "Gerätestatus nicht verfügbar. Kein Command wird gesendet.", true);
-     elements.lastChecked.textContent = formatNow();
-   }
+    elements.lastChecked.textContent = formatNow();
+    void loadHumanArmedBindingList();
+  }
 
-   function wait(milliseconds) {
+  function wait(milliseconds) {
      return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
    }
 

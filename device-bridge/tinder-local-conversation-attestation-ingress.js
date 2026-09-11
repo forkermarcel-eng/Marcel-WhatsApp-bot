@@ -1,7 +1,7 @@
 import {
   DEVICE_BRIDGE_PROTOCOL,
   DeviceBridgeProtocolError,
-  isTinderLocalConversationAttestationCapable,
+  isTinderLocalConversationAttestationPostChatCapable,
   isUuidV4,
   protocolErrorBody
 } from "./protocol-v1.js";
@@ -132,7 +132,7 @@ async function assertActiveAttestationDevice(client, auth) {
 }
 
 function assertPositiveAttestationRuntimeGates(row, now) {
-  if (!isTinderLocalConversationAttestationCapable(row.capabilities)) {
+  if (!isTinderLocalConversationAttestationPostChatCapable(row.capabilities)) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support local conversation attestation");
   }
   if (deriveDeviceStatus(row.last_accepted_heartbeat_at, now) !== "ONLINE") {

@@ -10,7 +10,7 @@ import {
   T1_TINDER_MANUAL_GATE_COMMANDS,
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
-  isTinderLocalConversationAttestationCapable,
+  isTinderLocalConversationAttestationPostChatCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
@@ -44,6 +44,7 @@ import {
   isExactOfficialAppResumeIntentDispatchedAcknowledgement
 } from "../services/tinder-official-app-resume.js";
 import {
+  isExactLocalConversationAttestationPostChatBootstrapPayload,
   isExactLocalConversationAttestationStagedAcknowledgement
 } from "../services/tinder-local-conversation-attestation.js";
 
@@ -182,6 +183,46 @@ function isExactAttestedVisibleChatSyncPayload(payload) {
     && /^[1-9][0-9]*$/.test(payload.binding_revision);
 }
 
+async function assertPostChatAttestationCommandProvenance(client, command) {
+  if (TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(command.command_type)) {
+    const revision = Number(command.payload?.binding_revision);
+    if (!isExactLocalConversationAttestationPostChatBootstrapPayload(command.payload, revision)) {
+      throw new DeviceBridgeProtocolError(
+        409,
+        "COMMAND_CONTRACT_UNSUPPORTED",
+        "Local conversation attestation command contract is unsupported"
+      );
+    }
+    return;
+  }
+  if (!TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(command.command_type)
+      || !isExactAttestedVisibleChatSyncPayload(command.payload)) return;
+
+  // The V4 envelope intentionally carries only the opaque bootstrap handle
+  // and revision.  Re-read the immutable signed command row to prove that
+  // handle originated in the post-chat V2 bootstrap contract; capability
+  // advertisement alone cannot upgrade a historical V1 bootstrap.
+  const result = await client.query(
+    `SELECT command_type, payload
+       FROM device_bridge_commands
+      WHERE command_id=$1 AND device_id=$2`,
+    [command.payload.local_conversation_attestation, command.device_id]
+  );
+  const bootstrap = result.rows[0] || null;
+  if (!bootstrap
+      || bootstrap.command_type !== "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"
+      || !isExactLocalConversationAttestationPostChatBootstrapPayload(
+        bootstrap.payload,
+        Number(command.payload.binding_revision)
+      )) {
+    throw new DeviceBridgeProtocolError(
+      409,
+      "COMMAND_CONTRACT_UNSUPPORTED",
+      "Visible-chat sync bootstrap contract is unsupported"
+    );
+  }
+}
+
 function validateAckForCommand(ack, commandType, capabilities) {
   if (TINDER_MANUAL_SEND_COMMANDS.has(commandType)) {
     if (!isTinderManualSendCapable(capabilities)) {
@@ -200,7 +241,7 @@ function validateAckForCommand(ack, commandType, capabilities) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support official Tinder app resume");
   }
   if (TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)
-      && !isTinderLocalConversationAttestationCapable(capabilities)) {
+      && !isTinderLocalConversationAttestationPostChatCapable(capabilities)) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support local conversation attestation");
   }
   if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
@@ -319,7 +360,7 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     }
     if (TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(command.command_type)
         && isExactAttestedVisibleChatSyncPayload(command.payload)
-        && !isTinderLocalConversationAttestationCapable(device.capabilities)) {
+        && !isTinderLocalConversationAttestationPostChatCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support attested visible-chat sync staging");
     }
     if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(command.command_type)
@@ -327,10 +368,12 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support official Tinder app resume");
     }
     if (TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(command.command_type)
-        && !isTinderLocalConversationAttestationCapable(device.capabilities)) {
+        && !isTinderLocalConversationAttestationPostChatCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support local conversation attestation");
     }
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
+
+    await assertPostChatAttestationCommandProvenance(client, command);
 
     validateAckForCommand(ack, command.command_type, device.capabilities);
     const semanticHash = commandAckSemanticHash(ack);

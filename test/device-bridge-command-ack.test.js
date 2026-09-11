@@ -18,6 +18,7 @@ import {
   T4_DEVICE_CAPABILITIES,
   T4_RESUME_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -110,7 +111,8 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
   commandType = "PING", revision = 1, deviceRevision = 1, expiresAt = new Date(NOW.valueOf() + 60_000),
   deviceState = "ACTIVE", deviceRevoked = false, keyRevoked = false, missingCommand = false,
   nonceReplay = false, failAudit = false, capabilities = T0_DEVICE_CAPABILITIES,
-  commandPayload = {}, tinderIntent = null, visibleChatSyncPermit = null, officialAppResumePermit = null } = {}) {
+  commandPayload = {}, tinderIntent = null, visibleChatSyncPermit = null,
+  officialAppResumePermit = null, attestationBootstrap = null } = {}) {
   const calls = [];
   const state = {
     nonce: 0, ackInserts: 0, commandUpdates: 0, audits: 0, commits: 0, rollbacks: 0,
@@ -138,6 +140,9 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
       if (sql.includes("INSERT INTO device_bridge_request_nonces")) {
         if (nonceReplay) { const error = new Error("duplicate"); error.code = "23505"; throw error; }
         state.nonce += 1; return { rows: [] };
+      }
+      if (sql.includes("SELECT command_type, payload") && sql.includes("FROM device_bridge_commands")) {
+        return { rows: attestationBootstrap ? [attestationBootstrap] : [] };
       }
       if (sql.includes("FROM device_bridge_commands") && sql.includes("FOR UPDATE")) return { rows: missingCommand ? [] : [{
         command_id: COMMAND_ID, device_id: commandDeviceId, command_type: commandType,
@@ -357,31 +362,40 @@ test("V4 visible-chat sync acknowledgement atomically stages only its separate p
   );
 });
 
-test("an attested V4 payload rejects a capability downgrade before it can stage", async () => {
+test("an attested V4 payload rejects legacy and downgraded profiles before it can stage", async () => {
   const attestedPayload = {
     local_conversation_attestation: "4dbf2bd9-3d7c-4925-89de-fc0dc62a2fe1",
     binding_revision: "3"
   };
-  await assert.rejects(
-    () => processCommandAckTransaction(
-      ackPool({
-        commandType: "SYNC_TINDER_VISIBLE_CHAT",
-        commandPayload: attestedPayload,
-        capabilities: T4_RESUME_DEVICE_CAPABILITIES,
-        visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" }
-      }).pool,
-      auth(),
-      visibleChatSyncAckPayload("RECEIVED"),
-      NOW
-    ),
-    error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
-  );
+  for (const capabilities of [
+    T4_RESUME_DEVICE_CAPABILITIES,
+    T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES
+  ]) {
+    await assert.rejects(
+      () => processCommandAckTransaction(
+        ackPool({
+          commandType: "SYNC_TINDER_VISIBLE_CHAT",
+          commandPayload: attestedPayload,
+          capabilities,
+          visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" }
+        }).pool,
+        auth(),
+        visibleChatSyncAckPayload("RECEIVED"),
+        NOW
+      ),
+      error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
+    );
+  }
 
   const compatible = ackPool({
     commandType: "SYNC_TINDER_VISIBLE_CHAT",
     commandPayload: attestedPayload,
-    capabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
-    visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" }
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+    visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" },
+    attestationBootstrap: {
+      command_type: "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION",
+      payload: { binding_revision: "3", attestation_contract_version: "2" }
+    }
   });
   const response = await processCommandAckTransaction(
     compatible.pool,
@@ -391,6 +405,38 @@ test("an attested V4 payload rejects a capability downgrade before it can stage"
   );
   assert.equal(response.status, "RECEIVED");
   assert.equal(compatible.state.commits, 1);
+});
+
+test("post-chat ACKs reject legacy V1 bootstrap provenance even on a V2-capable runtime", async () => {
+  const stage = ackPool({
+    commandType: "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION",
+    commandPayload: { binding_revision: "3" },
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES
+  });
+  await assert.rejects(
+    () => processCommandAckTransaction(stage.pool, auth(), ackPayload("RECEIVED"), NOW),
+    error => error.code === "COMMAND_CONTRACT_UNSUPPORTED"
+  );
+  assert.equal(stage.state.ackInserts, 0);
+
+  const sync = ackPool({
+    commandType: "SYNC_TINDER_VISIBLE_CHAT",
+    commandPayload: {
+      local_conversation_attestation: "4dbf2bd9-3d7c-4925-89de-fc0dc62a2fe1",
+      binding_revision: "3"
+    },
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+    visibleChatSyncPermit: { command_id: COMMAND_ID, device_id: DEVICE_ID, permit_state: "ISSUED" },
+    attestationBootstrap: {
+      command_type: "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION",
+      payload: { binding_revision: "3" }
+    }
+  });
+  await assert.rejects(
+    () => processCommandAckTransaction(sync.pool, auth(), visibleChatSyncAckPayload("RECEIVED"), NOW),
+    error => error.code === "COMMAND_CONTRACT_UNSUPPORTED"
+  );
+  assert.equal(sync.state.ackInserts, 0);
 });
 
 test("official Tinder app resume ACK is exact, capability-gated, and projects only its dedicated permit", async () => {

@@ -29,6 +29,17 @@ export const TINDER_OFFICIAL_APP_RESUME_CAPABILITY = "TINDER_OFFICIAL_APP_RESUME
 // a Tinder identifier and grants no reader, navigation or write authority.
 export const TINDER_LOCAL_CONVERSATION_ATTESTATION_CAPABILITY =
   "TINDER_LOCAL_CONVERSATION_ATTESTATION_V1";
+// V2 does not broaden the attestation authority.  It is an exact additive
+// compatibility contract for the post-chat handoff: a runtime must explicitly
+// understand the terminal, local CHAT_VERIFIED path before it can receive a
+// new bootstrap or an attested V4 reader command.
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CAPABILITY =
+  "TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_V2";
+// This marker is deliberately part of the signed, persisted bootstrap
+// command payload rather than inferred from the mutable device profile.  It
+// lets every later server-side transition distinguish a new post-chat proof
+// from an immutable historical V1 row without introducing a schema field.
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION = "2";
 
 export const T1_DEVICE_CAPABILITIES = Object.freeze([
   ...T0_DEVICE_CAPABILITIES,
@@ -77,6 +88,18 @@ export const T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES = Object.freeze([
 ]);
 export const TINDER_LOCAL_CONVERSATION_ATTESTATION_DEVICE_CAPABILITIES =
   T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES;
+
+// The V1 attestation profile remains a recognized historical profile so its
+// heartbeats and terminal invalidations remain safe.  The V2 successor is a
+// separate exact profile: it must match the Android V2 heartbeat exactly and
+// must not claim the V1 contract that the Android handler intentionally
+// refuses for new bootstrap work.
+export const T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES = Object.freeze([
+  ...T4_RESUME_DEVICE_CAPABILITIES,
+  TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CAPABILITY
+]);
+export const TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES =
+  T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES;
 
 export const T0_DEVICE_BRIDGE_COMMANDS = Object.freeze([
   "PING",
@@ -173,17 +196,18 @@ export function deviceBridgeCapabilityProfile(capabilities) {
   if (exactArray(capabilities, T4_DEVICE_CAPABILITIES)) return "T4";
   if (exactArray(capabilities, T4_RESUME_DEVICE_CAPABILITIES)) return "T4_RESUME";
   if (exactArray(capabilities, T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION";
+  if (exactArray(capabilities, T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION_POST_CHAT";
   return null;
 }
 
 export function isTinderManualGateCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
+  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
 }
 
 export function isTinderHumanArmedConversationBindingCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
+  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
 }
 
 export function isTinderManualSendCapable(capabilities) {
@@ -192,16 +216,25 @@ export function isTinderManualSendCapable(capabilities) {
 
 export function isTinderVisibleChatSyncCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
+  return profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
 }
 
 export function isTinderOfficialAppResumeCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION";
+  return profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
 }
 
 export function isTinderLocalConversationAttestationCapable(capabilities) {
-  return deviceBridgeCapabilityProfile(capabilities) === "T4_RESUME_ATTESTATION";
+  const profile = deviceBridgeCapabilityProfile(capabilities);
+  return profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
+}
+
+// New bootstrap, its STAGED acknowledgement, signed positive ATTESTED
+// ingress, and V2 reader work all require the post-chat profile.  The V1
+// profile above remains intentionally recognizable only for fail-closed
+// historical-state handling, never for new post-chat authority.
+export function isTinderLocalConversationAttestationPostChatCapable(capabilities) {
+  return deviceBridgeCapabilityProfile(capabilities) === "T4_RESUME_ATTESTATION_POST_CHAT";
 }
 
 export function isKnownTinderStateForCapabilities(state, capabilities) {

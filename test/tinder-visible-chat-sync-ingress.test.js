@@ -12,7 +12,8 @@ import {
 import { createTinderVisibleChatSyncStore } from "../services/tinder-visible-chat-sync-store.js";
 import {
   T4_DEVICE_CAPABILITIES,
-  T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES
+  T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES
 } from "../device-bridge/protocol-v1.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
@@ -87,7 +88,8 @@ function stagedPermit(overrides = {}) {
 function storeRepository({
   sourceReady = true,
   attestedSourceReady = true,
-  permit = stagedPermit()
+  permit = stagedPermit(),
+  runtimeCapabilities = null
 } = {}) {
   const state = { calls: [], inserted: null, permit };
   return {
@@ -100,8 +102,9 @@ function storeRepository({
         bridge_service_state: "RUNNING",
         tinder_state: "CONNECTED",
         automation_state: "STOPPED",
-        capabilities: permit.permit_contract_version === 2
-          ? T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES : T4_DEVICE_CAPABILITIES
+        capabilities: runtimeCapabilities || (permit.permit_contract_version === 2
+          ? T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES : T4_DEVICE_CAPABILITIES
+        )
       };
     },
     async expireVisibleChatSyncPermits() {},
@@ -235,6 +238,28 @@ test("V4 V2 ingress rejects a source remapped away from the current confirmed bi
   assert.equal(repository.state.calls.includes("INSERT"), false);
   assert.equal(repository.state.calls.includes("CONSUME"), false);
   assert.equal(repository.state.permit.permit_state, "STAGED");
+});
+
+test("V4 V2 ingress rejects the legacy V1 attestation profile before transcript persistence", async () => {
+  const repository = storeRepository({
+    runtimeCapabilities: T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
+    permit: stagedPermit({
+      permit_contract_version: 2,
+      attestation_command_id: ATTESTATION_COMMAND_ID,
+      binding_id: BINDING_ID,
+      binding_revision: 3
+    })
+  });
+  const store = createTinderVisibleChatSyncStore(repository, {
+    now: () => NOW,
+    createSyncId: () => SYNC_ID
+  });
+  assert.deepEqual(await store.storeStagedVisibleChatSync({ deviceId: DEVICE_ID, sync: syncBody() }), {
+    status: "DEVICE_NOT_READY",
+    reasonCode: "DEVICE_CAPABILITY_UNSUPPORTED"
+  });
+  assert.equal(repository.state.calls.includes("INSERT"), false);
+  assert.equal(repository.state.calls.includes("CONSUME"), false);
 });
 
 test("V4 PostgreSQL insert persists only the command-scoped transcript fingerprint and bound tuple", async () => {

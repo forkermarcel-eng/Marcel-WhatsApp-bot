@@ -96,7 +96,10 @@ export const HUMAN_ARMED_CONVERSATION_REASON = Object.freeze({
   LOCAL_CONVERSATION_ATTESTATION_ACTIVE: "LOCAL_CONVERSATION_ATTESTATION_ACTIVE",
   // V5 may hold a separately issued, one-shot standard-launcher authority.
   // V3 must never create a second device action while that authority is live.
-  OFFICIAL_APP_RESUME_PERMIT_ACTIVE: "OFFICIAL_APP_RESUME_PERMIT_ACTIVE"
+  OFFICIAL_APP_RESUME_PERMIT_ACTIVE: "OFFICIAL_APP_RESUME_PERMIT_ACTIVE",
+  // V8 owns the device while its bounded READ/RETURN chain is active. A new
+  // human arm is a separate authority and must wait for that chain to close.
+  UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE: "UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE"
 });
 
 export class TinderHumanArmedConversationBindingError extends Error {
@@ -451,7 +454,8 @@ function requireRepository(repository) {
     "insertBindingAudit",
     // The adapter may safely return false when the separately migrated V5
     // relation is absent, but an issuer must never silently omit this lookup.
-    "findActiveOfficialAppResumePermitForDevice"
+    "findActiveOfficialAppResumePermitForDevice",
+    "findActiveUnboundInboxConversationSweepForDevice"
   ]) {
     if (typeof repository?.[method] !== "function") {
       throw new TypeError(`repository.${method} must be a function`);
@@ -556,6 +560,23 @@ export function createTinderHumanArmedConversationBindingService(repository, {
           reasonCode: HUMAN_ARMED_CONVERSATION_REASON.LOCAL_CONVERSATION_ATTESTATION_ACTIVE
         });
       }
+    }
+    const activeUnboundInboxSweep = await repository.findActiveUnboundInboxConversationSweepForDevice(
+      transaction,
+      { deviceId, now: currentTime.toISOString() }
+    );
+    if (activeUnboundInboxSweep !== true && activeUnboundInboxSweep !== false) {
+      throw new TinderHumanArmedConversationBindingError(
+        "Die Inbox-Lesefreigabe ist ungÃ¼ltig.",
+        "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP",
+        500
+      );
+    }
+    if (activeUnboundInboxSweep === true) {
+      return Object.freeze({
+        status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+        reasonCode: HUMAN_ARMED_CONVERSATION_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
+      });
     }
     return null;
   }
@@ -1350,6 +1371,27 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
              FROM tinder_official_app_resume_permits
             WHERE device_id=$1
               AND permit_state='ISSUED'
+              AND expires_at>$2
+         ) AS active`,
+        [deviceId, now]
+      );
+      return result.rows[0]?.active === true;
+    },
+
+    // V8 is separately migrated. Its guarded lookup remains false before the
+    // table exists, and once it does, the device row held by the arm issuer
+    // serializes this V3 authority against an active V8 sweep.
+    async findActiveUnboundInboxConversationSweepForDevice(client, { deviceId, now }) {
+      const relation = await client.query(
+        "SELECT to_regclass('tinder_unbound_inbox_conversation_sweeps') AS relation_name"
+      );
+      if (!relation.rows[0]?.relation_name) return false;
+      const result = await client.query(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM tinder_unbound_inbox_conversation_sweeps
+            WHERE device_id=$1
+              AND sweep_state='ACTIVE'
               AND expires_at>$2
          ) AS active`,
         [deviceId, now]

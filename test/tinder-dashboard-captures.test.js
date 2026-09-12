@@ -16,6 +16,8 @@ import {
   createTinderDashboardDraftEligibleCaptureListHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardMappingHandler,
+  createTinderDashboardUnboundInboxConversationSweepStatusHandler,
+  createTinderDashboardUnboundInboxConversationSweepTranscriptListHandler,
   createTinderDashboardVisibleChatSyncQueueHandler,
   registerTinderCaptureRoutes
 } from "../device-bridge/tinder-capture-routes.js";
@@ -68,6 +70,98 @@ test("official-app resume accepts exactly an empty object and no absent, null, o
       error => error.code === "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST"
     );
   }
+});
+
+test("V8 unbound Inbox sweep status is bounded and exposes no correlation data", async () => {
+  const status = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {
+    createRepository() { return {}; },
+    createService() { return { async getBoundedSweepStatus() { return { status: "ACTIVE" }; } }; }
+  });
+  const statusResponse = responseRecorder();
+  statusResponse.setHeader = () => {};
+  await status({ params: { deviceId: DEVICE_ID } }, statusResponse);
+  assert.deepEqual(statusResponse.body, { ok: true, unbound_inbox_sweep: { status: "ACTIVE" } });
+});
+
+test("V8 sweep status is inert when its exact schema assertion detects drift", async () => {
+  let statusWork = 0;
+  const status = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {
+    createRepository() { return {}; },
+    async assertFoundationReady() { throw new Error("unexpected catalog index"); },
+    createService(_repository, { assertFoundationReady }) {
+      return {
+        async getBoundedSweepStatus() {
+          await assertFoundationReady({});
+          statusWork += 1;
+          return { status: "ACTIVE" };
+        }
+      };
+    }
+  });
+  const statusResponse = responseRecorder();
+  statusResponse.setHeader = () => {};
+  await status({ params: { deviceId: DEVICE_ID } }, statusResponse);
+  assert.equal(statusWork, 0);
+  assert.equal(statusResponse.statusCode, 503);
+  assert.deepEqual(statusResponse.body, {
+    ok: false,
+    code: "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY",
+    error: "Unbound Inbox sweep foundation is not ready."
+  });
+});
+
+test("V8 pending transcript dashboard projection is bounded and omits all correlation, identity, and audit fields", async () => {
+  let requestedDeviceId = null;
+  const handler = createTinderDashboardUnboundInboxConversationSweepTranscriptListHandler({}, {
+    createRepository() {
+      return {
+        async listPendingUnboundInboxConversationSweepTranscripts({ deviceId }) {
+          requestedDeviceId = deviceId;
+          return [{
+            received_at: "2026-09-12T12:00:00.000Z",
+            mapping_status: "NEEDS_HUMAN_MAPPING",
+            human_review_status: "PENDING",
+            visible_messages: [
+              { visible_order: 1, direction: "INBOUND", text: "bounded pending text" },
+              { visible_order: 2, direction: "OUTBOUND", text: "bounded reply text" }
+            ],
+            transcript_id: "a565e8a7-ef60-42d0-b19d-26e7904390fa",
+            sweep_id: "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+            command_id: "c565e8a7-ef60-42d0-b19d-26e7904390fa",
+            slot_ordinal: 1,
+            contact_id: 7,
+            binding_id: "d565e8a7-ef60-42d0-b19d-26e7904390fa",
+            transcript_fingerprint: "a".repeat(64)
+          }];
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  res.setHeader = () => {};
+  await handler({ params: { deviceId: DEVICE_ID } }, res);
+
+  assert.equal(requestedDeviceId, DEVICE_ID);
+  assert.deepEqual(res.body, {
+    ok: true,
+    transcripts: [{
+      received_at: "2026-09-12T12:00:00.000Z",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: [
+        { direction: "INBOUND", text: "bounded pending text" },
+        { direction: "OUTBOUND", text: "bounded reply text" }
+      ]
+    }]
+  });
+  const rendered = JSON.stringify(res.body);
+  for (const forbidden of [
+    "a565e8a7-ef60-42d0-b19d-26e7904390fa",
+    "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+    "c565e8a7-ef60-42d0-b19d-26e7904390fa",
+    "d565e8a7-ef60-42d0-b19d-26e7904390fa",
+    "contact_id", "binding_id", "slot_ordinal", "transcript_fingerprint"
+  ]) assert.equal(rendered.includes(forbidden), false);
 });
 
 test("dashboard capture read exposes only mapping context, not visible message text or fingerprint", async () => {
@@ -512,6 +606,18 @@ test("capture discovery routes remain protected and are registered before the ca
   assert.ok(registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/resume-official-app"
   ));
+  assert.equal(registrations.some(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-read"
+  ), false);
+  assert.equal(registrations.some(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps"
+  ), false);
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps/status"
+  ));
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps/transcripts"
+  ));
   assert.ok(registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm"
   ));
@@ -663,6 +769,38 @@ test("official-app resume route retains dashboard authorization before any reade
     body: { package: "com.tinder" }
   }, res);
   assert.equal(res.statusCode, 401);
+  assert.equal(deviceBridgeReadinessCalled, false);
+});
+
+test("V8 unbound Inbox sweep status/transcript routes retain dashboard authorization and expose no manual start route", async () => {
+  let deviceBridgeReadinessCalled = false;
+  const registrations = [];
+  registerTinderCaptureRoutes({
+    app: {
+      get(path, handler) { registrations.push({ method: "GET", path, handler }); },
+      post(path, handler) { registrations.push({ method: "POST", path, handler }); }
+    },
+    pool: { connect() {}, query() {} },
+    dashboardApiReady() { return true; },
+    dashboardApiAuthorized() { return false; },
+    requireDeviceBridgeReady() { deviceBridgeReadinessCalled = true; return true; }
+  });
+  const status = registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps/status"
+  );
+  const transcripts = registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps/transcripts"
+  );
+  const start = registrations.find(({ method, path }) =>
+    method === "POST" && path === "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps"
+  );
+  assert.equal(start, undefined);
+  assert.ok(status && transcripts);
+  for (const route of [status, transcripts]) {
+    const res = responseRecorder();
+    await route.handler({ params: { deviceId: DEVICE_ID }, body: { capture_id: CAPTURE_ID } }, res);
+    assert.equal(res.statusCode, 401);
+  }
   assert.equal(deviceBridgeReadinessCalled, false);
 });
 

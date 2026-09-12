@@ -81,11 +81,18 @@ const CONFIRMED_CONVERSATIONS_VIEW = "confirmed-conversations";
 const CONFIRMED_CONVERSATION_VIEW = "confirmed-conversation";
 const VISIBLE_CHAT_SYNC_OPERATION = "visible-chat-sync";
 const OFFICIAL_APP_RESUME_OPERATION = "resume-official-app";
+const UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW = "unbound-inbox-conversation-sweep-status";
+const UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW = "unbound-inbox-conversation-sweep-transcripts";
 const LATEST_CONFIRMED_CONVERSATION_LIMIT = 25;
 const CONVERSATION_MESSAGE_LIMIT = 100;
 const CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
 const CONVERSATION_MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING", "UNKNOWN"]);
+const UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_LIMIT = 8;
+const UNBOUND_INBOX_CONVERSATION_SWEEP_MESSAGE_DIRECTIONS = new Set(["INBOUND", "OUTBOUND"]);
 const PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE = "SYNC_TINDER_VISIBLE_CHAT";
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES = new Set([
+  "NOT_REQUESTED", "ACTIVE", "COMPLETED", "STOPPED", "EXPIRED"
+]);
 const PUBLIC_VISIBLE_CHAT_SYNC_STATUSES = new Set([
   "QUEUED", "DEVICE_NOT_READY", "PERMIT_CONFLICT", "PERMIT_NOT_AVAILABLE"
 ]);
@@ -428,6 +435,14 @@ function captureRequestFromQuery(req) {
       && query.operation === OFFICIAL_APP_RESUME_OPERATION) {
     return Object.freeze({ type: "official_app_resume", captureId: query.captureId });
   }
+  if (exactKeys(query, ["deviceId", "view"]) && validCaptureId(query.deviceId)
+      && query.view === UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW) {
+    return Object.freeze({ type: "unbound_inbox_conversation_sweep_status", deviceId: query.deviceId });
+  }
+  if (exactKeys(query, ["deviceId", "view"]) && validCaptureId(query.deviceId)
+      && query.view === UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW) {
+    return Object.freeze({ type: "unbound_inbox_conversation_sweep_transcripts", deviceId: query.deviceId });
+  }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === HUMAN_ARM_OPERATION) {
     return Object.freeze({ type: "human_arm", captureId: query.captureId });
@@ -539,6 +554,9 @@ function validEmptyOfficialAppResumeBody(body) {
   return body === undefined || body === null || exactKeys(body, []);
 }
 
+// The selected Device Bridge is an opaque existing dashboard target. The
+// browser must not supply a row, capture, contact, binding, identity, time,
+// fingerprint, payload, or command detail for the unbound technical read.
 function normalizePublicDraftActionResult(value, action) {
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       typeof value.state !== "string" || typeof value.idempotent !== "boolean") {
@@ -790,6 +808,50 @@ function normalizePublicVisibleChatSyncResult(value) {
   });
 }
 
+function normalizePublicUnboundInboxConversationSweepStatus(value) {
+  if (!exactKeys(value, ["status"])
+      || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES.has(value.status)) {
+    return null;
+  }
+  return Object.freeze({ status: value.status });
+}
+
+// The V8 dashboard projection intentionally contains transcript facts only.
+// It never exposes a database correlation handle, sweep/child state, source,
+// fingerprint, local Inbox evidence, person, contact, or binding field.
+function normalizePublicUnboundInboxConversationSweepTranscript(value) {
+  if (!exactKeys(value, ["received_at", "mapping_status", "human_review_status", "messages"])
+      || value.mapping_status !== "NEEDS_HUMAN_MAPPING"
+      || value.human_review_status !== "PENDING"
+      || !Array.isArray(value.messages)
+      || value.messages.length < 1 || value.messages.length > CONVERSATION_MESSAGE_LIMIT) {
+    return null;
+  }
+  const receivedAt = normalizePublicTimestamp(value.received_at);
+  if (!receivedAt) return null;
+  const messages = value.messages.map(message => {
+    if (!exactKeys(message, ["direction", "text"])
+        || !UNBOUND_INBOX_CONVERSATION_SWEEP_MESSAGE_DIRECTIONS.has(message.direction)
+        || !validBoundedText(message.text, CONVERSATION_MESSAGE_TEXT_LIMIT)) {
+      return null;
+    }
+    return Object.freeze({ direction: message.direction, text: message.text });
+  });
+  if (messages.some(message => message === null)) return null;
+  return Object.freeze({
+    received_at: receivedAt,
+    mapping_status: "NEEDS_HUMAN_MAPPING",
+    human_review_status: "PENDING",
+    messages: Object.freeze(messages)
+  });
+}
+
+function normalizePublicUnboundInboxConversationSweepTranscripts(value) {
+  if (!Array.isArray(value) || value.length > UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_LIMIT) return null;
+  const transcripts = value.map(normalizePublicUnboundInboxConversationSweepTranscript);
+  return transcripts.some(transcript => transcript === null) ? null : Object.freeze(transcripts);
+}
+
 // This public result deliberately contains only a command type, terminal
 // queue state, and bounded reason.  In particular it must not turn the
 // opaque device command handle or binding facts into dashboard data.
@@ -973,6 +1035,59 @@ async function forwardOfficialAppResume(res, configuration, captureId) {
     return res.status(status).json({ ok: false, error: "Offizielle Tinder-App konnte nicht vorbereitet werden." });
   } catch {
     console.error("Verbindung zum offiziellen Tinder-App-Resume fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+/**
+ * The dashboard forwards only a selected enrolled device and a literal empty
+ * body. The Railway route derives current Inbox freshness and all permit
+ * facts under lock; no browser value can target a Tinder row or identity.
+ */
+async function forwardUnboundInboxConversationSweepStatus(res, configuration, deviceId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/devices/${encodeURIComponent(deviceId)}/unbound-inbox-conversation-sweeps/status`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const sweep = normalizePublicUnboundInboxConversationSweepStatus(data?.unbound_inbox_sweep);
+    if (response.ok && data?.ok === true && sweep) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({ ok: true, unbound_inbox_sweep: sweep });
+    }
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Inbox-Sweep-Status konnte nicht geladen werden." });
+  } catch {
+    console.error("Verbindung zum Tinder-Inbox-Sweep-Status fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardUnboundInboxConversationSweepTranscriptRead(res, configuration, deviceId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/devices/${encodeURIComponent(deviceId)}/unbound-inbox-conversation-sweeps/transcripts`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const transcripts = normalizePublicUnboundInboxConversationSweepTranscripts(data?.transcripts);
+    if (response.ok && data?.ok === true && transcripts) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({ ok: true, transcripts });
+    }
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Inbox-Sweep-Verl\u00e4ufe konnten nicht geladen werden." });
+  } catch {
+    console.error("Verbindung zum Tinder-Inbox-Sweep-Verlauf fehlgeschlagen.");
     return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
   }
 }
@@ -1586,6 +1701,12 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "draft_review") {
     return forwardDraftReview(res, configuration, captureRequest.captureId);
   }
+  if (req.method === "GET" && captureRequest.type === "unbound_inbox_conversation_sweep_status") {
+    return forwardUnboundInboxConversationSweepStatus(res, configuration, captureRequest.deviceId);
+  }
+  if (req.method === "GET" && captureRequest.type === "unbound_inbox_conversation_sweep_transcripts") {
+    return forwardUnboundInboxConversationSweepTranscriptRead(res, configuration, captureRequest.deviceId);
+  }
   if (req.method === "GET") {
     return forwardCaptureRead(res, configuration, captureRequest.captureId);
   }
@@ -1646,6 +1767,8 @@ export {
   CONFIRMED_CONVERSATIONS_VIEW,
   VISIBLE_CHAT_SYNC_OPERATION,
   OFFICIAL_APP_RESUME_OPERATION,
+  UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW,
+  UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW,
   CONVERSATION_MESSAGE_LIMIT,
   CONVERSATION_MESSAGE_TEXT_LIMIT,
   LATEST_CONFIRMED_CONVERSATION_LIMIT,
@@ -1677,6 +1800,9 @@ export {
   normalizePublicVisibleChatSyncTranscript,
   normalizePublicOfficialAppResumeObservation,
   normalizePublicVisibleChatSyncResult,
+  normalizePublicUnboundInboxConversationSweepStatus,
+  normalizePublicUnboundInboxConversationSweepTranscript,
+  normalizePublicUnboundInboxConversationSweepTranscripts,
   normalizePublicLocalConversationAttestationResult,
   normalizePublicOfficialAppResumeResult,
   validEmptyOfficialAppResumeBody,

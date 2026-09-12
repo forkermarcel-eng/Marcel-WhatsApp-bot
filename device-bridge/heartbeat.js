@@ -7,6 +7,7 @@ import {
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
   isTinderLocalConversationAttestationPostChatCapable,
+  isTinderUnboundInboxConversationSweepCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
@@ -24,10 +25,20 @@ import {
   TINDER_SEND_COMMAND_TYPE
 } from "../services/tinder-manual-send.js";
 import { hydrateTinderManualSendCommandForHeartbeat } from "./tinder-manual-send-command-hydration.js";
+import {
+  inspectTinderUnboundInboxConversationSweepSchema,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
+} from "./tinder-unbound-inbox-conversation-sweep-schema.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE = "tinder_local_conversation_attestation_permits";
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE =
+  "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE =
+  "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE = "tinder_unbound_inbox_conversation_sweeps";
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE = "tinder_unbound_inbox_conversation_sweep_steps";
 const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conversation_v1";
 
@@ -83,6 +94,10 @@ const TINDER_INBOX_NAVIGATION_REASON_SET = new Set(TINDER_INBOX_NAVIGATION_REASO
 const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
   "stage", "reason", "visible_conversation_count", "observed_event_count"
 ]);
+const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
+]);
+export const TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND = "FRESH_REVIEWED_INBOX_V1";
 const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
 
 /* ==================================================
@@ -111,7 +126,8 @@ function exactKeys(value, keys) {
 }
 
 export function isBoundedTinderInboxNavigationDiagnostic(value) {
-  return exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
+  const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
+  return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -119,7 +135,11 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
     && value.visible_conversation_count <= TINDER_INBOX_NAVIGATION_MAX_COUNT
     && Number.isSafeInteger(value.observed_event_count)
     && value.observed_event_count >= 0
-    && value.observed_event_count <= TINDER_INBOX_NAVIGATION_MAX_COUNT;
+    && value.observed_event_count <= TINDER_INBOX_NAVIGATION_MAX_COUNT
+    && (!freshObservation || (
+      value.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
+      && isUuidV4(value.observation_nonce)
+    ));
 }
 
 function heartbeatAuditDetails(heartbeat) {
@@ -128,15 +148,109 @@ function heartbeatAuditDetails(heartbeat) {
   const navigation = heartbeat.tinder_inbox_navigation;
   // Do not serialize the heartbeat object itself. This explicit allowlist
   // prevents future local diagnostics from becoming durable audit metadata.
+  const boundedNavigation = {
+    stage: navigation.stage,
+    reason: navigation.reason,
+    visible_conversation_count: navigation.visible_conversation_count,
+    observed_event_count: navigation.observed_event_count
+  };
+  if (navigation.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND) {
+    // This is an opaque, device-generated freshness nonce. It exists only in
+    // the immutable signed-heartbeat audit fact to consume a one-shot local
+    // Inbox observation; it is never projected through dashboard/status APIs.
+    boundedNavigation.observation_kind = TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND;
+    boundedNavigation.observation_nonce = navigation.observation_nonce;
+  }
   return {
     ...details,
-    tinder_inbox_navigation: {
-      stage: navigation.stage,
-      reason: navigation.reason,
-      visible_conversation_count: navigation.visible_conversation_count,
-      observed_event_count: navigation.observed_event_count
-    }
+    tinder_inbox_navigation: boundedNavigation
   };
+}
+
+function isFreshReviewedInboxObservation(heartbeat) {
+  const navigation = heartbeat?.tinder_inbox_navigation;
+  return isBoundedTinderInboxNavigationDiagnostic(navigation)
+    && navigation.stage === "INBOX_READY"
+    && navigation.reason === "NONE"
+    && navigation.visible_conversation_count > 0
+    && navigation.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
+    && isUuidV4(navigation.observation_nonce);
+}
+
+/**
+ * V8 is sole-issued from the same signed heartbeat transaction that captured
+ * the local fresh Inbox observation. This intentionally has no public/manual
+ * dashboard entrypoint and no command/status response field.
+ */
+async function maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
+  pool, deviceId, heartbeat, now, unboundInboxConversationSweepFoundationReady
+}) {
+  if (!isFreshReviewedInboxObservation(heartbeat)
+      || !isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities)
+      || unboundInboxConversationSweepFoundationReady !== true) {
+    return;
+  }
+  // Dynamic import avoids a static heartbeat -> service -> heartbeat cycle;
+  // it is evaluated only after this module and the signed transaction exist.
+  const {
+    createPgTinderUnboundInboxConversationSweepRepository,
+    createTinderUnboundInboxConversationSweepService
+  } = await import("../services/tinder-unbound-inbox-conversation-sweep.js");
+  const service = createTinderUnboundInboxConversationSweepService(
+    createPgTinderUnboundInboxConversationSweepRepository(pool),
+    { now: () => now }
+  );
+  await service.startUnboundInboxConversationSweepFromFreshInboxObservation(client, {
+    deviceId,
+    heartbeatSequence: heartbeat.sequence,
+    inboxNavigation: heartbeat.tinder_inbox_navigation,
+    observationNonce: heartbeat.tinder_inbox_navigation.observation_nonce
+  });
+}
+
+// An expired V8 child is terminalized before delivery is selected.  The
+// service owns the paired step/parent/audit transition; the heartbeat owns
+// only the conservative response rule that prevents an older nonterminal
+// command from slipping through in the same transaction.
+async function expireUnboundInboxConversationSweepForHeartbeat(client, {
+  pool, deviceId, now, unboundInboxConversationSweepFoundationCanonical
+}) {
+  if (unboundInboxConversationSweepFoundationCanonical !== true) {
+    return Object.freeze({ childExpired: false, active: false });
+  }
+  const {
+    createPgTinderUnboundInboxConversationSweepRepository,
+    createTinderUnboundInboxConversationSweepService
+  } = await import("../services/tinder-unbound-inbox-conversation-sweep.js");
+  const service = createTinderUnboundInboxConversationSweepService(
+    createPgTinderUnboundInboxConversationSweepRepository(pool),
+    { now: () => now }
+  );
+  const result = await service.expireUnboundInboxConversationSweepForHeartbeat(client, {
+    deviceId
+  });
+  return Object.freeze({
+    childExpired: result?.childExpired === true,
+    active: result?.active === true
+  });
+}
+
+// V8 commands are permitted only after the exact catalog inspector accepts the
+// complete direct-V6-to-V8 foundation. A pair of relations is not sufficient:
+// a partial, drifted, or otherwise uninspectable foundation must not mint or
+// deliver a child command. A catalog-read failure is deliberately inert rather
+// than turning an ordinary heartbeat into a schema-repair path.
+async function inspectUnboundInboxConversationSweepFoundationState(client, inspectFoundation) {
+  try {
+    const inspection = await inspectFoundation(client);
+    return inspection?.state === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+      ? TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+      : inspection?.state === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.UPGRADE_REQUIRED
+        ? TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.UPGRADE_REQUIRED
+        : TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID;
+  } catch {
+    return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID;
+  }
 }
 
 export function parseAndValidateHeartbeat(req) {
@@ -180,7 +294,10 @@ function commandEnvelope(row, payload = row.payload) {
   };
 }
 
-async function selectDeliverableCommands(client, deviceId, capabilities, now) {
+async function selectDeliverableCommands(client, deviceId, capabilities, now, {
+  unboundInboxConversationSweepFoundationReady = false,
+  suppressDynamicTinderCommands = false
+} = {}) {
   const t1Capable = isTinderManualGateCapable(capabilities);
   const humanArmedBindingCapable = isTinderHumanArmedConversationBindingCapable(capabilities);
   const t5Capable = isTinderManualSendCapable(capabilities);
@@ -188,6 +305,8 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
   const officialAppResumeCapable = isTinderOfficialAppResumeCapable(capabilities);
   const advertisedPostChatLocalConversationAttestationCapability =
     isTinderLocalConversationAttestationPostChatCapable(capabilities);
+  const advertisedUnboundInboxConversationSweepCapability =
+    isTinderUnboundInboxConversationSweepCapable(capabilities);
   // A newer device can heartbeat during a rolling backend deployment. Do not
   // turn a schema-absent V6 foundation into a heartbeat 42P01: omit only the
   // new local-proof commands until the migration has made their table real.
@@ -199,7 +318,17 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
     );
     postChatLocalConversationAttestationCapable = Boolean(foundation.rows[0]?.relation_name);
   }
-  const commandTypes = postChatLocalConversationAttestationCapable
+  const unboundInboxConversationSweepCapable = advertisedUnboundInboxConversationSweepCapability
+    && unboundInboxConversationSweepFoundationReady === true;
+  // A device that advertises V8 while its catalog is partial or unknown may
+  // have a previously active V8 child we cannot inspect safely.  Do not fall
+  // back to delivery of a pre-V8 dynamic Tinder command in that ambiguous
+  // state. Administrative/status commands remain available.
+  const commandTypes = suppressDynamicTinderCommands
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE'"
+    : unboundInboxConversationSweepCapable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP','STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION','READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT','RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT'"
+    : postChatLocalConversationAttestationCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP','STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION'"
     : officialAppResumeCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP'"
@@ -212,7 +341,28 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
     : t1Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
     : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
-  const payloadPredicate = postChatLocalConversationAttestationCapable
+  const payloadPredicate = unboundInboxConversationSweepCapable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','RESUME_OFFICIAL_TINDER_APP','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}') AND payload='{}'::jsonb)
+         OR (
+           command_type='SYNC_TINDER_VISIBLE_CHAT'
+           AND jsonb_typeof(payload)='object'
+           AND payload ? 'local_conversation_attestation'
+           AND payload ? 'binding_revision'
+           AND (payload - 'local_conversation_attestation' - 'binding_revision')='{}'::jsonb
+           AND payload->>'local_conversation_attestation' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           AND payload->>'binding_revision' ~ '^[1-9][0-9]*$'
+         )
+         OR (
+           command_type='${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
+           AND jsonb_typeof(payload)='object'
+           AND payload ? 'binding_revision'
+           AND payload ? 'attestation_contract_version'
+           AND (payload - 'binding_revision' - 'attestation_contract_version')='{}'::jsonb
+           AND payload->>'binding_revision' ~ '^[1-9][0-9]*$'
+           AND payload->>'attestation_contract_version'='${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+         )`
+    : postChatLocalConversationAttestationCapable
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','RESUME_OFFICIAL_TINDER_APP') AND payload='{}'::jsonb)
          OR (
@@ -393,6 +543,54 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
           )
         )`
     : "";
+  const unboundInboxConversationSweepDeliveryPredicate = unboundInboxConversationSweepCapable
+    ? `
+        AND (
+          command_type NOT IN ('${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}')
+          OR EXISTS (
+            SELECT 1
+              FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE} step
+              JOIN ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE} sweep
+                ON sweep.sweep_id=step.sweep_id
+             WHERE step.command_id=device_bridge_commands.command_id
+               AND step.device_id=device_bridge_commands.device_id
+               AND step.child_state='ISSUED'
+               AND step.expires_at>$2
+               AND sweep.device_id=step.device_id
+               AND sweep.sweep_state='ACTIVE'
+               AND sweep.active_command_id=step.command_id
+               AND sweep.expires_at>$2
+               AND (
+                 (step.child_kind='READ' AND device_bridge_commands.command_type='${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}')
+                 OR (step.child_kind='RETURN_ONLY' AND device_bridge_commands.command_type='${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}')
+               )
+               AND device_bridge_commands.payload='{}'::jsonb
+          )
+        )`
+    : "";
+  // A V8 parent has exactly one active child. If a stale pre-V8 command is
+  // still nonterminal in the command table, never batch it beside that child:
+  // only the exact current V8 READ/RETURN command may reach Android. This is
+  // a delivery backstop; reciprocal issuer checks prevent new overlaps.
+  const unboundInboxConversationSweepExclusiveDeliveryPredicate = unboundInboxConversationSweepCapable
+    ? `
+        AND (
+          NOT EXISTS (
+            SELECT 1
+              FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE} active_sweep
+              JOIN ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE} active_step
+                ON active_step.sweep_id=active_sweep.sweep_id
+               AND active_step.device_id=active_sweep.device_id
+             WHERE active_sweep.device_id=$1
+               AND active_sweep.sweep_state='ACTIVE'
+               AND active_sweep.expires_at>$2
+               AND active_sweep.active_command_id=active_step.command_id
+               AND active_step.child_state IN ('ISSUED','STAGED','RETURN_STAGED')
+               AND active_step.expires_at>$2
+          )
+          OR command_type IN ('${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}')
+        )`
+    : "";
   const result = await client.query(
     `SELECT command_id, protocol_version, command_type, issued_at, expires_at,
             configuration_revision, payload
@@ -406,6 +604,8 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now) {
         )
         ${officialAppResumeDeliveryPredicate}
         ${localConversationAttestationDeliveryPredicate}
+        ${unboundInboxConversationSweepDeliveryPredicate}
+        ${unboundInboxConversationSweepExclusiveDeliveryPredicate}
      ORDER BY issued_at ASC, command_id ASC
      LIMIT $3`,
     [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit]
@@ -450,7 +650,12 @@ function heartbeatResponse(serverTime, acceptedAt, commands) {
   };
 }
 
-export async function processHeartbeatTransaction(pool, auth, heartbeat, now = new Date()) {
+export async function processHeartbeatTransaction(pool, auth, heartbeat, now = new Date(), {
+  inspectUnboundInboxConversationSweepFoundation = inspectTinderUnboundInboxConversationSweepSchema
+} = {}) {
+  if (typeof inspectUnboundInboxConversationSweepFoundation !== "function") {
+    throw new TypeError("inspectUnboundInboxConversationSweepFoundation must be a function");
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -480,6 +685,17 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       throw new DeviceBridgeProtocolError(409, "HEARTBEAT_SEQUENCE_CONFLICT", "Heartbeat sequence conflicts with the last accepted heartbeat");
     }
 
+    const unboundInboxConversationSweepFoundationState =
+      await inspectUnboundInboxConversationSweepFoundationState(
+        client,
+        inspectUnboundInboxConversationSweepFoundation
+      );
+    const unboundInboxConversationSweepFoundationCanonical =
+      unboundInboxConversationSweepFoundationState
+      === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL;
+    const unboundInboxConversationSweepFoundationReady =
+      unboundInboxConversationSweepFoundationCanonical
+      && isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities);
     let acceptedAt = now;
     if (!idempotent) {
       await client.query(
@@ -502,10 +718,46 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
          VALUES ('HEARTBEAT_ACCEPTED',$1,$2,$3,'SUCCEEDED',200,$4::jsonb)`,
         [auth.requestId, auth.deviceId, auth.keyId, JSON.stringify(heartbeatAuditDetails(heartbeat))]
       );
+      // The audit fact is intentionally written before any V8 gate/conflict
+      // decision. Therefore a valid fresh observation nonce is consumed even
+      // when this particular heartbeat cannot issue a sweep child.
+      await maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
+        pool, deviceId: auth.deviceId, heartbeat, now,
+        unboundInboxConversationSweepFoundationReady
+      });
     } else {
       acceptedAt = new Date(device.last_accepted_heartbeat_at);
     }
-    const commands = await selectDeliverableCommands(client, auth.deviceId, heartbeat.capabilities, now);
+    const v8SweepRuntime = await expireUnboundInboxConversationSweepForHeartbeat(client, {
+      pool,
+      deviceId: auth.deviceId,
+      now,
+      unboundInboxConversationSweepFoundationCanonical
+    });
+    const commands = v8SweepRuntime.childExpired
+      // Delivery must not continue with an older nonterminal command in the
+      // same heartbeat that made the V8 child terminal.  A subsequent signed
+      // heartbeat obtains a freshly locked command view.
+      ? []
+      : await selectDeliverableCommands(client, auth.deviceId, heartbeat.capabilities, now, {
+        unboundInboxConversationSweepFoundationReady,
+        suppressDynamicTinderCommands:
+          // An INVALID result can mean a previously canonical V8 catalog
+          // drifted after an active parent/child was issued. The current
+          // transaction cannot safely inspect that parent, so never fall back
+          // to unrelated dynamic Tinder delivery merely because this
+          // heartbeat also advertises an older capability profile. An absent
+          // V8 catalog is the distinct UPGRADE_REQUIRED state and preserves
+          // legacy delivery until this new foundation has ever been applied.
+          unboundInboxConversationSweepFoundationState
+            === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+          // A current legacy capability cannot receive a V8 child. If one is
+          // nevertheless active from an earlier V8 heartbeat, suppress all
+          // dynamic Tinder delivery until it reaches its immutable terminal
+          // state; never let capability downgrade bypass serial execution.
+          || (!isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities)
+            && v8SweepRuntime.active)
+      });
     await client.query("COMMIT");
     return heartbeatResponse(now, acceptedAt, commands);
   } catch (error) {

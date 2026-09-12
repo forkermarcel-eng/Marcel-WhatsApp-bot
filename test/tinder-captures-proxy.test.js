@@ -865,6 +865,92 @@ test("local conversation bootstrap forwards the exact confirmation and keeps CHA
   }
 }));
 
+test("V8 unbound Inbox sweep proxy exposes bounded status only and has no browser start operation", async () => withEnvironment(async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return backendResponse({
+      ok: true,
+      unbound_inbox_sweep: { status: "ACTIVE" }
+    });
+  };
+  const status = responseRecorder();
+  await handler(request({
+    query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-status" }
+  }), status);
+  assert.equal(status.statusCode, 200);
+  assert.equal(calls[0].url,
+    `https://shared-backend.example/dashboard-api/tinder/devices/${DEVICE_ID}/unbound-inbox-conversation-sweeps/status`);
+  assert.deepEqual(status.body, { ok: true, unbound_inbox_sweep: { status: "ACTIVE" } });
+
+  globalThis.fetch = async () => { throw new Error("fetch must not run"); };
+  const manualStart = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { deviceId: DEVICE_ID, operation: "unbound-inbox-conversation-sweep" },
+    body: {}
+  }), manualStart);
+  assert.equal(manualStart.statusCode, 400);
+}));
+
+test("V8 pending transcript projection remains device-scoped, bounded, and strips all correlation fields at the Vercel boundary", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      transcripts: [{
+        received_at: "2026-09-12T12:00:00.000Z",
+        mapping_status: "NEEDS_HUMAN_MAPPING",
+        human_review_status: "PENDING",
+        messages: [
+          { direction: "INBOUND", text: "bounded pending text" },
+          { direction: "OUTBOUND", text: "bounded reply text" }
+        ]
+      }]
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({
+    query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-transcripts" }
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url,
+    `https://shared-backend.example/dashboard-api/tinder/devices/${DEVICE_ID}/unbound-inbox-conversation-sweeps/transcripts`);
+  assert.equal(call.options.method, "GET");
+  assert.equal(Object.hasOwn(call.options, "body"), false);
+  assert.deepEqual(res.body, {
+    ok: true,
+    transcripts: [{
+      received_at: "2026-09-12T12:00:00.000Z",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: [
+        { direction: "INBOUND", text: "bounded pending text" },
+        { direction: "OUTBOUND", text: "bounded reply text" }
+      ]
+    }]
+  });
+
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    transcripts: [{
+      received_at: "2026-09-12T12:00:00.000Z",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: [{ direction: "INBOUND", text: "bounded pending text" }],
+      transcript_id: "a565e8a7-ef60-42d0-b19d-26e7904390fa"
+    }]
+  });
+  const injected = responseRecorder();
+  await handler(request({
+    query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-transcripts" }
+  }), injected);
+  assert.equal(injected.statusCode, 502);
+  assert.equal(JSON.stringify(injected.body).includes("a565e8a7-ef60-42d0-b19d-26e7904390fa"), false);
+}));
+
 test("human-armed binding GET keeps the UUID as a bounded browser handle and strips raw server fields", async () => withEnvironment(async () => {
   const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
   let call;

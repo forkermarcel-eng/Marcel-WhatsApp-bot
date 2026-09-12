@@ -12,6 +12,7 @@ import {
   T4_RESUME_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   assertTimestampWithinWindow,
   canonicalRequest,
@@ -26,6 +27,7 @@ import {
   isTinderOfficialAppResumeCapable,
   isTinderLocalConversationAttestationCapable,
   isTinderLocalConversationAttestationPostChatCapable,
+  isTinderUnboundInboxConversationSweepCapable,
   isTinderVisibleChatSyncCapable,
   isUuidV4,
   normalizeEnrollmentCode,
@@ -66,11 +68,11 @@ test("Protocol V1 constants are fixed", () => {
     signatureWindowSeconds: 300,
     maximumRequestBytes: 65536,
     commandBatchLimit: 50,
-    commands: ["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SEND_TINDER_DRAFT", "SYNC_TINDER_VISIBLE_CHAT", "RESUME_OFFICIAL_TINDER_APP", "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"]
+    commands: ["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SEND_TINDER_DRAFT", "SYNC_TINDER_VISIBLE_CHAT", "RESUME_OFFICIAL_TINDER_APP", "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT", "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT"]
   });
 });
 
-test("T1/T2/T5/T4/T4-resume/attestation capability profiles are exact, ordered and fail closed", () => {
+test("T1/T2/T5/T4/T4-resume/attestation/sweep capability profiles are exact, ordered and fail closed", () => {
   assert.equal(deviceBridgeCapabilityProfile(T0_DEVICE_CAPABILITIES), "T0");
   assert.equal(deviceBridgeCapabilityProfile(T1_DEVICE_CAPABILITIES), "T1");
   assert.equal(deviceBridgeCapabilityProfile(T2_DEVICE_CAPABILITIES), "T2");
@@ -79,6 +81,7 @@ test("T1/T2/T5/T4/T4-resume/attestation capability profiles are exact, ordered a
   assert.equal(deviceBridgeCapabilityProfile(T4_RESUME_DEVICE_CAPABILITIES), "T4_RESUME");
   assert.equal(deviceBridgeCapabilityProfile(T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES), "T4_RESUME_ATTESTATION");
   assert.equal(deviceBridgeCapabilityProfile(T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES), "T4_RESUME_ATTESTATION_POST_CHAT");
+  assert.equal(deviceBridgeCapabilityProfile(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP");
   assert.equal(isTinderManualGateCapable(T0_DEVICE_CAPABILITIES), false);
   assert.equal(isTinderManualGateCapable(T1_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderManualGateCapable(T2_DEVICE_CAPABILITIES), true);
@@ -87,6 +90,7 @@ test("T1/T2/T5/T4/T4-resume/attestation capability profiles are exact, ordered a
   assert.equal(isTinderManualGateCapable(T4_RESUME_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderManualGateCapable(T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderManualGateCapable(T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderManualGateCapable(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderHumanArmedConversationBindingCapable(T1_DEVICE_CAPABILITIES), false);
   assert.equal(isTinderHumanArmedConversationBindingCapable(T2_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderHumanArmedConversationBindingCapable(T5_DEVICE_CAPABILITIES), true);
@@ -94,6 +98,7 @@ test("T1/T2/T5/T4/T4-resume/attestation capability profiles are exact, ordered a
   assert.equal(isTinderHumanArmedConversationBindingCapable(T4_RESUME_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderHumanArmedConversationBindingCapable(T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderHumanArmedConversationBindingCapable(T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderHumanArmedConversationBindingCapable(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderManualSendCapable(T2_DEVICE_CAPABILITIES), false);
   assert.equal(isTinderManualSendCapable(T5_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderManualSendCapable(T4_DEVICE_CAPABILITIES), false);
@@ -102,15 +107,20 @@ test("T1/T2/T5/T4/T4-resume/attestation capability profiles are exact, ordered a
   assert.equal(isTinderVisibleChatSyncCapable(T4_RESUME_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderVisibleChatSyncCapable(T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderVisibleChatSyncCapable(T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderVisibleChatSyncCapable(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderOfficialAppResumeCapable(T4_DEVICE_CAPABILITIES), false);
   assert.equal(isTinderOfficialAppResumeCapable(T4_RESUME_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderOfficialAppResumeCapable(T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderOfficialAppResumeCapable(T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderOfficialAppResumeCapable(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderLocalConversationAttestationCapable(T4_RESUME_DEVICE_CAPABILITIES), false);
   assert.equal(isTinderLocalConversationAttestationCapable(T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderLocalConversationAttestationCapable(T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderLocalConversationAttestationCapable(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderLocalConversationAttestationPostChatCapable(T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES), false);
   assert.equal(isTinderLocalConversationAttestationPostChatCapable(T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderLocalConversationAttestationPostChatCapable(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), true);
+  assert.equal(isTinderUnboundInboxConversationSweepCapable(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES), true);
   assert.equal(isTinderManualSendCapable(T4_RESUME_DEVICE_CAPABILITIES), false);
   assert.equal(deviceBridgeCapabilityProfile([...T1_DEVICE_CAPABILITIES].reverse()), null);
   assert.equal(deviceBridgeCapabilityProfile([...T2_DEVICE_CAPABILITIES, "UNKNOWN_CAPABILITY_V1"]), null);
@@ -120,6 +130,7 @@ test("T1/T2/T5/T4/T4-resume/attestation capability profiles are exact, ordered a
   assert.equal(deviceBridgeCapabilityProfile([...T4_RESUME_DEVICE_CAPABILITIES].reverse()), null);
   assert.equal(deviceBridgeCapabilityProfile([...T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES].reverse()), null);
   assert.equal(deviceBridgeCapabilityProfile([...T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES].reverse()), null);
+  assert.equal(deviceBridgeCapabilityProfile([...T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES].reverse()), null);
   assert.equal(deviceBridgeCapabilityProfile([...T2_DEVICE_CAPABILITIES, "TINDER_DRAFT_SEND_V1"]), "T5");
   assert.equal(deviceBridgeCapabilityProfile([...T2_DEVICE_CAPABILITIES, "TINDER_VISIBLE_CHAT_SYNC_V1"]), "T4");
   assert.equal(deviceBridgeCapabilityProfile([
@@ -145,6 +156,10 @@ test("T1/T2/T5/T4/T4-resume/attestation capability profiles are exact, ordered a
     ...T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
     "TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_V2"
   ]), null);
+  assert.equal(deviceBridgeCapabilityProfile([
+    ...T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+    "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_V1"
+  ]), "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP");
   assert.equal(isKnownTinderStateForCapabilities("UNKNOWN", T0_DEVICE_CAPABILITIES), true);
   assert.equal(isKnownTinderStateForCapabilities("CONNECTED", T0_DEVICE_CAPABILITIES), false);
   assert.equal(isKnownTinderStateForCapabilities("CONNECTING", T1_DEVICE_CAPABILITIES), true);

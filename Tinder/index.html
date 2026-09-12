@@ -357,6 +357,39 @@
       line-height: 1.45;
     }
 
+    .unbound-conversation-disclosure {
+      width: 100%;
+    }
+
+    .unbound-conversation-disclosure > summary {
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .unbound-conversation-disclosure > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .unbound-conversation-disclosure > summary::after {
+      content: "Nachrichten anzeigen";
+      display: inline-block;
+      margin-top: 9px;
+      color: #b6d4ff;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .unbound-conversation-disclosure[open] > summary::after {
+      content: "Nachrichten ausblenden";
+    }
+
+    .unbound-conversation-read-copy {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
    .capture-mapping-context {
      display: grid;
      grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -863,6 +896,18 @@
         </span>
       </section>
 
+      <section class="enrollment-panel pending-capture-panel" id="unboundConversationPanel" aria-labelledby="unboundConversationHeading">
+        <h2 id="unboundConversationHeading">Neue, noch unzugeordnete Conversations</h2>
+        <p>
+          Sicher gelesene Verlaeufe bleiben ohne Personen- oder Kontaktzuordnung PENDING.
+          Die read-only Ansicht erstellt keine Zuordnung, keinen Entwurf und keinen Versand.
+        </p>
+        <div class="pending-capture-list" id="unboundConversationList" aria-live="polite"></div>
+        <span class="enrollment-message" id="unboundConversationMessage" role="status" aria-live="polite">
+          Neue, noch unzugeordnete Conversations werden geladen.
+        </span>
+      </section>
+
       <section class="enrollment-panel pending-capture-panel" id="openDraftReviewPanel" aria-labelledby="openDraftReviewHeading">
         <h2 id="openDraftReviewHeading">Offene T4-Entwurfsprüfungen</h2>
         <p>
@@ -1146,6 +1191,8 @@
       inboxNavigationStatus: document.getElementById("inboxNavigationStatus"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
+       unboundConversationList: document.getElementById("unboundConversationList"),
+       unboundConversationMessage: document.getElementById("unboundConversationMessage"),
        openDraftReviewList: document.getElementById("openDraftReviewList"),
        openDraftReviewMessage: document.getElementById("openDraftReviewMessage"),
        draftEligibleCapturePanel: document.getElementById("draftEligibleCapturePanel"),
@@ -1214,6 +1261,9 @@
     const VISIBLE_CHAT_SYNC_REFRESH_MAX_ATTEMPTS = 45;
     const OFFICIAL_APP_RESUME_REFRESH_DELAY_MS = 5000;
     const OFFICIAL_APP_RESUME_REFRESH_MAX_ATTEMPTS = 45;
+   const UNBOUND_CONVERSATION_TRANSCRIPT_LIMIT = 8;
+   const UNBOUND_CONVERSATION_MESSAGE_LIMIT = 100;
+   const UNBOUND_CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const INBOX_NAVIGATION_STAGES = new Set([
      "IDLE", "AWAITING_INBOX", "AWAITING_OFFICIAL_RESUME_HANDOFF",
@@ -2753,6 +2803,110 @@
        `OBSERVED_EVENTS: ${navigation.observed_event_count}`;
    }
 
+   function pendingUnboundConversationTranscriptIsSafe(transcript) {
+     const receivedAt = new Date(transcript?.received_at || "");
+     return hasExactConversationFields(transcript, [
+       "received_at", "mapping_status", "human_review_status", "messages"
+     ]) && !Number.isNaN(receivedAt.valueOf())
+       && transcript.mapping_status === "NEEDS_HUMAN_MAPPING"
+       && transcript.human_review_status === "PENDING"
+       && Array.isArray(transcript.messages)
+       && transcript.messages.length >= 1
+       && transcript.messages.length <= UNBOUND_CONVERSATION_MESSAGE_LIMIT
+       && transcript.messages.every((message) =>
+         hasExactConversationFields(message, ["direction", "text"])
+         && ["INBOUND", "OUTBOUND"].includes(message.direction)
+         && typeof message.text === "string"
+         && message.text.trim().length > 0
+         && message.text.trim().length <= UNBOUND_CONVERSATION_MESSAGE_TEXT_LIMIT
+         && !/[\u0000-\u001f\u007f]/.test(message.text)
+       );
+   }
+
+   function setPendingUnboundConversationUnavailable(message) {
+     elements.unboundConversationList.replaceChildren();
+     const unavailable = document.createElement("div");
+     unavailable.className = "pending-capture-empty";
+     unavailable.textContent = message;
+     elements.unboundConversationList.append(unavailable);
+     elements.unboundConversationMessage.textContent = message;
+   }
+
+   function renderPendingUnboundConversations(transcripts) {
+     elements.unboundConversationList.replaceChildren();
+     if (transcripts.length === 0) {
+       const empty = document.createElement("div");
+       empty.className = "pending-capture-empty";
+       empty.textContent = "Keine neuen, noch unzugeordneten Conversations liegen derzeit vor.";
+       elements.unboundConversationList.append(empty);
+       elements.unboundConversationMessage.textContent = "Keine neue Conversation wartet auf eine menschliche Zuordnung.";
+       return;
+     }
+
+     for (const transcript of transcripts) {
+       const item = document.createElement("article");
+       item.className = "pending-capture-item";
+       const disclosure = document.createElement("details");
+       disclosure.className = "unbound-conversation-disclosure";
+       const summary = document.createElement("summary");
+       const copy = document.createElement("div");
+       copy.className = "pending-capture-copy";
+       const title = document.createElement("div");
+       title.className = "pending-capture-name";
+       title.textContent = "Neue, noch unzugeordnete Conversation";
+       const meta = document.createElement("div");
+       meta.className = "pending-capture-meta";
+       meta.textContent = "PENDING. Sicher gelesen. Wartet auf eine spaetere bewusste Zuordnung.";
+       copy.append(title, meta);
+       summary.append(copy);
+
+       const readOnlyCopy = document.createElement("p");
+       readOnlyCopy.className = "unbound-conversation-read-copy";
+       readOnlyCopy.textContent = "Read-only Nachrichtenansicht. Sie ordnet keine Person zu, erstellt keinen Entwurf und versendet nichts.";
+       const messages = transcript.messages.map((message) => Object.freeze({
+         direction: message.direction === "INBOUND" ? "INCOMING" : "OUTGOING",
+         text: message.text
+       }));
+       disclosure.append(summary, readOnlyCopy, renderConversationMessages(messages, "conversation-messages"));
+       item.append(disclosure);
+       elements.unboundConversationList.append(item);
+     }
+     elements.unboundConversationMessage.textContent =
+       `${transcripts.length} neue Conversation${transcripts.length === 1 ? "" : "s"} wartet ohne automatische Zuordnung auf eine spaetere menschliche Entscheidung.`;
+   }
+
+   let pendingUnboundConversationRequestGeneration = 0;
+   async function loadPendingUnboundConversations() {
+     const generation = ++pendingUnboundConversationRequestGeneration;
+     const deviceId = String(selectedDevice?.device_id || "");
+     if (!UUID_V4.test(deviceId)) {
+       setPendingUnboundConversationUnavailable(
+         "Neue Conversations werden nach Auswahl eines eindeutigen aktiven Android-Geraets geladen."
+       );
+       return;
+     }
+     try {
+       const data = await requestJson(
+         `/api/tinder/captures?deviceId=${encodeURIComponent(deviceId)}&view=unbound-inbox-conversation-sweep-transcripts`
+       );
+       if (generation !== pendingUnboundConversationRequestGeneration
+           || String(selectedDevice?.device_id || "") !== deviceId) return;
+       const transcripts = Array.isArray(data?.transcripts) ? data.transcripts : null;
+       if (data?.ok !== true || !transcripts
+           || transcripts.length > UNBOUND_CONVERSATION_TRANSCRIPT_LIMIT
+           || transcripts.some((transcript) => !pendingUnboundConversationTranscriptIsSafe(transcript))) {
+         throw new Error("Invalid pending Conversation response.");
+       }
+       renderPendingUnboundConversations(transcripts);
+     } catch {
+       if (generation !== pendingUnboundConversationRequestGeneration
+           || String(selectedDevice?.device_id || "") !== deviceId) return;
+       setPendingUnboundConversationUnavailable(
+         "Neue, noch unzugeordnete Conversations koennen derzeit nicht sicher geladen werden."
+       );
+     }
+   }
+
    function setUnavailableDeviceDetails(value) {
      renderInboxNavigationStatus(null);
      setDot(elements.bridgeDot, "info");
@@ -2844,6 +2998,7 @@
          selectedDevice = device;
          renderDeviceSelection(devices);
          renderDeviceStatus({ devices: [device] });
+         void loadPendingUnboundConversations();
        });
        return button;
      }));
@@ -2945,6 +3100,7 @@
     // for the presentation-only bootstrap affordance. Re-rendering the
     // binding cards keeps the UI disabled without replaying any command.
     selectedDevice = null;
+    void loadPendingUnboundConversations();
      setDot(elements.deviceDot, "bad");
      elements.deviceValue.textContent = "Nicht verfügbar";
      elements.deviceSub.textContent = error?.message || "Device-Bridge-Status konnte nicht geladen werden";
@@ -3055,6 +3211,7 @@
      try {
        const data = await requestJson("/api/tinder/device-status");
        renderDeviceStatus(data);
+       await loadPendingUnboundConversations();
        return data;
      } catch (error) {
        renderDeviceStatusError(error);

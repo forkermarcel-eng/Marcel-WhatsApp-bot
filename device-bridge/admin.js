@@ -8,6 +8,7 @@ import {
 } from "./protocol-v1.js";
 import {
   deriveDeviceStatus,
+  TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND,
   TINDER_INBOX_NAVIGATION_REASONS,
   TINDER_INBOX_NAVIGATION_STAGES
 } from "./heartbeat.js";
@@ -57,6 +58,9 @@ const TINDER_INBOX_NAVIGATION_REASON_SET = new Set(TINDER_INBOX_NAVIGATION_REASO
 const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
   "stage", "reason", "visible_conversation_count", "observed_event_count"
 ]);
+const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
+]);
 const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
 
 function plainObject(value) {
@@ -74,7 +78,8 @@ function exactKeys(value, keys) {
  * unavailable instead of falling back to a stale observation.
  */
 export function normalizeAdminInboxNavigationStatus(value) {
-  if (!exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
+  const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
+  if (!(exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || freshObservation)
       || !TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
       || !TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
@@ -82,7 +87,11 @@ export function normalizeAdminInboxNavigationStatus(value) {
       || value.visible_conversation_count > TINDER_INBOX_NAVIGATION_MAX_COUNT
       || !Number.isSafeInteger(value.observed_event_count)
       || value.observed_event_count < 0
-      || value.observed_event_count > TINDER_INBOX_NAVIGATION_MAX_COUNT) {
+      || value.observed_event_count > TINDER_INBOX_NAVIGATION_MAX_COUNT
+      || (freshObservation && (
+        value.observation_kind !== TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
+        || !isUuidV4(value.observation_nonce)
+      ))) {
     return null;
   }
   return Object.freeze({

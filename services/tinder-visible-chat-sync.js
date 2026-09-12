@@ -58,6 +58,9 @@ export const TINDER_VISIBLE_CHAT_SYNC_REASON = Object.freeze({
   DEVICE_CAPABILITY_UNSUPPORTED: "DEVICE_CAPABILITY_UNSUPPORTED",
   HUMAN_ARMED_PERMIT_ACTIVE: "HUMAN_ARMED_PERMIT_ACTIVE",
   OFFICIAL_APP_RESUME_PERMIT_ACTIVE: "OFFICIAL_APP_RESUME_PERMIT_ACTIVE",
+  // V8 owns the device while it is reading and returning between Inbox rows.
+  // A V4 reader must never be queued concurrently with that bounded sweep.
+  UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE: "UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE",
   SYNC_PERMIT_ACTIVE: "SYNC_PERMIT_ACTIVE",
   PERMIT_NOT_FOUND: "PERMIT_NOT_FOUND",
   PERMIT_ALREADY_CONSUMED: "PERMIT_ALREADY_CONSUMED",
@@ -323,6 +326,7 @@ function requireRepository(repository) {
     "findActiveHumanArmedPermitForDevice",
     "findActiveVisibleChatSyncPermitForDevice",
     "findActiveOfficialAppResumePermitForDevice",
+    "findActiveUnboundInboxConversationSweepForDevice",
     "getConfirmedSourceCaptureForUpdate",
     "queueVisibleChatSyncCommand",
     "createVisibleChatSyncPermit",
@@ -455,6 +459,15 @@ export function createTinderVisibleChatSyncService(repository, {
         return Object.freeze({
           status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_CONFLICT,
           reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.OFFICIAL_APP_RESUME_PERMIT_ACTIVE
+        });
+      }
+      if (strictBoolean(await repository.findActiveUnboundInboxConversationSweepForDevice(transaction, {
+        deviceId: normalized.deviceId,
+        now: currentTime.toISOString()
+      }), "findActiveUnboundInboxConversationSweepForDevice")) {
+        return Object.freeze({
+          status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_CONFLICT,
+          reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
         });
       }
 
@@ -968,6 +981,28 @@ export function createPgTinderVisibleChatSyncRepository(pool) {
              FROM tinder_official_app_resume_permits
             WHERE device_id=$1
               AND permit_state='ISSUED'
+              AND expires_at>$2
+         ) AS active`,
+        [deviceId, currentTime]
+      );
+      return result.rows[0]?.active === true;
+    },
+
+    // V8 is optional until its explicit foundation migration has committed.
+    // The issuer already holds the device row lock, so this guarded lookup
+    // serializes V4 issuance against an active V8 parent without making a
+    // pre-V8 deployment query a schema-absence failure.
+    async findActiveUnboundInboxConversationSweepForDevice(client, { deviceId, now: currentTime }) {
+      const relation = await client.query(
+        "SELECT to_regclass('tinder_unbound_inbox_conversation_sweeps') AS relation_name"
+      );
+      if (!relation.rows[0]?.relation_name) return false;
+      const result = await client.query(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM tinder_unbound_inbox_conversation_sweeps
+            WHERE device_id=$1
+              AND sweep_state='ACTIVE'
               AND expires_at>$2
          ) AS active`,
         [deviceId, currentTime]

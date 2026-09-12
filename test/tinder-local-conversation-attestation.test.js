@@ -80,6 +80,7 @@ function fixtureRepository({
   bindingRow = binding(),
   permitRows = [],
   activeLocal = null,
+  activeUnboundInboxSweep = false,
   inboxNavigation = {
     stage: "CHAT_VERIFIED",
     reason: "NONE",
@@ -132,6 +133,10 @@ function fixtureRepository({
     async findActiveHumanArmedPermitForDevice() { return false; },
     async findActiveVisibleChatSyncPermitForDevice() { return false; },
     async findActiveOfficialAppResumePermitForDevice() { return false; },
+    async findActiveUnboundInboxConversationSweepForDevice(_transaction, input) {
+      state.calls.push({ type: "find-v8-sweep", input });
+      return activeUnboundInboxSweep;
+    },
     async lookupHumanBindingDeviceId(_transaction, bindingId) {
       return bindingId === BINDING_ID ? bindingRow.device_id : null;
     },
@@ -300,6 +305,23 @@ test("one active local proof per device fails closed without replacing the exist
   });
   assert.equal(repository.state.commands.length, 0);
   assert.equal(repository.state.audits.length, 0);
+});
+
+test("local attestation fails closed while an active V8 Inbox sweep owns the locked device", async () => {
+  const repository = fixtureRepository({ activeUnboundInboxSweep: true });
+  const result = await service(repository).queueBootstrap({
+    bindingId: BINDING_ID,
+    confirmed: true,
+    actor: "DASHBOARD_HUMAN"
+  });
+
+  assert.deepEqual(result, {
+    status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_CONFLICT,
+    reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
+  });
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
+  assert.equal(repository.state.calls.some(call => call.type === "find-v8-sweep"), true);
 });
 
 test("staged proof atomically becomes ATTESTED and queues one separate reader authority", async () => {

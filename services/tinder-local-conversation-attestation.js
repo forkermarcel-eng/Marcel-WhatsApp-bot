@@ -71,6 +71,7 @@ export const TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON = Object.freeze({
   HUMAN_ARMED_PERMIT_ACTIVE: "HUMAN_ARMED_PERMIT_ACTIVE",
   VISIBLE_CHAT_SYNC_PERMIT_ACTIVE: "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
   OFFICIAL_APP_RESUME_PERMIT_ACTIVE: "OFFICIAL_APP_RESUME_PERMIT_ACTIVE",
+  UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE: "UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE",
   ATTESTATION_ACTIVE: "ATTESTATION_ACTIVE",
   LOCAL_CONVERSATION_ATTESTATION_DEVICE_BUSY: "LOCAL_CONVERSATION_ATTESTATION_DEVICE_BUSY",
   BINDING_NOT_FOUND: "BINDING_NOT_FOUND",
@@ -444,6 +445,7 @@ function requireRepository(repository) {
     "findActiveHumanArmedPermitForDevice",
     "findActiveVisibleChatSyncPermitForDevice",
     "findActiveOfficialAppResumePermitForDevice",
+    "findActiveUnboundInboxConversationSweepForDevice",
     "lookupHumanBindingDeviceId",
     "getConfirmedHumanBindingForUpdate",
     "findActiveLocalConversationAttestationForDeviceForUpdate",
@@ -654,6 +656,15 @@ export function createTinderLocalConversationAttestationService(repository, {
         return Object.freeze({
           status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_CONFLICT,
           reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.OFFICIAL_APP_RESUME_PERMIT_ACTIVE
+        });
+      }
+      if (strictBoolean(await repository.findActiveUnboundInboxConversationSweepForDevice(transaction, {
+        deviceId: binding.deviceId,
+        now: currentTime.toISOString()
+      }), "findActiveUnboundInboxConversationSweepForDevice")) {
+        return Object.freeze({
+          status: TINDER_LOCAL_CONVERSATION_ATTESTATION_STATUS.PERMIT_CONFLICT,
+          reasonCode: TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
         });
       }
       const active = await repository.findActiveLocalConversationAttestationForDeviceForUpdate(transaction, {
@@ -1061,6 +1072,28 @@ export function createPgTinderLocalConversationAttestationRepository(pool) {
         `SELECT EXISTS (
            SELECT 1 FROM tinder_official_app_resume_permits
             WHERE device_id=$1 AND permit_state='ISSUED' AND expires_at>$2
+         ) AS active`,
+        [deviceId, currentTime]
+      );
+      return result.rows[0]?.active === true;
+    },
+
+    // The V8 foundation is optional until its separately approved migration.
+    // This issuer has already locked the device row, so a live V8 parent owns
+    // the same device across this guarded check and no local-attestation
+    // command can be created alongside it.
+    async findActiveUnboundInboxConversationSweepForDevice(client, { deviceId, now: currentTime }) {
+      const relation = await client.query(
+        "SELECT to_regclass('tinder_unbound_inbox_conversation_sweeps') AS relation_name"
+      );
+      if (!relation.rows[0]?.relation_name) return false;
+      const result = await client.query(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM tinder_unbound_inbox_conversation_sweeps
+            WHERE device_id=$1
+              AND sweep_state='ACTIVE'
+              AND expires_at>$2
          ) AS active`,
         [deviceId, currentTime]
       );

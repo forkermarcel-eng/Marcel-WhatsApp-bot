@@ -52,6 +52,14 @@ import {
   createPgTinderLocalConversationAttestationRepository,
   createTinderLocalConversationAttestationService
 } from "../services/tinder-local-conversation-attestation.js";
+import {
+  TinderUnboundInboxConversationSweepError,
+  createPgTinderUnboundInboxConversationSweepRepository,
+  createTinderUnboundInboxConversationSweepService
+} from "../services/tinder-unbound-inbox-conversation-sweep.js";
+import {
+  assertTinderUnboundInboxConversationSweepSchemaReady
+} from "./tinder-unbound-inbox-conversation-sweep-schema.js";
 import { TINDER_IDENTITY_RESOLUTION_STATUS } from "../services/tinder-identity-resolution.js";
 
 /* ==================================================
@@ -110,6 +118,12 @@ const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_QUEUE_STATUSES = new Set([
 const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_REASONS = new Set(
   Object.values(TINDER_LOCAL_CONVERSATION_ATTESTATION_REASON)
 );
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUSES = new Set([
+  "NOT_REQUESTED", "ACTIVE", "COMPLETED", "STOPPED", "EXPIRED"
+]);
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TRANSCRIPT_LIMIT = 8;
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_MESSAGE_LIMIT = 100;
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TEXT_LIMIT = 4096;
 const PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES = new Set([
   HUMAN_ARMED_CONVERSATION_STATUS.UNSAFE_CAPTURE,
   HUMAN_ARMED_CONVERSATION_STATUS.PENDING_CAPTURE_REQUIRED,
@@ -174,6 +188,17 @@ function normalizeBindingId(value) {
     throw error;
   }
   return bindingId;
+}
+
+function normalizeDeviceId(value) {
+  const deviceId = String(value || "").trim();
+  if (!isUuidV4(deviceId)) {
+    const error = new Error("Invalid device identifier.");
+    error.statusCode = 400;
+    error.code = "INVALID_DEVICE_ID";
+    throw error;
+  }
+  return deviceId;
 }
 
 function normalizeCaptureRecord(row, { conversationBindingStatus = null } = {}) {
@@ -598,6 +623,69 @@ function boundedOfficialAppResumeQueueResult(result) {
   });
 }
 
+function boundedUnboundInboxConversationSweepStatus(result) {
+  const status = String(result?.status || "").trim().toUpperCase();
+  if (!PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUSES.has(status)
+      || !exactKeys(result, ["status"])) {
+    const error = new Error("Invalid unbound Inbox sweep status.");
+    error.statusCode = 500;
+    error.code = "INVALID_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS";
+    throw error;
+  }
+  return Object.freeze({ status });
+}
+
+/**
+ * This is the only V8 transcript projection for the existing Tinder
+ * dashboard. It is device-scoped and bounded to one parent's capacity. It
+ * deliberately has no transcript/sweep/step/command IDs, no row evidence,
+ * no source or fingerprint, and no person/contact/binding data.
+ */
+function normalizePendingUnboundInboxConversationSweepTranscriptRecords(rows) {
+  if (!Array.isArray(rows) || rows.length > TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TRANSCRIPT_LIMIT) {
+    const error = new Error("Invalid unbound Inbox sweep transcript records.");
+    error.statusCode = 500;
+    error.code = "INVALID_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS";
+    throw error;
+  }
+  return Object.freeze(rows.map((row) => {
+    const mappingStatus = String(row?.mappingStatus ?? row?.mapping_status ?? "").trim().toUpperCase();
+    const humanReviewStatus = String(row?.humanReviewStatus ?? row?.human_review_status ?? "").trim().toUpperCase();
+    const receivedAtValue = row?.receivedAt ?? row?.received_at;
+    const receivedAt = new Date(receivedAtValue);
+    const rawMessages = row?.messages ?? row?.visible_messages;
+    if (mappingStatus !== "NEEDS_HUMAN_MAPPING" || humanReviewStatus !== "PENDING"
+        || Number.isNaN(receivedAt.valueOf()) || !Array.isArray(rawMessages)
+        || rawMessages.length < 1 || rawMessages.length > TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_MESSAGE_LIMIT) {
+      const error = new Error("Invalid unbound Inbox sweep transcript record.");
+      error.statusCode = 500;
+      error.code = "INVALID_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS";
+      throw error;
+    }
+    const messages = rawMessages.map((message, index) => {
+      const visibleOrder = Number(message?.visibleOrder ?? message?.visible_order);
+      const direction = String(message?.direction || "").trim().toUpperCase();
+      const text = typeof message?.text === "string" ? message.text : "";
+      if (!exactKeys(message, ["visible_order", "direction", "text"])
+          || visibleOrder !== index + 1 || !["INBOUND", "OUTBOUND"].includes(direction)
+          || !text || text.length > TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TEXT_LIMIT
+          || /[\u0000-\u001f\u007f]/.test(text)) {
+        const error = new Error("Invalid unbound Inbox sweep transcript record.");
+        error.statusCode = 500;
+        error.code = "INVALID_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS";
+        throw error;
+      }
+      return Object.freeze({ direction, text });
+    });
+    return Object.freeze({
+      received_at: receivedAt.toISOString(),
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: Object.freeze(messages)
+    });
+  }));
+}
+
 /**
  * A dashboard user may only request the bounded V4 sync for the capture they
  * already selected in the existing capture context. The server alone derives
@@ -840,6 +928,106 @@ function createTinderDashboardOfficialAppResumeQueueHandler(pool, {
               ? "CAPTURE_NOT_FOUND"
               : "TINDER_OFFICIAL_APP_RESUME_QUEUE_FAILED",
         error: "Official Tinder app resume could not be queued."
+      });
+    }
+  };
+}
+
+/**
+ * Bounded, content-free technical state only; no parent, child, transcript,
+ * row, name, identity, or Inbox-observation value crosses the dashboard
+ * boundary. V8 issuance is heartbeat-only and has no dashboard start route.
+ */
+function createTinderDashboardUnboundInboxConversationSweepStatusHandler(pool, {
+  createRepository = createPgTinderUnboundInboxConversationSweepRepository,
+  createService = createTinderUnboundInboxConversationSweepService,
+  assertFoundationReady = assertTinderUnboundInboxConversationSweepSchemaReady
+} = {}) {
+  const requireCanonicalFoundation = async (transaction) => {
+    try {
+      await assertFoundationReady(transaction);
+    } catch {
+      const error = new Error("Unbound Inbox sweep foundation is not ready.");
+      error.statusCode = 503;
+      error.code = "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY";
+      throw error;
+    }
+  };
+  const sweepService = createService(createRepository(pool), {
+    assertFoundationReady: requireCanonicalFoundation
+  });
+  return async function tinderDashboardUnboundInboxConversationSweepStatusHandler(req, res) {
+    try {
+      const sweep = boundedUnboundInboxConversationSweepStatus(
+        await sweepService.getBoundedSweepStatus({
+          deviceId: normalizeDeviceId(req.params.deviceId)
+        })
+      );
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({ ok: true, unbound_inbox_sweep: sweep });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)
+          || error?.code === "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY") {
+        return res.status(503).json({
+          ok: false,
+          code: "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY",
+          error: "Unbound Inbox sweep foundation is not ready."
+        });
+      }
+      const status = Number(error?.statusCode)
+        || (error instanceof TinderUnboundInboxConversationSweepError ? error.statusCode : 500);
+      if (status === 500) console.error("Tinder unbound Inbox sweep status failed.");
+      return res.status(status).json({
+        ok: false,
+        code: status === 400 && error?.code === "INVALID_DEVICE_ID"
+          ? "INVALID_DEVICE_ID"
+          : "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_FAILED",
+        error: "Unbound Inbox sweep status could not be loaded."
+      });
+    }
+  };
+}
+
+/**
+ * Read-only dashboard projection for separately persisted V8 PENDING
+ * transcripts. It cannot select, map, bind, resolve, or reissue a sweep.
+ */
+function createTinderDashboardUnboundInboxConversationSweepTranscriptListHandler(pool, {
+  createRepository = createPgTinderUnboundInboxConversationSweepRepository
+} = {}) {
+  const repository = createRepository(pool);
+  return async function tinderDashboardUnboundInboxConversationSweepTranscriptListHandler(req, res) {
+    try {
+      if (typeof repository.listPendingUnboundInboxConversationSweepTranscripts !== "function") {
+        const error = new Error("Unbound Inbox sweep transcript reader is unavailable.");
+        error.statusCode = 503;
+        error.code = "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY";
+        throw error;
+      }
+      const transcripts = normalizePendingUnboundInboxConversationSweepTranscriptRecords(
+        await repository.listPendingUnboundInboxConversationSweepTranscripts({
+          deviceId: normalizeDeviceId(req.params.deviceId)
+        })
+      );
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({ ok: true, transcripts });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)
+          || error?.code === "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY") {
+        return res.status(503).json({
+          ok: false,
+          code: "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY",
+          error: "Unbound Inbox sweep foundation is not ready."
+        });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder unbound Inbox sweep transcript list failed.");
+      return res.status(status).json({
+        ok: false,
+        code: status === 400 && error?.code === "INVALID_DEVICE_ID"
+          ? "INVALID_DEVICE_ID"
+          : "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_LIST_FAILED",
+        error: "Unbound Inbox sweep transcripts could not be loaded."
       });
     }
   };
@@ -1232,6 +1420,10 @@ function registerTinderCaptureRoutes({
   const queueHumanArmedLocalConversationAttestation =
     createTinderDashboardHumanArmedLocalConversationAttestationQueueHandler(pool);
   const queueOfficialAppResume = createTinderDashboardOfficialAppResumeQueueHandler(pool);
+  const readUnboundInboxConversationSweepStatus =
+    createTinderDashboardUnboundInboxConversationSweepStatusHandler(pool);
+  const listUnboundInboxConversationSweepTranscripts =
+    createTinderDashboardUnboundInboxConversationSweepTranscriptListHandler(pool);
   const dashboard = (handler) => async (req, res) => {
     if (!dashboardApiReady(res)) return;
     if (!dashboardApiAuthorized(req)) return res.status(401).json({ ok: false, error: "Not authorized." });
@@ -1250,6 +1442,14 @@ function registerTinderCaptureRoutes({
   app.post("/dashboard-api/tinder/captures/:captureId/human-armed-binding", dashboard(armCaptureConversation));
   app.post("/dashboard-api/tinder/captures/:captureId/visible-chat-sync", dashboard(queueVisibleChatSync));
   app.post("/dashboard-api/tinder/captures/:captureId/resume-official-app", dashboard(queueOfficialAppResume));
+  app.get(
+    "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps/status",
+    dashboard(readUnboundInboxConversationSweepStatus)
+  );
+  app.get(
+    "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps/transcripts",
+    dashboard(listUnboundInboxConversationSweepTranscripts)
+  );
   app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/rearm", dashboard(rearmCaptureConversation));
   app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/visible-chat-sync", dashboard(queueHumanArmedVisibleChatSync));
   app.post("/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/local-conversation-attestation", dashboard(queueHumanArmedLocalConversationAttestation));
@@ -1280,16 +1480,21 @@ export {
   createTinderDashboardHumanArmedVisibleChatSyncQueueHandler,
   createTinderDashboardHumanArmedLocalConversationAttestationQueueHandler,
   createTinderDashboardOfficialAppResumeQueueHandler,
+  createTinderDashboardUnboundInboxConversationSweepStatusHandler,
+  createTinderDashboardUnboundInboxConversationSweepTranscriptListHandler,
   createTinderDashboardHumanArmedBindingHandler,
   createTinderDashboardHumanArmedRearmHandler,
   createTinderDashboardHumanArmedBindingListHandler,
   isFoundationNotReadyError,
   normalizeBindingId,
+  normalizeDeviceId,
   boundedVisibleChatSyncQueueResult,
   boundedLocalConversationAttestationQueueResult,
   normalizeCaptureRecord,
   assertEmptyOfficialAppResumeBody,
   boundedOfficialAppResumeQueueResult,
+  boundedUnboundInboxConversationSweepStatus,
+  normalizePendingUnboundInboxConversationSweepTranscriptRecords,
   normalizeDraftEligibleCaptureRecords,
   normalizeHumanArmedBindingRecords,
   normalizePendingCaptureRecords,

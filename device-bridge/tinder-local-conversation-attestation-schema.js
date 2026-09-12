@@ -11,7 +11,8 @@ import { canonicalSchemaPredicate } from "./schema-contract.js";
 import {
   inspectDeviceBridgeT1Schema,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
-  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME
 } from "./t1-schema.js";
 import {
   inspectTinderOfficialAppResumePermitV2Schema,
@@ -489,6 +490,10 @@ async function commandConstraintState(client, inspectDeviceBridgeSchema) {
     && item.specification?.column === "command_type");
   if (command?.constraintName === TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME) return "V5";
   if (command?.constraintName === TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME) return "V6";
+  // V8 only adds separate unbound sweep commands. It does not weaken or
+  // reinterpret any V6 attestation/confirmed-V4 contract, so this inspector
+  // remains forward-compatible after the V8 upgrade.
+  if (command?.constraintName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME) return "V8";
   return "INVALID";
 }
 
@@ -566,7 +571,7 @@ export async function inspectTinderLocalConversationAttestationSchema(client, {
     return { state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.UPGRADE_REQUIRED };
   }
 
-  const canonical = commandState === "V6"
+  const canonical = (commandState === "V6" || commandState === "V8")
     && relationKind(relations.rows, VISIBLE_CHAT_SYNC_PERMIT_TABLE) === "r"
     && relationKind(relations.rows, OFFICIAL_APP_RESUME_PERMIT_TABLE) === "r"
     && relationKind(relations.rows, VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE) === "r"

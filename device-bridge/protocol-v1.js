@@ -35,6 +35,11 @@ export const TINDER_LOCAL_CONVERSATION_ATTESTATION_CAPABILITY =
 // new bootstrap or an attested V4 reader command.
 export const TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CAPABILITY =
   "TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_V2";
+// V8 is a distinct bounded autonomous read/return state machine directly
+// over the V6 post-chat profile. Each child command remains empty-payload
+// and separately auditable.
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CAPABILITY =
+  "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_V1";
 // This marker is deliberately part of the signed, persisted bootstrap
 // command payload rather than inferred from the mutable device profile.  It
 // lets every later server-side transition distinguish a new post-chat proof
@@ -101,6 +106,13 @@ export const T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES = Object.freeze
 export const TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES =
   T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES;
 
+export const T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES = Object.freeze([
+  ...T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CAPABILITY
+]);
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DEVICE_CAPABILITIES =
+  T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES;
+
 export const T0_DEVICE_BRIDGE_COMMANDS = Object.freeze([
   "PING",
   "REQUEST_STATUS",
@@ -132,6 +144,11 @@ export const T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS = Object.freeze([
   "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION"
 ]);
 
+export const T4_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS = Object.freeze([
+  "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT",
+  "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT"
+]);
+
 export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
   ...T0_DEVICE_BRIDGE_COMMANDS,
   ...T1_TINDER_MANUAL_GATE_COMMANDS,
@@ -139,7 +156,8 @@ export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
   ...T5_TINDER_MANUAL_SEND_COMMANDS,
   ...T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS,
   ...T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS,
-  ...T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS
+  ...T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS,
+  ...T4_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS
 ]);
 
 export const BRIDGE_SERVICE_STATES = Object.freeze([
@@ -197,17 +215,18 @@ export function deviceBridgeCapabilityProfile(capabilities) {
   if (exactArray(capabilities, T4_RESUME_DEVICE_CAPABILITIES)) return "T4_RESUME";
   if (exactArray(capabilities, T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION";
   if (exactArray(capabilities, T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION_POST_CHAT";
+  if (exactArray(capabilities, T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
   return null;
 }
 
 export function isTinderManualGateCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
+  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
 }
 
 export function isTinderHumanArmedConversationBindingCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
+  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
 }
 
 export function isTinderManualSendCapable(capabilities) {
@@ -216,17 +235,17 @@ export function isTinderManualSendCapable(capabilities) {
 
 export function isTinderVisibleChatSyncCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
+  return profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
 }
 
 export function isTinderOfficialAppResumeCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
+  return profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
 }
 
 export function isTinderLocalConversationAttestationCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT";
+  return profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
 }
 
 // New bootstrap, its STAGED acknowledgement, signed positive ATTESTED
@@ -234,7 +253,14 @@ export function isTinderLocalConversationAttestationCapable(capabilities) {
 // profile above remains intentionally recognizable only for fail-closed
 // historical-state handling, never for new post-chat authority.
 export function isTinderLocalConversationAttestationPostChatCapable(capabilities) {
-  return deviceBridgeCapabilityProfile(capabilities) === "T4_RESUME_ATTESTATION_POST_CHAT";
+  const profile = deviceBridgeCapabilityProfile(capabilities);
+  return profile === "T4_RESUME_ATTESTATION_POST_CHAT"
+    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
+}
+
+export function isTinderUnboundInboxConversationSweepCapable(capabilities) {
+  return deviceBridgeCapabilityProfile(capabilities)
+    === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
 }
 
 export function isKnownTinderStateForCapabilities(state, capabilities) {

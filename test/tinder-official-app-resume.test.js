@@ -36,6 +36,7 @@ function fixtureRepository({
   activeHumanArmed = false,
   activeVisibleChatSync = false,
   activeResume = false,
+  activeUnboundInboxSweep = false,
   historicalPermits = [],
   confirmedSource = {
     source_capture_id: CAPTURE_ID,
@@ -62,6 +63,10 @@ function fixtureRepository({
     async findActiveOfficialAppResumePermitForDevice(_transaction, input) {
       state.calls.push({ type: "resume", input });
       return activeResume;
+    },
+    async findActiveUnboundInboxConversationSweepForDevice(_transaction, input) {
+      state.calls.push({ type: "unbound-inbox-sweep", input });
+      return activeUnboundInboxSweep;
     },
     async getConfirmedHumanArmedSourceForUpdate(_transaction, input) {
       state.calls.push({ type: "confirmed-human-armed-source", input });
@@ -150,6 +155,23 @@ test("official-app resume conflicts with an active V3 or V4 permit before comman
     reasonCode: TINDER_OFFICIAL_APP_RESUME_REASON.VISIBLE_CHAT_SYNC_PERMIT_ACTIVE
   });
   assert.equal(v4Repository.state.commands.length, 0);
+});
+
+test("official-app resume fails closed while an active V8 Inbox sweep owns the locked device", async () => {
+  const repository = fixtureRepository({ activeUnboundInboxSweep: true });
+  const result = await service(repository).queueOfficialAppResume({
+    deviceId: DEVICE_ID,
+    sourceCaptureId: CAPTURE_ID
+  });
+
+  assert.deepEqual(result, {
+    status: TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_CONFLICT,
+    reasonCode: TINDER_OFFICIAL_APP_RESUME_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
+  });
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.length, 0);
+  assert.equal(repository.state.calls.some(call => call.type === "unbound-inbox-sweep"), true);
+  assert.equal(repository.state.calls.some(call => call.type === "confirmed-human-armed-source"), false);
 });
 
 test("official-app resume permits a distinct new V2 authority after terminal V1 history without mutating it", async () => {

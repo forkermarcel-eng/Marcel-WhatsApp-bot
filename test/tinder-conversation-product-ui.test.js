@@ -113,3 +113,32 @@ test("conversation selection remains local and does not enter the existing captu
   assert.match(conversationCode, /selectedConversationCaptureId = captureId/);
   assert.doesNotMatch(conversationCode, /pendingCaptureMappingUrl|captureIdFromLocation|new URLSearchParams\(window\.location/);
 });
+
+test("pending unbound Conversations are a separate read-only PENDING surface without correlation or mapping controls", () => {
+  const unboundCode = sourceBetween(
+    "function pendingUnboundConversationTranscriptIsSafe",
+    "function setUnavailableDeviceDetails"
+  );
+  const panelMarkup = sourceBetween(
+    '<section class="enrollment-panel pending-capture-panel" id="unboundConversationPanel"',
+    '<section class="enrollment-panel pending-capture-panel" id="openDraftReviewPanel"'
+  );
+  const renderedAssignments = (unboundCode.match(/\w+\.textContent\s*=\s*[^;]+;/g) || []).join("\n");
+
+  assert.match(page, /id="unboundConversationPanel"/);
+  assert.match(page, /id="unboundConversationList"/);
+  assert.match(page, /id="unboundConversationMessage"/);
+  assert.match(unboundCode, /function loadPendingUnboundConversations\(\)/);
+  assert.match(unboundCode, /view=unbound-inbox-conversation-sweep-transcripts/);
+  assert.match(unboundCode, /mapping_status === "NEEDS_HUMAN_MAPPING"/);
+  assert.match(unboundCode, /human_review_status === "PENDING"/);
+  assert.match(unboundCode, /Read-only Nachrichtenansicht/);
+  assert.match(unboundCode, /text: message\.text/);
+  assert.match(page, /await loadPendingUnboundConversations\(\)/);
+
+  assert.doesNotMatch(panelMarkup, /<button|<input|<select|<form|href=|data-/i);
+  assert.doesNotMatch(unboundCode, /transcript_id|sweep_id|command_id|binding_id|contact_id|capture_id|thread_fingerprint|capture_fingerprint|fingerprint/i);
+  assert.doesNotMatch(renderedAssignments, /received_at|device|command|sweep|binding|capture|thread|fingerprint|nonce|mapping_status|human_review_status/i);
+  assert.doesNotMatch(unboundCode, /createElement\("button"\)|addEventListener\(|method:\s*"POST"|operation=|JSON\.stringify|body:/);
+  assert.doesNotMatch(unboundCode, /pendingCaptureMappingUrl|window\.location|dataset\./);
+});

@@ -79,7 +79,8 @@ function fixtureRepository({
   bindings = [],
   permits = [],
   activeOfficialAppResume = false,
-  activeLocalConversationAttestation = false
+  activeLocalConversationAttestation = false,
+  activeUnboundInboxSweep = false
 } = {}) {
   const captureRows = new Map(captures.map(row => [row.capture_id, { ...row }]));
   const contactIds = new Set(contacts);
@@ -159,6 +160,10 @@ function fixtureRepository({
     async findActiveLocalConversationAttestationPermitForDevice(_tx, input) {
       state.calls.push({ type: "find-local-attestation", input });
       return activeLocalConversationAttestation;
+    },
+    async findActiveUnboundInboxConversationSweepForDevice(_tx, input) {
+      state.calls.push({ type: "find-v8-sweep", input });
+      return activeUnboundInboxSweep;
     },
     async insertBindingAudit(_tx, audit) { state.audits.push(audit); }
   };
@@ -447,6 +452,40 @@ test("a live local conversation attestation blocks every new V3 identity arm on 
   assert.equal(initialRepository.state.createdContacts.length, 0);
   assert.equal(initialRepository.state.bindings.size, 0);
   assert.equal(initialRepository.state.commands.length, 0);
+});
+
+test("an active V8 Inbox sweep blocks every new V3 identity arm before binding-side writes", async () => {
+  const rearmRepository = fixtureRepository({
+    bindings: [binding()],
+    activeUnboundInboxSweep: true
+  });
+  assert.deepEqual(await service(rearmRepository).rearmExistingBinding({
+    bindingId: BINDING_ID,
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
+  });
+  assert.equal(rearmRepository.state.commands.length, 0);
+  assert.equal(rearmRepository.state.permits.size, 0);
+
+  const initialRepository = fixtureRepository({
+    contacts: [],
+    activeUnboundInboxSweep: true
+  });
+  assert.deepEqual(await service(initialRepository).armInitialCapture({
+    captureId: CAPTURE_A,
+    action: "BIND_CREATE",
+    newContactName: "M Tinder Test",
+    confirmed: true
+  }), {
+    status: HUMAN_ARMED_CONVERSATION_STATUS.CONFLICT,
+    reasonCode: HUMAN_ARMED_CONVERSATION_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
+  });
+  assert.equal(initialRepository.state.createdContacts.length, 0);
+  assert.equal(initialRepository.state.bindings.size, 0);
+  assert.equal(initialRepository.state.commands.length, 0);
+  assert.equal(initialRepository.state.permits.size, 0);
 });
 
 test("an indeterminate V5 resume-permit lookup fails closed before V3 writes", async () => {

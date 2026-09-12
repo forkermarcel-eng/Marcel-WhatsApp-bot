@@ -111,6 +111,10 @@ function storeRepository({
     async findActiveHumanArmedPermitForDevice() { return false; },
     async findActiveVisibleChatSyncPermitForDevice() { return false; },
     async findActiveOfficialAppResumePermitForDevice() { return false; },
+    // The V4 service's issuance contract now also owns a reciprocal V8
+    // conflict check. Ingress only consumes an already staged V4 permit, but
+    // its repository must still implement the full service contract.
+    async findActiveUnboundInboxConversationSweepForDevice() { return false; },
     async getConfirmedSourceCaptureForUpdate(_transaction, input) {
       state.calls.push({ type: "source", input });
       return sourceReady && input.sourceCaptureId === CAPTURE_ID && input.deviceId === DEVICE_ID;

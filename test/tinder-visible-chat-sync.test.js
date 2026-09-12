@@ -42,6 +42,7 @@ function fixtureRepository({
   activeHumanArmed = false,
   activeSync = false,
   activeOfficialAppResume = false,
+  activeUnboundInboxSweep = false,
   sourceConfirmed = true,
   sourceCaptureIsLatest = true,
   humanBindingSource = {
@@ -88,6 +89,10 @@ function fixtureRepository({
     async findActiveOfficialAppResumePermitForDevice(_transaction, input) {
       state.calls.push({ type: "find-v5-resume", input });
       return activeOfficialAppResume;
+    },
+    async findActiveUnboundInboxConversationSweepForDevice(_transaction, input) {
+      state.calls.push({ type: "find-v8-sweep", input });
+      return activeUnboundInboxSweep;
     },
     async lookupHumanBindingDeviceId(_transaction, bindingId) {
       state.calls.push({ type: "binding-device", input: { bindingId } });
@@ -173,6 +178,22 @@ test("V4 direct V1 issuance is permanently fail-closed after the local-attestati
   assert.equal(repository.state.transactions, 0);
   assert.equal(repository.state.commands.length, 0);
   assert.equal(repository.state.permits.size, 0);
+});
+
+test("V4 fails closed under the shared device lock while a V8 Inbox sweep is active", async () => {
+  const repository = fixtureRepository({ activeUnboundInboxSweep: true });
+  const result = await service(repository).queueVisibleChatSyncForHumanBinding({ bindingId: BINDING_ID });
+
+  assert.deepEqual(result, {
+    status: TINDER_VISIBLE_CHAT_SYNC_STATUS.PERMIT_CONFLICT,
+    reasonCode: TINDER_VISIBLE_CHAT_SYNC_REASON.UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE
+  });
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.size, 0);
+  assert.equal(repository.state.calls.some(call => call.type === "find-v8-sweep"), true);
+  // The human-confirmed source is locked and revalidated before the shared
+  // device conflict gate. No command or permit write may follow that lookup.
+  assert.equal(repository.state.calls.some(call => call.type === "human-binding-source"), true);
 });
 
 test("V4 creator rejects capture, identity, display, and fingerprint injection before a transaction", async () => {

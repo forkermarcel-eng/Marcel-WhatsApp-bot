@@ -9,6 +9,9 @@ import {
   processCommandAckTransaction,
   TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR,
   TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_OUTCOME_UNRESOLVED_ERROR,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LOCAL_CONTEXT_UNAVAILABLE_ERROR,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_THREAD_DRIFT_ERROR,
   TINDER_WRITER_NOT_IMPLEMENTED_ERROR
 } from "../device-bridge/command-ack.js";
 import {
@@ -19,6 +22,7 @@ import {
   T4_RESUME_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -33,6 +37,7 @@ const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
 const COMMAND_ID = "2324a0db-c846-41f8-a9f5-3539ca83de00";
 const REQUEST_ID = "d2675347-0888-4548-9feb-ae4d71a972cf";
+const V8_FOUNDATION_READY = async () => {};
 
 function ackPayload(status, overrides = {}) {
   const defaults = {
@@ -75,6 +80,16 @@ function visibleChatSyncAckPayload(status, overrides = {}) {
 function officialAppResumeAckPayload(status, overrides = {}) {
   return ackPayload(status, {
     ...(status === "SUCCEEDED" ? { result: { official_tinder_app_resume: "INTENT_DISPATCHED" } } : {}),
+    ...overrides
+  });
+}
+
+function unboundInboxSweepAckPayload(commandType, status, overrides = {}) {
+  const result = commandType === "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT"
+    ? { tinder_unbound_inbox_conversation_sweep_read: "STAGED" }
+    : { tinder_unbound_inbox_conversation_sweep_return: "STAGED" };
+  return ackPayload(status, {
+    ...(status === "SUCCEEDED" ? { result } : {}),
     ...overrides
   });
 }
@@ -571,6 +586,89 @@ test("official Tinder app resume cannot record a late success after RECEIVED, wh
   const response = await processCommandAckTransaction(lateFailure.pool, auth(), failed, NOW);
   assert.equal(response.status, "FAILED");
   assert.equal(lateFailure.state.officialAppResumePermit.permit_state, "CANCELLED");
+});
+
+test("V8 sweep child ACKs are capability-gated exact STAGED acknowledgements; RETURNED is never a generic command ACK", () => {
+  const capability = T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES;
+  const readType = "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
+  const returnType = "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
+  assert.doesNotThrow(() => parseAndValidateCommandAck(
+    ackRequest(unboundInboxSweepAckPayload(readType, "SUCCEEDED")).req, readType, capability
+  ));
+  assert.doesNotThrow(() => parseAndValidateCommandAck(
+    ackRequest(unboundInboxSweepAckPayload(returnType, "SUCCEEDED")).req, returnType, capability
+  ));
+  assert.throws(() => parseAndValidateCommandAck(
+    ackRequest(unboundInboxSweepAckPayload(returnType, "SUCCEEDED", {
+      result: { tinder_unbound_inbox_conversation_sweep_return: "RETURNED" }
+    })).req,
+    returnType,
+    capability
+  ), error => error.code === "INVALID_BODY");
+  assert.throws(() => parseAndValidateCommandAck(
+    ackRequest(unboundInboxSweepAckPayload(readType, "SUCCEEDED")).req,
+    readType,
+    T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES
+  ), error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED");
+  for (const technicalError of [
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_THREAD_DRIFT_ERROR,
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_OUTCOME_UNRESOLVED_ERROR,
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LOCAL_CONTEXT_UNAVAILABLE_ERROR
+  ]) {
+    assert.doesNotThrow(() => parseAndValidateCommandAck(
+      ackRequest(unboundInboxSweepAckPayload(readType, "FAILED", { error: technicalError })).req,
+      readType,
+      capability
+    ));
+    assert.throws(() => parseAndValidateCommandAck(
+      ackRequest(unboundInboxSweepAckPayload(readType, "FAILED", { error: technicalError })).req,
+      "PING",
+      T0_DEVICE_CAPABILITIES
+    ), error => error.code === "INVALID_BODY");
+  }
+});
+
+test("a late matching EXPIRED ACK is idempotent after server-side V8 child expiry", async () => {
+  const commandType = "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
+  const expired = unboundInboxSweepAckPayload(commandType, "EXPIRED");
+  const fake = ackPool({
+    commandType,
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES,
+    terminalStatus: "EXPIRED",
+    expiresAt: new Date(NOW.valueOf() - 1)
+  });
+  const response = await processCommandAckTransaction(fake.pool, auth(), expired, NOW, {
+    assertUnboundInboxConversationSweepFoundationReady: V8_FOUNDATION_READY
+  });
+  assert.equal(response.status, "EXPIRED");
+  assert.equal(fake.state.ackInserts, 0);
+  assert.equal(fake.state.commandUpdates, 0);
+  assert.equal(fake.state.audits, 0);
+  assert.equal(fake.state.commits, 1);
+});
+
+test("V8 child acknowledgement rejects catalog drift before replay or lifecycle writes", async () => {
+  const commandType = "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
+  const fake = ackPool({
+    commandType,
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES
+  });
+  await assert.rejects(
+    () => processCommandAckTransaction(
+      fake.pool,
+      auth(),
+      unboundInboxSweepAckPayload(commandType, "SUCCEEDED"),
+      NOW,
+      { assertUnboundInboxConversationSweepFoundationReady: async () => { throw new Error("catalog drift"); } }
+    ),
+    error => error.code === "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY"
+  );
+  assert.equal(fake.state.nonce, 0);
+  assert.equal(fake.state.ackInserts, 0);
+  assert.equal(fake.state.commandUpdates, 0);
+  assert.equal(fake.state.audits, 0);
+  assert.equal(fake.state.commits, 0);
+  assert.equal(fake.state.rollbacks, 1);
 });
 
 test("T5 accepts only direct blocked-writer REJECTED and atomically cancels its sealed intent", async () => {

@@ -3,6 +3,7 @@ import {
   DEVICE_BRIDGE_COMMANDS,
   DeviceBridgeProtocolError,
   T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS,
+  T4_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS,
   T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS,
   T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS,
   T5_TINDER_MANUAL_SEND_COMMANDS,
@@ -11,6 +12,7 @@ import {
   isKnownTinderStateForCapabilities,
   isTinderHumanArmedConversationBindingCapable,
   isTinderLocalConversationAttestationPostChatCapable,
+  isTinderUnboundInboxConversationSweepCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
@@ -38,6 +40,9 @@ import {
   projectTinderLocalConversationAttestationCommandAck
 } from "./tinder-local-conversation-attestation-command-ack.js";
 import {
+  projectTinderUnboundInboxConversationSweepCommandAck
+} from "./tinder-unbound-inbox-conversation-sweep-command-ack.js";
+import {
   isExactVisibleChatSyncStagedAcknowledgement
 } from "../services/tinder-visible-chat-sync.js";
 import {
@@ -47,6 +52,13 @@ import {
   isExactLocalConversationAttestationPostChatBootstrapPayload,
   isExactLocalConversationAttestationStagedAcknowledgement
 } from "../services/tinder-local-conversation-attestation.js";
+import {
+  isExactUnboundInboxConversationSweepReadStagedAcknowledgement,
+  isExactUnboundInboxConversationSweepReturnAcknowledgement
+} from "../services/tinder-unbound-inbox-conversation-sweep.js";
+import {
+  assertTinderUnboundInboxConversationSweepSchemaReady
+} from "./tinder-unbound-inbox-conversation-sweep-schema.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 COMMAND ACK
@@ -62,6 +74,9 @@ const TINDER_VISIBLE_CHAT_SYNC_COMMANDS = new Set(T4_TINDER_VISIBLE_CHAT_SYNC_CO
 const TINDER_OFFICIAL_APP_RESUME_COMMANDS = new Set(T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS);
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS = new Set(
   T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS
+);
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS = new Set(
+  T4_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS
 );
 const BRIDGE_STATES = new Set(BRIDGE_SERVICE_STATES);
 const MAX_RESULT_BYTES = 1024;
@@ -92,6 +107,39 @@ export const TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR = Object.freeze
   code: "COMMAND_OUTCOME_UNRESOLVED",
   message: "Command outcome is unresolved"
 });
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_THREAD_DRIFT_ERROR = Object.freeze({
+  code: "TINDER_UNBOUND_INBOX_SWEEP_THREAD_DRIFT",
+  message: "Unbound Inbox sweep thread drift"
+});
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_OUTCOME_UNRESOLVED_ERROR = Object.freeze({
+  code: "TINDER_UNBOUND_INBOX_SWEEP_OUTCOME_UNRESOLVED",
+  message: "Unbound Inbox sweep outcome is unresolved"
+});
+// A V8 child is intentionally executable only against a reviewed Inbox
+// snapshot retained by the same Android process.  A service/process reset may
+// not recreate or infer that snapshot from a server heartbeat; it closes the
+// child and parent fail-closed instead.
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LOCAL_CONTEXT_UNAVAILABLE_ERROR = Object.freeze({
+  code: "TINDER_UNBOUND_INBOX_SWEEP_LOCAL_CONTEXT_UNAVAILABLE",
+  message: "Unbound Inbox sweep local Inbox context is unavailable"
+});
+
+function unboundInboxConversationSweepFoundationNotReadyError() {
+  return new DeviceBridgeProtocolError(
+    503,
+    "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY",
+    "Unbound Inbox sweep foundation is not ready",
+    true
+  );
+}
+
+async function assertUnboundInboxConversationSweepFoundationReady(client, assertFoundationReady) {
+  try {
+    await assertFoundationReady(client);
+  } catch {
+    throw unboundInboxConversationSweepFoundationNotReadyError();
+  }
+}
 
 function invalidAck(message = "Command acknowledgement is invalid") {
   return new DeviceBridgeProtocolError(400, "INVALID_BODY", message);
@@ -118,7 +166,8 @@ function validateSucceededResult(commandType, result, capabilities = null) {
         && !TINDER_HUMAN_ARMED_CONVERSATION_COMMANDS.has(commandType)
         && !TINDER_VISIBLE_CHAT_SYNC_COMMANDS.has(commandType)
         && !TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
-        && !TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)) return;
+        && !TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)
+        && !TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(commandType)) return;
     throw invalidAck("Ack result is required for this Tinder command");
   }
   if (jsonBytes(result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
@@ -140,6 +189,10 @@ function validateSucceededResult(commandType, result, capabilities = null) {
       && isExactOfficialAppResumeIntentDispatchedAcknowledgement(result)) return;
   if (TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)
       && isExactLocalConversationAttestationStagedAcknowledgement(result)) return;
+  if (commandType === "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT"
+      && isExactUnboundInboxConversationSweepReadStagedAcknowledgement(result)) return;
+  if (commandType === "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT"
+      && isExactUnboundInboxConversationSweepReturnAcknowledgement(result)) return;
   throw invalidAck("Ack result is not allowed for this T0 command");
 }
 
@@ -151,7 +204,13 @@ function validateTechnicalError(error) {
         !(error.code === TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR.code &&
           error.message === TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR.message) &&
         !(error.code === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.code &&
-          error.message === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.message)) ||
+          error.message === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.message) &&
+        !(error.code === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_THREAD_DRIFT_ERROR.code &&
+          error.message === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_THREAD_DRIFT_ERROR.message) &&
+        !(error.code === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_OUTCOME_UNRESOLVED_ERROR.code &&
+          error.message === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_OUTCOME_UNRESOLVED_ERROR.message) &&
+        !(error.code === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LOCAL_CONTEXT_UNAVAILABLE_ERROR.code &&
+          error.message === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LOCAL_CONTEXT_UNAVAILABLE_ERROR.message)) ||
       jsonBytes(error) > MAX_ERROR_BYTES) {
     throw invalidAck("Ack error is invalid or exceeds the T0 limit");
   }
@@ -168,6 +227,17 @@ function isTinderOfficialAppResumeTerminalError(error) {
       && error.message === TINDER_OFFICIAL_APP_RESUME_BLOCKED_ERROR.message)
     || (error.code === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.code
       && error.message === TINDER_OFFICIAL_APP_RESUME_OUTCOME_UNRESOLVED_ERROR.message)
+  );
+}
+
+function isTinderUnboundInboxConversationSweepTerminalError(error) {
+  return plainObject(error) && (
+    (error.code === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_THREAD_DRIFT_ERROR.code
+      && error.message === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_THREAD_DRIFT_ERROR.message)
+    || (error.code === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_OUTCOME_UNRESOLVED_ERROR.code
+      && error.message === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_OUTCOME_UNRESOLVED_ERROR.message)
+    || (error.code === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LOCAL_CONTEXT_UNAVAILABLE_ERROR.code
+      && error.message === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LOCAL_CONTEXT_UNAVAILABLE_ERROR.message)
   );
 }
 
@@ -244,14 +314,24 @@ function validateAckForCommand(ack, commandType, capabilities) {
       && !isTinderLocalConversationAttestationPostChatCapable(capabilities)) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support local conversation attestation");
   }
+  if (TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(commandType)
+      && !isTinderUnboundInboxConversationSweepCapable(capabilities)) {
+    throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support unbound Inbox sweeps");
+  }
   if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
       && ack.status === "FAILED" && ack.result === null
       && isTinderOfficialAppResumeTerminalError(ack.error)) return;
+  if (TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(commandType)
+      && ack.status === "FAILED" && ack.result === null
+      && isTinderUnboundInboxConversationSweepTerminalError(ack.error)) return;
   if (isTinderWriterNotImplementedError(ack.error)) {
     throw invalidAck("Tinder writer error is not allowed for this command");
   }
   if (isTinderOfficialAppResumeTerminalError(ack.error)) {
     throw invalidAck("Official Tinder app resume error is not allowed for this command");
+  }
+  if (isTinderUnboundInboxConversationSweepTerminalError(ack.error)) {
+    throw invalidAck("Unbound Inbox sweep error is not allowed for this command");
   }
   if (ack.status === "SUCCEEDED") validateSucceededResult(commandType, ack.result, capabilities);
 }
@@ -314,7 +394,10 @@ function ackResponse(commandId, status, now) {
   return { ok: true, protocol_version: 1, command_id: commandId, status, server_time: now.toISOString() };
 }
 
-export async function processCommandAckTransaction(pool, auth, ack, now = new Date()) {
+export async function processCommandAckTransaction(pool, auth, ack, now = new Date(), {
+  assertUnboundInboxConversationSweepFoundationReady: assertFoundationReady =
+    assertTinderUnboundInboxConversationSweepSchemaReady
+} = {}) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -331,7 +414,6 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     if (!device || device.enrollment_state === "REVOKED" || device.revoked_at) throw new DeviceBridgeProtocolError(403, "DEVICE_REVOKED", "Device acknowledgement is not authorized");
     if (device.enrollment_state !== "ACTIVE") throw new DeviceBridgeProtocolError(410, "RE_ENROLL_REQUIRED", "Device must enroll again");
     if (device.key_revoked_at) throw new DeviceBridgeProtocolError(403, "KEY_REVOKED", "Device acknowledgement is not authorized");
-    await registerAuthenticatedRequestReplay(client, auth, now);
 
     const commandResult = await client.query(
       `SELECT command_id, device_id, command_type, payload, configuration_revision,
@@ -371,6 +453,22 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         && !isTinderLocalConversationAttestationPostChatCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support local conversation attestation");
     }
+    if (TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(command.command_type)
+        && !isTinderUnboundInboxConversationSweepCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support unbound Inbox sweeps");
+    }
+    if (TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(command.command_type)
+        && !exactKeys(command.payload, [])) {
+      throw new DeviceBridgeProtocolError(409, "COMMAND_CONTRACT_UNSUPPORTED", "Unbound Inbox sweep child command contract is unsupported");
+    }
+    // A V8 ACK mutates the child, parent, and audit lifecycle.  Verify the
+    // exact catalog while this command is locked and before the request
+    // replay record or any command state is written.  An unreadable/drifted
+    // foundation is inert rather than partially acknowledging a child.
+    if (TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(command.command_type)) {
+      await assertUnboundInboxConversationSweepFoundationReady(client, assertFoundationReady);
+    }
+    await registerAuthenticatedRequestReplay(client, auth, now);
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
 
     await assertPostChatAttestationCommandProvenance(client, command);
@@ -388,6 +486,15 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
       await client.query("COMMIT");
       return ackResponse(ack.command_id, ack.status, now);
     }
+    // Server-side V8 expiry atomically terminalizes the exact child command
+    // together with its step, parent, and CHILD_EXPIRED audit. A late Android
+    // EXPIRED projection is therefore an idempotent confirmation, not a
+    // second transition that could roll the server expiry back.
+    if (TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(command.command_type)
+        && command.terminal_status === "EXPIRED" && ack.status === "EXPIRED") {
+      await client.query("COMMIT");
+      return ackResponse(ack.command_id, ack.status, now);
+    }
     const currentStatus = command.terminal_status || (history.rows.some(row => row.status === "RECEIVED") ? "RECEIVED" : null);
     assertTransition(currentStatus, ack.status);
     const expired = new Date(command.expires_at).valueOf() <= now.valueOf();
@@ -398,6 +505,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     if (expired && TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(command.command_type)
         && ack.status === "SUCCEEDED") {
       throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Local conversation attestation command expired before terminal acknowledgement");
+    }
+    if (expired && TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(command.command_type)
+        && ack.status === "SUCCEEDED") {
+      throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Unbound Inbox sweep child command expired before terminal acknowledgement");
     }
     if (expired && currentStatus === null && ack.status !== "EXPIRED") throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Command has expired");
     if (!expired && currentStatus === null && ack.status === "EXPIRED") throw new DeviceBridgeProtocolError(409, "INVALID_ACK_TRANSITION", "Command has not expired");
@@ -420,6 +531,7 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     await projectTinderVisibleChatSyncCommandAck(client, { command, ack });
     await projectTinderOfficialAppResumeCommandAck(client, { command, ack });
     await projectTinderLocalConversationAttestationCommandAck(client, { command, ack });
+    await projectTinderUnboundInboxConversationSweepCommandAck(client, { command, ack });
     await client.query(
       `INSERT INTO device_bridge_audit_events
         (event_type, request_id, device_id, key_id, command_id, result_code, http_status, details)

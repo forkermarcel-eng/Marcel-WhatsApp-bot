@@ -155,7 +155,7 @@ CREATE TABLE tinder_unbound_inbox_conversation_sweep_steps (
 );
 
 ALTER TABLE tinder_unbound_inbox_conversation_sweep_steps
-  ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_steps_command_device_fkey
+  ADD CONSTRAINT tinder_unbound_inbox_sweep_steps_command_device_fkey
   FOREIGN KEY (command_id, device_id)
   REFERENCES device_bridge_commands(command_id, device_id)
   ON DELETE RESTRICT;
@@ -226,13 +226,13 @@ CREATE TABLE tinder_unbound_inbox_conversation_sweep_transcripts (
 );
 
 ALTER TABLE tinder_unbound_inbox_conversation_sweep_transcripts
-  ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_transcripts_command_device_fkey
+  ADD CONSTRAINT tinder_unbound_inbox_sweep_transcripts_command_device_fkey
   FOREIGN KEY (command_id, device_id)
   REFERENCES tinder_unbound_inbox_conversation_sweep_steps(command_id, device_id)
   ON DELETE RESTRICT;
 
 ALTER TABLE tinder_unbound_inbox_conversation_sweep_transcripts
-  ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_transcripts_step_scope_fkey
+  ADD CONSTRAINT tinder_unbound_inbox_sweep_transcripts_step_scope_fkey
   FOREIGN KEY (command_id, sweep_id, device_id)
   REFERENCES tinder_unbound_inbox_conversation_sweep_steps(command_id, sweep_id, device_id)
   ON DELETE RESTRICT;
@@ -243,10 +243,10 @@ ALTER TABLE tinder_unbound_inbox_conversation_sweep_steps
   REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts(transcript_id, command_id, sweep_id, device_id)
   ON DELETE RESTRICT;
 
-CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_transcript_device_received
+CREATE INDEX idx_tinder_unbound_inbox_sweep_transcript_device_received
 ON tinder_unbound_inbox_conversation_sweep_transcripts (device_id, received_at DESC);
 
-CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_transcript_pending_received
+CREATE INDEX idx_tinder_unbound_inbox_sweep_transcript_pending_received
 ON tinder_unbound_inbox_conversation_sweep_transcripts (mapping_status, human_review_status, received_at DESC);
 
 CREATE TABLE tinder_unbound_inbox_conversation_sweep_audit (
@@ -297,7 +297,7 @@ ALTER TABLE tinder_unbound_inbox_conversation_sweep_audit
   ON DELETE RESTRICT;
 
 ALTER TABLE tinder_unbound_inbox_conversation_sweep_audit
-  ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_audit_transcript_scope_fkey
+  ADD CONSTRAINT tinder_unbound_inbox_sweep_audit_transcript_scope_fkey
   FOREIGN KEY (transcript_id, command_id, sweep_id, device_id)
   REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts(transcript_id, command_id, sweep_id, device_id)
   ON DELETE RESTRICT;
@@ -305,11 +305,11 @@ ALTER TABLE tinder_unbound_inbox_conversation_sweep_audit
 CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_audit_sweep_created
 ON tinder_unbound_inbox_conversation_sweep_audit (sweep_id, created_at DESC);
 
-CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_audit_command_created
+CREATE INDEX idx_tinder_unbound_inbox_sweep_audit_command_created
 ON tinder_unbound_inbox_conversation_sweep_audit (command_id, created_at DESC)
 WHERE command_id IS NOT NULL;
 
-CREATE FUNCTION tinder_unbound_inbox_conversation_sweep_immutable_terminal_guard()
+CREATE FUNCTION tinder_unbound_inbox_sweep_immutable_terminal_guard()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $guard$
@@ -394,19 +394,19 @@ $guard$;
 
 CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_terminal_immutable
 BEFORE UPDATE OR DELETE ON tinder_unbound_inbox_conversation_sweeps
-FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_conversation_sweep_immutable_terminal_guard();
+FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_sweep_immutable_terminal_guard();
 
 CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_step_terminal_immutable
 BEFORE UPDATE OR DELETE ON tinder_unbound_inbox_conversation_sweep_steps
-FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_conversation_sweep_immutable_terminal_guard();
+FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_sweep_immutable_terminal_guard();
 
 CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_transcript_immutable
 BEFORE UPDATE OR DELETE ON tinder_unbound_inbox_conversation_sweep_transcripts
-FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_conversation_sweep_immutable_terminal_guard();
+FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_sweep_immutable_terminal_guard();
 
 CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_audit_immutable
 BEFORE UPDATE OR DELETE ON tinder_unbound_inbox_conversation_sweep_audit
-FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_conversation_sweep_immutable_terminal_guard();
+FOR EACH ROW EXECUTE FUNCTION tinder_unbound_inbox_sweep_immutable_terminal_guard();
 
 CREATE CONSTRAINT TRIGGER tinder_unbound_inbox_conversation_sweep_active_child_scope
 AFTER INSERT OR UPDATE ON tinder_unbound_inbox_conversation_sweeps

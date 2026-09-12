@@ -41,24 +41,24 @@ const EXPECTED_STATEMENT_HEADS = Object.freeze([
   "CREATE UNIQUE INDEX idx_tinder_unbound_inbox_conversation_sweep_active_device ON tinder_unbound_inbox_conversation_sweeps",
   "CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_device_expiry ON tinder_unbound_inbox_conversation_sweeps",
   "CREATE TABLE tinder_unbound_inbox_conversation_sweep_steps",
-  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_steps ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_steps_command_device_fkey FOREIGN KEY (command_id, device_id) REFERENCES device_bridge_commands(command_id, device_id) ON DELETE RESTRICT",
+  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_steps ADD CONSTRAINT tinder_unbound_inbox_sweep_steps_command_device_fkey FOREIGN KEY (command_id, device_id) REFERENCES device_bridge_commands(command_id, device_id) ON DELETE RESTRICT",
   "ALTER TABLE tinder_unbound_inbox_conversation_sweep_steps ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_steps_sweep_device_fkey FOREIGN KEY (sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweeps(sweep_id, device_id) ON DELETE RESTRICT",
   "CREATE UNIQUE INDEX idx_tinder_unbound_inbox_conversation_sweep_active_child_device ON tinder_unbound_inbox_conversation_sweep_steps",
   "CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_steps_sweep_slot ON tinder_unbound_inbox_conversation_sweep_steps",
   "CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_steps_device_expiry ON tinder_unbound_inbox_conversation_sweep_steps",
   "CREATE TABLE tinder_unbound_inbox_conversation_sweep_transcripts",
-  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_transcripts ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_transcripts_command_device_fkey FOREIGN KEY (command_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_steps(command_id, device_id) ON DELETE RESTRICT",
-  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_transcripts ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_transcripts_step_scope_fkey FOREIGN KEY (command_id, sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_steps(command_id, sweep_id, device_id) ON DELETE RESTRICT",
+  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_transcripts ADD CONSTRAINT tinder_unbound_inbox_sweep_transcripts_command_device_fkey FOREIGN KEY (command_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_steps(command_id, device_id) ON DELETE RESTRICT",
+  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_transcripts ADD CONSTRAINT tinder_unbound_inbox_sweep_transcripts_step_scope_fkey FOREIGN KEY (command_id, sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_steps(command_id, sweep_id, device_id) ON DELETE RESTRICT",
   "ALTER TABLE tinder_unbound_inbox_conversation_sweep_steps ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_steps_transcript_scope FOREIGN KEY (transcript_id, command_id, sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts(transcript_id, command_id, sweep_id, device_id) ON DELETE RESTRICT",
-  "CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_transcript_device_received ON tinder_unbound_inbox_conversation_sweep_transcripts",
-  "CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_transcript_pending_received ON tinder_unbound_inbox_conversation_sweep_transcripts",
+  "CREATE INDEX idx_tinder_unbound_inbox_sweep_transcript_device_received ON tinder_unbound_inbox_conversation_sweep_transcripts",
+  "CREATE INDEX idx_tinder_unbound_inbox_sweep_transcript_pending_received ON tinder_unbound_inbox_conversation_sweep_transcripts",
   "CREATE TABLE tinder_unbound_inbox_conversation_sweep_audit",
   "ALTER TABLE tinder_unbound_inbox_conversation_sweep_audit ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_audit_sweep_device_fkey FOREIGN KEY (sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweeps(sweep_id, device_id) ON DELETE RESTRICT",
   "ALTER TABLE tinder_unbound_inbox_conversation_sweep_audit ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_audit_step_scope_fkey FOREIGN KEY (command_id, sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_steps(command_id, sweep_id, device_id) ON DELETE RESTRICT",
-  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_audit ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_audit_transcript_scope_fkey FOREIGN KEY (transcript_id, command_id, sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts(transcript_id, command_id, sweep_id, device_id) ON DELETE RESTRICT",
+  "ALTER TABLE tinder_unbound_inbox_conversation_sweep_audit ADD CONSTRAINT tinder_unbound_inbox_sweep_audit_transcript_scope_fkey FOREIGN KEY (transcript_id, command_id, sweep_id, device_id) REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts(transcript_id, command_id, sweep_id, device_id) ON DELETE RESTRICT",
   "CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_audit_sweep_created ON tinder_unbound_inbox_conversation_sweep_audit",
-  "CREATE INDEX idx_tinder_unbound_inbox_conversation_sweep_audit_command_created ON tinder_unbound_inbox_conversation_sweep_audit",
-  "CREATE FUNCTION tinder_unbound_inbox_conversation_sweep_immutable_terminal_guard() RETURNS trigger LANGUAGE plpgsql AS",
+  "CREATE INDEX idx_tinder_unbound_inbox_sweep_audit_command_created ON tinder_unbound_inbox_conversation_sweep_audit",
+  "CREATE FUNCTION tinder_unbound_inbox_sweep_immutable_terminal_guard() RETURNS trigger LANGUAGE plpgsql AS",
   "CREATE FUNCTION tinder_unbound_inbox_conversation_sweep_active_child_guard() RETURNS trigger LANGUAGE plpgsql AS",
   "CREATE FUNCTION tinder_unbound_inbox_conversation_sweep_audit_scope_guard() RETURNS trigger LANGUAGE plpgsql AS",
   "CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_terminal_immutable BEFORE UPDATE OR DELETE ON tinder_unbound_inbox_conversation_sweeps",
@@ -73,7 +73,7 @@ const EXPECTED_STATEMENT_HEADS = Object.freeze([
 // SHA-256 of the complete reviewed fixed source after line-ending and outer
 // whitespace normalization. Any relation, literal, trigger, or SQL ordering
 // change requires a deliberate review and a new digest.
-const REVIEWED_SOURCE_SHA256 = "182aaabf0ccbd8619553caff02db467c8e50da476728b2a7a79c8f2e0230338c";
+const REVIEWED_SOURCE_SHA256 = "1c8ab6a2c74edad160e41e87dfe3351b072fc419ffecd6ea8c1aaff383875deb";
 
 function canonicalFixedSource(value) {
   return String(value || "").replace(/\r\n/g, "\n").trim();

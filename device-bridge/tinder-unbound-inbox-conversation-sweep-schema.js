@@ -41,7 +41,7 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE =
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE =
   "tinder_unbound_inbox_conversation_sweep_audit";
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION =
-  "tinder_unbound_inbox_conversation_sweep_immutable_terminal_guard";
+  "tinder_unbound_inbox_sweep_immutable_terminal_guard";
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE_CHILD_GUARD_FUNCTION =
   "tinder_unbound_inbox_conversation_sweep_active_child_guard";
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_SCOPE_GUARD_FUNCTION =
@@ -59,10 +59,10 @@ const TARGET_INDEX_NAMES = Object.freeze([
   "idx_tinder_unbound_inbox_conversation_sweep_active_child_device",
   "idx_tinder_unbound_inbox_conversation_sweep_steps_sweep_slot",
   "idx_tinder_unbound_inbox_conversation_sweep_steps_device_expiry",
-  "idx_tinder_unbound_inbox_conversation_sweep_transcript_device_received",
-  "idx_tinder_unbound_inbox_conversation_sweep_transcript_pending_received",
+  "idx_tinder_unbound_inbox_sweep_transcript_device_received",
+  "idx_tinder_unbound_inbox_sweep_transcript_pending_received",
   "idx_tinder_unbound_inbox_conversation_sweep_audit_sweep_created",
-  "idx_tinder_unbound_inbox_conversation_sweep_audit_command_created"
+  "idx_tinder_unbound_inbox_sweep_audit_command_created"
 ]);
 const TARGET_TRIGGER_NAMES = Object.freeze([
   "tinder_unbound_inbox_conversation_sweep_terminal_immutable",
@@ -124,11 +124,11 @@ const AUDIT_DEFAULTS = Object.freeze({
 
 const SWEEP_LIFECYCLE_CHECK = `
   (sweep_state = 'ACTIVE'
-    AND active_command_id IS NOT NULL AND next_slot BETWEEN 1 AND max_slots
+    AND active_command_id IS NOT NULL AND next_slot >= 1 AND next_slot <= max_slots
     AND closed_at IS NULL AND terminal_reason IS NULL)
   OR
   (sweep_state = 'COMPLETED'
-    AND active_command_id IS NULL AND next_slot = max_slots + 1
+    AND active_command_id IS NULL AND next_slot = (max_slots + 1)
     AND closed_at IS NOT NULL AND terminal_reason = 'SLOTS_EXHAUSTED')
   OR
   (sweep_state = 'STOPPED'
@@ -189,7 +189,7 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT = Objec
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE, "f", ["active_command_id"], "FOREIGN KEY (active_command_id) REFERENCES device_bridge_commands(command_id) ON DELETE RESTRICT", { referenceTable: "device_bridge_commands", referenceColumns: ["command_id"], deleteAction: "r", updateAction: "a" }),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE, "u", ["sweep_id", "device_id"], "UNIQUE (sweep_id, device_id)"),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE, "u", ["device_id", "inbox_observation_nonce"], "UNIQUE (device_id, inbox_observation_nonce)"),
-  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE, ["sweep_contract_version = 1", "inbox_heartbeat_sequence > 0", "sweep_state IN ('ACTIVE', 'COMPLETED', 'STOPPED', 'EXPIRED')", "max_slots = 8", "next_slot BETWEEN 1 AND 9", "expires_at > issued_at", "expires_at <= issued_at + '00:30:00'::interval", SWEEP_LIFECYCLE_CHECK, "closed_at IS NULL OR closed_at >= issued_at"]),
+  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE, ["sweep_contract_version = 1", "inbox_heartbeat_sequence > 0", "sweep_state IN ('ACTIVE', 'COMPLETED', 'STOPPED', 'EXPIRED')", "max_slots = 8", "next_slot >= 1 AND next_slot <= 9", "expires_at > issued_at", "expires_at <= (issued_at + '00:30:00'::interval)", SWEEP_LIFECYCLE_CHECK, "closed_at IS NULL OR closed_at >= issued_at"]),
 
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, "p", ["command_id"], "PRIMARY KEY (command_id)"),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, "f", ["command_id"], "FOREIGN KEY (command_id) REFERENCES device_bridge_commands(command_id) ON DELETE RESTRICT", { referenceTable: "device_bridge_commands", referenceColumns: ["command_id"], deleteAction: "r", updateAction: "a" }),
@@ -201,7 +201,7 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT = Objec
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, "u", ["command_id", "device_id"], "UNIQUE (command_id, device_id)"),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, "u", ["command_id", "sweep_id", "device_id"], "UNIQUE (command_id, sweep_id, device_id)"),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, "u", ["sweep_id", "slot_ordinal", "child_kind"], "UNIQUE (sweep_id, slot_ordinal, child_kind)"),
-  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, ["step_contract_version = 1", "slot_ordinal BETWEEN 1 AND 8", "child_kind IN ('READ', 'RETURN_ONLY')", "child_state IN ('ISSUED', 'STAGED', 'RETURN_STAGED', 'TRANSCRIPT_ACCEPTED', 'RETURN_ACCEPTED', 'EXPIRED', 'CANCELLED')", "expires_at > issued_at", "(child_kind = 'READ' AND expires_at <= issued_at + '00:03:00'::interval) OR (child_kind = 'RETURN_ONLY' AND expires_at <= issued_at + '00:01:30'::interval)", STEP_LIFECYCLE_CHECK, "staged_at IS NULL OR staged_at >= issued_at", "accepted_at IS NULL OR (staged_at IS NULL OR accepted_at >= staged_at)", "closed_at IS NULL OR closed_at >= issued_at"]),
+  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, ["step_contract_version = 1", "slot_ordinal >= 1 AND slot_ordinal <= 8", "child_kind IN ('READ', 'RETURN_ONLY')", "child_state IN ('ISSUED', 'STAGED', 'RETURN_STAGED', 'TRANSCRIPT_ACCEPTED', 'RETURN_ACCEPTED', 'EXPIRED', 'CANCELLED')", "expires_at > issued_at", "(child_kind = 'READ' AND expires_at <= (issued_at + '00:03:00'::interval)) OR (child_kind = 'RETURN_ONLY' AND expires_at <= (issued_at + '00:01:30'::interval))", STEP_LIFECYCLE_CHECK, "staged_at IS NULL OR staged_at >= issued_at", "accepted_at IS NULL OR staged_at IS NULL OR accepted_at >= staged_at", "closed_at IS NULL OR closed_at >= issued_at"]),
 
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, "p", ["transcript_id"], "PRIMARY KEY (transcript_id)"),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, "f", ["command_id"], `FOREIGN KEY (command_id) REFERENCES ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE}(command_id) ON DELETE RESTRICT`, { referenceTable: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, referenceColumns: ["command_id"], deleteAction: "r", updateAction: "a" }),
@@ -211,7 +211,7 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT = Objec
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, "f", ["command_id", "sweep_id", "device_id"], `FOREIGN KEY (command_id, sweep_id, device_id) REFERENCES ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE}(command_id, sweep_id, device_id) ON DELETE RESTRICT`, { referenceTable: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, referenceColumns: ["command_id", "sweep_id", "device_id"], deleteAction: "r", updateAction: "a" }),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, "u", ["command_id", "device_id"], "UNIQUE (command_id, device_id)"),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, "u", ["transcript_id", "command_id", "sweep_id", "device_id"], "UNIQUE (transcript_id, command_id, sweep_id, device_id)"),
-  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, ["transcript_contract_version = 1", "transcript_schema_version = 'tinder-unbound-inbox-conversation-sweep-transcript-v1'", "source_platform = 'tinder'", "source_package = 'com.tinder'", "layout_schema_version = 'tinder-zte-visible-chat-scroll-v1'", "initial_visible_node_count BETWEEN 1 AND 5000", "final_visible_node_count BETWEEN 1 AND 5000", "segment_count BETWEEN 1 AND 8", "overlap_count BETWEEN 0 AND 100", "transcript_fingerprint ~ '^[0-9a-f]{64}$'", "jsonb_typeof(visible_messages) = 'array'", "transcript_safety_status = 'SAFE'", "mapping_status = 'NEEDS_HUMAN_MAPPING'", "human_review_status = 'PENDING'", "sync_completed_at >= sync_started_at", "sync_completed_at <= sync_started_at + '00:01:30'::interval"]),
+  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, ["transcript_contract_version = 1", "transcript_schema_version = 'tinder-unbound-inbox-conversation-sweep-transcript-v1'", "source_platform = 'tinder'", "source_package = 'com.tinder'", "layout_schema_version = 'tinder-zte-visible-chat-scroll-v1'", "initial_visible_node_count >= 1 AND initial_visible_node_count <= 5000", "final_visible_node_count >= 1 AND final_visible_node_count <= 5000", "segment_count >= 1 AND segment_count <= 8", "overlap_count >= 0 AND overlap_count <= 100", "transcript_fingerprint ~ '^[0-9a-f]{64}$'", "jsonb_typeof(visible_messages) = 'array'", "transcript_safety_status = 'SAFE'", "mapping_status = 'NEEDS_HUMAN_MAPPING'", "human_review_status = 'PENDING'", "sync_completed_at >= sync_started_at", "sync_completed_at <= (sync_started_at + '00:01:30'::interval)"]),
 
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE, "p", ["audit_id"], "PRIMARY KEY (audit_id)"),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE, "f", ["sweep_id"], `FOREIGN KEY (sweep_id) REFERENCES ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE}(sweep_id) ON DELETE RESTRICT`, { referenceTable: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE, referenceColumns: ["sweep_id"], deleteAction: "r", updateAction: "a" }),
@@ -221,7 +221,7 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT = Objec
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE, "f", ["transcript_id"], `FOREIGN KEY (transcript_id) REFERENCES ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE}(transcript_id) ON DELETE RESTRICT`, { referenceTable: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, referenceColumns: ["transcript_id"], deleteAction: "r", updateAction: "a" }),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE, "f", ["command_id", "sweep_id", "device_id"], `FOREIGN KEY (command_id, sweep_id, device_id) REFERENCES ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE}(command_id, sweep_id, device_id) ON DELETE RESTRICT`, { referenceTable: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE, referenceColumns: ["command_id", "sweep_id", "device_id"], deleteAction: "r", updateAction: "a" }),
   tinderFoundationKey(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE, "f", ["transcript_id", "command_id", "sweep_id", "device_id"], `FOREIGN KEY (transcript_id, command_id, sweep_id, device_id) REFERENCES ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE}(transcript_id, command_id, sweep_id, device_id) ON DELETE RESTRICT`, { referenceTable: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE, referenceColumns: ["transcript_id", "command_id", "sweep_id", "device_id"], deleteAction: "r", updateAction: "a" }),
-  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE, ["action IN ('SWEEP_ISSUED', 'READ_ISSUED', 'READ_STAGED', 'READ_TRANSCRIPT_ACCEPTED', 'RETURN_ISSUED', 'RETURN_STAGED', 'RETURN_ACCEPTED', 'SWEEP_COMPLETED', 'SWEEP_STOPPED', 'CHILD_EXPIRED', 'SWEEP_EXPIRED')", "actor IN ('ANDROID_RUNTIME', 'SIGNED_TRANSCRIPT_INGRESS', 'SIGNED_RETURN_INGRESS', 'SERVER_AUTOMATION', 'SERVER_EXPIRY')", "source IN ('SIGNED_DEVICE_INGRESS', 'SIGNED_TRANSCRIPT_INGRESS', 'SIGNED_RETURN_INGRESS', 'SERVER_AUTOMATION', 'SERVER_MAINTENANCE')", "details = '{}'::jsonb", AUDIT_REASON_CHECK, "(action IN ('READ_ISSUED', 'READ_STAGED', 'READ_TRANSCRIPT_ACCEPTED', 'RETURN_ISSUED', 'RETURN_STAGED', 'RETURN_ACCEPTED', 'SWEEP_STOPPED', 'CHILD_EXPIRED')) = (command_id IS NOT NULL AND slot_ordinal IS NOT NULL)", "(action = 'READ_TRANSCRIPT_ACCEPTED') = (transcript_id IS NOT NULL)"])
+  ...checks(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE, ["action IN ('SWEEP_ISSUED', 'READ_ISSUED', 'READ_STAGED', 'READ_TRANSCRIPT_ACCEPTED', 'RETURN_ISSUED', 'RETURN_STAGED', 'RETURN_ACCEPTED', 'SWEEP_COMPLETED', 'SWEEP_STOPPED', 'CHILD_EXPIRED', 'SWEEP_EXPIRED')", "actor IN ('ANDROID_RUNTIME', 'SIGNED_TRANSCRIPT_INGRESS', 'SIGNED_RETURN_INGRESS', 'SERVER_AUTOMATION', 'SERVER_EXPIRY')", "source IN ('SIGNED_DEVICE_INGRESS', 'SIGNED_TRANSCRIPT_INGRESS', 'SIGNED_RETURN_INGRESS', 'SERVER_AUTOMATION', 'SERVER_MAINTENANCE')", "details = '{}'::jsonb", AUDIT_REASON_CHECK, "(action = ANY (ARRAY['READ_ISSUED', 'READ_STAGED', 'READ_TRANSCRIPT_ACCEPTED', 'RETURN_ISSUED', 'RETURN_STAGED', 'RETURN_ACCEPTED', 'SWEEP_STOPPED', 'CHILD_EXPIRED'])) = (command_id IS NOT NULL AND slot_ordinal IS NOT NULL)", "(action = 'READ_TRANSCRIPT_ACCEPTED') = (transcript_id IS NOT NULL)"])
 ]);
 
 function mapColumns(rows, relation) {
@@ -264,10 +264,10 @@ function indexesCanonical(rows) {
     && indexMatches(rows, "idx_tinder_unbound_inbox_conversation_sweep_active_child_device", { unique: true, columns: ["device_id"], descending: [false], predicate: "child_state IN ('ISSUED', 'STAGED', 'RETURN_STAGED')" })
     && indexMatches(rows, "idx_tinder_unbound_inbox_conversation_sweep_steps_sweep_slot", { unique: false, columns: ["sweep_id", "slot_ordinal", "child_kind"], descending: [false, false, false] })
     && indexMatches(rows, "idx_tinder_unbound_inbox_conversation_sweep_steps_device_expiry", { unique: false, columns: ["device_id", "child_state", "expires_at"], descending: [false, false, true] })
-    && indexMatches(rows, "idx_tinder_unbound_inbox_conversation_sweep_transcript_device_received", { unique: false, columns: ["device_id", "received_at"], descending: [false, true] })
-    && indexMatches(rows, "idx_tinder_unbound_inbox_conversation_sweep_transcript_pending_received", { unique: false, columns: ["mapping_status", "human_review_status", "received_at"], descending: [false, false, true] })
+    && indexMatches(rows, "idx_tinder_unbound_inbox_sweep_transcript_device_received", { unique: false, columns: ["device_id", "received_at"], descending: [false, true] })
+    && indexMatches(rows, "idx_tinder_unbound_inbox_sweep_transcript_pending_received", { unique: false, columns: ["mapping_status", "human_review_status", "received_at"], descending: [false, false, true] })
     && indexMatches(rows, "idx_tinder_unbound_inbox_conversation_sweep_audit_sweep_created", { unique: false, columns: ["sweep_id", "created_at"], descending: [false, true] })
-    && indexMatches(rows, "idx_tinder_unbound_inbox_conversation_sweep_audit_command_created", { unique: false, columns: ["command_id", "created_at"], descending: [false, true], predicate: "command_id IS NOT NULL" });
+    && indexMatches(rows, "idx_tinder_unbound_inbox_sweep_audit_command_created", { unique: false, columns: ["command_id", "created_at"], descending: [false, true], predicate: "command_id IS NOT NULL" });
 }
 
 function canonicalTrigger(value) {

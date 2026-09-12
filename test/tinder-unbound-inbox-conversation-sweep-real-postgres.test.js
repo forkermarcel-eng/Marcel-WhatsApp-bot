@@ -20,6 +20,7 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-schema.js";
 import {
+  getTinderUnboundInboxConversationSweepMigrationFailureDiagnostic,
   migrateTinderUnboundInboxConversationSweepFoundation,
   validateTinderUnboundInboxConversationSweepPreDdl
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-migration.js";
@@ -60,7 +61,7 @@ async function prepareV6Foundation(pool) {
   await migrateTinderLocalConversationAttestation(pool);
 }
 
-function tracePool(pool) {
+function tracePool(pool, { afterQuery } = {}) {
   const records = [];
   return {
     records,
@@ -69,7 +70,9 @@ function tracePool(pool) {
       return {
         async query(sql, params) {
           records.push({ sql: String(sql), params: params || [] });
-          return client.query(sql, params);
+          const result = await client.query(sql, params);
+          await afterQuery?.({ sql: String(sql), params: params || [], client, result });
+          return result;
         },
         release(error) { return client.release(error); }
       };
@@ -184,6 +187,41 @@ test("real loopback V8 preflight is repeatable-read/read-only and rolls back wit
   }, { prefix: "marcel_unbound_sweep_v8_preflight" });
 });
 
+test("real loopback V8 postcheck drift rolls back the whole apply and never commits", { timeout: 60_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV6Foundation(pool);
+    let injected = false;
+    const trace = tracePool(pool, {
+      async afterQuery({ sql, client }) {
+        if (injected || !sql.includes("CREATE TABLE tinder_unbound_inbox_conversation_sweeps")) return;
+        injected = true;
+        await client.query(
+          "CREATE INDEX idx_tinder_unbound_inbox_sweep_postcheck_injected ON tinder_unbound_inbox_conversation_sweeps (issued_at)"
+        );
+      }
+    });
+    const error = await migrateTinderUnboundInboxConversationSweepFoundation(trace).catch(value => value);
+    assert.equal(injected, true);
+    assert.deepEqual(getTinderUnboundInboxConversationSweepMigrationFailureDiagnostic(error), {
+      stage: "POSTCHECK",
+      code: "DATABASE_OPERATION_FAILED",
+      transaction: "STARTED",
+      rollback: "COMPLETED",
+      ddl_started: true,
+      reason: "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_POSTCHECK_SCHEMA_INVALID"
+    });
+    assert.equal(trace.records.some(record => record.sql.trim() === "COMMIT"), false);
+    assert.equal(trace.records.some(record => record.sql.trim() === "ROLLBACK"), true);
+    assert.deepEqual(await inspectTinderUnboundInboxConversationSweepSchema(pool), {
+      state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.UPGRADE_REQUIRED
+    });
+    const residual = await pool.query(
+      "SELECT to_regclass('idx_tinder_unbound_inbox_sweep_postcheck_injected') AS relation_name"
+    );
+    assert.equal(residual.rows[0]?.relation_name, null);
+  }, { prefix: "marcel_unbound_sweep_v8_postcheck_rollback" });
+});
+
 test("real loopback V8 binds parent, child, transcript, and audit provenance to one sweep/device", { timeout: 60_000 }, async () => {
   await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
     await prepareV6Foundation(pool);
@@ -203,10 +241,10 @@ test("real loopback V8 binds parent, child, transcript, and audit provenance to 
     for (const name of [
       "tinder_unbound_inbox_conversation_sweep_steps_sweep_device_fkey",
       "tinder_unbound_inbox_conversation_sweep_steps_transcript_scope",
-      "tinder_unbound_inbox_conversation_sweep_transcripts_step_scope_fkey",
+      "tinder_unbound_inbox_sweep_transcripts_step_scope_fkey",
       "tinder_unbound_inbox_conversation_sweep_audit_sweep_device_fkey",
       "tinder_unbound_inbox_conversation_sweep_audit_step_scope_fkey",
-      "tinder_unbound_inbox_conversation_sweep_audit_transcript_scope_fkey"
+      "tinder_unbound_inbox_sweep_audit_transcript_scope_fkey"
     ]) assert.equal(names.has(name), true, name);
     const commandConstraints = await pool.query(
       `SELECT conname FROM pg_constraint

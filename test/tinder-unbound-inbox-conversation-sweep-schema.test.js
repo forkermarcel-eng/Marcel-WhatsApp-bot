@@ -6,8 +6,10 @@ import {
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-migration.js";
 import {
   preflightTinderUnboundInboxConversationSweepMigration,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-schema.js";
+import { canonicalCheckDefinition } from "../device-bridge/schema-contract.js";
 import {
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME
 } from "../device-bridge/t1-schema.js";
@@ -79,7 +81,7 @@ test("fixed V8 DDL is exact, separate from V1-V6 identity contracts, and makes R
   assert.match(source, /FOREIGN KEY \(sweep_id, device_id\)\s+REFERENCES tinder_unbound_inbox_conversation_sweeps\(sweep_id, device_id\)/i);
   assert.match(source, /ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_steps_transcript_scope\s+FOREIGN KEY \(transcript_id, command_id, sweep_id, device_id\)\s+REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts\(transcript_id, command_id, sweep_id, device_id\)/i);
   assert.match(source, /FOREIGN KEY \(command_id, sweep_id, device_id\)\s+REFERENCES tinder_unbound_inbox_conversation_sweep_steps\(command_id, sweep_id, device_id\)/i);
-  assert.match(source, /ADD CONSTRAINT tinder_unbound_inbox_conversation_sweep_audit_transcript_scope_fkey\s+FOREIGN KEY \(transcript_id, command_id, sweep_id, device_id\)\s+REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts\(transcript_id, command_id, sweep_id, device_id\)/i);
+  assert.match(source, /ADD CONSTRAINT tinder_unbound_inbox_sweep_audit_transcript_scope_fkey\s+FOREIGN KEY \(transcript_id, command_id, sweep_id, device_id\)\s+REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts\(transcript_id, command_id, sweep_id, device_id\)/i);
   assert.match(source, /CREATE CONSTRAINT TRIGGER tinder_unbound_inbox_conversation_sweep_active_child_scope/i);
   assert.match(source, /CREATE CONSTRAINT TRIGGER tinder_unbound_inbox_conversation_sweep_step_active_child_scope\s+AFTER INSERT OR DELETE OR UPDATE ON tinder_unbound_inbox_conversation_sweep_steps\s+DEFERRABLE INITIALLY DEFERRED/i);
   assert.match(source, /WHERE step\.command_id = parent\.active_command_id[\s\S]{0,320}AND step\.child_state IN \('ISSUED', 'STAGED', 'RETURN_STAGED'\)/i);
@@ -91,4 +93,42 @@ test("fixed V8 DDL is exact, separate from V1-V6 identity contracts, and makes R
   assert.throws(() => assertTinderUnboundInboxConversationSweepMigrationSource(
     `${source}\nALTER TABLE contacts ADD COLUMN forbidden text;`
   ));
+});
+
+test("every explicitly named V8 catalog object fits PostgreSQL's 63-byte identifier limit", () => {
+  const source = readFileSync(
+    new URL("../migrations/20260912_tinder_unbound_inbox_conversation_sweep_foundation.sql", import.meta.url),
+    "utf8"
+  );
+  const identifiers = [
+    ...source.matchAll(/(?:CREATE\s+(?:UNIQUE\s+)?INDEX|CREATE\s+FUNCTION|CREATE\s+(?:CONSTRAINT\s+)?TRIGGER|ADD\s+CONSTRAINT)\s+([a-z_][a-z0-9_]*)/gi)
+  ].map(match => match[1]);
+  assert.ok(identifiers.length > 0);
+  for (const identifier of identifiers) {
+    assert.ok(Buffer.byteLength(identifier, "utf8") <= 63, identifier);
+  }
+});
+
+test("V8 postcheck recognizes PostgreSQL's fixed catalog rendering without weakening checks", () => {
+  const contractChecks = new Set(
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT
+      .filter(contract => contract.type === "c")
+      .flatMap(contract => contract.definitions)
+  );
+  for (const catalogDefinition of [
+    "CHECK ((next_slot >= 1) AND (next_slot <= 9))",
+    "CHECK (expires_at <= (issued_at + '00:30:00'::interval))",
+    "CHECK (slot_ordinal >= 1 AND slot_ordinal <= 8)",
+    "CHECK (accepted_at IS NULL OR staged_at IS NULL OR accepted_at >= staged_at)",
+    "CHECK (initial_visible_node_count >= 1 AND initial_visible_node_count <= 5000)",
+    "CHECK (sync_completed_at <= (sync_started_at + '00:01:30'::interval))",
+    "CHECK ((action = ANY (ARRAY['READ_ISSUED'::text, 'READ_STAGED'::text, 'READ_TRANSCRIPT_ACCEPTED'::text, 'RETURN_ISSUED'::text, 'RETURN_STAGED'::text, 'RETURN_ACCEPTED'::text, 'SWEEP_STOPPED'::text, 'CHILD_EXPIRED'::text])) = (command_id IS NOT NULL AND slot_ordinal IS NOT NULL))"
+  ]) {
+    assert.equal(contractChecks.has(canonicalCheckDefinition(catalogDefinition)), true, catalogDefinition);
+  }
+  assert.equal(
+    contractChecks.has(canonicalCheckDefinition("next_slot BETWEEN 1 AND 9")),
+    false,
+    "the inspector must compare PostgreSQL catalog form, never broaden semantic acceptance"
+  );
 });

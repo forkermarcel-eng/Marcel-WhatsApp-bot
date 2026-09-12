@@ -310,6 +310,29 @@ test("official-app resume rejects browser targeting input and fails closed on ma
     reason_code: "SOURCE_CAPTURE_NOT_CONFIRMED"
   });
   assert.equal(JSON.stringify(conflict.body).includes("private database detail"), false);
+
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    conflict: true,
+    resume: {
+      command_type: "RESUME_OFFICIAL_TINDER_APP",
+      status: "PERMIT_CONFLICT",
+      reason_code: "UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE"
+    },
+    error: "private database detail"
+  }, { ok: false, status: 409 });
+  const activeSweepConflict = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { captureId: CAPTURE_ID, operation: "resume-official-app" }
+  }), activeSweepConflict);
+  assert.equal(activeSweepConflict.statusCode, 409);
+  assert.deepEqual(activeSweepConflict.body.resume, {
+    command_type: "RESUME_OFFICIAL_TINDER_APP",
+    status: "PERMIT_CONFLICT",
+    reason_code: "UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE"
+  });
+  assert.equal(JSON.stringify(activeSweepConflict.body).includes("private database detail"), false);
 }));
 
 test("conversation list proxy forwards the bounded list route and exposes only metadata", async () => withEnvironment(async () => {

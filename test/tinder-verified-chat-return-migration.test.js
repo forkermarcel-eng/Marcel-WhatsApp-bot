@@ -8,7 +8,7 @@ import {
 } from "../device-bridge/tinder-verified-chat-return-migration.js";
 import { readFileSync } from "node:fs";
 
-function fixture({ postcheckDrift = false } = {}) {
+function fixture({ postcheckDrift = false, rejectAbsentV9TargetLocks = false } = {}) {
   let state = "UPGRADE_REQUIRED";
   const calls = [];
   const client = {
@@ -17,6 +17,12 @@ function fixture({ postcheckDrift = false } = {}) {
       calls.push(text);
       if (text.includes("ALTER TABLE device_bridge_commands DROP CONSTRAINT device_bridge_commands_command_type_check_v8")) {
         state = postcheckDrift ? "INVALID" : "CANONICAL";
+      }
+      if (text.startsWith("LOCK TABLE") && rejectAbsentV9TargetLocks
+          && /tinder_verified_chat_return_(?:permits|audit)/i.test(text)) {
+        const error = new Error("relation does not exist");
+        error.code = "42P01";
+        throw error;
       }
       if (text === "COMMIT" || text === "ROLLBACK" || text.startsWith("BEGIN") || text.startsWith("SET LOCAL")
           || text.startsWith("LOCK TABLE") || text.includes("pg_try_advisory_xact_lock")) {
@@ -55,6 +61,18 @@ test("V9 apply runs one locked transaction, canonical postcheck, then COMMIT", a
   assert.equal(value.calls.filter(call => call === "COMMIT").length, 1);
   assert.equal(value.calls.filter(call => call === "ROLLBACK").length, 0);
   assert.equal(value.calls.filter(call => call.includes("DROP CONSTRAINT device_bridge_commands_command_type_check_v8")).length, 1);
+});
+
+test("V9 V8-to-V9 apply never locks its absent additive target relations before DDL", async () => {
+  const value = fixture({ rejectAbsentV9TargetLocks: true });
+  const result = await value.runner.migrate(value.pool);
+  const locks = value.calls.filter(call => call.startsWith("LOCK TABLE"));
+
+  assert.equal(result.migrated, true);
+  assert.ok(locks.length > 0);
+  assert.equal(locks.some(call => /tinder_verified_chat_return_(?:permits|audit)/i.test(call)), false);
+  assert.equal(value.calls.filter(call => call === "COMMIT").length, 1);
+  assert.equal(value.calls.filter(call => call === "ROLLBACK").length, 0);
 });
 
 test("V9 postcheck drift rolls back and does not retry", async () => {

@@ -5,9 +5,7 @@ import {
   assertTinderVerifiedChatReturnSchemaReady,
   inspectTinderVerifiedChatReturnSchema,
   preflightTinderVerifiedChatReturnMigration,
-  TINDER_VERIFIED_CHAT_RETURN_AUDIT_TABLE,
-  TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE,
-  TINDER_VERIFIED_CHAT_RETURN_PERMIT_TABLE
+  TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE
 } from "./tinder-verified-chat-return-schema.js";
 import {
   assertFixedTinderFoundationMigrationSource,
@@ -77,6 +75,11 @@ export function validateTinderVerifiedChatReturnMigrationSource(source) {
 }
 
 function lockedRelations() {
+  // V9 is additive from the canonical V8 state.  Its permit/audit relations
+  // do not exist until the fixed DDL runs, so attempting to lock either one
+  // would deterministically fail before DDL.  Every predecessor relation
+  // whose rows, catalog facts, or foreign-key scope the migration consumes is
+  // still locked before the second preflight.
   return [...new Set([
     ...REQUIRED_TABLES,
     "contacts",
@@ -92,9 +95,7 @@ function lockedRelations() {
     "tinder_unbound_inbox_conversation_sweeps",
     "tinder_unbound_inbox_conversation_sweep_steps",
     "tinder_unbound_inbox_conversation_sweep_transcripts",
-    "tinder_unbound_inbox_conversation_sweep_audit",
-    TINDER_VERIFIED_CHAT_RETURN_PERMIT_TABLE,
-    TINDER_VERIFIED_CHAT_RETURN_AUDIT_TABLE
+    "tinder_unbound_inbox_conversation_sweep_audit"
   ])];
 }
 

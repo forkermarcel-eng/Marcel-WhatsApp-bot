@@ -8,6 +8,7 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS,
   TinderUnboundInboxConversationSweepError,
+  createPgTinderUnboundInboxConversationSweepRepository,
   createTinderUnboundInboxConversationSweepService
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
 import {
@@ -219,6 +220,52 @@ test("expiry preserves exact child command and slot provenance, while parent exp
     reasonCode: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED,
     details: {}
   });
+});
+
+test("an expired parent with an active child releases that child authority before a fresh sweep", async () => {
+  const stoppedSweep = activeSweep({ sweep_state: "STOPPED", active_command_id: null });
+  const repository = fixtureRepository({
+    expiredRows: [{
+      ...stoppedSweep,
+      expired_command_id: READ_COMMAND_ID,
+      expired_slot_ordinal: 1
+    }]
+  });
+
+  assert.deepEqual(
+    await service(repository).startUnboundInboxConversationSweepFromFreshInboxObservation({}, freshObservationInput()),
+    { status: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS.QUEUED }
+  );
+  assert.deepEqual(repository.state.audits.map(audit => audit.action), [
+    "CHILD_EXPIRED", "SWEEP_ISSUED", "READ_ISSUED"
+  ]);
+  assert.equal(repository.state.commands.length, 1);
+  assert.equal(repository.state.steps.length, 1);
+});
+
+test("PostgreSQL expiry terminalizes an active child when its parent sweep expires", async () => {
+  const calls = [];
+  const repository = createPgTinderUnboundInboxConversationSweepRepository({
+    async connect() { throw new Error("not used"); },
+    async query() { throw new Error("not used"); }
+  });
+  const client = {
+    async query(sql, parameters) {
+      calls.push({ sql, parameters });
+      return { rows: [] };
+    }
+  };
+
+  await repository.expireUnboundInboxConversationSweepForDevice(client, {
+    deviceId: DEVICE_ID,
+    expiredAt: NOW.toISOString()
+  });
+
+  const [{ sql, parameters }] = calls;
+  assert.deepEqual(parameters, [DEVICE_ID, NOW.toISOString()]);
+  assert.match(sql, /AND \(step\.expires_at <= \$2 OR sweep\.expires_at <= \$2\)/);
+  assert.match(sql, /UPDATE device_bridge_commands command[\s\S]*FROM child_expired expired/);
+  assert.match(sql, /AND NOT EXISTS \([\s\S]*FROM child_expired expired[\s\S]*expired\.sweep_id=sweep\.sweep_id/);
 });
 
 test("heartbeat expiry exposes only a bounded child-expired fact after preserving exact audit provenance", async () => {

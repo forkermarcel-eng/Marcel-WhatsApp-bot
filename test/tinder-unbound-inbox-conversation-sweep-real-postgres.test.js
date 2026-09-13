@@ -24,6 +24,14 @@ import {
   migrateTinderUnboundInboxConversationSweepFoundation,
   validateTinderUnboundInboxConversationSweepPreDdl
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-migration.js";
+import {
+  createPgTinderUnboundInboxConversationSweepRepository,
+  createTinderUnboundInboxConversationSweepService,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS
+} from "../services/tinder-unbound-inbox-conversation-sweep.js";
+import {
+  T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES
+} from "../device-bridge/protocol-v1.js";
 import { runTinderUnboundInboxConversationSweepPreflightCli } from "../scripts/preflight-tinder-unbound-inbox-conversation-sweep.js";
 import {
   createDeviceBridgeLegacyRealPostgresFixture,
@@ -263,6 +271,115 @@ test("real loopback V8 binds parent, child, transcript, and audit provenance to 
       /not ready/
     );
   }, { prefix: "marcel_unbound_sweep_v8_provenance" });
+});
+
+test("real loopback V8 parent expiry terminalizes its still-active child and permits the next fresh sweep", { timeout: 60_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV6Foundation(pool);
+    await migrateTinderUnboundInboxConversationSweepFoundation(pool);
+
+    const deviceId = await insertV8Device(pool, "expired-parent-active-child");
+    const oldCommandId = await insertV8ReadCommand(pool, deviceId);
+    const client = await pool.connect();
+    let oldScope;
+    try {
+      await client.query("BEGIN");
+      oldScope = await insertActiveV8Scope(client, { deviceId, commandId: oldCommandId });
+      await client.query("COMMIT");
+    } finally {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // The committed setup transaction is already closed.
+      }
+      client.release();
+    }
+
+    await pool.query(
+      `UPDATE device_bridge_devices
+          SET bridge_service_state='RUNNING', tinder_state='CONNECTED', automation_state='STOPPED',
+              capabilities=$2::jsonb, last_heartbeat_sequence=17, last_accepted_heartbeat_at=NOW()
+        WHERE device_id=$1`,
+      [deviceId, JSON.stringify(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES)]
+    );
+    await pool.query(
+      `UPDATE device_bridge_commands
+          SET issued_at=NOW() - INTERVAL '4 minutes', expires_at=NOW() - INTERVAL '1 minute'
+        WHERE command_id=$1`,
+      [oldCommandId]
+    );
+    await pool.query(
+      `UPDATE tinder_unbound_inbox_conversation_sweeps
+          SET issued_at=NOW() - INTERVAL '6 minutes', expires_at=NOW() - INTERVAL '1 minute'
+        WHERE sweep_id=$1`,
+      [oldScope.sweepId]
+    );
+    await pool.query(
+      `UPDATE tinder_unbound_inbox_conversation_sweep_steps
+          SET issued_at=NOW() - INTERVAL '4 minutes', expires_at=NOW() - INTERVAL '1 minute'
+        WHERE command_id=$1`,
+      [oldCommandId]
+    );
+
+    const repository = createPgTinderUnboundInboxConversationSweepRepository(pool);
+    const newSweepId = randomUUID();
+    const newCommandId = randomUUID();
+    const observationNonce = randomUUID();
+    const result = await repository.withTransaction(transaction =>
+      createTinderUnboundInboxConversationSweepService(repository, {
+        createSweepId: () => newSweepId,
+        createCommandId: () => newCommandId,
+        createAuditId: randomUUID,
+        now: () => new Date()
+      }).startUnboundInboxConversationSweepFromFreshInboxObservation(transaction, {
+        deviceId,
+        heartbeatSequence: 17,
+        observationNonce,
+        inboxNavigation: {
+          stage: "INBOX_READY", reason: "NONE", visible_conversation_count: 1,
+          observed_event_count: 1, observation_kind: "FRESH_REVIEWED_INBOX_V1",
+          observation_nonce: observationNonce
+        }
+      })
+    );
+
+    assert.deepEqual(result, { status: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS.QUEUED });
+    const oldState = await pool.query(
+      `SELECT sweep.sweep_state, sweep.terminal_reason,
+              step.child_state, step.terminal_reason AS child_terminal_reason,
+              command.terminal_status
+         FROM tinder_unbound_inbox_conversation_sweeps sweep
+         JOIN tinder_unbound_inbox_conversation_sweep_steps step ON step.sweep_id=sweep.sweep_id
+         JOIN device_bridge_commands command ON command.command_id=step.command_id
+        WHERE sweep.sweep_id=$1`,
+      [oldScope.sweepId]
+    );
+    assert.deepEqual(oldState.rows, [{
+      sweep_state: "STOPPED", terminal_reason: "CHILD_EXPIRED",
+      child_state: "EXPIRED", child_terminal_reason: "CHILD_EXPIRED",
+      terminal_status: "EXPIRED"
+    }]);
+    const activeChildren = await pool.query(
+      `SELECT sweep.sweep_id, step.command_id
+         FROM tinder_unbound_inbox_conversation_sweeps sweep
+         JOIN tinder_unbound_inbox_conversation_sweep_steps step ON step.sweep_id=sweep.sweep_id
+        WHERE sweep.device_id=$1 AND sweep.sweep_state='ACTIVE'
+          AND step.child_state IN ('ISSUED','STAGED','RETURN_STAGED')`,
+      [deviceId]
+    );
+    assert.deepEqual(activeChildren.rows, [{ sweep_id: newSweepId, command_id: newCommandId }]);
+    const audit = await pool.query(
+      `SELECT sweep_id, action, reason_code
+         FROM tinder_unbound_inbox_conversation_sweep_audit
+        WHERE sweep_id IN ($1,$2)
+        ORDER BY created_at ASC, audit_id ASC`,
+      [oldScope.sweepId, newSweepId]
+    );
+    assert.equal(audit.rows.some(row => row.action === "CHILD_EXPIRED" && row.reason_code === "CHILD_EXPIRED"), true);
+    assert.equal(audit.rows.some(row => row.sweep_id === oldScope.sweepId && row.action === "SWEEP_EXPIRED"), false);
+    assert.equal(audit.rows.some(row => row.action === "SWEEP_ISSUED"), true);
+    assert.equal(audit.rows.some(row => row.action === "READ_ISSUED"), true);
+  }, { prefix: "marcel_unbound_sweep_v8_expired_parent_child" });
 });
 
 test("real loopback V8 rejects cross-step transcript evidence, wrong audit slots, and terminal or deleted active children", { timeout: 60_000 }, async () => {

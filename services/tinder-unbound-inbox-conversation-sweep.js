@@ -903,8 +903,12 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
              FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE} sweep
             WHERE step.sweep_id=sweep.sweep_id
               AND sweep.device_id=$1 AND sweep.sweep_state='ACTIVE'
-              AND sweep.expires_at>$2
-              AND step.child_state IN ${activeStepStates} AND step.expires_at <= $2
+              AND step.child_state IN ${activeStepStates}
+              -- A child has no remaining authority once either its own
+              -- deadline or its parent sweep deadline has elapsed.  Leaving
+              -- it active would retain the device-scoped partial-unique slot
+              -- and make a later fresh sweep fail transactionally.
+              AND (step.expires_at <= $2 OR sweep.expires_at <= $2)
            RETURNING step.sweep_id, step.command_id, step.slot_ordinal
         ), terminalized_child_commands AS (
            -- A step expiry is the authoritative V8 authority boundary.  The
@@ -934,6 +938,15 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
               SET sweep_state='EXPIRED', active_command_id=NULL, closed_at=$2,
                   terminal_reason='SWEEP_EXPIRED', updated_at=NOW()
             WHERE sweep.device_id=$1 AND sweep.sweep_state='ACTIVE' AND sweep.expires_at <= $2
+              -- A parent with an active child is terminalized through
+              -- child_expired above so the child command, step, parent and
+              -- audit provenance close atomically.  This branch is only for
+              -- a parent that has no active child left to terminalize.
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM child_expired expired
+                 WHERE expired.sweep_id=sweep.sweep_id
+              )
            RETURNING sweep.sweep_id, sweep.device_id, sweep.sweep_state,
                      sweep.max_slots, sweep.next_slot, sweep.expires_at, sweep.active_command_id,
                      NULL::uuid AS expired_command_id, NULL::smallint AS expired_slot_ordinal

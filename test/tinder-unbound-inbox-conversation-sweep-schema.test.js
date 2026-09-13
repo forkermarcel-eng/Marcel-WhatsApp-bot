@@ -5,9 +5,18 @@ import {
   assertTinderUnboundInboxConversationSweepMigrationSource
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-migration.js";
 import {
+  assertTinderUnboundInboxConversationSweepTriggerRepairMigrationSource
+} from "../device-bridge/tinder-unbound-inbox-conversation-sweep-trigger-repair-migration.js";
+import {
+  classifyTinderUnboundInboxConversationSweepTriggerContract,
   preflightTinderUnboundInboxConversationSweepMigration,
+  preflightTinderUnboundInboxConversationSweepTriggerRepair,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT,
-  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LEGACY_IMMUTABLE_GUARD_BODY,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRIGGER_CONTRACT,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-schema.js";
 import { canonicalCheckDefinition } from "../device-bridge/schema-contract.js";
 import {
@@ -29,6 +38,21 @@ function bridgeV6() {
       constraintName: TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME
     }]
   };
+}
+
+function triggerCatalog(immutableSource = TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY) {
+  return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRIGGER_CONTRACT.map(expected => ({
+    trigger_name: expected.name,
+    relation_name: expected.table,
+    enabled: "O",
+    function_name: expected.functionName,
+    deferrable: expected.deferrable,
+    initially_deferred: expected.initiallyDeferred,
+    trigger_definition: expected.definition,
+    function_source: expected.functionName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION
+      ? immutableSource
+      : expected.source
+  }));
 }
 
 function singleFlightCatalogClient() {
@@ -85,6 +109,57 @@ test("V8 catalog inspection keeps one pg client query in flight", async () => {
   assert.equal(client.maxActive, 1);
 });
 
+test("V8 distinguishes only the exact legacy immutable trigger from canonical or other drift", () => {
+  assert.equal(
+    classifyTinderUnboundInboxConversationSweepTriggerContract(triggerCatalog()),
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+  );
+  assert.equal(
+    classifyTinderUnboundInboxConversationSweepTriggerContract(triggerCatalog(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LEGACY_IMMUTABLE_GUARD_BODY)),
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED
+  );
+
+  const mixed = triggerCatalog();
+  mixed[0].function_source = TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LEGACY_IMMUTABLE_GUARD_BODY;
+  assert.equal(
+    classifyTinderUnboundInboxConversationSweepTriggerContract(mixed),
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+  );
+
+  const changed = triggerCatalog();
+  changed[0].trigger_definition = `${changed[0].trigger_definition} -- drift`;
+  assert.equal(
+    classifyTinderUnboundInboxConversationSweepTriggerContract(changed),
+    TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+  );
+});
+
+test("V8 base migration rejects the historical trigger while the repair preflight is exact and read-only", async () => {
+  const legacyInspection = async () => ({
+    state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED
+  });
+  await assert.rejects(
+    preflightTinderUnboundInboxConversationSweepMigration({}, { inspectSchema: legacyInspection }),
+    /schema is incompatible/i
+  );
+  assert.deepEqual(
+    await preflightTinderUnboundInboxConversationSweepTriggerRepair({}, { inspectSchema: legacyInspection }),
+    {
+      foundation: { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED },
+      mutate: true
+    }
+  );
+  assert.deepEqual(
+    await preflightTinderUnboundInboxConversationSweepTriggerRepair({}, {
+      inspectSchema: async () => ({ state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL })
+    }),
+    {
+      foundation: { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL },
+      mutate: false
+    }
+  );
+});
+
 test("fixed V8 DDL is exact, separate from V1-V6 identity contracts, and makes RETURNED a separately recorded receipt state", () => {
   const source = readFileSync(
     new URL("../migrations/20260912_tinder_unbound_inbox_conversation_sweep_foundation.sql", import.meta.url),
@@ -112,6 +187,9 @@ test("fixed V8 DDL is exact, separate from V1-V6 identity contracts, and makes R
   assert.match(source, /ADD CONSTRAINT tinder_unbound_inbox_sweep_audit_transcript_scope_fkey\s+FOREIGN KEY \(transcript_id, command_id, sweep_id, device_id\)\s+REFERENCES tinder_unbound_inbox_conversation_sweep_transcripts\(transcript_id, command_id, sweep_id, device_id\)/i);
   assert.match(source, /CREATE CONSTRAINT TRIGGER tinder_unbound_inbox_conversation_sweep_active_child_scope/i);
   assert.match(source, /CREATE CONSTRAINT TRIGGER tinder_unbound_inbox_conversation_sweep_step_active_child_scope\s+AFTER INSERT OR DELETE OR UPDATE ON tinder_unbound_inbox_conversation_sweep_steps\s+DEFERRABLE INITIALLY DEFERRED/i);
+  assert.match(source, /IF TG_TABLE_NAME = 'tinder_unbound_inbox_conversation_sweeps' THEN[\s\S]{0,300}NEW\.inbox_observation_nonce/i);
+  assert.match(source, /ELSIF TG_TABLE_NAME = 'tinder_unbound_inbox_conversation_sweep_steps' THEN[\s\S]{0,300}OLD\.child_state/i);
+  assert.doesNotMatch(source, /IF TG_OP <> 'DELETE'\s+AND TG_TABLE_NAME\s*=\s*'tinder_unbound_inbox_conversation_sweeps'\s+AND NEW\.inbox_observation_nonce/i);
   assert.match(source, /WHERE step\.command_id = parent\.active_command_id[\s\S]{0,320}AND step\.child_state IN \('ISSUED', 'STAGED', 'RETURN_STAGED'\)/i);
   assert.match(source, /CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_audit_scope/i);
   assert.match(source, /step\.slot_ordinal = NEW\.slot_ordinal/i);
@@ -121,6 +199,24 @@ test("fixed V8 DDL is exact, separate from V1-V6 identity contracts, and makes R
   assert.throws(() => assertTinderUnboundInboxConversationSweepMigrationSource(
     `${source}\nALTER TABLE contacts ADD COLUMN forbidden text;`
   ));
+});
+
+test("V8 base and repair SQL carry the exact same corrected immutable guard body", () => {
+  const baseSource = readFileSync(
+    new URL("../migrations/20260912_tinder_unbound_inbox_conversation_sweep_foundation.sql", import.meta.url),
+    "utf8"
+  );
+  const repairSource = readFileSync(
+    new URL("../migrations/20260913_tinder_unbound_inbox_conversation_sweep_trigger_repair.sql", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotThrow(() => assertTinderUnboundInboxConversationSweepTriggerRepairMigrationSource(repairSource));
+  const bodyOf = source => source.match(/AS \$guard\$\s*([\s\S]*?)\$guard\$/)?.[1]?.replace(/\s+/g, " ").trim();
+  const expected = TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY.replace(/\s+/g, " ").trim();
+  assert.equal(bodyOf(baseSource), expected);
+  assert.equal(bodyOf(repairSource), expected);
+  assert.equal((repairSource.match(/CREATE OR REPLACE FUNCTION/gi) || []).length, 1);
+  assert.doesNotMatch(repairSource, /^\s*(?:CREATE\s+TABLE|ALTER\s+TABLE|CREATE\s+TRIGGER|DROP\s+CONSTRAINT|INSERT\s+INTO)/im);
 });
 
 test("every explicitly named V8 catalog object fits PostgreSQL's 63-byte identifier limit", () => {

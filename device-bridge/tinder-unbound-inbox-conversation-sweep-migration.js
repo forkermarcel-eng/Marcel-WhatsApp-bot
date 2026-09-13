@@ -73,7 +73,7 @@ const EXPECTED_STATEMENT_HEADS = Object.freeze([
 // SHA-256 of the complete reviewed fixed source after line-ending and outer
 // whitespace normalization. Any relation, literal, trigger, or SQL ordering
 // change requires a deliberate review and a new digest.
-const REVIEWED_SOURCE_SHA256 = "1c8ab6a2c74edad160e41e87dfe3351b072fc419ffecd6ea8c1aaff383875deb";
+const REVIEWED_SOURCE_SHA256 = "ae6989b2856b8dbff720251c0187bbcd6310207a7441da06ae4c76868ac27528";
 
 function canonicalFixedSource(value) {
   return String(value || "").replace(/\r\n/g, "\n").trim();

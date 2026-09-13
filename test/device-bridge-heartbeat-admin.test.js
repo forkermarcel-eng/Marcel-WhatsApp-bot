@@ -563,7 +563,7 @@ test("a fresh reviewed Inbox observation is atomically consumed and can issue on
   assert.equal(replay.state.createdSweeps.length, 0);
 });
 
-test("partial or unknown V8 schema is inert: it cannot issue or deliver a V8 child", async () => {
+test("partial, unknown, or repair-required V8 schema is inert: it cannot issue or deliver a V8 child", async () => {
   const observationNonce = "7bfa798e-85ce-4c2e-830e-df8465c58f70";
   const capabilities = T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES;
   const payload = heartbeatPayload({
@@ -605,7 +605,7 @@ test("partial or unknown V8 schema is inert: it cannot issue or deliver a V8 chi
     {
       inspectUnboundInboxConversationSweepFoundation: async () => {
         inspections += 1;
-        return { state: "INVALID" };
+        return { state: "TRIGGER_REPAIR_REQUIRED" };
       }
     }
   );

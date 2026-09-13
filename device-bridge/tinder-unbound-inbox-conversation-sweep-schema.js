@@ -28,6 +28,7 @@ lock, select a row, or touch V1--V4 capture data.
 
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE = Object.freeze({
   UPGRADE_REQUIRED: "UPGRADE_REQUIRED",
+  TRIGGER_REPAIR_REQUIRED: "TRIGGER_REPAIR_REQUIRED",
   CANONICAL: "CANONICAL",
   INVALID: "INVALID"
 });
@@ -278,7 +279,7 @@ function canonicalTrigger(value) {
     });
 }
 
-const IMMUTABLE_GUARD_BODY = `
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LEGACY_IMMUTABLE_GUARD_BODY = `
 BEGIN
   IF TG_OP <> 'DELETE'
      AND TG_TABLE_NAME = 'tinder_unbound_inbox_conversation_sweeps'
@@ -295,6 +296,39 @@ BEGIN
   END IF;
   IF TG_TABLE_NAME IN ('tinder_unbound_inbox_conversation_sweep_transcripts', 'tinder_unbound_inbox_conversation_sweep_audit') THEN
     RAISE EXCEPTION 'unbound Inbox sweep evidence is immutable';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+`;
+
+// The original V8 function evaluated the parent-only observation field before
+// dispatching on TG_TABLE_NAME.  A step UPDATE therefore reached a field that
+// does not exist on the step row.  Keep that exact historical body separate
+// above so only that precise catalog state is eligible for the explicit
+// trigger-repair migration.  The canonical body never dereferences a field
+// until its owning relation has been selected.
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY = `
+BEGIN
+  IF TG_TABLE_NAME = 'tinder_unbound_inbox_conversation_sweeps' THEN
+    IF TG_OP <> 'DELETE' THEN
+      IF NEW.inbox_observation_nonce IS DISTINCT FROM OLD.inbox_observation_nonce THEN
+        RAISE EXCEPTION 'unbound Inbox sweep observation nonce is immutable';
+      END IF;
+    END IF;
+    IF OLD.sweep_state IN ('COMPLETED', 'STOPPED', 'EXPIRED') THEN
+      RAISE EXCEPTION 'terminal unbound Inbox sweep is immutable';
+    END IF;
+  ELSIF TG_TABLE_NAME = 'tinder_unbound_inbox_conversation_sweep_steps' THEN
+    IF OLD.child_state IN ('TRANSCRIPT_ACCEPTED', 'RETURN_ACCEPTED', 'EXPIRED', 'CANCELLED') THEN
+      RAISE EXCEPTION 'terminal unbound Inbox sweep step is immutable';
+    END IF;
+  ELSIF TG_TABLE_NAME IN ('tinder_unbound_inbox_conversation_sweep_transcripts', 'tinder_unbound_inbox_conversation_sweep_audit') THEN
+    RAISE EXCEPTION 'unbound Inbox sweep evidence is immutable';
+  ELSE
+    RAISE EXCEPTION 'unbound Inbox sweep immutable guard received an invalid relation';
   END IF;
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
@@ -344,34 +378,34 @@ BEGIN
 END;
 `;
 
-const TRIGGER_CONTRACT = Object.freeze([
+export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRIGGER_CONTRACT = Object.freeze([
   Object.freeze({
     name: "tinder_unbound_inbox_conversation_sweep_terminal_immutable",
     table: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE,
     functionName: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION,
     definition: `CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_terminal_immutable BEFORE UPDATE OR DELETE ON ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE} FOR EACH ROW EXECUTE FUNCTION ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION}()`,
-    source: IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
+    source: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
   }),
   Object.freeze({
     name: "tinder_unbound_inbox_conversation_sweep_step_terminal_immutable",
     table: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE,
     functionName: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION,
     definition: `CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_step_terminal_immutable BEFORE UPDATE OR DELETE ON ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE} FOR EACH ROW EXECUTE FUNCTION ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION}()`,
-    source: IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
+    source: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
   }),
   Object.freeze({
     name: "tinder_unbound_inbox_conversation_sweep_transcript_immutable",
     table: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE,
     functionName: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION,
     definition: `CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_transcript_immutable BEFORE UPDATE OR DELETE ON ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE} FOR EACH ROW EXECUTE FUNCTION ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION}()`,
-    source: IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
+    source: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
   }),
   Object.freeze({
     name: "tinder_unbound_inbox_conversation_sweep_audit_immutable",
     table: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE,
     functionName: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION,
     definition: `CREATE TRIGGER tinder_unbound_inbox_conversation_sweep_audit_immutable BEFORE UPDATE OR DELETE ON ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE} FOR EACH ROW EXECUTE FUNCTION ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION}()`,
-    source: IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
+    source: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY, deferrable: false, initiallyDeferred: false
   }),
   Object.freeze({
     name: "tinder_unbound_inbox_conversation_sweep_active_child_scope",
@@ -396,16 +430,33 @@ const TRIGGER_CONTRACT = Object.freeze([
   })
 ]);
 
-function triggersCanonical(rows) {
-  return rows.length === TRIGGER_CONTRACT.length && TRIGGER_CONTRACT.every(expected => {
+function triggersMatch(rows, immutableGuardBody) {
+  return rows.length === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRIGGER_CONTRACT.length && TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRIGGER_CONTRACT.every(expected => {
     const row = rows.find(candidate => candidate.trigger_name === expected.name && candidate.relation_name === expected.table);
+    const source = expected.functionName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_FUNCTION
+      ? immutableGuardBody
+      : expected.source;
     return row?.enabled === "O"
       && row?.function_name === expected.functionName
       && row?.deferrable === expected.deferrable
       && row?.initially_deferred === expected.initiallyDeferred
       && canonicalTrigger(row.trigger_definition) === canonicalTrigger(expected.definition)
-      && canonicalTrigger(row.function_source) === canonicalTrigger(expected.source);
+      && canonicalTrigger(row.function_source) === canonicalTrigger(source);
   });
+}
+
+/**
+ * Classifies only the exact V8 trigger contract.  Callers must separately
+ * establish that all tables, columns, constraints, and indexes are canonical.
+ */
+export function classifyTinderUnboundInboxConversationSweepTriggerContract(rows) {
+  if (triggersMatch(rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY)) {
+    return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL;
+  }
+  if (triggersMatch(rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LEGACY_IMMUTABLE_GUARD_BODY)) {
+    return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED;
+  }
+  return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID;
 }
 
 async function readRelations(client) {
@@ -459,7 +510,7 @@ export async function inspectTinderUnboundInboxConversationSweepSchema(client, {
       ? TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.UPGRADE_REQUIRED
       : TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID };
   }
-  const canonical = commandConstraintName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME
+  const coreCatalogCanonical = commandConstraintName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME
     && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE) === "r"
     && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE) === "r"
     && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE) === "r"
@@ -469,16 +520,47 @@ export async function inspectTinderUnboundInboxConversationSweepSchema(client, {
     && exactColumns(mapColumns(columns.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE), TRANSCRIPT_COLUMNS, TRANSCRIPT_DEFAULTS)
     && exactColumns(mapColumns(columns.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE), AUDIT_COLUMNS, AUDIT_DEFAULTS)
     && indexesCanonical(indexes.rows)
-    && hasExpectedTinderFoundationConstraints(constraints.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT, { exactTables: TARGET_RELATIONS })
-    && triggersCanonical(triggers.rows);
-  return { state: canonical ? TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL : TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID };
+    && hasExpectedTinderFoundationConstraints(constraints.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT, { exactTables: TARGET_RELATIONS });
+  if (!coreCatalogCanonical) {
+    return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID };
+  }
+  const triggerState = classifyTinderUnboundInboxConversationSweepTriggerContract(triggers.rows);
+  if (triggerState === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL) {
+    return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL };
+  }
+  if (triggerState === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED) {
+    return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED };
+  }
+  return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID };
 }
 
 /** Read-only pre-DDL gate for direct V6 -> V8 transition. */
-export async function preflightTinderUnboundInboxConversationSweepMigration(client, options) {
-  const foundation = await inspectTinderUnboundInboxConversationSweepSchema(client, options);
-  if (foundation.state === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID) throw new Error("Tinder unbound Inbox conversation sweep schema is incompatible.");
+export async function preflightTinderUnboundInboxConversationSweepMigration(client, {
+  inspectSchema = inspectTinderUnboundInboxConversationSweepSchema,
+  ...options
+} = {}) {
+  const foundation = await inspectSchema(client, options);
+  if (foundation.state !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.UPGRADE_REQUIRED
+      && foundation.state !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL) {
+    throw new Error("Tinder unbound Inbox conversation sweep schema is incompatible.");
+  }
   return { foundation, mutate: foundation.state === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.UPGRADE_REQUIRED };
+}
+
+/** Read-only pre-DDL gate for the exact historical V8 immutable-trigger body only. */
+export async function preflightTinderUnboundInboxConversationSweepTriggerRepair(client, {
+  inspectSchema = inspectTinderUnboundInboxConversationSweepSchema,
+  ...options
+} = {}) {
+  const foundation = await inspectSchema(client, options);
+  if (foundation.state !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED
+      && foundation.state !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL) {
+    throw new Error("Tinder unbound Inbox conversation sweep trigger repair schema is incompatible.");
+  }
+  return {
+    foundation,
+    mutate: foundation.state === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED
+  };
 }
 
 export async function assertTinderUnboundInboxConversationSweepSchemaReady(client, options) {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { migrateDeviceBridgeAckCanonicalization } from "../device-bridge/ack-canonicalization.js";
 import { migrateDeviceBridgeSchema } from "../device-bridge/database.js";
@@ -17,6 +18,8 @@ import { migrateTinderLocalConversationAttestation } from "../device-bridge/tind
 import {
   assertTinderUnboundInboxConversationSweepSchemaReady,
   inspectTinderUnboundInboxConversationSweepSchema,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LEGACY_IMMUTABLE_GUARD_BODY,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-schema.js";
 import {
@@ -24,6 +27,11 @@ import {
   migrateTinderUnboundInboxConversationSweepFoundation,
   validateTinderUnboundInboxConversationSweepPreDdl
 } from "../device-bridge/tinder-unbound-inbox-conversation-sweep-migration.js";
+import {
+  getTinderUnboundInboxConversationSweepTriggerRepairMigrationFailureDiagnostic,
+  migrateTinderUnboundInboxConversationSweepTriggerRepair,
+  validateTinderUnboundInboxConversationSweepTriggerRepairPreDdl
+} from "../device-bridge/tinder-unbound-inbox-conversation-sweep-trigger-repair-migration.js";
 import {
   createPgTinderUnboundInboxConversationSweepRepository,
   createTinderUnboundInboxConversationSweepService,
@@ -67,6 +75,20 @@ async function prepareV6Foundation(pool) {
   await migrateTinderVisibleChatSyncPermitFoundation(pool);
   await migrateTinderOfficialAppResumePermitV2(pool);
   await migrateTinderLocalConversationAttestation(pool);
+}
+
+function legacyV8MigrationSource() {
+  const source = readFileSync(
+    new URL("../migrations/20260912_tinder_unbound_inbox_conversation_sweep_foundation.sql", import.meta.url),
+    "utf8"
+  );
+  const functionStart = source.indexOf("CREATE FUNCTION tinder_unbound_inbox_sweep_immutable_terminal_guard()");
+  const bodyStart = source.indexOf("BEGIN", functionStart);
+  const bodyEnd = source.indexOf("$guard$;", bodyStart);
+  assert.ok(functionStart >= 0 && bodyStart > functionStart && bodyEnd > bodyStart);
+  assert.match(source.slice(bodyStart, bodyEnd), /inbox_observation_nonce/);
+  assert.match(TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_IMMUTABLE_GUARD_BODY, /ELSIF TG_TABLE_NAME/);
+  return `${source.slice(0, bodyStart)}${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_LEGACY_IMMUTABLE_GUARD_BODY.trim()}\n${source.slice(bodyEnd)}`;
 }
 
 function tracePool(pool, { afterQuery } = {}) {
@@ -168,6 +190,84 @@ test("real loopback PostgreSQL applies, postchecks, and recognizes canonical V8 
       preflight: { foundation: { state: "CANONICAL" }, mutate: false }
     });
   }, { prefix: "marcel_unbound_sweep_v8" });
+});
+
+test("real loopback PostgreSQL recognizes and repairs only the legacy V8 immutable trigger without weakening terminal guards", { timeout: 60_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV6Foundation(pool);
+    // This fixture deliberately reconstructs the historical catalog body only
+    // to prove upgrade detection and repair.  It does not use Production data.
+    await pool.query(legacyV8MigrationSource());
+    assert.deepEqual(await inspectTinderUnboundInboxConversationSweepSchema(pool), {
+      state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.TRIGGER_REPAIR_REQUIRED
+    });
+
+    const deviceId = await insertV8Device(pool, "legacy-trigger-repair");
+    const commandId = await insertV8ReadCommand(pool, deviceId);
+    const setupClient = await pool.connect();
+    let scope;
+    try {
+      await setupClient.query("BEGIN");
+      scope = await insertActiveV8Scope(setupClient, { deviceId, commandId });
+      await setupClient.query("COMMIT");
+    } finally {
+      try { await setupClient.query("ROLLBACK"); } catch {
+        // The committed setup transaction is already closed.
+      }
+      setupClient.release();
+    }
+    await assert.rejects(
+      () => pool.query(
+        `UPDATE tinder_unbound_inbox_conversation_sweep_steps
+            SET child_state='EXPIRED', closed_at=NOW(), terminal_reason='CHILD_EXPIRED'
+          WHERE command_id=$1`,
+        [scope.commandId]
+      ),
+      error => error?.code === "42703"
+    );
+
+    assert.deepEqual(await validateTinderUnboundInboxConversationSweepTriggerRepairPreDdl(pool), {
+      migrated: false,
+      preflight: { foundation: { state: "TRIGGER_REPAIR_REQUIRED" }, mutate: true }
+    });
+    assert.deepEqual(await migrateTinderUnboundInboxConversationSweepTriggerRepair(pool), {
+      migrated: true,
+      preflight: { foundation: { state: "TRIGGER_REPAIR_REQUIRED" }, mutate: true }
+    });
+    assert.deepEqual(await inspectTinderUnboundInboxConversationSweepSchema(pool), {
+      state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+    });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE tinder_unbound_inbox_conversation_sweeps
+            SET sweep_state='STOPPED', active_command_id=NULL, closed_at=NOW(), terminal_reason='CHILD_EXPIRED'
+          WHERE sweep_id=$1`,
+        [scope.sweepId]
+      );
+      await client.query(
+        `UPDATE tinder_unbound_inbox_conversation_sweep_steps
+            SET child_state='EXPIRED', closed_at=NOW(), terminal_reason='CHILD_EXPIRED'
+          WHERE command_id=$1`,
+        [scope.commandId]
+      );
+      await client.query("COMMIT");
+      await assert.rejects(
+        () => client.query(
+          "UPDATE tinder_unbound_inbox_conversation_sweep_steps SET terminal_reason='UNKNOWN_OUTCOME' WHERE command_id=$1",
+          [scope.commandId]
+        ),
+        error => error?.code === "P0001" && error?.message === "terminal unbound Inbox sweep step is immutable"
+      );
+    } finally {
+      try { await client.query("ROLLBACK"); } catch {
+        // The successful COMMIT or failed statement has already closed its transaction.
+      }
+      client.release();
+    }
+  }, { prefix: "marcel_unbound_sweep_v8_trigger_repair" });
 });
 
 test("real loopback V8 preflight is repeatable-read/read-only and rolls back without DDL or locks", { timeout: 60_000 }, async () => {

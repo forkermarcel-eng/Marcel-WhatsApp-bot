@@ -260,7 +260,7 @@ function t5HydrationRow(command, { snapshot: snapshotOverrides = {}, approval: a
 
 function heartbeatPool({
   request, sequence = null, bodyHash = null, acceptedAt = null, commands = [], hydrationRows = new Map(),
-  failUpdate = false, nonceReplay = false, localAttestationFoundation = false,
+  failUpdate = false, failUpdateCode = null, nonceReplay = false, localAttestationFoundation = false,
   unboundInboxSweepFoundation = false, sweepRuntime = null,
   priorFreshInboxObservation = false, persistedSweepObservation = false,
   activeSweepChild = false, activeSweepParent = false, expiredSweepRows = []
@@ -300,7 +300,11 @@ function heartbeatPool({
         state.nonceInserts += 1; return { rowCount: 1, rows: [] };
       }
       if (sql.includes("UPDATE device_bridge_devices")) {
-        if (failUpdate) throw new Error("simulated update failure");
+        if (failUpdate) {
+          const error = new Error("simulated update failure");
+          if (typeof failUpdateCode === "string") error.code = failUpdateCode;
+          throw error;
+        }
         state.updates += 1; return { rowCount: 1, rows: [] };
       }
       if (sql.includes("INSERT INTO device_bridge_audit_events")) { state.audits += 1; return { rowCount: 1, rows: [] }; }
@@ -702,9 +706,30 @@ test("internal heartbeat failures log only a bounded transaction stage", async (
   }
   assert.equal(response.statusCode, 500);
   assert.equal(response.body.error.code, "INTERNAL_ERROR");
-  assert.deepEqual(messages, ["Device Bridge heartbeat transaction failed at DEVICE_UPDATE."]);
+  assert.deepEqual(messages, ["Device Bridge heartbeat transaction failed at DEVICE_UPDATE: INTERNAL_UNCLASSIFIED."]);
   assert.equal(messages.join(" ").includes("simulated"), false);
   assert.match(heartbeatSource, /failureStage = "V8_EXPIRY";\s+const v8SweepRuntime/);
+});
+
+test("internal heartbeat database failures retain only a finite reason class", async () => {
+  const current = new Date();
+  const payload = heartbeatPayload({ sent_at: current.toISOString() });
+  const request = heartbeatRequest(payload, { now: current });
+  const fake = heartbeatPool({ request, failUpdate: true, failUpdateCode: "23505" });
+  const response = responseRecorder();
+  const messages = [];
+  const originalError = console.error;
+  console.error = value => messages.push(String(value));
+  try {
+    await createHeartbeatHandler(fake.pool)(request.req, response);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.body.error.code, "INTERNAL_ERROR");
+  assert.deepEqual(messages, ["Device Bridge heartbeat transaction failed at DEVICE_UPDATE: DATABASE_UNIQUE_CONFLICT."]);
+  assert.equal(messages.join(" ").includes("23505"), false);
+  assert.equal(messages.join(" ").includes("simulated"), false);
 });
 
 test("ONLINE/OFFLINE derives only from server accepted time", () => {

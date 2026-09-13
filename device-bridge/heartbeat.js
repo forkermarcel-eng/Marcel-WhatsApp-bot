@@ -150,6 +150,37 @@ function boundedHeartbeatFailureStage(error) {
     : "UNCLASSIFIED";
 }
 
+// Keep server-side heartbeat diagnostics useful without serializing a driver
+// error, a SQLSTATE, a query, or any application data.  The labels below are
+// deliberately coarse and finite: they tell an operator which recovery path
+// to inspect while preserving the fail-closed public protocol response.
+function boundedHeartbeatFailureReason(error) {
+  let code = null;
+  try {
+    code = typeof error?.code === "string" ? error.code : null;
+  } catch {
+    return "INTERNAL_UNCLASSIFIED";
+  }
+  switch (code) {
+    case "23505": return "DATABASE_UNIQUE_CONFLICT";
+    case "23503": return "DATABASE_FOREIGN_KEY_CONFLICT";
+    case "23514": return "DATABASE_CHECK_CONFLICT";
+    case "P0001": return "DATABASE_GUARD_REJECTED";
+    case "40001": return "DATABASE_TRANSACTION_CONFLICT";
+    case "40P01": return "DATABASE_TRANSACTION_CONFLICT";
+    case "55P03": return "DATABASE_LOCK_UNAVAILABLE";
+    case "42P01": return "DATABASE_RELATION_MISSING";
+    case "42703": return "DATABASE_COLUMN_MISSING";
+    case "42601": return "DATABASE_QUERY_INVALID";
+    case "42P10": return "DATABASE_CONSTRAINT_INVALID";
+    case "0A000": return "DATABASE_QUERY_UNSUPPORTED";
+    case "25P02": return "DATABASE_TRANSACTION_ABORTED";
+    default: return /^[0-9A-Z]{5}$/.test(code || "")
+      ? "DATABASE_UNCLASSIFIED"
+      : "INTERNAL_UNCLASSIFIED";
+  }
+}
+
 export function isBoundedTinderInboxNavigationDiagnostic(value) {
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || freshObservation)
@@ -818,7 +849,9 @@ export function createHeartbeatHandler(pool) {
     } catch (error) {
       const status = error instanceof DeviceBridgeProtocolError ? error.status : 500;
       if (!(error instanceof DeviceBridgeProtocolError)) {
-        console.error(`Device Bridge heartbeat transaction failed at ${boundedHeartbeatFailureStage(error)}.`);
+        console.error(
+          `Device Bridge heartbeat transaction failed at ${boundedHeartbeatFailureStage(error)}: ${boundedHeartbeatFailureReason(error)}.`
+        );
       }
       return res.status(status).json(protocolErrorBody(error, req.get("x-marcel-request-id")));
     }

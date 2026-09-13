@@ -243,6 +243,29 @@ test("an expired parent with an active child releases that child authority befor
   assert.equal(repository.state.steps.length, 1);
 });
 
+test("an immutable expired parent retains its state while its stranded active child is terminalized", async () => {
+  const expiredSweep = activeSweep({ sweep_state: "EXPIRED", active_command_id: null });
+  const repository = fixtureRepository({
+    sweepRow: expiredSweep,
+    expiredRows: [{
+      ...expiredSweep,
+      expired_command_id: READ_COMMAND_ID,
+      expired_slot_ordinal: 1
+    }]
+  });
+
+  assert.deepEqual(await service(repository).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
+    status: "EXPIRED"
+  });
+  assert.deepEqual(repository.state.audits, [{
+    auditId: AUDIT_IDS[0], sweepId: SWEEP_ID, commandId: READ_COMMAND_ID,
+    deviceId: DEVICE_ID, slotOrdinal: 1, transcriptId: null,
+    action: "CHILD_EXPIRED", actor: "SERVER_EXPIRY", source: "SERVER_MAINTENANCE",
+    reasonCode: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED,
+    details: {}
+  }]);
+});
+
 test("PostgreSQL expiry terminalizes an active child when its parent sweep expires", async () => {
   const calls = [];
   const repository = createPgTinderUnboundInboxConversationSweepRepository({
@@ -263,8 +286,10 @@ test("PostgreSQL expiry terminalizes an active child when its parent sweep expir
 
   const [{ sql, parameters }] = calls;
   assert.deepEqual(parameters, [DEVICE_ID, NOW.toISOString()]);
-  assert.match(sql, /AND \(step\.expires_at <= \$2 OR sweep\.expires_at <= \$2\)/);
+  assert.match(sql, /sweep\.sweep_state IN \('ACTIVE','EXPIRED'\)/);
+  assert.match(sql, /AND \(step\.expires_at <= \$2 OR sweep\.expires_at <= \$2 OR sweep\.sweep_state='EXPIRED'\)/);
   assert.match(sql, /UPDATE device_bridge_commands command[\s\S]*FROM child_expired expired/);
+  assert.match(sql, /expired_parent_child AS \([\s\S]*sweep\.sweep_state='EXPIRED'/);
   assert.match(sql, /AND NOT EXISTS \([\s\S]*FROM child_expired expired[\s\S]*expired\.sweep_id=sweep\.sweep_id/);
 });
 

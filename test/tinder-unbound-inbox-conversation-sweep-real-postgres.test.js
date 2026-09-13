@@ -273,7 +273,7 @@ test("real loopback V8 binds parent, child, transcript, and audit provenance to 
   }, { prefix: "marcel_unbound_sweep_v8_provenance" });
 });
 
-test("real loopback V8 parent expiry terminalizes its still-active child and permits the next fresh sweep", { timeout: 60_000 }, async () => {
+test("real loopback V8 cleans a legacy expired parent's still-active child and permits the next fresh sweep", { timeout: 60_000 }, async () => {
   await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
     await prepareV6Foundation(pool);
     await migrateTinderUnboundInboxConversationSweepFoundation(pool);
@@ -310,7 +310,8 @@ test("real loopback V8 parent expiry terminalizes its still-active child and per
     );
     await pool.query(
       `UPDATE tinder_unbound_inbox_conversation_sweeps
-          SET issued_at=NOW() - INTERVAL '6 minutes', expires_at=NOW() - INTERVAL '1 minute'
+          SET sweep_state='EXPIRED', active_command_id=NULL, closed_at=NOW(), terminal_reason='SWEEP_EXPIRED',
+              issued_at=NOW() - INTERVAL '6 minutes', expires_at=NOW() - INTERVAL '1 minute'
         WHERE sweep_id=$1`,
       [oldScope.sweepId]
     );
@@ -355,7 +356,7 @@ test("real loopback V8 parent expiry terminalizes its still-active child and per
       [oldScope.sweepId]
     );
     assert.deepEqual(oldState.rows, [{
-      sweep_state: "STOPPED", terminal_reason: "CHILD_EXPIRED",
+      sweep_state: "EXPIRED", terminal_reason: "SWEEP_EXPIRED",
       child_state: "EXPIRED", child_terminal_reason: "CHILD_EXPIRED",
       terminal_status: "EXPIRED"
     }]);

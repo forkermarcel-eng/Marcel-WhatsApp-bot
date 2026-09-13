@@ -431,13 +431,22 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
           "Unbound Inbox sweep expiry returned invalid data.", "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_REPOSITORY", 500
         );
       }
-      const childExpired = sweep.sweepState === "STOPPED";
-      const expiredCommandId = uuid(sourceValue(row, "expiredCommandId", "expired_command_id"));
-      const expiredSlotOrdinal = Number(sourceValue(row, "expiredSlotOrdinal", "expired_slot_ordinal"));
+      const expiredCommandRaw = sourceValue(row, "expiredCommandId", "expired_command_id");
+      const expiredSlotRaw = sourceValue(row, "expiredSlotOrdinal", "expired_slot_ordinal");
+      const expiredCommandId = expiredCommandRaw === null || expiredCommandRaw === undefined
+        ? null : uuid(expiredCommandRaw);
+      const expiredSlotOrdinal = expiredSlotRaw === null || expiredSlotRaw === undefined
+        ? null : Number(expiredSlotRaw);
+      const childExpired = expiredCommandId !== null || expiredSlotOrdinal !== null;
       if (childExpired && (!expiredCommandId || !Number.isSafeInteger(expiredSlotOrdinal)
           || expiredSlotOrdinal < 1 || expiredSlotOrdinal > TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_MAX_SLOTS)) {
         throw new TinderUnboundInboxConversationSweepError(
           "Unbound Inbox sweep expiry returned invalid child provenance.", "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_REPOSITORY", 500
+        );
+      }
+      if (childExpired && !["STOPPED", "EXPIRED"].includes(sweep.sweepState)) {
+        throw new TinderUnboundInboxConversationSweepError(
+          "Unbound Inbox sweep expiry returned invalid child state.", "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_REPOSITORY", 500
         );
       }
       if (!childExpired && sweep.sweepState !== "EXPIRED") {
@@ -902,13 +911,14 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
               SET child_state='EXPIRED', closed_at=$2, terminal_reason='CHILD_EXPIRED', updated_at=NOW()
              FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE} sweep
             WHERE step.sweep_id=sweep.sweep_id
-              AND sweep.device_id=$1 AND sweep.sweep_state='ACTIVE'
+              AND sweep.device_id=$1 AND sweep.sweep_state IN ('ACTIVE','EXPIRED')
               AND step.child_state IN ${activeStepStates}
               -- A child has no remaining authority once either its own
-              -- deadline or its parent sweep deadline has elapsed.  Leaving
-              -- it active would retain the device-scoped partial-unique slot
-              -- and make a later fresh sweep fail transactionally.
-              AND (step.expires_at <= $2 OR sweep.expires_at <= $2)
+              -- deadline, its parent sweep deadline, or an already terminal
+              -- legacy parent has elapsed. Leaving it active would retain the
+              -- device-scoped partial-unique slot and make a later fresh
+              -- sweep fail transactionally.
+              AND (step.expires_at <= $2 OR sweep.expires_at <= $2 OR sweep.sweep_state='EXPIRED')
            RETURNING step.sweep_id, step.command_id, step.slot_ordinal
         ), terminalized_child_commands AS (
            -- A step expiry is the authoritative V8 authority boundary.  The
@@ -933,6 +943,18 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
                      sweep.max_slots, sweep.next_slot, sweep.expires_at, sweep.active_command_id,
                      expired.command_id AS expired_command_id,
                      expired.slot_ordinal AS expired_slot_ordinal
+         ), expired_parent_child AS (
+           -- A historical parent can already be immutable EXPIRED while an
+           -- old active child still occupies the device slot. The parent must
+           -- remain immutable; terminalize only that child and preserve its
+           -- exact provenance for the CHILD_EXPIRED audit.
+           SELECT sweep.sweep_id, sweep.device_id, sweep.sweep_state,
+                  sweep.max_slots, sweep.next_slot, sweep.expires_at, sweep.active_command_id,
+                  expired.command_id AS expired_command_id,
+                  expired.slot_ordinal AS expired_slot_ordinal
+             FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE} sweep
+             JOIN child_expired expired ON expired.sweep_id=sweep.sweep_id
+            WHERE sweep.device_id=$1 AND sweep.sweep_state='EXPIRED'
          ), parent_expired AS (
            UPDATE ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE} sweep
               SET sweep_state='EXPIRED', active_command_id=NULL, closed_at=$2,
@@ -952,6 +974,8 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
                      NULL::uuid AS expired_command_id, NULL::smallint AS expired_slot_ordinal
          )
          SELECT * FROM child_stopped
+         UNION ALL
+         SELECT * FROM expired_parent_child
          UNION ALL
          SELECT * FROM parent_expired`,
         [deviceId, expiredAt]

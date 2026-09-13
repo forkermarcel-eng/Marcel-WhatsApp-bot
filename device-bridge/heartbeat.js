@@ -41,6 +41,12 @@ const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE = "tinder_unbound_inbox_conv
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE = "tinder_unbound_inbox_conversation_sweep_steps";
 const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conversation_v1";
+const HEARTBEAT_FAILURE_STAGE_PROPERTY = "deviceBridgeHeartbeatFailureStage";
+const HEARTBEAT_FAILURE_STAGES = new Set([
+  "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION",
+  "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_EXPIRY",
+  "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
+]);
 
 // This is deliberately a bounded, content-free diagnostic contract. It is
 // optional so an older installed Android release remains protocol-compatible,
@@ -123,6 +129,25 @@ function nullableTimestamp(value) {
 function exactKeys(value, keys) {
   return object(value)
     && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
+}
+
+function tagHeartbeatFailureStage(error, stage) {
+  if (!error || typeof error !== "object" || !HEARTBEAT_FAILURE_STAGES.has(stage)) return error;
+  try {
+    Object.defineProperty(error, HEARTBEAT_FAILURE_STAGE_PROPERTY, {
+      value: stage, enumerable: false, configurable: true
+    });
+  } catch {
+    // Preserve the original fail-closed error if a foreign error object cannot
+    // carry bounded diagnostic metadata.
+  }
+  return error;
+}
+
+function boundedHeartbeatFailureStage(error) {
+  return HEARTBEAT_FAILURE_STAGES.has(error?.[HEARTBEAT_FAILURE_STAGE_PROPERTY])
+    ? error[HEARTBEAT_FAILURE_STAGE_PROPERTY]
+    : "UNCLASSIFIED";
 }
 
 export function isBoundedTinderInboxNavigationDiagnostic(value) {
@@ -657,8 +682,10 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
     throw new TypeError("inspectUnboundInboxConversationSweepFoundation must be a function");
   }
   const client = await pool.connect();
+  let failureStage = "BEGIN";
   try {
     await client.query("BEGIN");
+    failureStage = "DEVICE_LOCK";
     const locked = await client.query(
       `SELECT d.device_id, d.installation_id, d.enrollment_state, d.revoked_at,
               d.last_heartbeat_sequence, d.last_heartbeat_body_sha256, d.last_accepted_heartbeat_at,
@@ -677,6 +704,7 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
     if (device.installation_id !== heartbeat.device.installation_id) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_ID_MISMATCH", "Installation identifier does not match device");
     }
+    failureStage = "REQUEST_REPLAY";
     await registerAuthenticatedRequestReplay(client, auth, now);
 
     const previousSequence = device.last_heartbeat_sequence === null ? null : Number(device.last_heartbeat_sequence);
@@ -685,6 +713,7 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       throw new DeviceBridgeProtocolError(409, "HEARTBEAT_SEQUENCE_CONFLICT", "Heartbeat sequence conflicts with the last accepted heartbeat");
     }
 
+    failureStage = "V8_FOUNDATION";
     const unboundInboxConversationSweepFoundationState =
       await inspectUnboundInboxConversationSweepFoundationState(
         client,
@@ -698,6 +727,7 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       && isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities);
     let acceptedAt = now;
     if (!idempotent) {
+      failureStage = "DEVICE_UPDATE";
       await client.query(
         `UPDATE device_bridge_devices SET
           app_version_name=$2, app_version_code=$3, manufacturer=$4, model=$5,
@@ -712,6 +742,7 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
           heartbeat.bridge.service_state, heartbeat.tinder_state, heartbeat.sequence,
           auth.contentSha256, now]
       );
+      failureStage = "HEARTBEAT_AUDIT";
       await client.query(
         `INSERT INTO device_bridge_audit_events
          (event_type, request_id, device_id, key_id, result_code, http_status, details)
@@ -721,6 +752,7 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       // The audit fact is intentionally written before any V8 gate/conflict
       // decision. Therefore a valid fresh observation nonce is consumed even
       // when this particular heartbeat cannot issue a sweep child.
+      failureStage = "V8_START";
       await maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
         pool, deviceId: auth.deviceId, heartbeat, now,
         unboundInboxConversationSweepFoundationReady
@@ -728,18 +760,20 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
     } else {
       acceptedAt = new Date(device.last_accepted_heartbeat_at);
     }
+    failureStage = "V8_EXPIRY";
     const v8SweepRuntime = await expireUnboundInboxConversationSweepForHeartbeat(client, {
       pool,
       deviceId: auth.deviceId,
       now,
       unboundInboxConversationSweepFoundationCanonical
     });
-    const commands = v8SweepRuntime.childExpired
+    let commands = [];
+    if (!v8SweepRuntime.childExpired) {
       // Delivery must not continue with an older nonterminal command in the
-      // same heartbeat that made the V8 child terminal.  A subsequent signed
+      // same heartbeat that made the V8 child terminal. A subsequent signed
       // heartbeat obtains a freshly locked command view.
-      ? []
-      : await selectDeliverableCommands(client, auth.deviceId, heartbeat.capabilities, now, {
+      failureStage = "COMMAND_SELECTION";
+      commands = await selectDeliverableCommands(client, auth.deviceId, heartbeat.capabilities, now, {
         unboundInboxConversationSweepFoundationReady,
         suppressDynamicTinderCommands:
           // An INVALID result can mean a previously canonical V8 catalog
@@ -758,11 +792,17 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
           || (!isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities)
             && v8SweepRuntime.active)
       });
+    }
+    failureStage = "COMMIT";
     await client.query("COMMIT");
     return heartbeatResponse(now, acceptedAt, commands);
   } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      throw tagHeartbeatFailureStage(rollbackError, "ROLLBACK");
+    }
+    throw tagHeartbeatFailureStage(error, failureStage);
   } finally {
     client.release();
   }
@@ -777,7 +817,9 @@ export function createHeartbeatHandler(pool) {
       return res.status(200).json(response);
     } catch (error) {
       const status = error instanceof DeviceBridgeProtocolError ? error.status : 500;
-      if (!(error instanceof DeviceBridgeProtocolError)) console.error("Device Bridge heartbeat transaction failed.");
+      if (!(error instanceof DeviceBridgeProtocolError)) {
+        console.error(`Device Bridge heartbeat transaction failed at ${boundedHeartbeatFailureStage(error)}.`);
+      }
       return res.status(status).json(protocolErrorBody(error, req.get("x-marcel-request-id")));
     }
   };

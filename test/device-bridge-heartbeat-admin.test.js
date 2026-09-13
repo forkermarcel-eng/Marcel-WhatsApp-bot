@@ -686,6 +686,27 @@ test("database failure rolls nonce and heartbeat back together logically", async
   assert.equal(fake.state.rollbacks, 1);
 });
 
+test("internal heartbeat failures log only a bounded transaction stage", async () => {
+  const current = new Date();
+  const payload = heartbeatPayload({ sent_at: current.toISOString() });
+  const request = heartbeatRequest(payload, { now: current });
+  const fake = heartbeatPool({ request, failUpdate: true });
+  const response = responseRecorder();
+  const messages = [];
+  const originalError = console.error;
+  console.error = value => messages.push(String(value));
+  try {
+    await createHeartbeatHandler(fake.pool)(request.req, response);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.body.error.code, "INTERNAL_ERROR");
+  assert.deepEqual(messages, ["Device Bridge heartbeat transaction failed at DEVICE_UPDATE."]);
+  assert.equal(messages.join(" ").includes("simulated"), false);
+  assert.match(heartbeatSource, /failureStage = "V8_EXPIRY";\s+const v8SweepRuntime/);
+});
+
 test("ONLINE/OFFLINE derives only from server accepted time", () => {
   assert.equal(deriveDeviceStatus(null, NOW), "OFFLINE");
   assert.equal(deriveDeviceStatus(new Date(NOW.valueOf() - 90_000), NOW), "ONLINE");

@@ -83,6 +83,21 @@ test("V8 unbound Inbox sweep status is bounded and exposes no correlation data",
   assert.deepEqual(statusResponse.body, { ok: true, unbound_inbox_sweep: { status: "ACTIVE" } });
 });
 
+test("V8 terminal sweep status exposes only an allowlisted terminal reason", async () => {
+  const status = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return { async getBoundedSweepStatus() { return { status: "STOPPED", reasonCode: "CHILD_EXPIRED" }; } };
+    }
+  });
+  const response = responseRecorder();
+  response.setHeader = () => {};
+  await status({ params: { deviceId: DEVICE_ID } }, response);
+  assert.deepEqual(response.body, {
+    ok: true, unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED" }
+  });
+});
+
 test("V8 sweep status is inert when its exact schema assertion detects drift", async () => {
   let statusWork = 0;
   const status = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {

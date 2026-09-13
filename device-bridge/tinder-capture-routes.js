@@ -53,6 +53,7 @@ import {
   createTinderLocalConversationAttestationService
 } from "../services/tinder-local-conversation-attestation.js";
 import {
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON,
   TinderUnboundInboxConversationSweepError,
   createPgTinderUnboundInboxConversationSweepRepository,
   createTinderUnboundInboxConversationSweepService
@@ -120,6 +121,14 @@ const PUBLIC_LOCAL_CONVERSATION_ATTESTATION_REASONS = new Set(
 );
 const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUSES = new Set([
   "NOT_REQUESTED", "ACTIVE", "COMPLETED", "STOPPED", "EXPIRED"
+]);
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS = new Set([
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.THREAD_DRIFT,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.COMMAND_REJECTED,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.RUNTIME_GATE_LOST,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.UNKNOWN_OUTCOME,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED
 ]);
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TRANSCRIPT_LIMIT = 8;
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_MESSAGE_LIMIT = 100;
@@ -625,14 +634,18 @@ function boundedOfficialAppResumeQueueResult(result) {
 
 function boundedUnboundInboxConversationSweepStatus(result) {
   const status = String(result?.status || "").trim().toUpperCase();
+  const hasReason = Object.hasOwn(result || {}, "reasonCode");
+  const terminal = status === "STOPPED" || status === "EXPIRED";
   if (!PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUSES.has(status)
-      || !exactKeys(result, ["status"])) {
+      || (!hasReason && !exactKeys(result, ["status"]))
+      || (hasReason && (!terminal || !exactKeys(result, ["status", "reasonCode"])
+        || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(result.reasonCode)))) {
     const error = new Error("Invalid unbound Inbox sweep status.");
     error.statusCode = 500;
     error.code = "INVALID_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS";
     throw error;
   }
-  return Object.freeze({ status });
+  return Object.freeze({ status, ...(hasReason ? { reason_code: result.reasonCode } : {}) });
 }
 
 /**

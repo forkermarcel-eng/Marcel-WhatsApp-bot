@@ -229,6 +229,26 @@ test("expiry preserves exact child command and slot provenance, while parent exp
   });
 });
 
+test("V8 terminal status exposes only its finite terminal reason", async () => {
+  const stopped = fixtureRepository({
+    sweepRow: activeSweep({
+      sweep_state: "STOPPED", active_command_id: null, terminal_reason: "CHILD_EXPIRED"
+    })
+  });
+  assert.deepEqual(await service(stopped).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
+    status: "STOPPED", reasonCode: "CHILD_EXPIRED"
+  });
+
+  const unexpectedReason = fixtureRepository({
+    sweepRow: activeSweep({
+      sweep_state: "STOPPED", active_command_id: null, terminal_reason: "UNEXPECTED"
+    })
+  });
+  assert.deepEqual(await service(unexpectedReason).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
+    status: "STOPPED"
+  });
+});
+
 test("an expired parent with an active child releases that child authority before a fresh sweep", async () => {
   const stoppedSweep = activeSweep({ sweep_state: "STOPPED", active_command_id: null });
   const repository = fixtureRepository({

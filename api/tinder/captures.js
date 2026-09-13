@@ -93,6 +93,14 @@ const PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE = "SYNC_TINDER_VISIBLE_CHAT";
 const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES = new Set([
   "NOT_REQUESTED", "ACTIVE", "COMPLETED", "STOPPED", "EXPIRED"
 ]);
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS = new Set([
+  "THREAD_DRIFT",
+  "COMMAND_REJECTED",
+  "RUNTIME_GATE_LOST",
+  "CHILD_EXPIRED",
+  "UNKNOWN_OUTCOME",
+  "SWEEP_EXPIRED"
+]);
 const PUBLIC_VISIBLE_CHAT_SYNC_STATUSES = new Set([
   "QUEUED", "DEVICE_NOT_READY", "PERMIT_CONFLICT", "PERMIT_NOT_AVAILABLE"
 ]);
@@ -810,11 +818,16 @@ function normalizePublicVisibleChatSyncResult(value) {
 }
 
 function normalizePublicUnboundInboxConversationSweepStatus(value) {
-  if (!exactKeys(value, ["status"])
-      || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES.has(value.status)) {
+  const status = value?.status;
+  const terminal = status === "STOPPED" || status === "EXPIRED";
+  const hasReason = Object.hasOwn(value || {}, "reason_code");
+  if (!PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES.has(status)
+      || (!hasReason && !exactKeys(value, ["status"]))
+      || (hasReason && (!terminal || !exactKeys(value, ["status", "reason_code"])
+        || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(value.reason_code)))) {
     return null;
   }
-  return Object.freeze({ status: value.status });
+  return Object.freeze({ status, ...(hasReason ? { reason_code: value.reason_code } : {}) });
 }
 
 // The V8 dashboard projection intentionally contains transcript facts only.

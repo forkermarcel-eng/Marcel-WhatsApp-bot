@@ -340,6 +340,9 @@ function currentSweepFromRow(row) {
   const deviceId = uuid(sourceValue(row, "deviceId", "device_id"));
   const activeCommandRaw = sourceValue(row, "activeCommandId", "active_command_id");
   const activeCommandId = activeCommandRaw === null || activeCommandRaw === undefined ? null : uuid(activeCommandRaw);
+  const terminalReasonRaw = sourceValue(row, "terminalReason", "terminal_reason");
+  const terminalReason = terminalReasonRaw === null || terminalReasonRaw === undefined
+    ? null : normalizedStatus(terminalReasonRaw);
   const expiresAt = date(sourceValue(row, "expiresAt", "expires_at"));
   const maxSlots = Number(sourceValue(row, "maxSlots", "max_slots"));
   const nextSlot = Number(sourceValue(row, "nextSlot", "next_slot"));
@@ -347,7 +350,27 @@ function currentSweepFromRow(row) {
       || (activeCommandRaw !== null && activeCommandRaw !== undefined && !activeCommandId)) return null;
   return Object.freeze({
     sweepId, deviceId, activeCommandId, expiresAt, maxSlots, nextSlot,
-    sweepState: normalizedStatus(sourceValue(row, "sweepState", "sweep_state"))
+    sweepState: normalizedStatus(sourceValue(row, "sweepState", "sweep_state")), terminalReason
+  });
+}
+
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_TERMINAL_REASONS = new Set([
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.THREAD_DRIFT,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.COMMAND_REJECTED,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.RUNTIME_GATE_LOST,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.UNKNOWN_OUTCOME,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED
+]);
+
+function boundedSweepStatus(sweep) {
+  const status = ["ACTIVE", "COMPLETED", "STOPPED", "EXPIRED"].includes(sweep?.sweepState)
+    ? sweep.sweepState : "STOPPED";
+  const terminal = status === "STOPPED" || status === "EXPIRED";
+  return Object.freeze({
+    status,
+    ...(terminal && TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_TERMINAL_REASONS
+      .has(sweep?.terminalReason) ? { reasonCode: sweep.terminalReason } : {})
   });
 }
 
@@ -930,9 +953,7 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
       await expireForDevice(transaction, { deviceId: normalized.deviceId, currentTime });
       const sweep = currentSweepFromRow(await repository.getUnboundInboxConversationSweepForDeviceForUpdate(transaction, normalized.deviceId));
       if (!sweep) return Object.freeze({ status: "NOT_REQUESTED" });
-      const status = ["ACTIVE", "COMPLETED", "STOPPED", "EXPIRED"].includes(sweep.sweepState)
-        ? sweep.sweepState : "STOPPED";
-      return Object.freeze({ status });
+      return boundedSweepStatus(sweep);
     });
   }
 
@@ -1254,7 +1275,7 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
     async getUnboundInboxConversationSweepForDeviceForUpdate(client, deviceId) {
       const result = await client.query(
         `SELECT sweep_id, device_id, sweep_state, max_slots, next_slot,
-                active_command_id, expires_at
+                active_command_id, expires_at, terminal_reason
            FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE}
           WHERE device_id=$1
           ORDER BY issued_at DESC, sweep_id DESC

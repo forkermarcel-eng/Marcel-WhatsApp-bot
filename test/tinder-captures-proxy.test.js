@@ -883,6 +883,17 @@ test("V8 unbound Inbox sweep proxy exposes bounded status only and has no browse
     `https://shared-backend.example/dashboard-api/tinder/devices/${DEVICE_ID}/unbound-inbox-conversation-sweeps/status`);
   assert.deepEqual(status.body, { ok: true, unbound_inbox_sweep: { status: "ACTIVE" } });
 
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED" }
+  });
+  const terminalStatus = responseRecorder();
+  await handler(request({ query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-status" } }), terminalStatus);
+  assert.equal(terminalStatus.statusCode, 200);
+  assert.deepEqual(terminalStatus.body, {
+    ok: true, unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED" }
+  });
+
   globalThis.fetch = async () => { throw new Error("fetch must not run"); };
   const manualStart = responseRecorder();
   await handler(request({

@@ -535,13 +535,14 @@ export async function inspectTinderLocalConversationAttestationSchema(client, {
   let constraints;
   let commandState;
   try {
-    [relations, columns, indexes, constraints, commandState] = await Promise.all([
-      readRelations(client),
-      readColumns(client),
-      readIndexes(client),
-      readTinderFoundationConstraints(client, TARGET_RELATIONS),
-      commandConstraintState(client, inspectDeviceBridgeSchema)
-    ]);
+    // One pg Client has one wire-protocol query stream.  This inspector is
+    // also reached from the normal heartbeat transaction, so catalog facts
+    // must be read in a deterministic sequence rather than concurrently.
+    relations = await readRelations(client);
+    columns = await readColumns(client);
+    indexes = await readIndexes(client);
+    constraints = await readTinderFoundationConstraints(client, TARGET_RELATIONS);
+    commandState = await commandConstraintState(client, inspectDeviceBridgeSchema);
   } catch (error) {
     boundedInspectionError(
       TINDER_LOCAL_CONVERSATION_ATTESTATION_PREFLIGHT_ERROR_CODE.PREREQUISITE_INSPECTION_FAILED,

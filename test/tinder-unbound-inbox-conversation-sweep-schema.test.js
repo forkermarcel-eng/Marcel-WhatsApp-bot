@@ -31,6 +31,21 @@ function bridgeV6() {
   };
 }
 
+function singleFlightCatalogClient() {
+  let active = 0;
+  let maxActive = 0;
+  return {
+    get maxActive() { return maxActive; },
+    async query() {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setImmediate(resolve));
+      active -= 1;
+      return { rows: [] };
+    }
+  };
+}
+
 test("V8 preflight accepts only the exact V6 predecessor with an absent V8 catalog and stays catalog-read-only", async () => {
   const queries = [];
   const client = {
@@ -55,6 +70,19 @@ test("V8 preflight accepts only the exact V6 predecessor with an absent V8 catal
   assert.match(indexRead, /relation\.relname=ANY\(\$1\)/);
   assert.match(indexRead, /NOT EXISTS \(SELECT 1 FROM pg_constraint constraint_index WHERE constraint_index\.conindid=i\.indexrelid\)/);
   assert.doesNotMatch(indexRead, /idx\.relname=ANY\(\$1\)/);
+});
+
+test("V8 catalog inspection keeps one pg client query in flight", async () => {
+  const client = singleFlightCatalogClient();
+  const checked = await preflightTinderUnboundInboxConversationSweepMigration(client, {
+    inspectV6Schema: async () => canonicalV6(),
+    inspectDeviceBridgeSchema: async () => bridgeV6()
+  });
+  assert.deepEqual(checked, {
+    foundation: { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.UPGRADE_REQUIRED },
+    mutate: true
+  });
+  assert.equal(client.maxActive, 1);
 });
 
 test("fixed V8 DDL is exact, separate from V1-V6 identity contracts, and makes RETURNED a separately recorded receipt state", () => {

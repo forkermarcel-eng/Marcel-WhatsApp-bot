@@ -443,9 +443,16 @@ export async function inspectTinderUnboundInboxConversationSweepSchema(client, {
   if (v6?.state !== TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL) {
     return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID };
   }
-  const [relations, columns, indexes, constraints, triggers, commandConstraintName] = await Promise.all([
-    readRelations(client), readColumns(client), readIndexes(client), readTinderFoundationConstraints(client, TARGET_RELATIONS), readTriggers(client), currentCommandConstraintName(client, inspectDeviceBridgeSchema)
-  ]);
+  // This runs in both heartbeat and dashboard transactions.  Keep every
+  // catalog request on the same pg Client strictly sequential; concurrent
+  // client.query calls are deprecated and can obscure a safe V8 state as an
+  // inspection failure.
+  const relations = await readRelations(client);
+  const columns = await readColumns(client);
+  const indexes = await readIndexes(client);
+  const constraints = await readTinderFoundationConstraints(client, TARGET_RELATIONS);
+  const triggers = await readTriggers(client);
+  const commandConstraintName = await currentCommandConstraintName(client, inspectDeviceBridgeSchema);
   const catalog = { relations, columns, indexes, constraints, triggers };
   if (absentCatalog(catalog)) {
     return { state: commandConstraintName === TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME

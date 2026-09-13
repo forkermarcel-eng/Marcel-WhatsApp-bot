@@ -49,6 +49,21 @@ const canonicalV2 = async () => ({
   state: TINDER_OFFICIAL_APP_RESUME_PERMIT_V2_FOUNDATION_STATE.CANONICAL
 });
 
+function singleFlightCatalogClient() {
+  let active = 0;
+  let maxActive = 0;
+  return {
+    get maxActive() { return maxActive; },
+    async query() {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setImmediate(resolve));
+      active -= 1;
+      return { rows: [] };
+    }
+  };
+}
+
 test("attestation preflight accepts only an exact V5 predecessor, is catalog-read-only, and blocks active V1 sync permits", async () => {
   const client = catalogClient();
   const checked = await preflightTinderLocalConversationAttestationMigration(client, {
@@ -110,6 +125,19 @@ test("attestation inspection classifies prerequisite catalog failure with a boun
     error => error?.code
       === TINDER_LOCAL_CONVERSATION_ATTESTATION_PREFLIGHT_ERROR_CODE.PREREQUISITE_INSPECTION_FAILED
   );
+});
+
+test("attestation catalog inspection keeps one pg client query in flight", async () => {
+  const client = singleFlightCatalogClient();
+  assert.deepEqual(await inspectTinderLocalConversationAttestationSchema(client, {
+    inspectResumeV2Schema: canonicalV2,
+    inspectDeviceBridgeSchema: async () => bridgeInspection(
+      TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME
+    )
+  }), {
+    state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.UPGRADE_REQUIRED
+  });
+  assert.equal(client.maxActive, 1);
 });
 
 test("fixed attestation DDL is exact and contains no durable Tinder/UI identity material", () => {

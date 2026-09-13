@@ -13,6 +13,7 @@ import {
   tinderFoundationCheck,
   tinderFoundationKey
 } from "./tinder-foundation-constraint-contract.js";
+import { canonicalSchemaPredicate } from "./schema-contract.js";
 
 /* ==================================================
 VERIFIED CHAT -> INBOX RETURN -- V9 SCHEMA CONTRACT
@@ -95,6 +96,10 @@ async function readColumnRows(client) {
 }
 
 async function readIndexRows(client) {
+  // Inspect every non-constraint index on the V9 relations. The canonical
+  // check must reject a surplus index as well as a missing expected one.
+  // TARGET_INDEX_NAMES are index names, while this query filters indexed
+  // relations, so it must receive TARGET_RELATIONS.
   return client.query(`
     SELECT idx.relname AS index_name, i.indisunique, i.indisvalid, i.indisready,
            ARRAY(SELECT a.attname::text
@@ -112,7 +117,7 @@ async function readIndexRows(client) {
      WHERE n.nspname=current_schema()
        AND relation.relname=ANY($1)
        AND NOT EXISTS (SELECT 1 FROM pg_constraint constraint_index WHERE constraint_index.conindid=i.indexrelid)
-  `, [TARGET_INDEX_NAMES]);
+  `, [TARGET_RELATIONS]);
 }
 
 async function readTriggerRows(client) {
@@ -154,7 +159,7 @@ function indexMatches(rows, name, { unique, columns, descending, predicate = "" 
   return Boolean(row) && row.indisvalid === true && row.indisready === true
     && row.indisunique === unique && sameArray(row.column_names, columns)
     && sameArray(row.descending, descending)
-    && canonicalSql(row.predicate) === canonicalSql(predicate);
+    && canonicalSchemaPredicate(row.predicate) === canonicalSchemaPredicate(predicate);
 }
 
 function indexesCanonical(rows) {
@@ -220,6 +225,17 @@ const TRIGGER_CONTRACT = Object.freeze([
   })
 ]);
 
+function canonicalTriggerDefinition(value) {
+  return canonicalSql(value)
+    // PostgreSQL may display a multi-event trigger in a different event order
+    // than its reviewed CREATE statement.  Normalize only that presentation
+    // detail; timing, relation and function stay exact.
+    .replace(/\b(after|before)\s+((?:(?:insert|delete|update)(?:\s+or\s+)?)+)(?=\s+on\b)/g, (_whole, timing, eventList) => {
+      const events = String(eventList).split(/\s+or\s+/).map(event => event.trim()).filter(Boolean).sort();
+      return `${timing} ${events.join(" or ")}`;
+    });
+}
+
 function triggersCanonical(rows) {
   return Array.isArray(rows) && rows.length === TRIGGER_CONTRACT.length
     && TRIGGER_CONTRACT.every(expected => {
@@ -229,7 +245,7 @@ function triggersCanonical(rows) {
       return row?.enabled === "O" && row?.deferrable === false
         && row?.initially_deferred === false
         && row?.function_name === expected.functionName
-        && canonicalSql(row?.trigger_definition) === canonicalSql(expected.definition)
+        && canonicalTriggerDefinition(row?.trigger_definition) === canonicalTriggerDefinition(expected.definition)
         && expected.sourceFragments.every(fragment => source.includes(canonicalSql(fragment)));
     });
 }
@@ -345,13 +361,15 @@ export async function inspectTinderVerifiedChatReturnSchema(client, {
   inspectDeviceBridgeSchema = inspectDeviceBridgeT1Schema
 } = {}) {
   const commandConstraintName = await readCommandConstraint(client, inspectDeviceBridgeSchema);
-  const [relations, columns, indexes, triggers, constraints] = [
-    await readRelationRows(client),
-    await readColumnRows(client),
-    await readIndexRows(client),
-    await readTriggerRows(client),
-    await readTinderFoundationConstraints(client, TARGET_RELATIONS)
-  ];
+  // This inspector runs on a single pg Client inside preflight and migration
+  // transactions. Keep catalog reads explicitly sequential, matching V8, so
+  // no concurrent client.query calls can turn a safe catalog state into an
+  // ambiguous inspection failure.
+  const relations = await readRelationRows(client);
+  const columns = await readColumnRows(client);
+  const indexes = await readIndexRows(client);
+  const constraints = await readTinderFoundationConstraints(client, TARGET_RELATIONS);
+  const triggers = await readTriggerRows(client);
   const catalog = { relations, columns, indexes, triggers, constraints };
   if (commandConstraintName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME
       && absentCatalog(catalog)) {

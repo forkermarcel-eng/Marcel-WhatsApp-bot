@@ -65,7 +65,7 @@ function triggerRows({ driftScopeGuard = false } = {}) {
       relation_name: PERMIT_TABLE,
       enabled: "O", deferrable: false, initially_deferred: false,
       function_name: "tinder_verified_chat_return_immutable_guard",
-      trigger_definition: `CREATE TRIGGER tinder_verified_chat_return_permit_immutable BEFORE UPDATE OR DELETE ON ${PERMIT_TABLE} FOR EACH ROW EXECUTE FUNCTION tinder_verified_chat_return_immutable_guard()`,
+      trigger_definition: `CREATE TRIGGER tinder_verified_chat_return_permit_immutable BEFORE DELETE OR UPDATE ON ${PERMIT_TABLE} FOR EACH ROW EXECUTE FUNCTION tinder_verified_chat_return_immutable_guard()`,
       function_source: `BEGIN
         IF OLD.permit_state IN ('RETURNED', 'CANCELLED', 'EXPIRED') THEN RAISE EXCEPTION 'immutable'; END IF;
         IF NEW.source_capture_id IS DISTINCT FROM OLD.source_capture_id THEN RAISE EXCEPTION 'scope'; END IF;
@@ -112,10 +112,18 @@ function incompleteConstraintRows() {
   ];
 }
 
-function catalogClient({ driftScopeGuard = false, active = false, constraintRows = canonicalConstraintRows() } = {}) {
+function catalogClient({
+  driftScopeGuard = false,
+  active = false,
+  constraintRows = canonicalConstraintRows(),
+  requireRelationParametersForIndexes = false,
+  extraNonConstraintIndex = false,
+  calls = null
+} = {}) {
   return {
-    async query(sql) {
+    async query(sql, parameters) {
       const text = String(sql);
+      calls?.push({ text, parameters });
       if (text.includes("FROM pg_class c") && text.includes("c.relkind")) {
         return { rows: [
           { relation_name: PERMIT_TABLE, relkind: "r" },
@@ -129,13 +137,23 @@ function catalogClient({ driftScopeGuard = false, active = false, constraintRows
         ] };
       }
       if (text.includes("FROM pg_index")) {
-        return { rows: [
-          { index_name: "idx_tinder_verified_chat_return_active_device", indisunique: true, indisvalid: true, indisready: true, column_names: ["device_id"], descending: [false], predicate: "permit_state IN ('ISSUED', 'STAGED')" },
+        if (requireRelationParametersForIndexes
+            && (!Array.isArray(parameters)
+                || parameters.length !== 1
+                || parameters[0]?.join(",") !== `${PERMIT_TABLE},${AUDIT_TABLE}`)) {
+          return { rows: [] };
+        }
+        const rows = [
+          { index_name: "idx_tinder_verified_chat_return_active_device", indisunique: true, indisvalid: true, indisready: true, column_names: ["device_id"], descending: [false], predicate: "permit_state = ANY (ARRAY['ISSUED'::text, 'STAGED'::text])" },
           { index_name: "idx_tinder_verified_chat_return_source_created", indisunique: false, indisvalid: true, indisready: true, column_names: ["source_capture_id", "created_at"], descending: [false, true], predicate: "" },
           { index_name: "idx_tinder_verified_chat_return_resume_created", indisunique: false, indisvalid: true, indisready: true, column_names: ["resume_command_id", "created_at"], descending: [false, true], predicate: "" },
           { index_name: "idx_tinder_verified_chat_return_binding_revision_created", indisunique: false, indisvalid: true, indisready: true, column_names: ["binding_id", "binding_revision", "created_at"], descending: [false, false, true], predicate: "" },
           { index_name: "idx_tinder_verified_chat_return_audit_command_created", indisunique: false, indisvalid: true, indisready: true, column_names: ["command_id", "created_at"], descending: [false, true], predicate: "" }
-        ] };
+        ];
+        if (extraNonConstraintIndex) {
+          rows.push({ index_name: "idx_tinder_verified_chat_return_unreviewed", indisunique: false, indisvalid: true, indisready: true, column_names: ["created_at"], descending: [false], predicate: "" });
+        }
+        return { rows };
       }
       if (text.includes("FROM pg_trigger")) return { rows: triggerRows({ driftScopeGuard }) };
       if (text.includes("FROM pg_constraint")) return { rows: constraintRows };
@@ -156,6 +174,26 @@ test("V9 postcheck accepts only the complete canonical catalog contract", async 
     foundation: { state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL },
     mutate: false
   });
+});
+
+test("V9 postcheck reads all non-constraint indexes from its target relations and accepts PostgreSQL catalog normalization", async () => {
+  const calls = [];
+  const client = catalogClient({ requireRelationParametersForIndexes: true, calls });
+  assert.deepEqual(await inspectTinderVerifiedChatReturnSchema(client, {
+    inspectDeviceBridgeSchema: async () => bridgeV9()
+  }), { state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL });
+  const indexQuery = calls.find(call => call.text.includes("FROM pg_index"));
+  assert.ok(indexQuery);
+  assert.match(indexQuery.text, /relation\.relname=ANY\(\$1\)/);
+  assert.deepEqual(indexQuery.parameters, [[PERMIT_TABLE, AUDIT_TABLE]]);
+});
+
+test("V9 postcheck still rejects an unreviewed non-constraint index on a target relation", async () => {
+  assert.deepEqual(await inspectTinderVerifiedChatReturnSchema(catalogClient({
+    extraNonConstraintIndex: true
+  }), {
+    inspectDeviceBridgeSchema: async () => bridgeV9()
+  }), { state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.INVALID });
 });
 
 test("V9 postcheck rejects the former incomplete three-constraint fixture", async () => {

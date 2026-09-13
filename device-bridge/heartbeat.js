@@ -29,6 +29,9 @@ import {
   inspectTinderUnboundInboxConversationSweepSchema,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
 } from "./tinder-unbound-inbox-conversation-sweep-schema.js";
+import {
+  boundedTinderUnboundInboxConversationSweepExpiryPhase
+} from "../services/tinder-unbound-inbox-conversation-sweep.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
@@ -179,6 +182,12 @@ function boundedHeartbeatFailureReason(error) {
       ? "DATABASE_UNCLASSIFIED"
       : "INTERNAL_UNCLASSIFIED";
   }
+}
+
+function boundedHeartbeatFailurePhase(error) {
+  return boundedHeartbeatFailureStage(error) === "V8_EXPIRY"
+    ? boundedTinderUnboundInboxConversationSweepExpiryPhase(error)
+    : "UNCLASSIFIED";
 }
 
 export function isBoundedTinderInboxNavigationDiagnostic(value) {
@@ -849,8 +858,11 @@ export function createHeartbeatHandler(pool) {
     } catch (error) {
       const status = error instanceof DeviceBridgeProtocolError ? error.status : 500;
       if (!(error instanceof DeviceBridgeProtocolError)) {
+        const stage = boundedHeartbeatFailureStage(error);
+        const phase = boundedHeartbeatFailurePhase(error);
+        const location = phase === "UNCLASSIFIED" ? stage : `${stage}/${phase}`;
         console.error(
-          `Device Bridge heartbeat transaction failed at ${boundedHeartbeatFailureStage(error)}: ${boundedHeartbeatFailureReason(error)}.`
+          `Device Bridge heartbeat transaction failed at ${location}: ${boundedHeartbeatFailureReason(error)}.`
         );
       }
       return res.status(status).json(protocolErrorBody(error, req.get("x-marcel-request-id")));

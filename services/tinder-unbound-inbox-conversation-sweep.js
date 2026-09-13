@@ -24,6 +24,11 @@ signed command envelope and an exact empty payload.
 ================================================== */
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_EXPIRY_PHASE_PROPERTY =
+  "tinderUnboundInboxConversationSweepExpiryPhase";
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_EXPIRY_PHASES = new Set([
+  "EXPIRY_QUERY", "EXPIRY_AUDIT", "ACTIVE_LOOKUP"
+]);
 
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE =
   "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
@@ -107,6 +112,26 @@ export class TinderUnboundInboxConversationSweepError extends Error {
     this.code = code;
     this.statusCode = statusCode;
   }
+}
+
+function tagBoundedSweepExpiryPhase(error, phase) {
+  if (!error || typeof error !== "object"
+      || !TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_EXPIRY_PHASES.has(phase)) return error;
+  try {
+    Object.defineProperty(error, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_EXPIRY_PHASE_PROPERTY, {
+      value: phase, enumerable: false, configurable: true
+    });
+  } catch {
+    // Preserve the original fail-closed error when foreign errors cannot carry
+    // a bounded diagnostic marker.
+  }
+  return error;
+}
+
+export function boundedTinderUnboundInboxConversationSweepExpiryPhase(error) {
+  return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_EXPIRY_PHASES.has(
+    error?.[TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_EXPIRY_PHASE_PROPERTY]
+  ) ? error[TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_EXPIRY_PHASE_PROPERTY] : "UNCLASSIFIED";
 }
 
 function plainObject(value) {
@@ -414,9 +439,14 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
   const newAuditId = () => normalizeUuid(createAuditId(), "Audit identifier", "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_ID");
 
   async function expireForDevice(transaction, { deviceId, currentTime }) {
-    const expired = await repository.expireUnboundInboxConversationSweepForDevice(transaction, {
-      deviceId, expiredAt: currentTime.toISOString()
-    });
+    let expired;
+    try {
+      expired = await repository.expireUnboundInboxConversationSweepForDevice(transaction, {
+        deviceId, expiredAt: currentTime.toISOString()
+      });
+    } catch (error) {
+      throw tagBoundedSweepExpiryPhase(error, "EXPIRY_QUERY");
+    }
     if (!Array.isArray(expired)) {
       throw new TinderUnboundInboxConversationSweepError(
         "Unbound Inbox sweep expiry returned invalid data.", "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_REPOSITORY", 500
@@ -454,16 +484,20 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
           "Unbound Inbox sweep expiry returned invalid state.", "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_REPOSITORY", 500
         );
       }
-      await repository.insertUnboundInboxConversationSweepAudit(transaction, auditRecord({
-        auditId: newAuditId(), sweepId: sweep.sweepId, deviceId,
-        commandId: childExpired ? expiredCommandId : null,
-        slotOrdinal: childExpired ? expiredSlotOrdinal : null,
-        action: childExpired ? "CHILD_EXPIRED" : "SWEEP_EXPIRED",
-        actor: "SERVER_EXPIRY", source: "SERVER_MAINTENANCE",
-        reasonCode: childExpired
-          ? TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED
-          : TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED
-      }));
+      try {
+        await repository.insertUnboundInboxConversationSweepAudit(transaction, auditRecord({
+          auditId: newAuditId(), sweepId: sweep.sweepId, deviceId,
+          commandId: childExpired ? expiredCommandId : null,
+          slotOrdinal: childExpired ? expiredSlotOrdinal : null,
+          action: childExpired ? "CHILD_EXPIRED" : "SWEEP_EXPIRED",
+          actor: "SERVER_EXPIRY", source: "SERVER_MAINTENANCE",
+          reasonCode: childExpired
+            ? TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED
+            : TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED
+        }));
+      } catch (error) {
+        throw tagBoundedSweepExpiryPhase(error, "EXPIRY_AUDIT");
+      }
       if (childExpired) childExpiredCount += 1;
       else parentExpiredCount += 1;
     }
@@ -489,13 +523,18 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
       deviceId: normalizedDeviceId,
       currentTime
     });
-    const active = strictBoolean(
-      await repository.findActiveUnboundInboxConversationSweepForDevice(transaction, {
-        deviceId: normalizedDeviceId,
-        now: currentTime.toISOString()
-      }),
-      "findActiveUnboundInboxConversationSweepForDevice"
-    );
+    let active;
+    try {
+      active = strictBoolean(
+        await repository.findActiveUnboundInboxConversationSweepForDevice(transaction, {
+          deviceId: normalizedDeviceId,
+          now: currentTime.toISOString()
+        }),
+        "findActiveUnboundInboxConversationSweepForDevice"
+      );
+    } catch (error) {
+      throw tagBoundedSweepExpiryPhase(error, "ACTIVE_LOOKUP");
+    }
     return Object.freeze({ childExpired: outcome.childExpiredCount > 0, active });
   }
 

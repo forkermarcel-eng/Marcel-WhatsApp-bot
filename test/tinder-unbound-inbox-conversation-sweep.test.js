@@ -8,6 +8,7 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS,
   TinderUnboundInboxConversationSweepError,
+  boundedTinderUnboundInboxConversationSweepExpiryPhase,
   createPgTinderUnboundInboxConversationSweepRepository,
   createTinderUnboundInboxConversationSweepService
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
@@ -314,6 +315,23 @@ test("heartbeat expiry exposes only a bounded child-expired fact after preservin
     reasonCode: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED,
     details: {}
   });
+});
+
+test("heartbeat expiry marks a repository fault with a bounded query phase only", async () => {
+  const repository = fixtureRepository();
+  const raw = new Error("private simulated repository failure");
+  raw.code = "42703";
+  repository.expireUnboundInboxConversationSweepForDevice = async () => { throw raw; };
+  const sweep = service(repository);
+  await assert.rejects(
+    () => sweep.expireUnboundInboxConversationSweepForHeartbeat({}, { deviceId: DEVICE_ID }),
+    error => {
+      assert.equal(error, raw);
+      assert.equal(boundedTinderUnboundInboxConversationSweepExpiryPhase(error), "EXPIRY_QUERY");
+      assert.equal(Object.keys(error).some(key => key.includes("ExpiryPhase")), false);
+      return true;
+    }
+  );
 });
 
 test("READ transcript acceptance atomically queues a distinct 90-second empty RETURN_ONLY child", async () => {

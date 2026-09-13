@@ -61,6 +61,9 @@ import {
 import {
   assertTinderUnboundInboxConversationSweepSchemaReady
 } from "./tinder-unbound-inbox-conversation-sweep-schema.js";
+import {
+  boundedTinderUnboundInboxSweepDiagnostic
+} from "./tinder-unbound-inbox-sweep-diagnostic-contract.js";
 import { TINDER_IDENTITY_RESOLUTION_STATUS } from "../services/tinder-identity-resolution.js";
 
 /* ==================================================
@@ -635,17 +638,25 @@ function boundedOfficialAppResumeQueueResult(result) {
 function boundedUnboundInboxConversationSweepStatus(result) {
   const status = String(result?.status || "").trim().toUpperCase();
   const hasReason = Object.hasOwn(result || {}, "reasonCode");
+  const hasDiagnostic = Object.hasOwn(result || {}, "diagnostic");
   const terminal = status === "STOPPED" || status === "EXPIRED";
   if (!PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUSES.has(status)
-      || (!hasReason && !exactKeys(result, ["status"]))
-      || (hasReason && (!terminal || !exactKeys(result, ["status", "reasonCode"])
-        || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(result.reasonCode)))) {
+      || (!hasReason && !exactKeys(result, hasDiagnostic ? ["status", "diagnostic"] : ["status"]))
+      || (hasReason && (!terminal
+        || !exactKeys(result, hasDiagnostic ? ["status", "reasonCode", "diagnostic"]
+          : ["status", "reasonCode"])
+        || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(result.reasonCode)))
+      || (hasDiagnostic && boundedTinderUnboundInboxSweepDiagnostic(result.diagnostic) === null)) {
     const error = new Error("Invalid unbound Inbox sweep status.");
     error.statusCode = 500;
     error.code = "INVALID_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS";
     throw error;
   }
-  return Object.freeze({ status, ...(hasReason ? { reason_code: result.reasonCode } : {}) });
+  return Object.freeze({
+    status,
+    ...(hasReason ? { reason_code: result.reasonCode } : {}),
+    ...(hasDiagnostic ? { diagnostic: boundedTinderUnboundInboxSweepDiagnostic(result.diagnostic) } : {})
+  });
 }
 
 /**

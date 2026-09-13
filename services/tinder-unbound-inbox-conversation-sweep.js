@@ -7,6 +7,9 @@ import {
 import {
   isTinderUnboundInboxConversationSweepCapable
 } from "../device-bridge/protocol-v1.js";
+import {
+  boundedTinderUnboundInboxSweepDiagnostic
+} from "../device-bridge/tinder-unbound-inbox-sweep-diagnostic-contract.js";
 
 /* ==================================================
 UNBOUND INBOX-CONVERSATION SWEEP -- V8
@@ -54,6 +57,7 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE =
   "tinder_unbound_inbox_conversation_sweep_transcripts";
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE =
   "tinder_unbound_inbox_conversation_sweep_audit";
+const DEVICE_BRIDGE_AUDIT_EVENT_TABLE = "device_bridge_audit_events";
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONTRACT_VERSION = 1;
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_MAX_SLOTS = 8;
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_TTL_MS = 3 * 60_000;
@@ -372,6 +376,24 @@ function boundedSweepStatus(sweep) {
     ...(terminal && TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_TERMINAL_REASONS
       .has(sweep?.terminalReason) ? { reasonCode: sweep.terminalReason } : {})
   });
+}
+
+async function latestBoundedSweepDiagnostic(repository, transaction, deviceId) {
+  if (typeof repository?.getLatestTinderUnboundInboxSweepDiagnosticForDevice !== "function") {
+    return null;
+  }
+  // The repository reads a single JSON projection from the immutable accepted
+  // heartbeat audit. Re-validate it here so a malformed or future audit value
+  // is inert rather than becoming a dashboard-visible diagnostic.
+  return boundedTinderUnboundInboxSweepDiagnostic(
+    await repository.getLatestTinderUnboundInboxSweepDiagnosticForDevice(transaction, deviceId)
+  );
+}
+
+function withBoundedSweepDiagnostic(status, diagnostic) {
+  return diagnostic === null
+    ? status
+    : Object.freeze({ ...status, diagnostic });
 }
 
 function currentStepFromRow(row) {
@@ -952,8 +974,11 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
       const currentTime = new Date(now());
       await expireForDevice(transaction, { deviceId: normalized.deviceId, currentTime });
       const sweep = currentSweepFromRow(await repository.getUnboundInboxConversationSweepForDeviceForUpdate(transaction, normalized.deviceId));
-      if (!sweep) return Object.freeze({ status: "NOT_REQUESTED" });
-      return boundedSweepStatus(sweep);
+      const diagnostic = await latestBoundedSweepDiagnostic(repository, transaction,
+        normalized.deviceId);
+      if (!sweep) return withBoundedSweepDiagnostic(
+        Object.freeze({ status: "NOT_REQUESTED" }), diagnostic);
+      return withBoundedSweepDiagnostic(boundedSweepStatus(sweep), diagnostic);
     });
   }
 
@@ -1284,6 +1309,20 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
         [deviceId]
       );
       return result.rows[0] || null;
+    },
+
+    async getLatestTinderUnboundInboxSweepDiagnosticForDevice(client, deviceId) {
+      const result = await client.query(
+        `SELECT details->'tinder_unbound_inbox_sweep' AS diagnostic
+           FROM ${DEVICE_BRIDGE_AUDIT_EVENT_TABLE}
+          WHERE device_id=$1
+            AND event_type='HEARTBEAT_ACCEPTED'
+            AND jsonb_typeof(details->'tinder_unbound_inbox_sweep')='object'
+          ORDER BY created_at DESC, audit_event_id DESC
+          LIMIT 1`,
+        [deviceId]
+      );
+      return result.rows[0]?.diagnostic ?? null;
     },
 
     async getUnboundInboxConversationSweepStepForUpdate(client, commandId) {

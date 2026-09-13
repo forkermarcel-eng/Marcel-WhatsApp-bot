@@ -90,8 +90,8 @@ function issuedReturn(overrides = {}) {
   };
 }
 
-function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = activeSweep(), stepRow = stagedRead(), priorObservation = false, persistedObservation = false, expiredRows = [] } = {}) {
-  const state = { commands: [], sweeps: [], steps: [], audits: [], runtimeRow, conflicts, sweepRow, stepRow, priorObservation, persistedObservation, expiredRows, accepted: [], stopped: [] };
+function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = activeSweep(), stepRow = stagedRead(), priorObservation = false, persistedObservation = false, expiredRows = [], sweepDiagnostic = null } = {}) {
+  const state = { commands: [], sweeps: [], steps: [], audits: [], runtimeRow, conflicts, sweepRow, stepRow, priorObservation, persistedObservation, expiredRows, sweepDiagnostic, accepted: [], stopped: [] };
   const repository = {
     state,
     async withTransaction(work) { return work({}); },
@@ -112,6 +112,7 @@ function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = 
     },
     async getUnboundInboxConversationSweepForUpdate() { return state.sweepRow; },
     async getUnboundInboxConversationSweepForDeviceForUpdate() { return state.sweepRow; },
+    async getLatestTinderUnboundInboxSweepDiagnosticForDevice() { return state.sweepDiagnostic; },
     async getUnboundInboxConversationSweepStepForUpdate(_transaction, commandId) {
       return commandId === state.stepRow?.command_id ? state.stepRow : null;
     },
@@ -246,6 +247,29 @@ test("V8 terminal status exposes only its finite terminal reason", async () => {
   });
   assert.deepEqual(await service(unexpectedReason).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
     status: "STOPPED"
+  });
+});
+
+test("V8 status retains only the newest exact, content-free diagnostic projection", async () => {
+  const diagnostic = {
+    stage: "INGRESS",
+    reason: "UNBOUND_READER_INGRESS_FAILED",
+    session_state: "READ_IN_PROGRESS",
+    current_slot: 1,
+    reads_accepted: 0,
+    returns_accepted: 0,
+    reader_result: "COMPLETE",
+    ingress_phase: "READ",
+    ingress_outcome: "REJECTED",
+    ingress_stage: "HTTP_RESPONSE"
+  };
+  const repository = fixtureRepository({ sweepDiagnostic: diagnostic });
+  assert.deepEqual(await service(repository).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
+    status: "ACTIVE", diagnostic
+  });
+  const malformed = fixtureRepository({ sweepDiagnostic: { ...diagnostic, raw_error: "forbidden" } });
+  assert.deepEqual(await service(malformed).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
+    status: "ACTIVE"
   });
 });
 

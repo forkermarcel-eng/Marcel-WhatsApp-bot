@@ -1,4 +1,7 @@
 import crypto from "crypto";
+import {
+  boundedTinderUnboundInboxSweepDiagnostic
+} from "../../device-bridge/tinder-unbound-inbox-sweep-diagnostic-contract.js";
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAPPING_FIELDS = new Set([
@@ -821,13 +824,25 @@ function normalizePublicUnboundInboxConversationSweepStatus(value) {
   const status = value?.status;
   const terminal = status === "STOPPED" || status === "EXPIRED";
   const hasReason = Object.hasOwn(value || {}, "reason_code");
+  const hasDiagnostic = Object.hasOwn(value || {}, "diagnostic");
+  const diagnostic = hasDiagnostic
+    ? boundedTinderUnboundInboxSweepDiagnostic(value?.diagnostic)
+    : null;
+  const expectedKeys = hasReason
+    ? (hasDiagnostic ? ["status", "reason_code", "diagnostic"] : ["status", "reason_code"])
+    : (hasDiagnostic ? ["status", "diagnostic"] : ["status"]);
   if (!PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES.has(status)
-      || (!hasReason && !exactKeys(value, ["status"]))
-      || (hasReason && (!terminal || !exactKeys(value, ["status", "reason_code"])
-        || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(value.reason_code)))) {
+      || !exactKeys(value, expectedKeys)
+      || (hasReason && (!terminal
+        || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(value.reason_code)))
+      || (hasDiagnostic && diagnostic === null)) {
     return null;
   }
-  return Object.freeze({ status, ...(hasReason ? { reason_code: value.reason_code } : {}) });
+  return Object.freeze({
+    status,
+    ...(hasReason ? { reason_code: value.reason_code } : {}),
+    ...(diagnostic === null ? {} : { diagnostic })
+  });
 }
 
 // The V8 dashboard projection intentionally contains transcript facts only.

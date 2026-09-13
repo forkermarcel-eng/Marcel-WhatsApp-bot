@@ -478,6 +478,55 @@ test("optional Tinder inbox navigation heartbeat diagnostic is strict and conten
   }
 });
 
+test("optional V8 sweep heartbeat diagnostic is exact, content-free, and cannot affect command issuance", async () => {
+  const diagnostic = {
+    stage: "INGRESS",
+    reason: "UNBOUND_READER_INGRESS_FAILED",
+    session_state: "READ_IN_PROGRESS",
+    current_slot: 1,
+    reads_accepted: 0,
+    returns_accepted: 0,
+    reader_result: "COMPLETE",
+    ingress_phase: "READ",
+    ingress_outcome: "REJECTED",
+    ingress_stage: "HTTP_RESPONSE"
+  };
+  const payload = heartbeatPayload({ tinder_unbound_inbox_sweep: diagnostic });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(parseAndValidateHeartbeat(request.req).tinder_unbound_inbox_sweep, diagnostic);
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_unbound_inbox_sweep: diagnostic
+  });
+  assert.deepEqual(response.commands, []);
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  assert.equal(JSON.stringify(update.params).includes("UNBOUND_READER_INGRESS_FAILED"), false);
+
+  for (const invalidDiagnostic of [
+    null,
+    {},
+    { ...diagnostic, extra: "forbidden" },
+    { ...diagnostic, ingress_stage: "raw-stack" },
+    { ...diagnostic, current_slot: 9 },
+    { ...diagnostic, reads_accepted: -1 }
+  ]) {
+    const invalid = heartbeatPayload({ tinder_unbound_inbox_sweep: invalidDiagnostic });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("a fresh reviewed Inbox observation is atomically consumed and can issue one empty V8 READ child", async () => {
   const observationNonce = "0bfa798e-85ce-4c2e-830e-df8465c58f70";
   const capabilities = T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES;

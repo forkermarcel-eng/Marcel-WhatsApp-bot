@@ -33,6 +33,9 @@ import {
   boundedTinderUnboundInboxConversationSweepExpiryPhase,
   boundedTinderUnboundInboxConversationSweepIssuePhase
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
+import {
+  boundedTinderUnboundInboxSweepDiagnostic
+} from "./tinder-unbound-inbox-sweep-diagnostic-contract.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
@@ -210,29 +213,41 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
     ));
 }
 
+/**
+ * V8 sweep diagnostic evidence is observational only.  Its exact grammar is
+ * intentionally separate from Inbox freshness so no diagnostic field can
+ * mint, consume, refresh, or replay a sweep child.
+ */
+export function isBoundedTinderUnboundInboxSweepDiagnostic(value) {
+  return boundedTinderUnboundInboxSweepDiagnostic(value) !== null;
+}
+
 function heartbeatAuditDetails(heartbeat) {
   const details = { sequence: heartbeat.sequence };
-  if (!Object.hasOwn(heartbeat, "tinder_inbox_navigation")) return details;
-  const navigation = heartbeat.tinder_inbox_navigation;
-  // Do not serialize the heartbeat object itself. This explicit allowlist
-  // prevents future local diagnostics from becoming durable audit metadata.
-  const boundedNavigation = {
-    stage: navigation.stage,
-    reason: navigation.reason,
-    visible_conversation_count: navigation.visible_conversation_count,
-    observed_event_count: navigation.observed_event_count
-  };
-  if (navigation.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND) {
-    // This is an opaque, device-generated freshness nonce. It exists only in
-    // the immutable signed-heartbeat audit fact to consume a one-shot local
-    // Inbox observation; it is never projected through dashboard/status APIs.
-    boundedNavigation.observation_kind = TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND;
-    boundedNavigation.observation_nonce = navigation.observation_nonce;
+  if (Object.hasOwn(heartbeat, "tinder_inbox_navigation")) {
+    const navigation = heartbeat.tinder_inbox_navigation;
+    // Do not serialize the heartbeat object itself. This explicit allowlist
+    // prevents future local diagnostics from becoming durable audit metadata.
+    const boundedNavigation = {
+      stage: navigation.stage,
+      reason: navigation.reason,
+      visible_conversation_count: navigation.visible_conversation_count,
+      observed_event_count: navigation.observed_event_count
+    };
+    if (navigation.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND) {
+      // This is an opaque, device-generated freshness nonce. It exists only in
+      // the immutable signed-heartbeat audit fact to consume a one-shot local
+      // Inbox observation; it is never projected through dashboard/status APIs.
+      boundedNavigation.observation_kind = TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND;
+      boundedNavigation.observation_nonce = navigation.observation_nonce;
+    }
+    details.tinder_inbox_navigation = boundedNavigation;
   }
-  return {
-    ...details,
-    tinder_inbox_navigation: boundedNavigation
-  };
+  const sweepDiagnostic = Object.hasOwn(heartbeat, "tinder_unbound_inbox_sweep")
+    ? boundedTinderUnboundInboxSweepDiagnostic(heartbeat.tinder_unbound_inbox_sweep)
+    : null;
+  if (sweepDiagnostic !== null) details.tinder_unbound_inbox_sweep = sweepDiagnostic;
+  return details;
 }
 
 function isFreshReviewedInboxObservation(heartbeat) {
@@ -340,6 +355,10 @@ export function parseAndValidateHeartbeat(req) {
   if (!AUTOMATION_STATES.includes(body.automation_state)) throw invalidHeartbeat("T1 automation_state must be STOPPED");
   if (Object.hasOwn(body, "tinder_inbox_navigation") && !isBoundedTinderInboxNavigationDiagnostic(body.tinder_inbox_navigation)) {
     throw invalidHeartbeat("Heartbeat inbox navigation diagnostic is invalid");
+  }
+  if (Object.hasOwn(body, "tinder_unbound_inbox_sweep")
+      && !isBoundedTinderUnboundInboxSweepDiagnostic(body.tinder_unbound_inbox_sweep)) {
+    throw invalidHeartbeat("Heartbeat unbound Inbox sweep diagnostic is invalid");
   }
   return body;
 }

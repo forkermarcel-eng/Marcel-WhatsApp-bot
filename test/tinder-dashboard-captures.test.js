@@ -98,6 +98,42 @@ test("V8 terminal sweep status exposes only an allowlisted terminal reason", asy
   });
 });
 
+test("V8 status may project exactly one content-free reader diagnostic and rejects any extra field", async () => {
+  const diagnostic = {
+    stage: "INGRESS",
+    reason: "UNBOUND_READER_INGRESS_FAILED",
+    session_state: "READ_IN_PROGRESS",
+    current_slot: 1,
+    reads_accepted: 0,
+    returns_accepted: 0,
+    reader_result: "COMPLETE",
+    ingress_phase: "READ",
+    ingress_outcome: "REJECTED",
+    ingress_stage: "HTTP_RESPONSE"
+  };
+  const handler = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {
+    createRepository() { return {}; },
+    createService() { return { async getBoundedSweepStatus() { return { status: "STOPPED", reasonCode: "CHILD_EXPIRED", diagnostic }; } }; }
+  });
+  const response = responseRecorder();
+  response.setHeader = () => {};
+  await handler({ params: { deviceId: DEVICE_ID } }, response);
+  assert.deepEqual(response.body, {
+    ok: true,
+    unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED", diagnostic }
+  });
+
+  const invalid = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {
+    createRepository() { return {}; },
+    createService() { return { async getBoundedSweepStatus() { return { status: "ACTIVE", diagnostic: { ...diagnostic, exception: "forbidden" } }; } }; }
+  });
+  const invalidResponse = responseRecorder();
+  invalidResponse.setHeader = () => {};
+  await invalid({ params: { deviceId: DEVICE_ID } }, invalidResponse);
+  assert.equal(invalidResponse.statusCode, 500);
+  assert.equal(JSON.stringify(invalidResponse.body).includes("forbidden"), false);
+});
+
 test("V8 sweep status is inert when its exact schema assertion detects drift", async () => {
   let statusWork = 0;
   const status = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {

@@ -894,6 +894,39 @@ test("V8 unbound Inbox sweep proxy exposes bounded status only and has no browse
     ok: true, unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED" }
   });
 
+  const diagnostic = {
+    stage: "INGRESS",
+    reason: "UNBOUND_READER_INGRESS_FAILED",
+    session_state: "READ_IN_PROGRESS",
+    current_slot: 1,
+    reads_accepted: 0,
+    returns_accepted: 0,
+    reader_result: "COMPLETE",
+    ingress_phase: "READ",
+    ingress_outcome: "REJECTED",
+    ingress_stage: "HTTP_RESPONSE"
+  };
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED", diagnostic }
+  });
+  const diagnosticStatus = responseRecorder();
+  await handler(request({ query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-status" } }), diagnosticStatus);
+  assert.equal(diagnosticStatus.statusCode, 200);
+  assert.deepEqual(diagnosticStatus.body, {
+    ok: true,
+    unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED", diagnostic }
+  });
+
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    unbound_inbox_sweep: { status: "ACTIVE", diagnostic: { ...diagnostic, raw_error: "forbidden" } }
+  });
+  const rejectedDiagnostic = responseRecorder();
+  await handler(request({ query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-status" } }), rejectedDiagnostic);
+  assert.equal(rejectedDiagnostic.statusCode, 502);
+  assert.equal(JSON.stringify(rejectedDiagnostic.body).includes("forbidden"), false);
+
   globalThis.fetch = async () => { throw new Error("fetch must not run"); };
   const manualStart = responseRecorder();
   await handler(request({

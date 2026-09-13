@@ -82,6 +82,7 @@ function repositoryFixture({ storedTranscript = null } = {}) {
   const repository = {
     state,
     async withTransaction(work) { return work({}); },
+    async withReadOnlyTransaction(work) { return work({}); },
     async getDeviceRuntimeForUpdate() { return null; },
     async findPriorFreshReviewedInboxObservationForDevice() { return false; },
     async findUnboundInboxConversationSweepByObservationNonceForDevice() { return false; },
@@ -98,6 +99,7 @@ function repositoryFixture({ storedTranscript = null } = {}) {
       state.sweep = { ...state.sweep, active_command_id: input.commandId, next_slot: input.nextSlot };
     },
     async getUnboundInboxConversationSweepForUpdate() { return state.sweep; },
+    async getUnboundInboxConversationSweepForDevice() { return state.sweep; },
     async getUnboundInboxConversationSweepForDeviceForUpdate() { return state.sweep; },
     async getUnboundInboxConversationSweepStepForUpdate(_transaction, commandId) {
       return commandId === state.step.command_id ? state.step : null;

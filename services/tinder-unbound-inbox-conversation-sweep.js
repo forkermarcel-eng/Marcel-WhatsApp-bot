@@ -10,6 +10,9 @@ import {
 import {
   boundedTinderUnboundInboxSweepDiagnostic
 } from "../device-bridge/tinder-unbound-inbox-sweep-diagnostic-contract.js";
+import {
+  withDeviceBridgeReadOnlyTransaction
+} from "../device-bridge/read-only-transaction.js";
 
 /* ==================================================
 UNBOUND INBOX-CONVERSATION SWEEP -- V8
@@ -438,6 +441,7 @@ function auditRecord({ auditId, sweepId, commandId = null, deviceId, slotOrdinal
 function requireRepository(repository) {
   for (const method of [
     "withTransaction",
+    "withReadOnlyTransaction",
     "getDeviceRuntimeForUpdate",
     "findPriorFreshReviewedInboxObservationForDevice",
     "findUnboundInboxConversationSweepByObservationNonceForDevice",
@@ -452,6 +456,7 @@ function requireRepository(repository) {
     "createUnboundInboxConversationSweepStep",
     "setUnboundInboxConversationSweepActiveStep",
     "getUnboundInboxConversationSweepForUpdate",
+    "getUnboundInboxConversationSweepForDevice",
     "getUnboundInboxConversationSweepForDeviceForUpdate",
     "getUnboundInboxConversationSweepStepForUpdate",
     "stageUnboundInboxConversationSweepReadStep",
@@ -511,10 +516,9 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
   readTtlMs = TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_TTL_MS,
   returnTtlMs = TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_TTL_MS,
   sweepTtlMs = TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TTL_MS,
-  // Dashboard status may terminalize an expired child/parent.  The route
-  // supplies the exact catalog assertion so this otherwise bounded read
-  // surface is inert when V8 has drifted.  Core service callers which already
-  // hold their own canonical gate intentionally leave it null.
+  // Dashboard status is an exact catalog-asserted projection only.  Expiry
+  // remains in the signed-heartbeat path, where it owns the device lock,
+  // terminal state transition, and immutable audit record.
   assertFoundationReady = null
 } = {}) {
   requireRepository(repository);
@@ -969,11 +973,9 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
 
   async function getBoundedSweepStatus(input = {}) {
     const normalized = normalizeDeviceInput(input);
-    return repository.withTransaction(async transaction => {
+    return repository.withReadOnlyTransaction(async transaction => {
       if (assertFoundationReady) await assertFoundationReady(transaction);
-      const currentTime = new Date(now());
-      await expireForDevice(transaction, { deviceId: normalized.deviceId, currentTime });
-      const sweep = currentSweepFromRow(await repository.getUnboundInboxConversationSweepForDeviceForUpdate(transaction, normalized.deviceId));
+      const sweep = currentSweepFromRow(await repository.getUnboundInboxConversationSweepForDevice(transaction, normalized.deviceId));
       const diagnostic = await latestBoundedSweepDiagnostic(repository, transaction,
         normalized.deviceId);
       if (!sweep) return withBoundedSweepDiagnostic(
@@ -1021,6 +1023,10 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
       } finally {
         client.release();
       }
+    },
+
+    async withReadOnlyTransaction(work) {
+      return withDeviceBridgeReadOnlyTransaction(pool, work);
     },
 
     async getDeviceRuntimeForUpdate(client, deviceId, currentTime = new Date()) {
@@ -1306,6 +1312,19 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
           ORDER BY issued_at DESC, sweep_id DESC
           LIMIT 1
           FOR UPDATE`,
+        [deviceId]
+      );
+      return result.rows[0] || null;
+    },
+
+    async getUnboundInboxConversationSweepForDevice(client, deviceId) {
+      const result = await client.query(
+        `SELECT sweep_id, device_id, sweep_state, max_slots, next_slot,
+                active_command_id, expires_at, terminal_reason
+           FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE}
+          WHERE device_id=$1
+          ORDER BY issued_at DESC, sweep_id DESC
+          LIMIT 1`,
         [deviceId]
       );
       return result.rows[0] || null;

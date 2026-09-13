@@ -91,14 +91,23 @@ function issuedReturn(overrides = {}) {
 }
 
 function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = activeSweep(), stepRow = stagedRead(), priorObservation = false, persistedObservation = false, expiredRows = [], sweepDiagnostic = null } = {}) {
-  const state = { commands: [], sweeps: [], steps: [], audits: [], runtimeRow, conflicts, sweepRow, stepRow, priorObservation, persistedObservation, expiredRows, sweepDiagnostic, accepted: [], stopped: [] };
+  const state = {
+    commands: [], sweeps: [], steps: [], audits: [], runtimeRow, conflicts,
+    sweepRow, stepRow, priorObservation, persistedObservation, expiredRows,
+    sweepDiagnostic, accepted: [], stopped: [], expiryCalls: 0,
+    readOnlyTransactions: 0, statusReads: 0
+  };
   const repository = {
     state,
     async withTransaction(work) { return work({}); },
+    async withReadOnlyTransaction(work) { state.readOnlyTransactions += 1; return work({}); },
     async getDeviceRuntimeForUpdate() { return state.runtimeRow; },
     async findPriorFreshReviewedInboxObservationForDevice() { return state.priorObservation; },
     async findUnboundInboxConversationSweepByObservationNonceForDevice() { return state.persistedObservation; },
-    async expireUnboundInboxConversationSweepForDevice() { return state.expiredRows; },
+    async expireUnboundInboxConversationSweepForDevice() {
+      state.expiryCalls += 1;
+      return state.expiredRows;
+    },
     async findActiveHumanArmedPermitForDevice() { return conflicts.human === true; },
     async findActiveVisibleChatSyncPermitForDevice() { return conflicts.v4 === true; },
     async findActiveOfficialAppResumePermitForDevice() { return conflicts.resume === true; },
@@ -111,6 +120,10 @@ function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = 
       state.sweepRow = { ...state.sweepRow, active_command_id: update.commandId, next_slot: update.nextSlot };
     },
     async getUnboundInboxConversationSweepForUpdate() { return state.sweepRow; },
+    async getUnboundInboxConversationSweepForDevice() {
+      state.statusReads += 1;
+      return state.sweepRow;
+    },
     async getUnboundInboxConversationSweepForDeviceForUpdate() { return state.sweepRow; },
     async getLatestTinderUnboundInboxSweepDiagnosticForDevice() { return state.sweepDiagnostic; },
     async getUnboundInboxConversationSweepStepForUpdate(_transaction, commandId) {
@@ -193,7 +206,28 @@ test("V8 sweep fails closed for stale Inbox evidence, competing authority, and i
   );
 });
 
-test("expiry preserves exact child command and slot provenance, while parent expiry remains parent-scoped", async () => {
+test("V8 dashboard status is read-only and reflects the persisted sweep without terminalizing expiry", async () => {
+  const activeExpiredSweep = activeSweep({ expires_at: "2026-09-12T11:59:00.000Z" });
+  const repository = fixtureRepository({
+    sweepRow: activeExpiredSweep,
+    expiredRows: [{
+      ...activeExpiredSweep,
+      expired_command_id: READ_COMMAND_ID,
+      expired_slot_ordinal: 1
+    }]
+  });
+  assert.deepEqual(await service(repository).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
+    status: "ACTIVE"
+  });
+  assert.equal(repository.state.readOnlyTransactions, 1);
+  assert.equal(repository.state.statusReads, 1);
+  assert.equal(repository.state.expiryCalls, 0);
+  assert.deepEqual(repository.state.audits, []);
+  assert.deepEqual(repository.state.commands, []);
+  assert.deepEqual(repository.state.steps, []);
+
+  // Expiry remains a signed-heartbeat responsibility. Its terminal transition
+  // and audit therefore happen only when the heartbeat invokes that path.
   const stoppedSweep = activeSweep({ sweep_state: "STOPPED", active_command_id: null });
   const childExpiry = fixtureRepository({
     sweepRow: stoppedSweep,
@@ -203,24 +237,22 @@ test("expiry preserves exact child command and slot provenance, while parent exp
       expired_slot_ordinal: 1
     }]
   });
-  assert.deepEqual(await service(childExpiry).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
-    status: "STOPPED"
-  });
-  assert.deepEqual(childExpiry.state.audits, [
-    {
-      auditId: AUDIT_IDS[0], sweepId: SWEEP_ID, commandId: READ_COMMAND_ID,
-      deviceId: DEVICE_ID, slotOrdinal: 1, transcriptId: null,
-      action: "CHILD_EXPIRED", actor: "SERVER_EXPIRY", source: "SERVER_MAINTENANCE",
-      reasonCode: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED,
-      details: {}
-    }
-  ]);
+  assert.deepEqual(await service(childExpiry).expireUnboundInboxConversationSweepForHeartbeat({}, {
+    deviceId: DEVICE_ID
+  }), { childExpired: true, active: false });
+  assert.deepEqual(childExpiry.state.audits, [{
+    auditId: AUDIT_IDS[0], sweepId: SWEEP_ID, commandId: READ_COMMAND_ID,
+    deviceId: DEVICE_ID, slotOrdinal: 1, transcriptId: null,
+    action: "CHILD_EXPIRED", actor: "SERVER_EXPIRY", source: "SERVER_MAINTENANCE",
+    reasonCode: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.CHILD_EXPIRED,
+    details: {}
+  }]);
 
   const expiredSweep = activeSweep({ sweep_state: "EXPIRED", active_command_id: null });
   const parentExpiry = fixtureRepository({ sweepRow: expiredSweep, expiredRows: [{ ...expiredSweep }] });
-  assert.deepEqual(await service(parentExpiry).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
-    status: "EXPIRED"
-  });
+  assert.deepEqual(await service(parentExpiry).expireUnboundInboxConversationSweepForHeartbeat({}, {
+    deviceId: DEVICE_ID
+  }), { childExpired: false, active: false });
   assert.deepEqual(parentExpiry.state.audits[0], {
     auditId: AUDIT_IDS[0], sweepId: SWEEP_ID, commandId: null,
     deviceId: DEVICE_ID, slotOrdinal: null, transcriptId: null,
@@ -228,6 +260,41 @@ test("expiry preserves exact child command and slot provenance, while parent exp
     reasonCode: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED,
     details: {}
   });
+});
+
+test("V8 PostgreSQL dashboard status projection is SELECT-only, rollback-only, and never invokes expiry", async () => {
+  const calls = [];
+  let released = false;
+  const expiredButPersistedActiveSweep = activeSweep({ expires_at: "2026-09-12T11:59:00.000Z" });
+  const client = {
+    async query(sql, parameters = []) {
+      calls.push({ sql, parameters });
+      if (sql === "BEGIN" || sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+          || sql === "ROLLBACK") return { rows: [] };
+      if (sql.includes("FROM tinder_unbound_inbox_conversation_sweeps")) {
+        return { rows: [expiredButPersistedActiveSweep] };
+      }
+      if (sql.includes("FROM device_bridge_audit_events")) return { rows: [] };
+      throw new Error("Unexpected V8 status query");
+    },
+    release() { released = true; }
+  };
+  const pool = {
+    async connect() { return client; },
+    async query() { throw new Error("Pool query is not available to V8 status"); }
+  };
+  const repository = createPgTinderUnboundInboxConversationSweepRepository(pool);
+  const result = await createTinderUnboundInboxConversationSweepService(repository, {
+    now: () => NOW
+  }).getBoundedSweepStatus({ deviceId: DEVICE_ID });
+
+  assert.deepEqual(result, { status: "ACTIVE" });
+  assert.equal(calls[0]?.sql, "BEGIN");
+  assert.equal(calls[1]?.sql, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+  assert.equal(calls.at(-1)?.sql, "ROLLBACK");
+  assert.equal(calls.some(call => /\b(?:COMMIT|FOR\s+UPDATE|INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|LOCK)\b/i.test(call.sql)), false);
+  assert.equal(calls.slice(2, -1).every(call => /^\s*SELECT\b/i.test(call.sql)), true);
+  assert.equal(released, true);
 });
 
 test("V8 terminal status exposes only its finite terminal reason", async () => {
@@ -294,7 +361,7 @@ test("an expired parent with an active child releases that child authority befor
   assert.equal(repository.state.steps.length, 1);
 });
 
-test("an immutable expired parent retains its state while its stranded active child is terminalized", async () => {
+test("status leaves an immutable expired parent and stranded child unchanged until heartbeat expiry", async () => {
   const expiredSweep = activeSweep({ sweep_state: "EXPIRED", active_command_id: null });
   const repository = fixtureRepository({
     sweepRow: expiredSweep,
@@ -308,6 +375,12 @@ test("an immutable expired parent retains its state while its stranded active ch
   assert.deepEqual(await service(repository).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
     status: "EXPIRED"
   });
+  assert.equal(repository.state.expiryCalls, 0);
+  assert.deepEqual(repository.state.audits, []);
+
+  assert.deepEqual(await service(repository).expireUnboundInboxConversationSweepForHeartbeat({}, {
+    deviceId: DEVICE_ID
+  }), { childExpired: true, active: false });
   assert.deepEqual(repository.state.audits, [{
     auditId: AUDIT_IDS[0], sweepId: SWEEP_ID, commandId: READ_COMMAND_ID,
     deviceId: DEVICE_ID, slotOrdinal: 1, transcriptId: null,

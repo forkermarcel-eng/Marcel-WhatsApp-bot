@@ -107,6 +107,22 @@ test("a terminal official-app resume status clears only the local latch for a la
   assert.equal((conversationCode.match(/operation=resume-official-app/g) || []).length, 1);
 });
 
+test("verified-chat return status is display-only and cannot become a browser control surface", () => {
+  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
+  const statusCode = sourceBetween("function verifiedChatReturnStatusText", "function visibleChatSyncIsSafe");
+  const detailCode = sourceBetween("function renderConfirmedConversationDetail", "async function selectConfirmedConversation");
+
+  assert.match(conversationCode, /verified_chat_return/);
+  assert.match(conversationCode, /VERIFIED_CHAT_RETURN_OBSERVATION_STATUSES/);
+  assert.match(detailCode, /verifiedChatReturnStatusText\(conversation\.verified_chat_return\)/);
+  for (const status of ["NOT_REQUESTED", "PENDING", "STAGED", "RETURNED", "CANCELLED", "EXPIRED"]) {
+    assert.match(statusCode, new RegExp(`case "${status}"`));
+  }
+  assert.doesNotMatch(statusCode, /command_id|device_id|source_capture_id|binding_id|binding_revision|resume_command_id|expires_at|terminal_reason|receipt|fingerprint/i);
+  assert.doesNotMatch(statusCode, /addEventListener|requestJson|method:\s*"POST"|operation=|JSON\.stringify|body:/);
+  assert.doesNotMatch(detailCode, /RETURN_TINDER_VERIFIED_CHAT_TO_INBOX|tinder-verified-chat-return/i);
+});
+
 test("conversation selection remains local and does not enter the existing capture mapping URL flow", () => {
   const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
   assert.match(page, /let selectedConversationCaptureId = null/);

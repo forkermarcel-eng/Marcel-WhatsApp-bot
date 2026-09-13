@@ -1284,6 +1284,9 @@
     const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
       "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
     ]);
+    const VERIFIED_CHAT_RETURN_OBSERVATION_STATUSES = new Set([
+      "NOT_REQUESTED", "PENDING", "STAGED", "RETURNED", "CANCELLED", "EXPIRED"
+    ]);
     // A terminal observation belongs only to its immutable historic permit.
     // A deliberate later action may create one new, separately audited
     // launcher-only permit; PENDING never enables that action.
@@ -2343,10 +2346,12 @@
    function confirmedConversationDetailIsSafe(conversation, captureId) {
      const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(conversation || {}, "visible_chat_sync");
      const hasOfficialAppResume = Object.prototype.hasOwnProperty.call(conversation || {}, "official_app_resume");
+     const hasVerifiedChatReturn = Object.prototype.hasOwnProperty.call(conversation || {}, "verified_chat_return");
      const detailFields = [
        "capture_id", "visible_name", "captured_at", "messages",
        ...(hasVisibleChatSync ? ["visible_chat_sync"] : []),
-       ...(hasOfficialAppResume ? ["official_app_resume"] : [])
+       ...(hasOfficialAppResume ? ["official_app_resume"] : []),
+       ...(hasVerifiedChatReturn ? ["verified_chat_return"] : [])
      ];
      if (!hasExactConversationFields(conversation, detailFields)
          || conversation.capture_id !== captureId || !confirmedConversationIsSafeForSelection({
@@ -2364,12 +2369,18 @@
      );
      return originalMessagesSafe
        && (!hasVisibleChatSync || visibleChatSyncIsSafe(conversation.visible_chat_sync))
-       && (!hasOfficialAppResume || officialAppResumeIsSafe(conversation.official_app_resume));
+       && (!hasOfficialAppResume || officialAppResumeIsSafe(conversation.official_app_resume))
+       && (!hasVerifiedChatReturn || verifiedChatReturnIsSafe(conversation.verified_chat_return));
    }
 
    function officialAppResumeIsSafe(resume) {
      return hasExactConversationFields(resume, ["status"])
        && OFFICIAL_APP_RESUME_OBSERVATION_STATUSES.has(resume.status);
+   }
+
+   function verifiedChatReturnIsSafe(returnStatus) {
+     return hasExactConversationFields(returnStatus, ["status"])
+       && VERIFIED_CHAT_RETURN_OBSERVATION_STATUSES.has(returnStatus.status);
    }
 
    function officialAppResumeStatusText(resume) {
@@ -2391,6 +2402,28 @@
          return "Status der einmaligen offiziellen Startanfrage ist nicht verfügbar. Kein neuer Versuch wird vorbereitet.";
      }
    }
+
+    function verifiedChatReturnStatusText(returnStatus) {
+      if (!verifiedChatReturnIsSafe(returnStatus)) {
+        return "Status der begrenzten R\u00fcckkehr in die Inbox ist nicht verf\u00fcgbar.";
+      }
+      switch (returnStatus.status) {
+        case "NOT_REQUESTED":
+          return "Keine begrenzte R\u00fcckkehr in die Inbox wurde vorbereitet.";
+        case "PENDING":
+          return "Eine begrenzte R\u00fcckkehr in die Inbox wird vorbereitet.";
+        case "STAGED":
+          return "Die begrenzte R\u00fcckkehr in die Inbox ist am verifizierten Ger\u00e4t bereit.";
+        case "RETURNED":
+          return "Die begrenzte R\u00fcckkehr in die Inbox wurde vom verifizierten Ger\u00e4t best\u00e4tigt.";
+        case "CANCELLED":
+          return "Die begrenzte R\u00fcckkehr in die Inbox ist terminal beendet.";
+        case "EXPIRED":
+          return "Die begrenzte R\u00fcckkehr in die Inbox ist abgelaufen.";
+        default:
+          return "Status der begrenzten R\u00fcckkehr in die Inbox ist nicht verf\u00fcgbar.";
+      }
+    }
 
    function visibleChatSyncIsSafe(sync) {
      const receivedAt = new Date(sync?.received_at || "");
@@ -2687,6 +2720,13 @@
        void requestOfficialAppResume(conversation.capture_id, conversation.official_app_resume, resumeButton, resumeMessage);
      });
      resumeAction.append(resumeCopy, resumeButton, resumeMessage);
+
+      if (Object.prototype.hasOwnProperty.call(conversation, "verified_chat_return")) {
+        const returnStatus = document.createElement("span");
+        returnStatus.className = "conversation-sync-message";
+        returnStatus.textContent = verifiedChatReturnStatusText(conversation.verified_chat_return);
+        resumeAction.append(returnStatus);
+      }
 
      const originalMessages = renderConversationMessages(conversation.messages, "conversation-messages");
      elements.confirmedConversationDetail.append(summary, resumeAction, syncAction, originalMessages);

@@ -9,6 +9,7 @@ import {
   normalizeLatestConfirmedConversationDetail,
   normalizeLatestConfirmedConversationListItem,
   normalizeLatestConfirmedOfficialAppResume,
+  normalizeLatestConfirmedVerifiedChatReturn,
   normalizeVisibleChatSync
 } from "../services/tinder-conversation-product-read.js";
 
@@ -130,6 +131,36 @@ test("official app resume detail exposes only a bounded one-shot outcome", () =>
   }
 });
 
+test("verified-chat return detail exposes only a bounded lifecycle outcome", () => {
+  const now = new Date("2026-09-13T12:00:00.000Z");
+  const cases = [
+    [{ permit_state: "NOT_REQUESTED", expires_at: null }, "NOT_REQUESTED"],
+    [{ permit_state: "ISSUED", expires_at: "2026-09-13T12:00:01.000Z" }, "PENDING"],
+    [{ permit_state: "ISSUED", expires_at: "2026-09-13T12:00:00.000Z" }, "EXPIRED"],
+    [{ permit_state: "STAGED", expires_at: "2026-09-13T12:00:01.000Z" }, "STAGED"],
+    [{ permit_state: "STAGED", expires_at: "2026-09-13T12:00:00.000Z" }, "EXPIRED"],
+    [{ permit_state: "RETURNED", expires_at: "2026-09-13T12:00:01.000Z" }, "RETURNED"],
+    [{ permit_state: "CANCELLED", expires_at: "2026-09-13T12:00:01.000Z" }, "CANCELLED"],
+    [{ permit_state: "EXPIRED", expires_at: "2026-09-13T12:00:01.000Z" }, "EXPIRED"]
+  ];
+  for (const [row, status] of cases) {
+    assert.deepEqual(normalizeLatestConfirmedVerifiedChatReturn(row, now), { status });
+  }
+  assert.equal(normalizeLatestConfirmedVerifiedChatReturn(undefined, now), undefined);
+  assert.equal(normalizeLatestConfirmedVerifiedChatReturn(null, now), undefined);
+  for (const malformed of [
+    { permit_state: "ISSUED", expires_at: null },
+    { permit_state: "UNKNOWN", expires_at: "2026-09-13T12:00:01.000Z" },
+    {
+      permit_state: "STAGED",
+      expires_at: "2026-09-13T12:00:01.000Z",
+      command_id: "must-not-be-projected"
+    }
+  ]) {
+    assert.throws(() => normalizeLatestConfirmedVerifiedChatReturn(malformed, now), TinderConversationProductReadError);
+  }
+});
+
 test("conversation product reader rejects unconfirmed, stale-shape, and malformed message records", () => {
   for (const row of [
     capture({ mapping_status: "NEEDS_HUMAN_MAPPING" }),
@@ -221,6 +252,26 @@ test("conversation product service keeps the launcher outcome bounded and option
   }
 });
 
+test("conversation product service keeps the verified-chat return status bounded and optional", async () => {
+  const service = createTinderConversationProductReadService({
+    async findLatestConfirmedConversations() { return []; },
+    async findLatestConfirmedConversationByCaptureId() { return capture(); },
+    async findLatestConfirmedVerifiedChatReturnByCaptureId(captureId) {
+      assert.equal(captureId, CAPTURE_ID);
+      return { permit_state: "STAGED", expires_at: "2999-09-13T12:00:01.000Z" };
+    }
+  });
+  const detail = await service.getLatestConfirmedConversation(CAPTURE_ID);
+  assert.deepEqual(detail.verified_chat_return, { status: "STAGED" });
+  const rendered = JSON.stringify(detail.verified_chat_return);
+  for (const forbidden of [
+    "command_id", "device_id", "source_capture_id", "binding_id", "binding_revision",
+    "resume_command_id", "expires_at", "terminal_reason", "ack"
+  ]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+});
+
 test("Postgres reader selects only the latest safe resolved confirmed capture and never selects technical fields", async () => {
   const calls = [];
   const repository = createPgTinderConversationProductReadRepository({
@@ -234,10 +285,11 @@ test("Postgres reader selects only the latest safe resolved confirmed capture an
   await repository.findLatestConfirmedConversationByCaptureId(CAPTURE_ID);
   await repository.findLatestConfirmedVisibleChatSyncByCaptureId(CAPTURE_ID);
   await repository.findLatestConfirmedOfficialAppResumeByCaptureId(CAPTURE_ID);
+  await repository.findLatestConfirmedVerifiedChatReturnByCaptureId(CAPTURE_ID);
 
-  assert.equal(calls.length, 4);
-  const [list, detail, visibleChatSync, officialAppResume] = calls;
-  for (const query of [list.text, detail.text, visibleChatSync.text, officialAppResume.text]) {
+  assert.equal(calls.length, 5);
+  const [list, detail, visibleChatSync, officialAppResume, verifiedChatReturn] = calls;
+  for (const query of [list.text, detail.text, visibleChatSync.text, officialAppResume.text, verifiedChatReturn.text]) {
     assert.match(query, /capture_safety_status = 'SAFE'/);
     assert.match(query, /mapping_status = 'RESOLVED'/);
     assert.match(query, /human_review_status = 'CONFIRMED'/);
@@ -272,6 +324,20 @@ test("Postgres reader selects only the latest safe resolved confirmed capture an
   assert.doesNotMatch(resumeColumns, /p\.command_id/);
   assert.doesNotMatch(resumeColumns, /p\.device_id/);
   assert.doesNotMatch(resumeColumns, /p\.source_capture_id/);
+
+  assert.match(verifiedChatReturn.text, /LEFT JOIN LATERAL/i);
+  assert.match(verifiedChatReturn.text, /FROM tinder_verified_chat_return_permits/i);
+  assert.match(verifiedChatReturn.text, /ORDER BY created_at DESC, command_id DESC/i);
+  assert.match(verifiedChatReturn.text, /LIMIT 1/i);
+  assert.match(verifiedChatReturn.text, /COALESCE\(p\.permit_state, 'NOT_REQUESTED'\)/i);
+  assert.deepEqual(verifiedChatReturn.values, [CAPTURE_ID]);
+  const returnColumns = verifiedChatReturn.text.slice(0, verifiedChatReturn.text.indexOf("FROM tinder_visible_chat_captures"));
+  for (const forbidden of [
+    "p.command_id", "p.device_id", "p.source_capture_id", "p.binding_id", "p.binding_revision",
+    "p.resume_command_id", "terminal_reason"
+  ]) {
+    assert.doesNotMatch(returnColumns, new RegExp(forbidden.replace(".", "\\.")));
+  }
 });
 
 test("missing optional launcher foundation remains unavailable rather than fresh", async () => {
@@ -283,4 +349,5 @@ test("missing optional launcher foundation remains unavailable rather than fresh
     }
   });
   assert.equal(await repository.findLatestConfirmedOfficialAppResumeByCaptureId(CAPTURE_ID), undefined);
+  assert.equal(await repository.findLatestConfirmedVerifiedChatReturnByCaptureId(CAPTURE_ID), undefined);
 });

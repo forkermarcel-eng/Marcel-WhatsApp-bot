@@ -35,6 +35,10 @@ export const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME 
 // granting old runtimes either command.
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME =
   "device_bridge_commands_command_type_check_v8";
+// V9 adds only the separately audited verified-chat -> Inbox return command.
+// It must not reinterpret a launcher-only Resume permit or either V8 child.
+export const TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME =
+  "device_bridge_commands_command_type_check_v9";
 
 const LEGACY_T1_TINDER_STATE_CONSTRAINT_NAME = "device_bridge_devices_tinder_state_check";
 const LEGACY_T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_type_check";
@@ -87,6 +91,10 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPES = Object.free
   "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT",
   "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT"
 ]);
+export const TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPES = Object.freeze([
+  ...TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPES,
+  "RETURN_TINDER_VERIFIED_CHAT_TO_INBOX"
+]);
 
 export const T1_TINDER_STATE_CHECK_EXPRESSION = `
   tinder_state IN ('DISCONNECTED', 'CONNECTING', 'CONNECTED', 'AUTH_REQUIRED', 'REVIEW_REQUIRED', 'UNKNOWN')
@@ -118,6 +126,10 @@ export const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CHECK_EXPRESSION
 
 export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CHECK_EXPRESSION = `
   command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT', 'RESUME_OFFICIAL_TINDER_APP', 'STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION', 'READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT', 'RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT')
+`;
+
+export const TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CHECK_EXPRESSION = `
+  command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT', 'RESUME_OFFICIAL_TINDER_APP', 'STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION', 'READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT', 'RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT', 'RETURN_TINDER_VERIFIED_CHAT_TO_INBOX')
 `;
 
 export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
@@ -155,7 +167,10 @@ export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
     attestationCompatibleValues: TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPES,
     unboundInboxSweepCompatibleName: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME,
     unboundInboxSweepCompatibleExpression: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CHECK_EXPRESSION,
-    unboundInboxSweepCompatibleValues: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPES
+    unboundInboxSweepCompatibleValues: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPES,
+    verifiedChatReturnCompatibleName: TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME,
+    verifiedChatReturnCompatibleExpression: TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CHECK_EXPRESSION,
+    verifiedChatReturnCompatibleValues: TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPES
   })
 ]);
 
@@ -262,6 +277,15 @@ async function inspectColumnConstraint(client, specification) {
       state: "FINAL",
       constraintName: current.conname,
       compatibilityExpression: specification.unboundInboxSweepCompatibleExpression
+    };
+  }
+  if (current.conname === specification.verifiedChatReturnCompatibleName
+      && hasExactCheckDefinition(current.constraint_definition, specification.verifiedChatReturnCompatibleExpression)) {
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.verifiedChatReturnCompatibleExpression
     };
   }
   const legacyExpression = `${specification.column} IN (${specification.legacyValues.map(value => `'${value}'`).join(", ")})`;

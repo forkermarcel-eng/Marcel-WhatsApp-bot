@@ -8,6 +8,7 @@ import {
   isTinderHumanArmedConversationBindingCapable,
   isTinderLocalConversationAttestationPostChatCapable,
   isTinderUnboundInboxConversationSweepCapable,
+  isTinderVerifiedChatReturnCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
@@ -30,6 +31,10 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
 } from "./tinder-unbound-inbox-conversation-sweep-schema.js";
 import {
+  inspectTinderVerifiedChatReturnSchema,
+  TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE
+} from "./tinder-verified-chat-return-schema.js";
+import {
   boundedTinderUnboundInboxConversationSweepExpiryPhase,
   boundedTinderUnboundInboxConversationSweepIssuePhase
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
@@ -46,13 +51,15 @@ const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE =
   "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE = "tinder_unbound_inbox_conversation_sweeps";
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE = "tinder_unbound_inbox_conversation_sweep_steps";
+const TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE = "RETURN_TINDER_VERIFIED_CHAT_TO_INBOX";
+const TINDER_VERIFIED_CHAT_RETURN_PERMIT_TABLE = "tinder_verified_chat_return_permits";
 const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conversation_v1";
 const HEARTBEAT_FAILURE_STAGE_PROPERTY = "deviceBridgeHeartbeatFailureStage";
 const HEARTBEAT_FAILURE_STAGES = new Set([
-  "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION",
+  "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION", "V9_FOUNDATION",
   "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_EXPIRY",
-  "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
+  "V9_EXPIRY", "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
 ]);
 
 // This is deliberately a bounded, content-free diagnostic contract. It is
@@ -112,6 +119,12 @@ const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
 ]);
 export const TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND = "FRESH_REVIEWED_INBOX_V1";
 const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
+// This is not a permit, target, or identity assertion.  It is a transient
+// same-heartbeat readiness bit from the V9-capable Android runtime after it
+// has locally revalidated the retained human-attested V3 continuity proof.
+// The server still revalidates every durable fact immediately before it can
+// deliver a return command.
+export const TINDER_VERIFIED_CHAT_RETURN_READINESS_FIELDS = Object.freeze(["ready"]);
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 HEARTBEAT
@@ -222,6 +235,11 @@ export function isBoundedTinderUnboundInboxSweepDiagnostic(value) {
   return boundedTinderUnboundInboxSweepDiagnostic(value) !== null;
 }
 
+export function isExactTinderVerifiedChatReturnReadiness(value) {
+  return exactKeys(value, TINDER_VERIFIED_CHAT_RETURN_READINESS_FIELDS)
+    && typeof value.ready === "boolean";
+}
+
 function heartbeatAuditDetails(heartbeat) {
   const details = { sequence: heartbeat.sequence };
   if (Object.hasOwn(heartbeat, "tinder_inbox_navigation")) {
@@ -247,6 +265,12 @@ function heartbeatAuditDetails(heartbeat) {
     ? boundedTinderUnboundInboxSweepDiagnostic(heartbeat.tinder_unbound_inbox_sweep)
     : null;
   if (sweepDiagnostic !== null) details.tinder_unbound_inbox_sweep = sweepDiagnostic;
+  if (Object.hasOwn(heartbeat, "tinder_verified_chat_return")) {
+    // Explicitly retain only the boolean current-heartbeat readiness fact.
+    // No permit, command, source, binding, revision, timestamp, or Android
+    // local-proof material can enter durable heartbeat audit data here.
+    details.tinder_verified_chat_return = { ready: heartbeat.tinder_verified_chat_return.ready };
+  }
   return details;
 }
 
@@ -336,6 +360,52 @@ async function inspectUnboundInboxConversationSweepFoundationState(client, inspe
   }
 }
 
+// V9 intentionally makes V8's exact vocabulary inspector report a later
+// state as non-canonical.  Keep that historical inspector exact; this small
+// successor classifier establishes whether the additive V9 catalog has taken
+// over the V8 runtime relations without weakening either contract.
+async function inspectVerifiedChatReturnFoundationState(client, inspectFoundation) {
+  try {
+    const inspection = await inspectFoundation(client);
+    return inspection?.state === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL
+      ? TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL
+      : inspection?.state === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.UPGRADE_REQUIRED
+        ? TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.UPGRADE_REQUIRED
+        : TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.INVALID;
+  } catch {
+    return TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.INVALID;
+  }
+}
+
+// An expired V9 child must become durably terminal before command selection,
+// just as an expired V8 child does.  The V9 repository records an immutable,
+// content-free RETURN_EXPIRED audit fact in the same locked transaction.  A
+// command is deliberately withheld for this heartbeat when such a transition
+// occurred, so a stale command cannot be interleaved with a fresh authority.
+async function expireVerifiedChatReturnPermitForHeartbeat(client, {
+  pool, deviceId, now, verifiedChatReturnFoundationCanonical
+}) {
+  if (verifiedChatReturnFoundationCanonical !== true) {
+    return Object.freeze({ permitExpired: false, active: false });
+  }
+  const {
+    createPgTinderVerifiedChatReturnRepository
+  } = await import("../services/tinder-verified-chat-return.js");
+  const repository = createPgTinderVerifiedChatReturnRepository(pool);
+  const expiredCount = await repository.expireVerifiedChatReturnPermits(client, {
+    deviceId,
+    expiredAt: now.toISOString()
+  });
+  const active = await repository.findActiveVerifiedChatReturnPermitForDevice(client, {
+    deviceId,
+    now: now.toISOString()
+  });
+  return Object.freeze({
+    permitExpired: Number.isSafeInteger(expiredCount) && expiredCount > 0,
+    active: active === true
+  });
+}
+
 export function parseAndValidateHeartbeat(req) {
   let body;
   try {
@@ -360,6 +430,10 @@ export function parseAndValidateHeartbeat(req) {
       && !isBoundedTinderUnboundInboxSweepDiagnostic(body.tinder_unbound_inbox_sweep)) {
     throw invalidHeartbeat("Heartbeat unbound Inbox sweep diagnostic is invalid");
   }
+  if (Object.hasOwn(body, "tinder_verified_chat_return")
+      && !isExactTinderVerifiedChatReturnReadiness(body.tinder_verified_chat_return)) {
+    throw invalidHeartbeat("Heartbeat verified chat return readiness is invalid");
+  }
   return body;
 }
 
@@ -383,6 +457,12 @@ function commandEnvelope(row, payload = row.payload) {
 
 async function selectDeliverableCommands(client, deviceId, capabilities, now, {
   unboundInboxConversationSweepFoundationReady = false,
+  verifiedChatReturnFoundationReady = false,
+  // V9 has a separate V3-current-chat readiness contract.  Foundation
+  // canonicality alone is intentionally insufficient: until the exact
+  // cross-side readiness proof is supplied, a queued return remains inert.
+  verifiedChatReturnDeliveryReady = false,
+  verifiedChatReturnActive = false,
   suppressDynamicTinderCommands = false
 } = {}) {
   const t1Capable = isTinderManualGateCapable(capabilities);
@@ -394,6 +474,8 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
     isTinderLocalConversationAttestationPostChatCapable(capabilities);
   const advertisedUnboundInboxConversationSweepCapability =
     isTinderUnboundInboxConversationSweepCapable(capabilities);
+  const advertisedVerifiedChatReturnCapability =
+    isTinderVerifiedChatReturnCapable(capabilities);
   // A newer device can heartbeat during a rolling backend deployment. Do not
   // turn a schema-absent V6 foundation into a heartbeat 42P01: omit only the
   // new local-proof commands until the migration has made their table real.
@@ -407,12 +489,18 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
   }
   const unboundInboxConversationSweepCapable = advertisedUnboundInboxConversationSweepCapability
     && unboundInboxConversationSweepFoundationReady === true;
+  const verifiedChatReturnCapable = advertisedVerifiedChatReturnCapability
+    && verifiedChatReturnFoundationReady === true;
+  const verifiedChatReturnDeliverable = verifiedChatReturnCapable
+    && verifiedChatReturnDeliveryReady === true;
   // A device that advertises V8 while its catalog is partial or unknown may
   // have a previously active V8 child we cannot inspect safely.  Do not fall
   // back to delivery of a pre-V8 dynamic Tinder command in that ambiguous
   // state. Administrative/status commands remain available.
   const commandTypes = suppressDynamicTinderCommands
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE'"
+    : verifiedChatReturnDeliverable
+    ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP','STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION','READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT','RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT','RETURN_TINDER_VERIFIED_CHAT_TO_INBOX'"
     : unboundInboxConversationSweepCapable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','SYNC_TINDER_VISIBLE_CHAT','RESUME_OFFICIAL_TINDER_APP','STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION','READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT','RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT'"
     : postChatLocalConversationAttestationCapable
@@ -428,7 +516,28 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
     : t1Capable
     ? "'PING','REQUEST_STATUS','STOP_BRIDGE','CONNECT_TINDER','DISCONNECT_TINDER'"
     : "'PING','REQUEST_STATUS','STOP_BRIDGE'";
-  const payloadPredicate = unboundInboxConversationSweepCapable
+  const payloadPredicate = verifiedChatReturnDeliverable
+    ? `
+         OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','RESUME_OFFICIAL_TINDER_APP','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}','${TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE}') AND payload='{}'::jsonb)
+         OR (
+           command_type='SYNC_TINDER_VISIBLE_CHAT'
+           AND jsonb_typeof(payload)='object'
+           AND payload ? 'local_conversation_attestation'
+           AND payload ? 'binding_revision'
+           AND (payload - 'local_conversation_attestation' - 'binding_revision')='{}'::jsonb
+           AND payload->>'local_conversation_attestation' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           AND payload->>'binding_revision' ~ '^[1-9][0-9]*$'
+         )
+         OR (
+           command_type='${TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE}'
+           AND jsonb_typeof(payload)='object'
+           AND payload ? 'binding_revision'
+           AND payload ? 'attestation_contract_version'
+           AND (payload - 'binding_revision' - 'attestation_contract_version')='{}'::jsonb
+           AND payload->>'binding_revision' ~ '^[1-9][0-9]*$'
+           AND payload->>'attestation_contract_version'='${TINDER_LOCAL_CONVERSATION_ATTESTATION_POST_CHAT_CONTRACT_VERSION}'
+         )`
+    : unboundInboxConversationSweepCapable
     ? `
          OR (command_type IN ('CONNECT_TINDER','DISCONNECT_TINDER','ARM_TINDER_CONVERSATION_BINDING','RESUME_OFFICIAL_TINDER_APP','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}') AND payload='{}'::jsonb)
          OR (
@@ -678,6 +787,74 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
           OR command_type IN ('${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}')
         )`
     : "";
+  // V9 is a distinct post-Resume navigation authority.  The command body is
+  // permanently `{}`; all target scope remains in the locked permit and is
+  // revalidated immediately before Android can observe the command.
+  const verifiedChatReturnDeliveryPredicate = verifiedChatReturnDeliverable
+    ? `
+        AND (
+          command_type <> '${TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE}'
+          OR EXISTS (
+            SELECT 1
+              FROM ${TINDER_VERIFIED_CHAT_RETURN_PERMIT_TABLE} return_permit
+              JOIN tinder_official_app_resume_permits resume_permit
+                ON resume_permit.command_id=return_permit.resume_command_id
+              JOIN device_bridge_commands resume_command
+                ON resume_command.command_id=resume_permit.command_id
+              JOIN contact_human_armed_conversation_bindings binding
+                ON binding.binding_id=return_permit.binding_id
+              JOIN contact_human_armed_conversation_binding_permits binding_permit
+                ON binding_permit.binding_id=binding.binding_id
+              JOIN tinder_visible_chat_captures source_capture
+                ON source_capture.capture_id=return_permit.source_capture_id
+             WHERE return_permit.command_id=device_bridge_commands.command_id
+               AND return_permit.device_id=device_bridge_commands.device_id
+               AND return_permit.permit_contract_version=1
+               AND return_permit.permit_state='ISSUED'
+               AND return_permit.expires_at>$2
+               AND device_bridge_commands.payload='{}'::jsonb
+               AND resume_permit.device_id=return_permit.device_id
+               AND resume_permit.source_capture_id=return_permit.source_capture_id
+               AND resume_permit.binding_id=return_permit.binding_id
+               AND resume_permit.binding_revision=return_permit.binding_revision
+               AND resume_permit.permit_contract_version=2
+               AND resume_permit.permit_state='DISPATCHED'
+               AND resume_permit.expires_at>$2
+               AND resume_command.device_id=resume_permit.device_id
+               AND resume_command.command_type='${TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE}'
+               AND resume_command.terminal_status='SUCCEEDED'
+               AND resume_command.payload='{}'::jsonb
+               AND binding.device_id=return_permit.device_id
+               AND binding.binding_revision=return_permit.binding_revision
+               AND binding.channel='tinder'
+               AND binding.reference_kind='${TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+               AND binding.binding_state='CONFIRMED'
+               AND binding.human_verified=TRUE
+               AND binding_permit.device_id=binding.device_id
+               AND binding_permit.binding_revision=binding.binding_revision
+               AND binding_permit.permit_state='CONSUMED'
+               AND binding_permit.consumed_capture_id=return_permit.source_capture_id
+               AND source_capture.device_id=binding.device_id
+               AND source_capture.source_package='com.tinder'
+               AND source_capture.capture_safety_status='SAFE'
+               AND source_capture.mapping_status='RESOLVED'
+               AND source_capture.human_review_status='CONFIRMED'
+               AND source_capture.resolved_contact_id=binding.contact_id
+               AND source_capture.capture_revision=(
+                 SELECT MAX(newer.capture_revision)
+                   FROM tinder_visible_chat_captures newer
+                  WHERE newer.device_id=source_capture.device_id
+                    AND newer.runtime_thread_fingerprint=source_capture.runtime_thread_fingerprint
+               )
+          )
+        )`
+    : "";
+  // While V9 is live (including after its command was STAGED), no unrelated
+  // dynamic Tinder command may be batched beside it.  Its own command is the
+  // sole exception; terminal commands disappear via the base query.
+  const verifiedChatReturnExclusiveDeliveryPredicate = verifiedChatReturnCapable && verifiedChatReturnActive
+    ? ` AND command_type='${TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE}'`
+    : "";
   const result = await client.query(
     `SELECT command_id, protocol_version, command_type, issued_at, expires_at,
             configuration_revision, payload
@@ -693,6 +870,8 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
         ${localConversationAttestationDeliveryPredicate}
         ${unboundInboxConversationSweepDeliveryPredicate}
         ${unboundInboxConversationSweepExclusiveDeliveryPredicate}
+        ${verifiedChatReturnDeliveryPredicate}
+        ${verifiedChatReturnExclusiveDeliveryPredicate}
      ORDER BY issued_at ASC, command_id ASC
      LIMIT $3`,
     [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit]
@@ -738,10 +917,14 @@ function heartbeatResponse(serverTime, acceptedAt, commands) {
 }
 
 export async function processHeartbeatTransaction(pool, auth, heartbeat, now = new Date(), {
-  inspectUnboundInboxConversationSweepFoundation = inspectTinderUnboundInboxConversationSweepSchema
+  inspectUnboundInboxConversationSweepFoundation = inspectTinderUnboundInboxConversationSweepSchema,
+  inspectVerifiedChatReturnFoundation = inspectTinderVerifiedChatReturnSchema
 } = {}) {
   if (typeof inspectUnboundInboxConversationSweepFoundation !== "function") {
     throw new TypeError("inspectUnboundInboxConversationSweepFoundation must be a function");
+  }
+  if (typeof inspectVerifiedChatReturnFoundation !== "function") {
+    throw new TypeError("inspectVerifiedChatReturnFoundation must be a function");
   }
   const client = await pool.connect();
   let failureStage = "BEGIN";
@@ -781,12 +964,30 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
         client,
         inspectUnboundInboxConversationSweepFoundation
       );
+    failureStage = "V9_FOUNDATION";
+    const verifiedChatReturnFoundationState =
+      await inspectVerifiedChatReturnFoundationState(client, inspectVerifiedChatReturnFoundation);
+    // V8's own exact inspector deliberately becomes INVALID after the V9
+    // command-constraint successor. V9 CANONICAL is therefore the only
+    // allowed forward-compatible evidence that the retained V8 relations may
+    // continue their narrow runtime lifecycle.
+    const verifiedChatReturnFoundationCanonical =
+      verifiedChatReturnFoundationState === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL;
     const unboundInboxConversationSweepFoundationCanonical =
       unboundInboxConversationSweepFoundationState
-      === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL;
+      === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+      || verifiedChatReturnFoundationCanonical;
     const unboundInboxConversationSweepFoundationReady =
       unboundInboxConversationSweepFoundationCanonical
       && isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities);
+    const verifiedChatReturnFoundationReady = verifiedChatReturnFoundationCanonical
+      && isTinderVerifiedChatReturnCapable(heartbeat.capabilities);
+    // Readiness is deliberately transient and tied to this signed heartbeat.
+    // A prior `ready:true` audit cannot authorize a later delivery. The
+    // Android runtime may assert it only after local V3 continuity proof;
+    // selection still revalidates all durable server facts under this lock.
+    const verifiedChatReturnDeliveryReady = verifiedChatReturnFoundationReady
+      && heartbeat.tinder_verified_chat_return?.ready === true;
     let acceptedAt = now;
     if (!idempotent) {
       failureStage = "DEVICE_UPDATE";
@@ -829,14 +1030,24 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       now,
       unboundInboxConversationSweepFoundationCanonical
     });
+    failureStage = "V9_EXPIRY";
+    const v9ReturnRuntime = await expireVerifiedChatReturnPermitForHeartbeat(client, {
+      pool,
+      deviceId: auth.deviceId,
+      now,
+      verifiedChatReturnFoundationCanonical
+    });
     let commands = [];
-    if (!v8SweepRuntime.childExpired) {
+    if (!v8SweepRuntime.childExpired && !v9ReturnRuntime.permitExpired) {
       // Delivery must not continue with an older nonterminal command in the
       // same heartbeat that made the V8 child terminal. A subsequent signed
       // heartbeat obtains a freshly locked command view.
       failureStage = "COMMAND_SELECTION";
       commands = await selectDeliverableCommands(client, auth.deviceId, heartbeat.capabilities, now, {
         unboundInboxConversationSweepFoundationReady,
+        verifiedChatReturnFoundationReady,
+        verifiedChatReturnDeliveryReady,
+        verifiedChatReturnActive: v9ReturnRuntime.active,
         suppressDynamicTinderCommands:
           // An INVALID result can mean a previously canonical V8 catalog
           // drifted after an active parent/child was issued. The current
@@ -845,8 +1056,11 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
           // heartbeat also advertises an older capability profile. An absent
           // V8 catalog is the distinct UPGRADE_REQUIRED state and preserves
           // legacy delivery until this new foundation has ever been applied.
-          unboundInboxConversationSweepFoundationState
+          (unboundInboxConversationSweepFoundationState
             === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+            && !verifiedChatReturnFoundationCanonical)
+          || verifiedChatReturnFoundationState
+            === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.INVALID
           // A current legacy capability cannot receive a V8 child. If one is
           // nevertheless active from an earlier V8 heartbeat, suppress all
           // dynamic Tinder delivery until it reaches its immutable terminal

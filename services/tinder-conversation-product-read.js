@@ -21,6 +21,9 @@ const VISIBLE_CHAT_SYNC_LAYOUT_SCHEMA_VERSION = "tinder-zte-visible-chat-scroll-
 const OFFICIAL_APP_RESUME_PRODUCT_STATUSES = new Set([
   "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
 ]);
+const VERIFIED_CHAT_RETURN_PRODUCT_STATUSES = new Set([
+  "NOT_REQUESTED", "PENDING", "STAGED", "RETURNED", "CANCELLED", "EXPIRED"
+]);
 
 class TinderConversationProductReadError extends Error {
   constructor(message, code = "INVALID_TINDER_CONVERSATION_PRODUCT_READ") {
@@ -224,6 +227,50 @@ function normalizeOfficialAppResumeObservation(value) {
 }
 
 /**
+ * Product-only state for the separate V9 verified-chat -> Inbox return.
+ * This intentionally mirrors the Resume projection's narrow boundary: the
+ * selected confirmed Conversation may learn only a bounded lifecycle status.
+ * It must never expose a command, device, source, binding, revision, expiry,
+ * terminal reason, acknowledgement, or any screen/content evidence.
+ */
+function normalizeLatestConfirmedVerifiedChatReturn(row, now = new Date()) {
+  if (row === undefined || row === null) return undefined;
+  if (!exactKeys(row, ["permit_state", "expires_at"])) {
+    invalid("Invalid verified Tinder chat return record.", "INVALID_TINDER_VERIFIED_CHAT_RETURN_PRODUCT_PROJECTION");
+  }
+
+  const storedState = String(row.permit_state || "").trim().toUpperCase();
+  if (storedState === "NOT_REQUESTED") {
+    if (row.expires_at !== null) {
+      invalid("Invalid verified Tinder chat return record.", "INVALID_TINDER_VERIFIED_CHAT_RETURN_PRODUCT_PROJECTION");
+    }
+    return normalizeVerifiedChatReturnObservation({ status: "NOT_REQUESTED" });
+  }
+  if (!["ISSUED", "STAGED", "RETURNED", "CANCELLED", "EXPIRED"].includes(storedState)) {
+    invalid("Invalid verified Tinder chat return record.", "INVALID_TINDER_VERIFIED_CHAT_RETURN_PRODUCT_PROJECTION");
+  }
+
+  const expiresAt = new Date(normalizeCapturedAt(row.expires_at));
+  const referenceTime = now instanceof Date ? new Date(now.valueOf()) : new Date(now);
+  if (Number.isNaN(referenceTime.valueOf())) {
+    invalid("Invalid verified Tinder chat return time.", "INVALID_TINDER_VERIFIED_CHAT_RETURN_PRODUCT_PROJECTION");
+  }
+
+  const status = ["ISSUED", "STAGED"].includes(storedState)
+    ? (expiresAt.valueOf() <= referenceTime.valueOf() ? "EXPIRED" : storedState === "ISSUED" ? "PENDING" : "STAGED")
+    : storedState;
+  return normalizeVerifiedChatReturnObservation({ status });
+}
+
+function normalizeVerifiedChatReturnObservation(value) {
+  if (!exactKeys(value, ["status"])
+      || !VERIFIED_CHAT_RETURN_PRODUCT_STATUSES.has(value.status)) {
+    invalid("Invalid verified Tinder chat return observation.", "INVALID_TINDER_VERIFIED_CHAT_RETURN_PRODUCT_PROJECTION");
+  }
+  return Object.freeze({ status: value.status });
+}
+
+/**
  * The database row has a deliberately different, server-internal field name
  * (`visible_messages`).  Convert it through an exact allowlist before the
  * public product normalizer sees it, so a selected detail cannot accidentally
@@ -290,10 +337,12 @@ function normalizeTinderConversationProductDetail(value) {
   const baseKeys = ["capture_id", "visible_name", "captured_at", "messages"];
   const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(value || {}, "visible_chat_sync");
   const hasOfficialAppResume = Object.prototype.hasOwnProperty.call(value || {}, "official_app_resume");
+  const hasVerifiedChatReturn = Object.prototype.hasOwnProperty.call(value || {}, "verified_chat_return");
   const expectedKeys = [
     ...baseKeys,
     ...(hasVisibleChatSync ? ["visible_chat_sync"] : []),
-    ...(hasOfficialAppResume ? ["official_app_resume"] : [])
+    ...(hasOfficialAppResume ? ["official_app_resume"] : []),
+    ...(hasVerifiedChatReturn ? ["verified_chat_return"] : [])
   ];
   if (!exactKeys(value, expectedKeys)
       || !Array.isArray(value.messages) || value.messages.length === 0
@@ -312,6 +361,9 @@ function normalizeTinderConversationProductDetail(value) {
       : {}),
     ...(hasOfficialAppResume
       ? { official_app_resume: normalizeOfficialAppResumeObservation(value.official_app_resume) }
+      : {}),
+    ...(hasVerifiedChatReturn
+      ? { verified_chat_return: normalizeVerifiedChatReturnObservation(value.verified_chat_return) }
       : {})
   });
 }
@@ -320,7 +372,13 @@ function normalizeLatestConfirmedConversationListItem(row) {
   return normalizeConversationIdentity(row);
 }
 
-function normalizeLatestConfirmedConversationDetail(row, visibleChatSync = null, officialAppResume = undefined, now = new Date()) {
+function normalizeLatestConfirmedConversationDetail(
+  row,
+  visibleChatSync = null,
+  officialAppResume = undefined,
+  now = new Date(),
+  verifiedChatReturn = undefined
+) {
   const identity = normalizeConversationIdentity(row);
   return Object.freeze({
     ...identity,
@@ -328,7 +386,10 @@ function normalizeLatestConfirmedConversationDetail(row, visibleChatSync = null,
     ...(visibleChatSync === null ? {} : { visible_chat_sync: normalizeLatestConfirmedVisibleChatSync(visibleChatSync) }),
     ...(officialAppResume === undefined
       ? {}
-      : { official_app_resume: normalizeLatestConfirmedOfficialAppResume(officialAppResume, now) })
+      : { official_app_resume: normalizeLatestConfirmedOfficialAppResume(officialAppResume, now) }),
+    ...(verifiedChatReturn === undefined
+      ? {}
+      : { verified_chat_return: normalizeLatestConfirmedVerifiedChatReturn(verifiedChatReturn, now) })
   });
 }
 
@@ -360,7 +421,16 @@ function createTinderConversationProductReadService(repository) {
     const officialAppResume = typeof repository.findLatestConfirmedOfficialAppResumeByCaptureId === "function"
       ? await repository.findLatestConfirmedOfficialAppResumeByCaptureId(normalizedCaptureId)
       : undefined;
-    return normalizeLatestConfirmedConversationDetail(row, visibleChatSync ?? null, officialAppResume);
+    const verifiedChatReturn = typeof repository.findLatestConfirmedVerifiedChatReturnByCaptureId === "function"
+      ? await repository.findLatestConfirmedVerifiedChatReturnByCaptureId(normalizedCaptureId)
+      : undefined;
+    return normalizeLatestConfirmedConversationDetail(
+      row,
+      visibleChatSync ?? null,
+      officialAppResume,
+      new Date(),
+      verifiedChatReturn
+    );
   }
 
   return Object.freeze({
@@ -490,6 +560,36 @@ function createPgTinderConversationProductReadRepository(pool) {
         if (error?.code === "42P01") return undefined;
         throw error;
       }
+    },
+
+    /**
+     * V9 is optional until its explicit foundation migration commits. The
+     * product reader remains read-only and emits no status at all when the
+     * relation is absent; that is deliberately different from NOT_REQUESTED.
+     */
+    async findLatestConfirmedVerifiedChatReturnByCaptureId(captureId) {
+      try {
+        const result = await pool.query(
+          `SELECT COALESCE(p.permit_state, 'NOT_REQUESTED') AS permit_state,
+                  p.expires_at
+             FROM tinder_visible_chat_captures c
+             LEFT JOIN LATERAL (
+               SELECT permit_state, expires_at
+                 FROM tinder_verified_chat_return_permits
+                WHERE source_capture_id=c.capture_id
+                ORDER BY created_at DESC, command_id DESC
+                LIMIT 1
+             ) p ON TRUE
+            WHERE c.capture_id=$1
+              AND ${eligibleWhere}
+            LIMIT 1`,
+          [captureId]
+        );
+        return result.rows[0] || null;
+      } catch (error) {
+        if (error?.code === "42P01") return undefined;
+        throw error;
+      }
     }
   });
 }
@@ -505,6 +605,8 @@ export {
   normalizeLatestConfirmedConversationListItem,
   normalizeLatestConfirmedOfficialAppResume,
   normalizeOfficialAppResumeObservation,
+  normalizeLatestConfirmedVerifiedChatReturn,
+  normalizeVerifiedChatReturnObservation,
   normalizeLatestConfirmedVisibleChatSync,
   normalizeConversationMessages,
   normalizeVisibleChatSync,

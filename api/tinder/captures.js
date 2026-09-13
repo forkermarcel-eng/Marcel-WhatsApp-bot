@@ -182,6 +182,9 @@ const PUBLIC_OFFICIAL_APP_RESUME_REASONS = new Set([
 const PUBLIC_OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
   "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
 ]);
+const PUBLIC_VERIFIED_CHAT_RETURN_OBSERVATION_STATUSES = new Set([
+  "NOT_REQUESTED", "PENDING", "STAGED", "RETURNED", "CANCELLED", "EXPIRED"
+]);
 const PUBLIC_OPEN_DRAFT_REVIEW_STATUSES = new Set(["DRAFT", "APPROVED", "STALE"]);
 const DRAFT_APPROVE_OPERATION = "draft-approve";
 const DRAFT_REJECT_OPERATION = "draft-reject";
@@ -756,6 +759,19 @@ function normalizePublicOfficialAppResumeObservation(value) {
 }
 
 /**
+ * The browser may observe only this V9 lifecycle token. It is deliberately
+ * independent of any permit, command, device, source, binding, revision,
+ * expiry, terminal reason, receipt, or message content.
+ */
+function normalizePublicVerifiedChatReturnObservation(value) {
+  if (!exactKeys(value, ["status"])
+      || !PUBLIC_VERIFIED_CHAT_RETURN_OBSERVATION_STATUSES.has(value.status)) {
+    return null;
+  }
+  return Object.freeze({ status: value.status });
+}
+
+/**
  * Every backend property is allowlisted. In particular, an accidental
  * capture/device/contact/fingerprint/provenance field cannot cross the
  * Vercel boundary even if a backend response changes later.
@@ -763,10 +779,12 @@ function normalizePublicOfficialAppResumeObservation(value) {
 function normalizePublicConfirmedConversation(value, captureId) {
   const hasVisibleChatSync = Object.prototype.hasOwnProperty.call(value || {}, "visible_chat_sync");
   const hasOfficialAppResume = Object.prototype.hasOwnProperty.call(value || {}, "official_app_resume");
+  const hasVerifiedChatReturn = Object.prototype.hasOwnProperty.call(value || {}, "verified_chat_return");
   const expectedFields = [
     "capture_id", "visible_name", "captured_at", "messages",
     ...(hasVisibleChatSync ? ["visible_chat_sync"] : []),
-    ...(hasOfficialAppResume ? ["official_app_resume"] : [])
+    ...(hasOfficialAppResume ? ["official_app_resume"] : []),
+    ...(hasVerifiedChatReturn ? ["verified_chat_return"] : [])
   ];
   if (!exactKeys(value, expectedFields)
       || value.capture_id !== captureId || !validCaptureId(value.capture_id)
@@ -783,16 +801,21 @@ function normalizePublicConfirmedConversation(value, captureId) {
   const officialAppResume = hasOfficialAppResume
     ? normalizePublicOfficialAppResumeObservation(value.official_app_resume)
     : null;
+  const verifiedChatReturn = hasVerifiedChatReturn
+    ? normalizePublicVerifiedChatReturnObservation(value.verified_chat_return)
+    : null;
   if (!capturedAt || messages.some((message) => message === null)
       || (hasVisibleChatSync && visibleChatSync === null)
-      || (hasOfficialAppResume && officialAppResume === null)) return null;
+      || (hasOfficialAppResume && officialAppResume === null)
+      || (hasVerifiedChatReturn && verifiedChatReturn === null)) return null;
   return Object.freeze({
     capture_id: value.capture_id,
     visible_name: value.visible_name.trim(),
     captured_at: capturedAt,
     messages: Object.freeze(messages),
     ...(hasVisibleChatSync ? { visible_chat_sync: visibleChatSync } : {}),
-    ...(hasOfficialAppResume ? { official_app_resume: officialAppResume } : {})
+    ...(hasOfficialAppResume ? { official_app_resume: officialAppResume } : {}),
+    ...(hasVerifiedChatReturn ? { verified_chat_return: verifiedChatReturn } : {})
   });
 }
 
@@ -1828,6 +1851,7 @@ export {
   normalizePublicVisibleChatSyncMessage,
   normalizePublicVisibleChatSyncTranscript,
   normalizePublicOfficialAppResumeObservation,
+  normalizePublicVerifiedChatReturnObservation,
   normalizePublicVisibleChatSyncResult,
   normalizePublicUnboundInboxConversationSweepStatus,
   normalizePublicUnboundInboxConversationSweepTranscript,

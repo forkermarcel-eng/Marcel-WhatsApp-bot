@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import handler from "../api/tinder/captures.js";
+import handler, {
+  normalizePublicConfirmedConversation,
+  normalizePublicVerifiedChatReturnObservation
+} from "../api/tinder/captures.js";
 
 const CAPTURE_ID = "6c7308cf-5d40-423d-913b-c4424f0e4ee0";
 const DEVICE_ID = "36761d7f-2ac3-4da9-9ad4-7fd381665f1e";
@@ -70,6 +73,35 @@ function safeDraftEligibleCapture(overrides = {}) {
     ...overrides
   };
 }
+
+test("V9 verified-chat return status crosses the dashboard proxy only as one bounded token", () => {
+  const conversation = normalizePublicConfirmedConversation({
+    capture_id: CAPTURE_ID,
+    visible_name: "M Tinder Test",
+    captured_at: "2026-09-13T12:00:00.000Z",
+    messages: [{ direction: "INCOMING", text: "bounded confirmed message" }],
+    verified_chat_return: { status: "STAGED" }
+  }, CAPTURE_ID);
+  assert.deepEqual(conversation?.verified_chat_return, { status: "STAGED" });
+  const rendered = JSON.stringify(conversation?.verified_chat_return);
+  for (const forbidden of [
+    "command_id", "device_id", "source_capture_id", "binding_id", "binding_revision",
+    "resume_command_id", "expires_at", "terminal_reason", "receipt", "fingerprint"
+  ]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+
+  assert.equal(normalizePublicVerifiedChatReturnObservation({ status: "RETURNED" })?.status, "RETURNED");
+  assert.equal(normalizePublicVerifiedChatReturnObservation({ status: "STAGED", command_id: CAPTURE_ID }), null);
+  assert.equal(normalizePublicVerifiedChatReturnObservation({ status: "UNKNOWN" }), null);
+  assert.equal(normalizePublicConfirmedConversation({
+    capture_id: CAPTURE_ID,
+    visible_name: "M Tinder Test",
+    captured_at: "2026-09-13T12:00:00.000Z",
+    messages: [{ direction: "INCOMING", text: "bounded confirmed message" }],
+    verified_chat_return: { status: "STAGED", source_capture_id: CAPTURE_ID }
+  }, CAPTURE_ID), null);
+});
 
 function validCookie() {
   const token = "test-session";

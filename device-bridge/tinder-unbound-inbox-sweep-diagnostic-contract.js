@@ -17,6 +17,23 @@ export const TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_STAGES = Object.freeze([
   "RETURN"
 ]);
 
+/**
+ * The last content-free Android checkpoint before the V8 reader.  The server-only
+ * NOT_REPORTED value denotes a legacy ten-field client; it is deliberately distinct from a
+ * current client that reported NOT_OBSERVED.
+ */
+export const TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_COMMAND_HANDOFF_STAGES = Object.freeze([
+  "NOT_REPORTED",
+  "NOT_OBSERVED",
+  "HANDLER_ENTERED",
+  "STAGED",
+  "STAGE_REJECTED",
+  "LOCAL_CONTEXT_UNAVAILABLE",
+  "TERMINAL_ACK_ACCEPTED",
+  "SERVICE_HANDOFF_QUEUED",
+  "SERVICE_HANDOFF_UNAVAILABLE"
+]);
+
 export const TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_REASONS = Object.freeze([
   "NONE",
   "RUNTIME_GATE",
@@ -111,8 +128,21 @@ export const TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_INGRESS_STAGES = Object.freez
   "UNEXPECTED"
 ]);
 
-const FIELDS = Object.freeze([
+const LEGACY_FIELDS = Object.freeze([
   "stage",
+  "reason",
+  "session_state",
+  "current_slot",
+  "reads_accepted",
+  "returns_accepted",
+  "reader_result",
+  "ingress_phase",
+  "ingress_outcome",
+  "ingress_stage"
+]);
+const CURRENT_FIELDS = Object.freeze([
+  "stage",
+  "command_handoff_stage",
   "reason",
   "session_state",
   "current_slot",
@@ -125,6 +155,9 @@ const FIELDS = Object.freeze([
 ]);
 const MAXIMUM_COUNTER = 8;
 const stageSet = new Set(TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_STAGES);
+const commandHandoffStageSet = new Set(
+  TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_COMMAND_HANDOFF_STAGES
+);
 const reasonSet = new Set(TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_REASONS);
 const sessionStateSet = new Set(TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_SESSION_STATES);
 const readerResultSet = new Set(TINDER_UNBOUND_INBOX_SWEEP_DIAGNOSTIC_READER_RESULTS);
@@ -136,9 +169,17 @@ function object(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function exactKeys(value) {
+function exactKeys(value, fields) {
   return object(value)
-    && Object.keys(value).sort().join("|") === [...FIELDS].sort().join("|");
+    && Object.keys(value).sort().join("|") === [...fields].sort().join("|");
+}
+
+function legacyDiagnostic(value) {
+  return exactKeys(value, LEGACY_FIELDS);
+}
+
+function currentDiagnostic(value) {
+  return exactKeys(value, CURRENT_FIELDS);
 }
 
 function boundedCounter(value) {
@@ -151,8 +192,10 @@ function boundedCounter(value) {
  * from a device heartbeat or database JSON document across a public boundary.
  */
 export function boundedTinderUnboundInboxSweepDiagnostic(value) {
-  if (!exactKeys(value)
+  const legacy = legacyDiagnostic(value);
+  if (!(legacy || currentDiagnostic(value))
       || !stageSet.has(value.stage)
+      || (!legacy && !commandHandoffStageSet.has(value.command_handoff_stage))
       || !reasonSet.has(value.reason)
       || !sessionStateSet.has(value.session_state)
       || !boundedCounter(value.current_slot)
@@ -166,6 +209,7 @@ export function boundedTinderUnboundInboxSweepDiagnostic(value) {
   }
   return Object.freeze({
     stage: value.stage,
+    command_handoff_stage: legacy ? "NOT_REPORTED" : value.command_handoff_stage,
     reason: value.reason,
     session_state: value.session_state,
     current_slot: value.current_slot,

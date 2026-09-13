@@ -320,6 +320,7 @@ test("V8 terminal status exposes only its finite terminal reason", async () => {
 test("V8 status retains only the newest exact, content-free diagnostic projection", async () => {
   const diagnostic = {
     stage: "INGRESS",
+    command_handoff_stage: "SERVICE_HANDOFF_QUEUED",
     reason: "UNBOUND_READER_INGRESS_FAILED",
     session_state: "READ_IN_PROGRESS",
     current_slot: 1,

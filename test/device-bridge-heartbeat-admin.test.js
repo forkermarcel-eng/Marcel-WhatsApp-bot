@@ -545,6 +545,7 @@ test("optional official resume handoff heartbeat diagnostic is exact, content-fr
 test("optional V8 sweep heartbeat diagnostic is exact, content-free, and cannot affect command issuance", async () => {
   const diagnostic = {
     stage: "INGRESS",
+    command_handoff_stage: "SERVICE_HANDOFF_QUEUED",
     reason: "UNBOUND_READER_INGRESS_FAILED",
     session_state: "READ_IN_PROGRESS",
     current_slot: 1,

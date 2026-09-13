@@ -7,6 +7,7 @@ import {
 function diagnostic(overrides = {}) {
   return {
     stage: "INGRESS",
+    command_handoff_stage: "SERVICE_HANDOFF_QUEUED",
     reason: "UNBOUND_READER_INGRESS_FAILED",
     session_state: "READ_IN_PROGRESS",
     current_slot: 1,
@@ -31,11 +32,25 @@ test("V8 sweep diagnostic projects only its exact finite, content-free shape", (
   }
 });
 
+test("V8 legacy diagnostic is accepted only as a bounded NOT_REPORTED projection", () => {
+  const legacy = diagnostic();
+  delete legacy.command_handoff_stage;
+
+  const projected = boundedTinderUnboundInboxSweepDiagnostic(legacy);
+
+  assert.deepEqual(projected, {
+    ...legacy,
+    command_handoff_stage: "NOT_REPORTED"
+  });
+  assert.equal(Object.isFrozen(projected), true);
+});
+
 test("V8 sweep diagnostic fails closed for future fields, invalid enums, and unbounded counters", () => {
   for (const invalid of [
     null,
     {},
     { ...diagnostic(), extra: "future" },
+    diagnostic({ command_handoff_stage: "FUTURE_STAGE" }),
     diagnostic({ stage: "UNBOUNDED" }),
     diagnostic({ reason: "raw exception" }),
     diagnostic({ session_state: "UNKNOWN" }),

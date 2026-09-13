@@ -928,6 +928,7 @@ test("V8 unbound Inbox sweep proxy exposes bounded status only and has no browse
 
   const diagnostic = {
     stage: "INGRESS",
+    command_handoff_stage: "SERVICE_HANDOFF_QUEUED",
     reason: "UNBOUND_READER_INGRESS_FAILED",
     session_state: "READ_IN_PROGRESS",
     current_slot: 1,

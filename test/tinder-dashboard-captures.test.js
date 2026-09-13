@@ -132,6 +132,7 @@ test("V8 terminal sweep status exposes only an allowlisted terminal reason", asy
 test("V8 status may project exactly one content-free reader diagnostic and rejects any extra field", async () => {
   const diagnostic = {
     stage: "INGRESS",
+    command_handoff_stage: "SERVICE_HANDOFF_QUEUED",
     reason: "UNBOUND_READER_INGRESS_FAILED",
     session_state: "READ_IN_PROGRESS",
     current_slot: 1,

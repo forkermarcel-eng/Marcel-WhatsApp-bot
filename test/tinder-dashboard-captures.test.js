@@ -6,6 +6,7 @@ import {
   assertHumanArmedBindingBody,
   assertHumanArmedRearmBody,
   assertHumanArmedVisibleChatSyncBody,
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady,
   assertMappingBody,
   createTinderDashboardCaptureReadHandler,
   createTinderDashboardConversationBindingHandler,
@@ -81,6 +82,36 @@ test("V8 unbound Inbox sweep status is bounded and exposes no correlation data",
   statusResponse.setHeader = () => {};
   await status({ params: { deviceId: DEVICE_ID } }, statusResponse);
   assert.deepEqual(statusResponse.body, { ok: true, unbound_inbox_sweep: { status: "ACTIVE" } });
+});
+
+test("V8 status accepts only a canonical V9 successor after its exact V8 inspector rejects the V9 constraint", async () => {
+  let v9Inspections = 0;
+  const result = await assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+    async inspectV8Schema() { return { state: "INVALID" }; },
+    async inspectV9Schema() {
+      v9Inspections += 1;
+      return { state: "CANONICAL" };
+    }
+  });
+  assert.deepEqual(result, { state: "CANONICAL" });
+  assert.equal(v9Inspections, 1);
+});
+
+test("V8 status remains fail-closed for partial V8 or noncanonical V9 schema", async () => {
+  await assert.rejects(
+    assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+      async inspectV8Schema() { return { state: "UPGRADE_REQUIRED" }; },
+      async inspectV9Schema() { throw new Error("must not inspect V9 for a partial V8 state"); }
+    }),
+    /not ready/
+  );
+  await assert.rejects(
+    assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+      async inspectV8Schema() { return { state: "INVALID" }; },
+      async inspectV9Schema() { return { state: "INVALID" }; }
+    }),
+    /not ready/
+  );
 });
 
 test("V8 terminal sweep status exposes only an allowlisted terminal reason", async () => {

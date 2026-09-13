@@ -190,7 +190,7 @@ test("V8 transcript ingress atomically persists PENDING/null-contact data, consu
   assert.deepEqual(repository.state.commands, [{
     commandId: RETURN_COMMAND_ID, deviceId: DEVICE_ID,
     commandType: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE,
-    payload: {}, expiresAt: "2026-09-12T12:01:30.000Z"
+    payload: {}, expiresAt: "2026-09-12T12:01:20.000Z"
   }]);
   assert.equal(repository.state.audits.some(audit => audit.action === "READ_TRANSCRIPT_ACCEPTED"), true);
   assert.equal(repository.state.audits.some(audit => audit.action === "RETURN_ISSUED"), true);

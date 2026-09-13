@@ -483,6 +483,59 @@ test("real loopback V8 cleans a legacy expired parent's still-active child and p
   }, { prefix: "marcel_unbound_sweep_v8_expired_parent_child" });
 });
 
+test("real loopback V8 accepts a bounded app-ahead deadline under canonical checks", { timeout: 60_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV6Foundation(pool);
+    await migrateTinderUnboundInboxConversationSweepFoundation(pool);
+
+    const deviceId = await insertV8Device(pool, "clock-margin");
+    await pool.query(
+      `UPDATE device_bridge_devices
+          SET bridge_service_state='RUNNING', tinder_state='CONNECTED', automation_state='STOPPED',
+              capabilities=$2::jsonb, last_heartbeat_sequence=17, last_accepted_heartbeat_at=NOW()
+        WHERE device_id=$1`,
+      [deviceId, JSON.stringify(T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES)]
+    );
+    const clock = await pool.query("SELECT NOW() AS current_time");
+    const applicationNow = new Date(new Date(clock.rows[0].current_time).valueOf() + 5_000);
+    const repository = createPgTinderUnboundInboxConversationSweepRepository(pool);
+    const sweepId = randomUUID();
+    const commandId = randomUUID();
+    const observationNonce = randomUUID();
+    const result = await repository.withTransaction(transaction =>
+      createTinderUnboundInboxConversationSweepService(repository, {
+        createSweepId: () => sweepId,
+        createCommandId: () => commandId,
+        createAuditId: randomUUID,
+        now: () => applicationNow
+      }).startUnboundInboxConversationSweepFromFreshInboxObservation(transaction, {
+        deviceId,
+        heartbeatSequence: 17,
+        observationNonce,
+        inboxNavigation: {
+          stage: "INBOX_READY", reason: "NONE", visible_conversation_count: 1,
+          observed_event_count: 1, observation_kind: "FRESH_REVIEWED_INBOX_V1",
+          observation_nonce: observationNonce
+        }
+      })
+    );
+    assert.deepEqual(result, { status: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS.QUEUED });
+    const bounded = await pool.query(
+      `SELECT EXTRACT(EPOCH FROM sweep.expires_at - sweep.issued_at) AS parent_seconds,
+              EXTRACT(EPOCH FROM step.expires_at - step.issued_at) AS child_seconds
+         FROM tinder_unbound_inbox_conversation_sweeps sweep
+         JOIN tinder_unbound_inbox_conversation_sweep_steps step ON step.sweep_id=sweep.sweep_id
+        WHERE sweep.sweep_id=$1 AND step.command_id=$2`,
+      [sweepId, commandId]
+    );
+    assert.equal(bounded.rows.length, 1);
+    assert.equal(Number(bounded.rows[0].parent_seconds) > 0, true);
+    assert.equal(Number(bounded.rows[0].parent_seconds) < 1_800, true);
+    assert.equal(Number(bounded.rows[0].child_seconds) > 0, true);
+    assert.equal(Number(bounded.rows[0].child_seconds) < 180, true);
+  }, { prefix: "marcel_unbound_sweep_v8_clock_margin" });
+});
+
 test("real loopback V8 rejects cross-step transcript evidence, wrong audit slots, and terminal or deleted active children", { timeout: 60_000 }, async () => {
   await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
     await prepareV6Foundation(pool);

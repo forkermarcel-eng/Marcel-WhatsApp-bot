@@ -709,6 +709,8 @@ test("internal heartbeat failures log only a bounded transaction stage", async (
   assert.deepEqual(messages, ["Device Bridge heartbeat transaction failed at DEVICE_UPDATE: INTERNAL_UNCLASSIFIED."]);
   assert.equal(messages.join(" ").includes("simulated"), false);
   assert.match(heartbeatSource, /failureStage = "V8_EXPIRY";\s+const v8SweepRuntime/);
+  assert.match(heartbeatSource, /boundedTinderUnboundInboxConversationSweepIssuePhase/);
+  assert.match(heartbeatSource, /stage === "V8_START"/);
 });
 
 test("internal heartbeat database failures retain only a finite reason class", async () => {

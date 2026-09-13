@@ -30,7 +30,8 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
 } from "./tinder-unbound-inbox-conversation-sweep-schema.js";
 import {
-  boundedTinderUnboundInboxConversationSweepExpiryPhase
+  boundedTinderUnboundInboxConversationSweepExpiryPhase,
+  boundedTinderUnboundInboxConversationSweepIssuePhase
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
@@ -185,7 +186,9 @@ function boundedHeartbeatFailureReason(error) {
 }
 
 function boundedHeartbeatFailurePhase(error) {
-  return boundedHeartbeatFailureStage(error) === "V8_EXPIRY"
+  const stage = boundedHeartbeatFailureStage(error);
+  if (stage === "V8_START") return boundedTinderUnboundInboxConversationSweepIssuePhase(error);
+  return stage === "V8_EXPIRY"
     ? boundedTinderUnboundInboxConversationSweepExpiryPhase(error)
     : "UNCLASSIFIED";
 }

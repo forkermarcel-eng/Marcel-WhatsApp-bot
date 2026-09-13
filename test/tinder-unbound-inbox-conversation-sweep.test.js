@@ -6,9 +6,11 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_ACK_RESULT,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SQL_CLOCK_SAFETY_MARGIN_MS,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS,
   TinderUnboundInboxConversationSweepError,
   boundedTinderUnboundInboxConversationSweepExpiryPhase,
+  boundedTinderUnboundInboxConversationSweepIssuePhase,
   createPgTinderUnboundInboxConversationSweepRepository,
   createTinderUnboundInboxConversationSweepService
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
@@ -152,14 +154,18 @@ test("V8 sweep starts only at fresh INBOX_READY with one empty READ child and no
   assert.deepEqual(repository.state.commands, [{
     commandId: READ_COMMAND_ID, deviceId: DEVICE_ID,
     commandType: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE,
-    payload: {}, expiresAt: "2026-09-12T12:03:00.000Z"
+    payload: {}, expiresAt: "2026-09-12T12:02:50.000Z"
   }]);
   assert.equal(repository.state.sweeps[0].activeCommandId, READ_COMMAND_ID);
   assert.equal(repository.state.sweeps[0].inboxObservationNonce, OBSERVATION_NONCE);
   assert.deepEqual(repository.state.steps, [{
     commandId: READ_COMMAND_ID, sweepId: SWEEP_ID, deviceId: DEVICE_ID,
-    slotOrdinal: 1, childKind: "READ", childState: "ISSUED", expiresAt: "2026-09-12T12:03:00.000Z"
+    slotOrdinal: 1, childKind: "READ", childState: "ISSUED", expiresAt: "2026-09-12T12:02:50.000Z"
   }]);
+  assert.equal(
+    new Date(repository.state.sweeps[0].expiresAt).valueOf() - NOW.valueOf(),
+    30 * 60_000 - TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SQL_CLOCK_SAFETY_MARGIN_MS
+  );
   assert.equal(JSON.stringify(repository.state.commands[0]).includes("sweep"), false);
 });
 
@@ -345,7 +351,7 @@ test("READ transcript acceptance atomically queues a distinct 90-second empty RE
   assert.deepEqual(repository.state.commands, [{
     commandId: RETURN_COMMAND_ID, deviceId: DEVICE_ID,
     commandType: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE,
-    payload: {}, expiresAt: "2026-09-12T12:01:30.000Z"
+    payload: {}, expiresAt: "2026-09-12T12:01:20.000Z"
   }]);
   assert.equal(repository.state.audits.some(audit => audit.transcriptId === TRANSCRIPT_ID && audit.action === "READ_TRANSCRIPT_ACCEPTED"), true);
 });
@@ -366,9 +372,8 @@ test("only a separately signed RETURNED receipt queues the next READ slot, while
   assert.deepEqual(repository.state.commands, [{
     commandId: READ_COMMAND_ID, deviceId: DEVICE_ID,
     commandType: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE,
-    payload: {}, expiresAt: "2026-09-12T12:03:00.000Z"
+    payload: {}, expiresAt: "2026-09-12T12:02:50.000Z"
   }]);
-
   const stoppedRepository = fixtureRepository({ stepRow: stagedRead({ child_state: "ISSUED", terminal_status: "", ack_status: "", ack_result: null }) });
   const stopped = await service(stoppedRepository).projectSweepChildAcknowledgement({}, {
     command: { command_id: READ_COMMAND_ID, device_id: DEVICE_ID, command_type: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE },
@@ -377,6 +382,22 @@ test("only a separately signed RETURNED receipt queues the next READ slot, while
   assert.deepEqual(stopped, { state: "STOPPED" });
   assert.equal(stoppedRepository.state.stopped[0].reasonCode, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.UNKNOWN_OUTCOME);
   assert.equal(stoppedRepository.state.commands.length, 0);
+});
+
+test("V8 start tags a parent database write failure with a finite in-memory phase only", async () => {
+  const repository = fixtureRepository();
+  const raw = new Error("private parent constraint detail");
+  raw.code = "23514";
+  repository.createUnboundInboxConversationSweep = async () => { throw raw; };
+  await assert.rejects(
+    () => service(repository).startUnboundInboxConversationSweepFromFreshInboxObservation({}, freshObservationInput()),
+    error => {
+      assert.equal(error, raw);
+      assert.equal(boundedTinderUnboundInboxConversationSweepIssuePhase(error), "PARENT_WRITE");
+      assert.equal(Object.keys(error).some(key => key.includes("IssuePhase")), false);
+      return true;
+    }
+  );
 });
 
 test("a missing same-process reviewed Inbox snapshot closes the V8 child rather than recreating a baseline", async () => {

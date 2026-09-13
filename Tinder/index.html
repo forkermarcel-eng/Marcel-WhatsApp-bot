@@ -1042,6 +1042,9 @@
        <p class="enrollment-message" id="inboxNavigationStatus" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="officialResumeHandoffStatus" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
      </section>
 
      <section class="enrollment-panel capture-mapping-panel" id="captureMappingPanel" hidden aria-labelledby="captureMappingHeading">
@@ -1189,6 +1192,7 @@
      disconnectAndroidTinder: document.getElementById("disconnectAndroidTinder"),
       deviceCommandMessage: document.getElementById("deviceCommandMessage"),
       inboxNavigationStatus: document.getElementById("inboxNavigationStatus"),
+      officialResumeHandoffStatus: document.getElementById("officialResumeHandoffStatus"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        unboundConversationList: document.getElementById("unboundConversationList"),
@@ -1280,6 +1284,15 @@
      "CHAT_STRUCTURE_REJECTED", "ACCESSIBILITY_INTERRUPTED", "ACCESSIBILITY_UNBOUND",
      "ACCESSIBILITY_DESTROYED", "BRIDGE_NOT_RUNNING", "TINDER_GATE_NOT_CONNECTED",
      "LIFECYCLE_RESET", "LOCAL_STATE_UNAVAILABLE"
+   ]);
+   const OFFICIAL_RESUME_HANDOFF_STAGES = new Set([
+     "ARMED", "ACK_ACCEPTED", "CURRENT_ROOT_SAMPLED", "CANDIDATE_ACCEPTED",
+     "INBOX_PREPARATION_REQUESTED", "BLOCKED"
+   ]);
+   const OFFICIAL_RESUME_HANDOFF_REASONS = new Set([
+     "NONE", "ACK_WINDOW_EXPIRED", "ACK_ENVELOPE_UNAVAILABLE",
+     "CANDIDATE_POLICY_REJECTED", "CURRENT_ROOT_SCHEDULE_FAILED",
+     "INBOX_PREPARATION_REJECTED", "LIFECYCLE_RESET"
    ]);
     const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
       "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
@@ -2843,6 +2856,28 @@
        `OBSERVED_EVENTS: ${navigation.observed_event_count}`;
    }
 
+   function officialResumeHandoffIsSafe(value) {
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|") === ["reason", "stage"].join("|")
+       && OFFICIAL_RESUME_HANDOFF_STAGES.has(value.stage)
+       && OFFICIAL_RESUME_HANDOFF_REASONS.has(value.reason);
+   }
+
+   function renderOfficialResumeHandoffStatus(device) {
+     const handoff = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.official_resume_handoff
+       : null;
+     elements.officialResumeHandoffStatus.className = "enrollment-message";
+     if (!officialResumeHandoffIsSafe(handoff)) {
+       elements.officialResumeHandoffStatus.textContent =
+         "Nicht verfuegbar: kein aktueller Resume-Handoff im akzeptierten Heartbeat.";
+       return;
+     }
+     elements.officialResumeHandoffStatus.textContent =
+       `RESUME_HANDOFF_STAGE: ${handoff.stage} / ` +
+       `RESUME_HANDOFF_REASON: ${handoff.reason}`;
+   }
+
    function pendingUnboundConversationTranscriptIsSafe(transcript) {
      const receivedAt = new Date(transcript?.received_at || "");
      return hasExactConversationFields(transcript, [
@@ -2949,6 +2984,7 @@
 
    function setUnavailableDeviceDetails(value) {
      renderInboxNavigationStatus(null);
+     renderOfficialResumeHandoffStatus(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
      elements.bridgeSub.textContent = "Kein eindeutiger Gerätestatus";
@@ -3070,6 +3106,7 @@
      } else {
        const device = devices[0];
        renderInboxNavigationStatus(device);
+       renderOfficialResumeHandoffStatus(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
        const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();

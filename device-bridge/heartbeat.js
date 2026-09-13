@@ -41,6 +41,9 @@ import {
 import {
   boundedTinderUnboundInboxSweepDiagnostic
 } from "./tinder-unbound-inbox-sweep-diagnostic-contract.js";
+import {
+  boundedTinderOfficialResumeHandoffDiagnostic
+} from "./tinder-official-resume-handoff-diagnostic-contract.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
@@ -235,6 +238,15 @@ export function isBoundedTinderUnboundInboxSweepDiagnostic(value) {
   return boundedTinderUnboundInboxSweepDiagnostic(value) !== null;
 }
 
+/**
+ * This optional two-enum evidence is deliberately independent of Inbox
+ * freshness and V8 issuance. Accepting it cannot select, mint, consume,
+ * renew, replay, or otherwise affect a command or permit.
+ */
+export function isBoundedTinderOfficialResumeHandoffDiagnostic(value) {
+  return boundedTinderOfficialResumeHandoffDiagnostic(value) !== null;
+}
+
 export function isExactTinderVerifiedChatReturnReadiness(value) {
   return exactKeys(value, TINDER_VERIFIED_CHAT_RETURN_READINESS_FIELDS)
     && typeof value.ready === "boolean";
@@ -265,6 +277,12 @@ function heartbeatAuditDetails(heartbeat) {
     ? boundedTinderUnboundInboxSweepDiagnostic(heartbeat.tinder_unbound_inbox_sweep)
     : null;
   if (sweepDiagnostic !== null) details.tinder_unbound_inbox_sweep = sweepDiagnostic;
+  const officialResumeHandoff = Object.hasOwn(heartbeat, "tinder_official_resume_handoff")
+    ? boundedTinderOfficialResumeHandoffDiagnostic(heartbeat.tinder_official_resume_handoff)
+    : null;
+  if (officialResumeHandoff !== null) {
+    details.tinder_official_resume_handoff = officialResumeHandoff;
+  }
   if (Object.hasOwn(heartbeat, "tinder_verified_chat_return")) {
     // Explicitly retain only the boolean current-heartbeat readiness fact.
     // No permit, command, source, binding, revision, timestamp, or Android
@@ -429,6 +447,11 @@ export function parseAndValidateHeartbeat(req) {
   if (Object.hasOwn(body, "tinder_unbound_inbox_sweep")
       && !isBoundedTinderUnboundInboxSweepDiagnostic(body.tinder_unbound_inbox_sweep)) {
     throw invalidHeartbeat("Heartbeat unbound Inbox sweep diagnostic is invalid");
+  }
+  if (Object.hasOwn(body, "tinder_official_resume_handoff")
+      && !isBoundedTinderOfficialResumeHandoffDiagnostic(
+        body.tinder_official_resume_handoff)) {
+    throw invalidHeartbeat("Heartbeat official resume handoff diagnostic is invalid");
   }
   if (Object.hasOwn(body, "tinder_verified_chat_return")
       && !isExactTinderVerifiedChatReturnReadiness(body.tinder_verified_chat_return)) {

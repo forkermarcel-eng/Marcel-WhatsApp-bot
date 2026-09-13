@@ -501,6 +501,47 @@ test("optional Tinder inbox navigation heartbeat diagnostic is strict and conten
   }
 });
 
+test("optional official resume handoff heartbeat diagnostic is exact, content-free, and observational", async () => {
+  const diagnostic = { stage: "BLOCKED", reason: "CANDIDATE_POLICY_REJECTED" };
+  const payload = heartbeatPayload({ tinder_official_resume_handoff: diagnostic });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(parseAndValidateHeartbeat(request.req).tinder_official_resume_handoff, diagnostic);
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_official_resume_handoff: diagnostic
+  });
+  assert.deepEqual(response.commands, []);
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  const serialized = JSON.stringify({ update: update?.params, response });
+  for (const value of ["BLOCKED", "CANDIDATE_POLICY_REJECTED"]) {
+    assert.equal(serialized.includes(value), false);
+  }
+
+  for (const invalidDiagnostic of [
+    null,
+    {},
+    { ...diagnostic, stage: "IDLE" },
+    { ...diagnostic, reason: "raw exception" },
+    { ...diagnostic, permit: "forbidden" },
+    { ...diagnostic, text: "forbidden" }
+  ]) {
+    const invalid = heartbeatPayload({ tinder_official_resume_handoff: invalidDiagnostic });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("optional V8 sweep heartbeat diagnostic is exact, content-free, and cannot affect command issuance", async () => {
   const diagnostic = {
     stage: "INGRESS",
@@ -1451,14 +1492,16 @@ test("T5 heartbeat omits a descriptor when freshly locked source shows newer cap
   }
 });
 
-function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN", inboxNavigation = null) {
+function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN",
+    inboxNavigation = null, officialResumeHandoff = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
     last_accepted_heartbeat_at: lastAccepted, app_version_name: "1.0", app_version_code: "1",
     bridge_service_state: "RUNNING", tinder_state: tinderState, automation_state: "STOPPED", capabilities,
     configuration_revision: 1,
-    inbox_navigation: inboxNavigation
+    inbox_navigation: inboxNavigation,
+    official_resume_handoff: officialResumeHandoff
   };
 }
 
@@ -1522,6 +1565,43 @@ test("admin status projects only the newest bounded inbox navigation heartbeat d
   assert.match(sql, /tinder_inbox_navigation/);
   assert.match(sql, /ORDER BY e\.created_at DESC, e\.audit_event_id DESC/);
   assert.equal(JSON.stringify(res.body.device).includes("details"), false);
+});
+
+test("admin status projects only the newest bounded official resume handoff diagnostic", async () => {
+  const diagnostic = { stage: "ACK_ACCEPTED", reason: "NONE" };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+        "CONNECTED", null, diagnostic)] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.official_resume_handoff, diagnostic);
+  assert.match(sql, /tinder_official_resume_handoff/);
+  assert.match(sql, /HEARTBEAT_ACCEPTED/);
+  assert.equal(JSON.stringify(res.body.device).includes("details"), false);
+});
+
+test("admin status suppresses stale or malformed official resume handoff diagnostic", async () => {
+  const diagnostic = { stage: "BLOCKED", reason: "ACK_WINDOW_EXPIRED" };
+  for (const [acceptedAt, value] of [
+    [new Date(Date.now() - 91_000), diagnostic],
+    [new Date(), { ...diagnostic, raw_error: "forbidden" }],
+    [new Date(), { stage: "IDLE", reason: "NONE" }]
+  ]) {
+    const pool = {
+      async query() {
+        return { rows: [statusRow(acceptedAt, T4_RESUME_DEVICE_CAPABILITIES,
+          "CONNECTED", null, value)] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.official_resume_handoff, null);
+  }
 });
 
 test("admin status strips a valid fresh Inbox observation nonce while preserving bounded navigation state", async () => {

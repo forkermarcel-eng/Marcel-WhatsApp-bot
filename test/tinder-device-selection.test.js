@@ -43,3 +43,19 @@ test("Tinder technical diagnostics render only a bounded selected-device inbox n
   assert.doesNotMatch(page, /inbox_navigation\.raw/i);
   assert.doesNotMatch(page, /inbox_navigation\.last_observation/i);
 });
+
+test("Tinder technical diagnostics render only the bounded read-only official resume handoff", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="officialResumeHandoffStatus"/);
+  assert.match(page, /function officialResumeHandoffIsSafe\(value\)/);
+  assert.match(page, /OFFICIAL_RESUME_HANDOFF_STAGES\.has\(value\.stage\)/);
+  assert.match(page, /OFFICIAL_RESUME_HANDOFF_REASONS\.has\(value\.reason\)/);
+  assert.match(page, /String\(device\?\.device_status \|\| ""\)\.toUpperCase\(\) === "ONLINE"/);
+  assert.match(page, /renderOfficialResumeHandoffStatus\(device\);/);
+  assert.match(page, /renderOfficialResumeHandoffStatus\(null\);/);
+  assert.match(page, /textContent =\s*`RESUME_HANDOFF_STAGE:/);
+  for (const forbidden of [
+    "official_resume_handoff.raw", "official_resume_handoff.command", "official_resume_handoff.permit",
+    "official_resume_handoff.capture", "official_resume_handoff.binding", "official_resume_handoff.text",
+    "official_resume_handoff.tree", "official_resume_handoff.payload"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});

@@ -60,7 +60,7 @@ function backendResponse({ ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return JSON.stringify(body); } };
 }
 
-function deviceStatus({ inboxNavigation = null, extra = {} } = {}) {
+function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null, extra = {} } = {}) {
   return {
     device_id: DEVICE_ID,
     display_name: "ZTE",
@@ -77,6 +77,7 @@ function deviceStatus({ inboxNavigation = null, extra = {} } = {}) {
     tinder_local_conversation_attestation_post_chat_capable: false,
     configuration_revision: 1,
     inbox_navigation: inboxNavigation,
+    official_resume_handoff: officialResumeHandoff,
     ...extra
   };
 }
@@ -173,9 +174,33 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
   assert.deepEqual(Object.keys(res.body.devices[0]).sort(), [
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
-    "inbox_navigation", "last_heartbeat_accepted_at", "tinder_local_conversation_attestation_post_chat_capable",
+    "inbox_navigation", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
     "tinder_manual_gate_capable", "tinder_state"
   ]);
+}));
+
+test("device-list proxy allowlists the bounded official resume handoff projection", async () => withEnvironment(async () => {
+  const officialResumeHandoff = { stage: "BLOCKED", reason: "CANDIDATE_POLICY_REJECTED" };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ officialResumeHandoff })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].official_resume_handoff, officialResumeHandoff);
+  for (const forbidden of ["permit", "capture", "binding", "identity", "text", "tree", "payload"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
 }));
 
 test("device-list proxy preserves only the bounded post-chat capability bit", async () => withEnvironment(async () => {
@@ -227,6 +252,34 @@ test("device-list proxy makes malformed inbox diagnostics unavailable and strips
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.devices[0].inbox_navigation, null);
     assert.equal(JSON.stringify(res.body).includes("raw_audit_details"), false);
+  }
+}));
+
+test("device-list proxy makes malformed official resume handoff diagnostics unavailable and suppresses offline evidence", async () => withEnvironment(async () => {
+  const valid = { stage: "BLOCKED", reason: "ACK_WINDOW_EXPIRED" };
+  for (const device of [
+    deviceStatus({ officialResumeHandoff: { stage: "IDLE", reason: "NONE" } }),
+    deviceStatus({ officialResumeHandoff: { ...valid, raw_exception: "forbidden" } }),
+    deviceStatus({ officialResumeHandoff: valid, extra: { device_status: "OFFLINE" } })
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          server_time: "2026-09-02T12:00:04.000Z",
+          devices: [device]
+        });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].official_resume_handoff, null);
+    assert.equal(JSON.stringify(res.body).includes("raw_exception"), false);
   }
 }));
 

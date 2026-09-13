@@ -12,6 +12,9 @@ import {
   TINDER_INBOX_NAVIGATION_REASONS,
   TINDER_INBOX_NAVIGATION_STAGES
 } from "./heartbeat.js";
+import {
+  boundedTinderOfficialResumeHandoffDiagnostic
+} from "./tinder-official-resume-handoff-diagnostic-contract.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
 import {
@@ -102,6 +105,15 @@ export function normalizeAdminInboxNavigationStatus(value) {
   });
 }
 
+/**
+ * Only the newest accepted heartbeat may supply this observational status.
+ * A malformed or absent value remains unavailable; it never falls back to an
+ * earlier handoff, and cannot affect command selection or permission state.
+ */
+export function normalizeAdminOfficialResumeHandoffStatus(value) {
+  return boundedTinderOfficialResumeHandoffDiagnostic(value);
+}
+
 function statusRow(row, now) {
   const deviceStatus = deriveDeviceStatus(row.last_accepted_heartbeat_at, now);
   return {
@@ -129,6 +141,9 @@ function statusRow(row, now) {
     // server's offline threshold has elapsed.
     inbox_navigation: deviceStatus === "ONLINE"
       ? normalizeAdminInboxNavigationStatus(row.inbox_navigation)
+      : null,
+    official_resume_handoff: deviceStatus === "ONLINE"
+      ? normalizeAdminOfficialResumeHandoffStatus(row.official_resume_handoff)
       : null
   };
 }
@@ -136,7 +151,8 @@ function statusRow(row, now) {
 const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.created_at, d.last_accepted_heartbeat_at,
   d.app_version_name, d.app_version_code, d.bridge_service_state, d.tinder_state,
   d.automation_state, d.capabilities, d.configuration_revision,
-  latest_heartbeat.details -> 'tinder_inbox_navigation' AS inbox_navigation`;
+  latest_heartbeat.details -> 'tinder_inbox_navigation' AS inbox_navigation,
+  latest_heartbeat.details -> 'tinder_official_resume_handoff' AS official_resume_handoff`;
 
 const STATUS_FROM = `FROM device_bridge_devices d
   LEFT JOIN LATERAL (

@@ -6,8 +6,8 @@ import {
 
 test("official resume handoff diagnostic projects only its exact bounded two-enum shape", () => {
   const source = {
-    stage: "CANDIDATE_ACCEPTED",
-    reason: "NONE"
+    stage: "BLOCKED",
+    reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED"
   };
   const projected = boundedTinderOfficialResumeHandoffDiagnostic(source);
   assert.deepEqual(projected, source);

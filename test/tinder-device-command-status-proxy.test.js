@@ -184,7 +184,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
 }));
 
 test("device-list proxy allowlists the bounded official resume handoff projection", async () => withEnvironment(async () => {
-  const officialResumeHandoff = { stage: "BLOCKED", reason: "CANDIDATE_POLICY_REJECTED" };
+  const officialResumeHandoff = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   globalThis.fetch = async () => ({
     ok: true,
     status: 200,

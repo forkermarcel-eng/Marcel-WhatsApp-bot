@@ -535,7 +535,7 @@ test("optional Tinder inbox navigation heartbeat diagnostic is strict and conten
 });
 
 test("optional official resume handoff heartbeat diagnostic is exact, content-free, and observational", async () => {
-  const diagnostic = { stage: "BLOCKED", reason: "CANDIDATE_POLICY_REJECTED" };
+  const diagnostic = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   const payload = heartbeatPayload({ tinder_official_resume_handoff: diagnostic });
   const request = heartbeatRequest(payload);
   assert.deepEqual(parseAndValidateHeartbeat(request.req).tinder_official_resume_handoff, diagnostic);
@@ -555,7 +555,7 @@ test("optional official resume handoff heartbeat diagnostic is exact, content-fr
   assert.deepEqual(response.commands, []);
   const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
   const serialized = JSON.stringify({ update: update?.params, response });
-  for (const value of ["BLOCKED", "CANDIDATE_POLICY_REJECTED"]) {
+  for (const value of ["BLOCKED", "OFFICIAL_FOREGROUND_NOT_OBSERVED"]) {
     assert.equal(serialized.includes(value), false);
   }
 
@@ -1983,7 +1983,7 @@ test("admin status projects only the newest bounded inbox navigation heartbeat d
 });
 
 test("admin status projects only the newest bounded official resume handoff diagnostic", async () => {
-  const diagnostic = { stage: "ACK_ACCEPTED", reason: "NONE" };
+  const diagnostic = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   let sql = "";
   const pool = {
     async query(query) {

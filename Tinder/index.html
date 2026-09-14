@@ -1045,6 +1045,9 @@
        <p class="enrollment-message" id="officialResumeHandoffStatus" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="resumedForegroundChatReturnStatus" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
      </section>
 
      <section class="enrollment-panel capture-mapping-panel" id="captureMappingPanel" hidden aria-labelledby="captureMappingHeading">
@@ -1193,6 +1196,7 @@
       deviceCommandMessage: document.getElementById("deviceCommandMessage"),
       inboxNavigationStatus: document.getElementById("inboxNavigationStatus"),
       officialResumeHandoffStatus: document.getElementById("officialResumeHandoffStatus"),
+      resumedForegroundChatReturnStatus: document.getElementById("resumedForegroundChatReturnStatus"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        unboundConversationList: document.getElementById("unboundConversationList"),
@@ -2878,6 +2882,26 @@
        `RESUME_HANDOFF_REASON: ${handoff.reason}`;
    }
 
+   function resumedForegroundChatReturnIsSafe(value) {
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|") === "ready"
+       && typeof value.ready === "boolean";
+   }
+
+   function renderResumedForegroundChatReturnStatus(device) {
+     const readiness = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.tinder_resumed_foreground_chat_return
+       : null;
+     elements.resumedForegroundChatReturnStatus.className = "enrollment-message";
+     if (!resumedForegroundChatReturnIsSafe(readiness)) {
+       elements.resumedForegroundChatReturnStatus.textContent =
+         "Nicht verfuegbar: kein aktueller V10-Rueckkehrstatus im akzeptierten Heartbeat.";
+       return;
+     }
+     elements.resumedForegroundChatReturnStatus.textContent =
+       `V10_CHAT_RETURN_READY: ${readiness.ready ? "JA" : "NEIN"}`;
+   }
+
    function pendingUnboundConversationTranscriptIsSafe(transcript) {
      const receivedAt = new Date(transcript?.received_at || "");
      return hasExactConversationFields(transcript, [
@@ -2985,6 +3009,7 @@
    function setUnavailableDeviceDetails(value) {
      renderInboxNavigationStatus(null);
      renderOfficialResumeHandoffStatus(null);
+     renderResumedForegroundChatReturnStatus(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
      elements.bridgeSub.textContent = "Kein eindeutiger Gerätestatus";
@@ -3107,6 +3132,7 @@
        const device = devices[0];
        renderInboxNavigationStatus(device);
        renderOfficialResumeHandoffStatus(device);
+       renderResumedForegroundChatReturnStatus(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
        const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();

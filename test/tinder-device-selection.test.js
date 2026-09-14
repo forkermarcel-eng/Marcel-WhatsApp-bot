@@ -59,3 +59,18 @@ test("Tinder technical diagnostics render only the bounded read-only official re
     "official_resume_handoff.tree", "official_resume_handoff.payload"
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
+
+test("Tinder technical diagnostics render only the content-free V10 return readiness", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="resumedForegroundChatReturnStatus"/);
+  assert.match(page, /function resumedForegroundChatReturnIsSafe\(value\)/);
+  assert.match(page, /Object\.keys\(value\)\.sort\(\)\.join\("\|"\) === "ready"/);
+  assert.match(page, /renderResumedForegroundChatReturnStatus\(device\);/);
+  assert.match(page, /renderResumedForegroundChatReturnStatus\(null\);/);
+  assert.match(page, /textContent =\s*`V10_CHAT_RETURN_READY:/);
+  for (const forbidden of [
+    "tinder_resumed_foreground_chat_return.permit", "tinder_resumed_foreground_chat_return.command",
+    "tinder_resumed_foreground_chat_return.identity", "tinder_resumed_foreground_chat_return.source",
+    "tinder_resumed_foreground_chat_return.binding", "tinder_resumed_foreground_chat_return.capture",
+    "tinder_resumed_foreground_chat_return.header", "tinder_resumed_foreground_chat_return.text"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});

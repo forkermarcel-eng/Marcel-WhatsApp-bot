@@ -1841,7 +1841,8 @@ test("T5 heartbeat omits a descriptor when freshly locked source shows newer cap
 });
 
 function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN",
-    inboxNavigation = null, officialResumeHandoff = null) {
+    inboxNavigation = null, officialResumeHandoff = null,
+    resumedForegroundChatReturn = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
@@ -1849,7 +1850,8 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     bridge_service_state: "RUNNING", tinder_state: tinderState, automation_state: "STOPPED", capabilities,
     configuration_revision: 1,
     inbox_navigation: inboxNavigation,
-    official_resume_handoff: officialResumeHandoff
+    official_resume_handoff: officialResumeHandoff,
+    tinder_resumed_foreground_chat_return: resumedForegroundChatReturn
   };
 }
 
@@ -1931,6 +1933,45 @@ test("admin status projects only the newest bounded official resume handoff diag
   assert.match(sql, /tinder_official_resume_handoff/);
   assert.match(sql, /HEARTBEAT_ACCEPTED/);
   assert.equal(JSON.stringify(res.body.device).includes("details"), false);
+});
+
+test("admin status projects only the newest content-free V10 return readiness", async () => {
+  const readiness = { ready: true };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      return { rows: [statusRow(new Date(),
+        T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
+        "CONNECTED", null, null, readiness)] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.tinder_resumed_foreground_chat_return, readiness);
+  assert.match(sql, /tinder_resumed_foreground_chat_return/);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body.device).includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed or offline V10 return readiness", async () => {
+  for (const [acceptedAt, readiness] of [
+    [new Date(), { ready: true, raw: "forbidden" }],
+    [new Date(), { ready: "true" }],
+    [new Date(Date.now() - 91_000), { ready: true }]
+  ]) {
+    const pool = {
+      async query() {
+        return { rows: [statusRow(acceptedAt,
+          T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
+          "CONNECTED", null, null, readiness)] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.tinder_resumed_foreground_chat_return, null);
+  }
 });
 
 test("admin status suppresses stale or malformed official resume handoff diagnostic", async () => {

@@ -29,7 +29,7 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "last_heartbeat_accepted_at", "app_version", "app_build", "bridge_service_state",
   "tinder_state", "automation_state", "tinder_manual_gate_capable",
   "tinder_local_conversation_attestation_post_chat_capable", "configuration_revision",
-  "official_resume_handoff"
+  "official_resume_handoff", "tinder_resumed_foreground_chat_return"
 ]);
 
 function getCookie(req, name) {
@@ -118,6 +118,13 @@ function normalizePublicOfficialResumeHandoff(value) {
   return boundedTinderOfficialResumeHandoffDiagnostic(value);
 }
 
+function normalizePublicResumedForegroundChatReturnReadiness(value) {
+  if (value === null || !exactKeys(value, ["ready"]) || typeof value.ready !== "boolean") {
+    return null;
+  }
+  return Object.freeze({ ready: value.ready });
+}
+
 /**
  * Preserve the pre-existing device-status fields without changing their
  * validation semantics, while explicitly allowlisting the new optional
@@ -140,6 +147,15 @@ function sanitizePublicDeviceStatus(value) {
     && hasOfficialResumeHandoff
     ? normalizePublicOfficialResumeHandoff(value.official_resume_handoff)
     : null;
+  const hasResumedForegroundChatReturn = Object.hasOwn(
+    value, "tinder_resumed_foreground_chat_return"
+  );
+  const resumedForegroundChatReturn = String(value.device_status || "").toUpperCase() === "ONLINE"
+    && hasResumedForegroundChatReturn
+    ? normalizePublicResumedForegroundChatReturnReadiness(
+      value.tinder_resumed_foreground_chat_return
+    )
+    : null;
   return Object.freeze({
     ...Object.fromEntries(LEGACY_DEVICE_STATUS_FIELDS.map(field => [field, value[field]])),
     // This is a bounded derived compatibility bit, not the raw capability
@@ -147,7 +163,8 @@ function sanitizePublicDeviceStatus(value) {
     tinder_local_conversation_attestation_post_chat_capable:
       value.tinder_local_conversation_attestation_post_chat_capable === true,
     inbox_navigation: inboxNavigation,
-    official_resume_handoff: officialResumeHandoff
+    official_resume_handoff: officialResumeHandoff,
+    tinder_resumed_foreground_chat_return: resumedForegroundChatReturn
   });
 }
 

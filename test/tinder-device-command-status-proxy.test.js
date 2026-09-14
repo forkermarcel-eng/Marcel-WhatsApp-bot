@@ -60,7 +60,8 @@ function backendResponse({ ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return JSON.stringify(body); } };
 }
 
-function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null, extra = {} } = {}) {
+function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
+  resumedForegroundChatReturn = null, extra = {} } = {}) {
   return {
     device_id: DEVICE_ID,
     display_name: "ZTE",
@@ -78,6 +79,7 @@ function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null, ex
     configuration_revision: 1,
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
+    tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     ...extra
   };
 }
@@ -175,7 +177,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
     "inbox_navigation", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
-    "tinder_manual_gate_capable", "tinder_state"
+    "tinder_manual_gate_capable", "tinder_resumed_foreground_chat_return", "tinder_state"
   ]);
 }));
 
@@ -200,6 +202,52 @@ test("device-list proxy allowlists the bounded official resume handoff projectio
   assert.deepEqual(res.body.devices[0].official_resume_handoff, officialResumeHandoff);
   for (const forbidden of ["permit", "capture", "binding", "identity", "text", "tree", "payload"]) {
     assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy allowlists only the content-free V10 return readiness", async () => withEnvironment(async () => {
+  const readiness = { ready: true };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ resumedForegroundChatReturn: readiness })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].tinder_resumed_foreground_chat_return, readiness);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy suppresses malformed or offline V10 return readiness", async () => withEnvironment(async () => {
+  for (const device of [
+    deviceStatus({ resumedForegroundChatReturn: { ready: true, raw: "forbidden" } }),
+    deviceStatus({ resumedForegroundChatReturn: { ready: "true" } }),
+    deviceStatus({ resumedForegroundChatReturn: { ready: true }, extra: { device_status: "OFFLINE" } })
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z", devices: [device] });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].tinder_resumed_foreground_chat_return, null);
   }
 }));
 

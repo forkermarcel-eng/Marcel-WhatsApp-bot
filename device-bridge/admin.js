@@ -114,6 +114,16 @@ export function normalizeAdminOfficialResumeHandoffStatus(value) {
   return boundedTinderOfficialResumeHandoffDiagnostic(value);
 }
 
+/**
+ * V10 publishes only the current, content-free readiness bit through an
+ * accepted heartbeat.  It is deliberately not a permit, command, identity,
+ * source, binding, capture, header, or local-proof projection.
+ */
+export function normalizeAdminResumedForegroundChatReturnReadiness(value) {
+  if (!exactKeys(value, ["ready"]) || typeof value.ready !== "boolean") return null;
+  return Object.freeze({ ready: value.ready });
+}
+
 function statusRow(row, now) {
   const deviceStatus = deriveDeviceStatus(row.last_accepted_heartbeat_at, now);
   return {
@@ -144,6 +154,10 @@ function statusRow(row, now) {
       : null,
     official_resume_handoff: deviceStatus === "ONLINE"
       ? normalizeAdminOfficialResumeHandoffStatus(row.official_resume_handoff)
+      : null,
+    tinder_resumed_foreground_chat_return: deviceStatus === "ONLINE"
+      ? normalizeAdminResumedForegroundChatReturnReadiness(
+        row.tinder_resumed_foreground_chat_return)
       : null
   };
 }
@@ -152,7 +166,9 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
   d.app_version_name, d.app_version_code, d.bridge_service_state, d.tinder_state,
   d.automation_state, d.capabilities, d.configuration_revision,
   latest_heartbeat.details -> 'tinder_inbox_navigation' AS inbox_navigation,
-  latest_heartbeat.details -> 'tinder_official_resume_handoff' AS official_resume_handoff`;
+  latest_heartbeat.details -> 'tinder_official_resume_handoff' AS official_resume_handoff,
+  latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return'
+    AS tinder_resumed_foreground_chat_return`;
 
 const STATUS_FROM = `FROM device_bridge_devices d
   LEFT JOIN LATERAL (

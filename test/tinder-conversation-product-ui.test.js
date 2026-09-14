@@ -104,7 +104,6 @@ test("a fresh official-app resume status clears only the local latch for a later
     "async function requestOfficialAppResume",
     "function renderConfirmedConversationDetail"
   );
-
   assert.match(conversationCode, /function scheduleOfficialAppResumeDetailRefresh\(captureId\)/);
   assert.match(conversationCode, /await selectConfirmedConversation\(captureId\)/);
   assert.match(conversationCode, /status === "PENDING"/);
@@ -130,6 +129,32 @@ test("a fresh official-app resume status clears only the local latch for a later
     refreshCode.indexOf('status === "PENDING"')
       < refreshCode.indexOf("officialAppResumeQueuedCaptureId = null")
   );
+  assert.equal((requestCode.match(/operation=resume-official-app/g) || []).length, 1);
+  assert.equal((requestCode.match(/method:\s*"POST"/g) || []).length, 1);
+});
+
+test("rejected official-app resume preparation exposes only bounded status and reason evidence", () => {
+  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
+  const requestCode = sourceBetween(
+    "async function requestOfficialAppResume",
+    "function renderConfirmedConversationDetail"
+  );
+  const rejectionStart = requestCode.indexOf("const rejected = officialAppResumeQueueFailureIsSafe");
+  const rejectionEnd = requestCode.indexOf(
+    "scheduleOfficialAppResumeDetailRefresh(captureId);",
+    rejectionStart
+  );
+  const rejectionCode = requestCode.slice(rejectionStart, rejectionEnd);
+
+  assert.match(page, /OFFICIAL_APP_RESUME_QUEUE_FAILURE_STATUSES/);
+  assert.match(page, /OFFICIAL_APP_RESUME_QUEUE_FAILURE_REASONS/);
+  assert.match(conversationCode, /function officialAppResumeQueueFailureIsSafe\(resume\)/);
+  assert.match(conversationCode, /hasExactConversationFields\(resume, \["command_type", "status", "reason_code"\]\)/);
+  assert.match(conversationCode, /resume\.command_type === "RESUME_OFFICIAL_TINDER_APP"/);
+  assert.match(requestCode, /officialAppResumeQueueFailureIsSafe\(error\?\.data\?\.resume\)/);
+  assert.match(requestCode, /rejected\.status} \/ \$\{rejected\.reason_code/);
+  assert.ok(rejectionStart >= 0 && rejectionEnd > rejectionStart);
+  assert.doesNotMatch(rejectionCode, /command_id|device_id|capture_id|binding_id|fingerprint|payload/i);
   assert.equal((requestCode.match(/operation=resume-official-app/g) || []).length, 1);
   assert.equal((requestCode.match(/method:\s*"POST"/g) || []).length, 1);
 });

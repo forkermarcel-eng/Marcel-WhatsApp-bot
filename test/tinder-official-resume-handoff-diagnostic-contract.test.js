@@ -19,6 +19,11 @@ test("official resume handoff diagnostic projects only its exact bounded two-enu
   ]) assert.equal(Object.hasOwn(projected, forbidden), false);
 });
 
+test("official resume handoff diagnostic admits only reviewed finite rejection reasons", () => {
+  const source = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  assert.deepEqual(boundedTinderOfficialResumeHandoffDiagnostic(source), source);
+});
+
 test("official resume handoff diagnostic rejects IDLE, unknown vocabulary, extra keys, and non-objects", () => {
   const valid = { stage: "BLOCKED", reason: "CANDIDATE_POLICY_REJECTED" };
   for (const value of [

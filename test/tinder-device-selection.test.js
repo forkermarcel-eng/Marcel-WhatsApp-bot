@@ -59,6 +59,7 @@ test("Tinder technical diagnostics render only the bounded read-only official re
   assert.match(page, /OFFICIAL_RESUME_HANDOFF_STAGES\.has\(value\.stage\)/);
   assert.match(page, /OFFICIAL_RESUME_HANDOFF_REASONS\.has\(value\.reason\)/);
   assert.match(page, /OFFICIAL_FOREGROUND_NOT_OBSERVED/);
+  assert.match(page, /UNREVIEWED_OFFICIAL_SURFACE/);
   assert.match(page, /String\(device\?\.device_status \|\| ""\)\.toUpperCase\(\) === "ONLINE"/);
   assert.match(page, /renderOfficialResumeHandoffStatus\(device\);/);
   assert.match(page, /renderOfficialResumeHandoffStatus\(null\);/);

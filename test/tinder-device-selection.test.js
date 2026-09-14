@@ -15,9 +15,18 @@ test("Tinder page provides a safe multi-device selection with no key material", 
   assert.doesNotMatch(page, /device\.public_key/);
 });
 
+test("switching the explicitly selected device clears command feedback from the prior device", () => {
+  assert.match(page, /button\.addEventListener\("click", \(\) => \{[\s\S]{0,700}if \(deviceId !== String\(selectedDevice\?\.device_id \|\| ""\)\) \{[\s\S]{0,180}commandFeedback = "";[\s\S]{0,120}commandFeedbackIsError = false;[\s\S]{0,300}selectedDevice = device;/);
+});
+
 test("Tinder page polls command status for a full heartbeat interval plus ACK buffer", () => {
   assert.match(page, /for \(let attempt = 0; attempt < 31; attempt \+= 1\)/);
   assert.match(page, /if \(terminal\) return;/);
+});
+
+test("terminal resume wording does not imply that a separately audited V2 permit is historical", () => {
+  assert.match(page, /case "DISPATCHED":\s*return "Die zuletzt gelesene separate offizielle Startanfrage ist terminal/);
+  assert.doesNotMatch(page, /case "DISPATCHED":\s*return "Die frühere offizielle Startanfrage/);
 });
 
 test("Android Tinder manual gate controls require a selected compatible device and stay separate from the legacy worker", () => {

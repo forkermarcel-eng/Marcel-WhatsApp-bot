@@ -2425,13 +2425,13 @@
        case "NOT_REQUESTED":
          return "Eine einmalige offizielle Startanfrage kann bewusst vorbereitet werden.";
        case "PENDING":
-         return "Eine frühere offizielle Startanfrage wartet noch auf einen terminalen Ausgang. Kein zweiter Versuch wird vorbereitet.";
+         return "Die zuletzt gelesene separate offizielle Startanfrage wartet noch auf einen terminalen Ausgang. Kein zweiter Versuch wird vorbereitet.";
        case "DISPATCHED":
-         return "Die frühere offizielle Startanfrage ist terminal als Intent-Auslösung bestätigt. Dies bestätigt keinen Chat oder weitere Tinder-Aktion; ein neuer Vorgang wäre separat auditierbar.";
+         return "Die zuletzt gelesene separate offizielle Startanfrage ist terminal als Intent-Auslösung bestätigt. Dies bestätigt keinen Chat oder weitere Tinder-Aktion; ein neuer Vorgang wäre separat auditierbar.";
        case "CANCELLED":
-         return "Die frühere offizielle Startanfrage ist terminal beendet. Ein neuer Vorgang wäre separat auditierbar; der alte wird nicht wiederverwendet.";
+         return "Die zuletzt gelesene separate offizielle Startanfrage ist terminal beendet. Ein neuer Vorgang wäre separat auditierbar; der alte wird nicht wiederverwendet.";
        case "EXPIRED":
-         return "Die frühere offizielle Startanfrage ist abgelaufen. Ein neuer Vorgang wäre separat auditierbar; der alte wird nicht wiederverwendet.";
+         return "Die zuletzt gelesene separate offizielle Startanfrage ist abgelaufen. Ein neuer Vorgang wäre separat auditierbar; der alte wird nicht wiederverwendet.";
        default:
          return "Status der einmaligen offiziellen Startanfrage ist nicht verfügbar. Kein neuer Versuch wird vorbereitet.";
      }
@@ -3143,6 +3143,13 @@
        meta.textContent = `Device-ID ${shortDeviceId(deviceId)} · ${String(device?.enrollment_state || "UNKNOWN").toUpperCase()} · ${String(device?.device_status || "UNKNOWN").toUpperCase()} · registriert ${formatTimestamp(device?.enrolled_at)} · letzter Heartbeat ${formatTimestamp(device?.last_heartbeat_accepted_at)}`;
        button.append(title, meta);
        button.addEventListener("click", () => {
+         // Feedback belongs to the selected device only.  A newly selected
+         // device must not inherit a terminal error or pending-command
+         // message from the prior device.
+         if (deviceId !== String(selectedDevice?.device_id || "")) {
+           commandFeedback = "";
+           commandFeedbackIsError = false;
+         }
          selectedDevice = device;
          renderDeviceSelection(devices);
          renderDeviceStatus({ devices: [device] });

@@ -108,6 +108,7 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON = Object.freeze({
   VISIBLE_CHAT_SYNC_PERMIT_ACTIVE: "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
   RESUME_PERMIT_ACTIVE: "RESUME_PERMIT_ACTIVE",
   ATTESTATION_ACTIVE: "ATTESTATION_ACTIVE",
+  VERIFIED_CHAT_RETURN_PERMIT_ACTIVE: "VERIFIED_CHAT_RETURN_PERMIT_ACTIVE",
   SWEEP_ACTIVE: "SWEEP_ACTIVE",
   STEP_NOT_FOUND: "STEP_NOT_FOUND",
   STEP_NOT_STAGED: "STEP_NOT_STAGED",
@@ -438,7 +439,7 @@ function auditRecord({ auditId, sweepId, commandId = null, deviceId, slotOrdinal
   });
 }
 
-function requireRepository(repository) {
+function requireRepository(repository, { verifiedChatReturnFoundationCanonical = false } = {}) {
   for (const method of [
     "withTransaction",
     "withReadOnlyTransaction",
@@ -470,6 +471,10 @@ function requireRepository(repository) {
     if (typeof repository?.[method] !== "function") {
       throw new TypeError(`repository.${method} must be a function`);
     }
+  }
+  if (verifiedChatReturnFoundationCanonical === true
+      && typeof repository?.findActiveVerifiedChatReturnPermitForDevice !== "function") {
+    throw new TypeError("repository.findActiveVerifiedChatReturnPermitForDevice must be a function");
   }
 }
 
@@ -519,9 +524,16 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
   // Dashboard status is an exact catalog-asserted projection only.  Expiry
   // remains in the signed-heartbeat path, where it owns the device lock,
   // terminal state transition, and immutable audit record.
-  assertFoundationReady = null
+  assertFoundationReady = null,
+  // V9 is an additive successor. Keep V8-only deployments independent of
+  // relations that do not exist until the V9 foundation is canonical.
+  verifiedChatReturnFoundationCanonical = false
 } = {}) {
-  requireRepository(repository);
+  if (verifiedChatReturnFoundationCanonical !== true
+      && verifiedChatReturnFoundationCanonical !== false) {
+    throw new TypeError("verifiedChatReturnFoundationCanonical must be boolean");
+  }
+  requireRepository(repository, { verifiedChatReturnFoundationCanonical });
   if (maxSlots !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_MAX_SLOTS
       || !Number.isSafeInteger(readTtlMs) || readTtlMs < 30_000
       || readTtlMs > TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_TTL_MS
@@ -724,6 +736,10 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
       ["findActiveVisibleChatSyncPermitForDevice", TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.VISIBLE_CHAT_SYNC_PERMIT_ACTIVE],
       ["findActiveOfficialAppResumePermitForDevice", TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.RESUME_PERMIT_ACTIVE],
       ["findActiveLocalConversationAttestationForDevice", TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.ATTESTATION_ACTIVE],
+      ...(verifiedChatReturnFoundationCanonical ? [[
+        "findActiveVerifiedChatReturnPermitForDevice",
+        TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.VERIFIED_CHAT_RETURN_PERMIT_ACTIVE
+      ]] : []),
       ["findActiveUnboundInboxConversationSweepForDevice", TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_ACTIVE]
     ];
     for (const [method, reasonCode] of conflicts) {
@@ -1207,6 +1223,17 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
         `SELECT EXISTS (
            SELECT 1 FROM tinder_local_conversation_attestation_permits
             WHERE device_id=$1 AND permit_state IN ('ISSUED','STAGED','ATTESTED') AND expires_at>$2
+         ) AS active`,
+        [deviceId, currentTime]
+      );
+      return result.rows[0]?.active === true;
+    },
+
+    async findActiveVerifiedChatReturnPermitForDevice(client, { deviceId, now: currentTime }) {
+      const result = await client.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM tinder_verified_chat_return_permits
+            WHERE device_id=$1 AND permit_state IN ('ISSUED','STAGED') AND expires_at>$2
          ) AS active`,
         [deviceId, currentTime]
       );

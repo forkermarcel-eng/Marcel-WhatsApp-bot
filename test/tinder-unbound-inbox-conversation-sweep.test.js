@@ -112,6 +112,7 @@ function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = 
     async findActiveVisibleChatSyncPermitForDevice() { return conflicts.v4 === true; },
     async findActiveOfficialAppResumePermitForDevice() { return conflicts.resume === true; },
     async findActiveLocalConversationAttestationForDevice() { return conflicts.attestation === true; },
+    async findActiveVerifiedChatReturnPermitForDevice() { return conflicts.verifiedReturn === true; },
     async findActiveUnboundInboxConversationSweepForDevice() { return conflicts.sweep === true; },
     async queueUnboundInboxConversationSweepCommand(_transaction, command) { state.commands.push(command); },
     async createUnboundInboxConversationSweep(_transaction, sweep) { state.sweeps.push(sweep); },
@@ -152,12 +153,13 @@ function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = 
   return repository;
 }
 
-function service(repository, { commandIndex = 0 } = {}) {
+function service(repository, { commandIndex = 0, verifiedChatReturnFoundationCanonical = false } = {}) {
   let auditIndex = 0;
   return createTinderUnboundInboxConversationSweepService(repository, {
     createSweepId: () => SWEEP_ID,
     createCommandId: () => [READ_COMMAND_ID, RETURN_COMMAND_ID, NEXT_READ_COMMAND_ID][commandIndex++],
-    createAuditId: () => AUDIT_IDS[auditIndex++], now: () => NOW
+    createAuditId: () => AUDIT_IDS[auditIndex++], now: () => NOW,
+    verifiedChatReturnFoundationCanonical
   });
 }
 
@@ -183,6 +185,15 @@ test("V8 sweep starts only at fresh INBOX_READY with one empty READ child and no
   assert.equal(JSON.stringify(repository.state.commands[0]).includes("sweep"), false);
 });
 
+test("V8-only canonical operation neither requires nor queries the later V9 return relation", async () => {
+  const repository = fixtureRepository();
+  delete repository.findActiveVerifiedChatReturnPermitForDevice;
+  const result = await service(repository)
+    .startUnboundInboxConversationSweepFromFreshInboxObservation({}, freshObservationInput());
+  assert.deepEqual(result, { status: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS.QUEUED });
+  assert.equal(repository.state.commands.length, 1);
+});
+
 test("V8 sweep fails closed for stale Inbox evidence, competing authority, and injected start input", async () => {
   await assert.rejects(
     () => service(fixtureRepository()).startUnboundInboxConversationSweepFromFreshInboxObservation({}, freshObservationInput({
@@ -200,6 +211,17 @@ test("V8 sweep fails closed for stale Inbox evidence, competing authority, and i
     status: "INERT"
   });
   assert.equal(duplicate.state.commands.length, 0);
+  const verifiedReturnConflict = fixtureRepository({ conflicts: { verifiedReturn: true } });
+  assert.deepEqual(await service(verifiedReturnConflict, {
+    verifiedChatReturnFoundationCanonical: true
+  }).startUnboundInboxConversationSweepFromFreshInboxObservation({}, freshObservationInput()), {
+    status: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS.PERMIT_CONFLICT,
+    reasonCode: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.VERIFIED_CHAT_RETURN_PERMIT_ACTIVE
+  });
+  assert.deepEqual(verifiedReturnConflict.state.commands, []);
+  assert.deepEqual(verifiedReturnConflict.state.sweeps, []);
+  assert.deepEqual(verifiedReturnConflict.state.steps, []);
+  assert.deepEqual(verifiedReturnConflict.state.audits, []);
   await assert.rejects(
     () => service(fixtureRepository()).startUnboundInboxConversationSweepFromFreshInboxObservation({}, { deviceId: DEVICE_ID, maxSlots: 8 }),
     error => error instanceof TinderUnboundInboxConversationSweepError && error.code === "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_OBSERVATION"

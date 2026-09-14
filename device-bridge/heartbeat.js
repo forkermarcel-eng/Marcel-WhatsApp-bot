@@ -308,10 +308,16 @@ function isFreshReviewedInboxObservation(heartbeat) {
  * dashboard entrypoint and no command/status response field.
  */
 async function maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
-  pool, deviceId, heartbeat, now, unboundInboxConversationSweepFoundationReady
+  pool, deviceId, heartbeat, now, unboundInboxConversationSweepFoundationReady,
+  verifiedChatReturnPermitActive, verifiedChatReturnFoundationCanonical
 }) {
   if (!isFreshReviewedInboxObservation(heartbeat)
       || !isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities)
+      // V9 is serial with V8. Its terminal state is determined under this
+      // same device lock before V8 can consume a fresh Inbox observation.
+      // The observation audit remains immutable, but it cannot mint an
+      // undeliverable overlapping V8 child.
+      || verifiedChatReturnPermitActive === true
       || unboundInboxConversationSweepFoundationReady !== true) {
     return;
   }
@@ -323,7 +329,7 @@ async function maybeStartUnboundInboxConversationSweepFromFreshObservation(clien
   } = await import("../services/tinder-unbound-inbox-conversation-sweep.js");
   const service = createTinderUnboundInboxConversationSweepService(
     createPgTinderUnboundInboxConversationSweepRepository(pool),
-    { now: () => now }
+    { now: () => now, verifiedChatReturnFoundationCanonical }
   );
   await service.startUnboundInboxConversationSweepFromFreshInboxObservation(client, {
     deviceId,
@@ -996,12 +1002,21 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
     // continue their narrow runtime lifecycle.
     const verifiedChatReturnFoundationCanonical =
       verifiedChatReturnFoundationState === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL;
+    // `UPGRADE_REQUIRED` is the one known pre-V9 catalog: the exact V8
+    // inspector is still authoritative there. Any other V9 result means a
+    // partially present or drifted successor and must not mint a new V8
+    // authority merely because the retained V8 relations happen to inspect.
+    const verifiedChatReturnFoundationAllowsV8Runtime =
+      verifiedChatReturnFoundationCanonical
+      || verifiedChatReturnFoundationState
+        === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.UPGRADE_REQUIRED;
     const unboundInboxConversationSweepFoundationCanonical =
       unboundInboxConversationSweepFoundationState
       === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
       || verifiedChatReturnFoundationCanonical;
     const unboundInboxConversationSweepFoundationReady =
       unboundInboxConversationSweepFoundationCanonical
+      && verifiedChatReturnFoundationAllowsV8Runtime
       && isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities);
     const verifiedChatReturnFoundationReady = verifiedChatReturnFoundationCanonical
       && isTinderVerifiedChatReturnCapable(heartbeat.capabilities);
@@ -1035,14 +1050,6 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
          VALUES ('HEARTBEAT_ACCEPTED',$1,$2,$3,'SUCCEEDED',200,$4::jsonb)`,
         [auth.requestId, auth.deviceId, auth.keyId, JSON.stringify(heartbeatAuditDetails(heartbeat))]
       );
-      // The audit fact is intentionally written before any V8 gate/conflict
-      // decision. Therefore a valid fresh observation nonce is consumed even
-      // when this particular heartbeat cannot issue a sweep child.
-      failureStage = "V8_START";
-      await maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
-        pool, deviceId: auth.deviceId, heartbeat, now,
-        unboundInboxConversationSweepFoundationReady
-      });
     } else {
       acceptedAt = new Date(device.last_accepted_heartbeat_at);
     }
@@ -1060,6 +1067,19 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       now,
       verifiedChatReturnFoundationCanonical
     });
+    if (!idempotent) {
+      // The audit fact was intentionally written before the expiration and
+      // serial gate. A valid fresh observation nonce is therefore consumed
+      // even when a current V9 authority blocks V8. A later V8 must originate
+      // from a new independently reviewed local Inbox observation.
+      failureStage = "V8_START";
+      await maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
+        pool, deviceId: auth.deviceId, heartbeat, now,
+        unboundInboxConversationSweepFoundationReady,
+        verifiedChatReturnPermitActive: v9ReturnRuntime.active,
+        verifiedChatReturnFoundationCanonical
+      });
+    }
     let commands = [];
     if (!v8SweepRuntime.childExpired && !v9ReturnRuntime.permitExpired) {
       // Delivery must not continue with an older nonterminal command in the

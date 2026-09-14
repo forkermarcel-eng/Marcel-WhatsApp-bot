@@ -12,7 +12,8 @@ import {
   inspectDeviceBridgeT1Schema,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
   TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
-  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME,
+  TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
 } from "./t1-schema.js";
 import {
   inspectTinderOfficialAppResumePermitV2Schema,
@@ -494,7 +495,27 @@ async function commandConstraintState(client, inspectDeviceBridgeSchema) {
   // reinterpret any V6 attestation/confirmed-V4 contract, so this inspector
   // remains forward-compatible after the V8 upgrade.
   if (command?.constraintName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME) return "V8";
+  if (command?.constraintName === TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME) return "V9";
   return "INVALID";
+}
+
+function canonicalAttestationCatalog({ relations, columns, indexes, constraints }) {
+  return relationKind(relations.rows, VISIBLE_CHAT_SYNC_PERMIT_TABLE) === "r"
+    && relationKind(relations.rows, OFFICIAL_APP_RESUME_PERMIT_TABLE) === "r"
+    && relationKind(relations.rows, VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE) === "r"
+    && relationKind(relations.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE) === "r"
+    && relationKind(relations.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_AUDIT_TABLE) === "r"
+    && exactColumns(mapColumns(columns.rows, VISIBLE_CHAT_SYNC_PERMIT_TABLE), VISIBLE_CHAT_SYNC_PERMIT_COLUMNS_V2, VISIBLE_CHAT_SYNC_PERMIT_DEFAULTS_V2)
+    && exactColumns(mapColumns(columns.rows, OFFICIAL_APP_RESUME_PERMIT_TABLE), OFFICIAL_APP_RESUME_PERMIT_COLUMNS_V2, OFFICIAL_APP_RESUME_PERMIT_DEFAULTS_V2)
+    && exactColumns(mapColumns(columns.rows, VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE), VISIBLE_CHAT_SYNC_TRANSCRIPT_COLUMNS, VISIBLE_CHAT_SYNC_TRANSCRIPT_DEFAULTS)
+    && exactColumns(mapColumns(columns.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE), ATTESTATION_PERMIT_COLUMNS, ATTESTATION_PERMIT_DEFAULTS)
+    && exactColumns(mapColumns(columns.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_AUDIT_TABLE), ATTESTATION_AUDIT_COLUMNS, ATTESTATION_AUDIT_DEFAULTS)
+    && indexesCanonical(indexes.rows)
+    && hasExpectedTinderFoundationConstraints(
+      constraints.rows,
+      TINDER_LOCAL_CONVERSATION_ATTESTATION_CONSTRAINT_CONTRACT,
+      { exactTables: TARGET_RELATIONS }
+    );
 }
 
 function boundedInspectionError(code, message, error) {
@@ -573,22 +594,7 @@ export async function inspectTinderLocalConversationAttestationSchema(client, {
   }
 
   const canonical = (commandState === "V6" || commandState === "V8")
-    && relationKind(relations.rows, VISIBLE_CHAT_SYNC_PERMIT_TABLE) === "r"
-    && relationKind(relations.rows, OFFICIAL_APP_RESUME_PERMIT_TABLE) === "r"
-    && relationKind(relations.rows, VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE) === "r"
-    && relationKind(relations.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE) === "r"
-    && relationKind(relations.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_AUDIT_TABLE) === "r"
-    && exactColumns(mapColumns(columns.rows, VISIBLE_CHAT_SYNC_PERMIT_TABLE), VISIBLE_CHAT_SYNC_PERMIT_COLUMNS_V2, VISIBLE_CHAT_SYNC_PERMIT_DEFAULTS_V2)
-    && exactColumns(mapColumns(columns.rows, OFFICIAL_APP_RESUME_PERMIT_TABLE), OFFICIAL_APP_RESUME_PERMIT_COLUMNS_V2, OFFICIAL_APP_RESUME_PERMIT_DEFAULTS_V2)
-    && exactColumns(mapColumns(columns.rows, VISIBLE_CHAT_SYNC_TRANSCRIPT_TABLE), VISIBLE_CHAT_SYNC_TRANSCRIPT_COLUMNS, VISIBLE_CHAT_SYNC_TRANSCRIPT_DEFAULTS)
-    && exactColumns(mapColumns(columns.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_PERMIT_TABLE), ATTESTATION_PERMIT_COLUMNS, ATTESTATION_PERMIT_DEFAULTS)
-    && exactColumns(mapColumns(columns.rows, TINDER_LOCAL_CONVERSATION_ATTESTATION_AUDIT_TABLE), ATTESTATION_AUDIT_COLUMNS, ATTESTATION_AUDIT_DEFAULTS)
-    && indexesCanonical(indexes.rows)
-    && hasExpectedTinderFoundationConstraints(
-      constraints.rows,
-      TINDER_LOCAL_CONVERSATION_ATTESTATION_CONSTRAINT_CONTRACT,
-      { exactTables: TARGET_RELATIONS }
-    );
+    && canonicalAttestationCatalog(catalog);
   return {
     state: canonical
       ? TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL
@@ -627,4 +633,41 @@ export async function assertTinderLocalConversationAttestationSchemaReady(client
     throw new Error("Tinder local conversation attestation schema is not ready.");
   }
   return inspection;
+}
+
+/**
+ * Validates the retained V6 catalog only after the exact V9 command-vocabulary
+ * successor is canonical. V6's direct inspector deliberately remains exact on
+ * its own V6/V8 command vocabulary; this catalog-only proof is for a later
+ * V8 runtime, which still reads the attestation foundation while V9 owns the
+ * command constraint. It neither grants a runtime right by itself nor alters
+ * V6 migration/preflight semantics.
+ */
+export async function inspectTinderLocalConversationAttestationRetainedSchemaForV9(client, {
+  inspectDeviceBridgeSchema = inspectDeviceBridgeT1Schema
+} = {}) {
+  let relations;
+  let columns;
+  let indexes;
+  let constraints;
+  let commandState;
+  try {
+    relations = await readRelations(client);
+    columns = await readColumns(client);
+    indexes = await readIndexes(client);
+    constraints = await readTinderFoundationConstraints(client, TARGET_RELATIONS);
+    commandState = await commandConstraintState(client, inspectDeviceBridgeSchema);
+  } catch (error) {
+    boundedInspectionError(
+      TINDER_LOCAL_CONVERSATION_ATTESTATION_PREFLIGHT_ERROR_CODE.PREREQUISITE_INSPECTION_FAILED,
+      "Tinder local conversation attestation retained prerequisite inspection failed.",
+      error
+    );
+  }
+  return {
+    state: commandState === "V9"
+        && canonicalAttestationCatalog({ relations, columns, indexes, constraints })
+      ? TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL
+      : TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.INVALID
+  };
 }

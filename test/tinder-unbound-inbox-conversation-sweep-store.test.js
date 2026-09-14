@@ -25,6 +25,9 @@ import {
 import {
   T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES
 } from "../device-bridge/protocol-v1.js";
+import {
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
+} from "../device-bridge/tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const SWEEP_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
@@ -240,13 +243,27 @@ function response() {
   };
 }
 
-function foundationGatePool() {
+function foundationGatePool({ readyDevice = false } = {}) {
   const state = { began: 0, rolledBack: 0, committed: 0, replayWrites: 0, released: false };
   const client = {
     async query(sql) {
       if (sql === "BEGIN") { state.began += 1; return { rows: [] }; }
       if (sql === "ROLLBACK") { state.rolledBack += 1; return { rows: [] }; }
       if (sql === "COMMIT") { state.committed += 1; return { rows: [] }; }
+      if (readyDevice && String(sql).includes("FROM device_bridge_devices d") && String(sql).includes("FOR UPDATE")) {
+        return { rows: [{
+          device_id: DEVICE_ID,
+          enrollment_state: "ACTIVE",
+          revoked_at: null,
+          last_accepted_heartbeat_at: NOW,
+          bridge_service_state: "RUNNING",
+          tinder_state: "CONNECTED",
+          automation_state: "STOPPED",
+          capabilities: T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES,
+          key_id: V8_AUTH.keyId,
+          key_revoked_at: null
+        }] };
+      }
       if (sql.includes("device_bridge_request_nonces")) state.replayWrites += 1;
       return { rows: [] };
     },
@@ -262,11 +279,56 @@ const V8_AUTH = Object.freeze({
   contentSha256: "a".repeat(64)
 });
 
+function runtimeFoundation({ retained = "CANONICAL", retainedV6 = "CANONICAL" } = {}) {
+  return client => assertTinderUnboundInboxConversationSweepRuntimeSchemaReady(client, {
+    async inspectV8Schema() { return { state: "INVALID" }; },
+    async inspectV9Schema() { return { state: "CANONICAL" }; },
+    async inspectV8RetainedSchemaForV9() { return { state: retained }; },
+    async inspectV6RetainedSchemaForV9() { return { state: retainedV6 }; }
+  });
+}
+
+test("V8 signed READ and RETURN ingress accept jointly canonical V6, V8 and V9 runtime foundations", async () => {
+  for (const kind of ["TRANSCRIPT", "RETURN"]) {
+    const fixture = foundationGatePool({ readyDevice: true });
+    let lifecycleWork = 0;
+    const factory = kind === "TRANSCRIPT"
+      ? createAuthenticatedUnboundInboxConversationSweepStore(fixture.pool, V8_AUTH, {
+        now: () => NOW,
+        assertFoundationReady: runtimeFoundation(),
+        createRepository() { return {}; },
+        createStore(repository) {
+          return { async storeStagedUnboundInboxConversationSweepTranscript() {
+            return repository.withTransaction(async () => { lifecycleWork += 1; return { status: "ACCEPTED" }; });
+          } };
+        }
+      })
+      : createAuthenticatedUnboundInboxConversationSweepReturnService(fixture.pool, V8_AUTH, {
+        now: () => NOW,
+        assertFoundationReady: runtimeFoundation(),
+        createRepository() { return {}; },
+        createService(repository) {
+          return { async acceptSignedSweepReturnReceipt() {
+            return repository.withTransaction(async () => { lifecycleWork += 1; return { status: "READ_QUEUED" }; });
+          } };
+        }
+      });
+    const result = kind === "TRANSCRIPT"
+      ? await factory.storeStagedUnboundInboxConversationSweepTranscript({ deviceId: DEVICE_ID, transcript: transcript() })
+      : await factory.acceptSignedSweepReturnReceipt({ commandId: RETURN_COMMAND_ID, deviceId: DEVICE_ID, status: "RETURNED" });
+    assert.equal(lifecycleWork, 1);
+    assert.equal(fixture.state.replayWrites, 1);
+    assert.equal(fixture.state.committed, 1);
+    assert.equal(fixture.state.rolledBack, 0);
+    assert.deepEqual(result, kind === "TRANSCRIPT" ? { status: "ACCEPTED" } : { status: "READ_QUEUED" });
+  }
+});
+
 test("V8 ingress and return fail before replay or lifecycle work when the exact catalog is not canonical", async () => {
   for (const kind of ["TRANSCRIPT", "RETURN"]) {
     const fixture = foundationGatePool();
     let lifecycleWork = 0;
-    const assertion = async () => { throw new Error("catalog drift"); };
+    const assertion = runtimeFoundation({ retained: "INVALID" });
     const factory = kind === "TRANSCRIPT"
       ? createAuthenticatedUnboundInboxConversationSweepStore(fixture.pool, V8_AUTH, {
         now: () => NOW,
@@ -300,6 +362,44 @@ test("V8 ingress and return fail before replay or lifecycle work when the exact 
     assert.equal(fixture.state.committed, 0);
     assert.equal(fixture.state.rolledBack, 1);
     assert.equal(fixture.state.released, true);
+  }
+});
+
+test("V8 ingress and return fail before replay or lifecycle work when retained V6 catalog proof is invalid", async () => {
+  for (const kind of ["TRANSCRIPT", "RETURN"]) {
+    const fixture = foundationGatePool();
+    let lifecycleWork = 0;
+    const factory = kind === "TRANSCRIPT"
+      ? createAuthenticatedUnboundInboxConversationSweepStore(fixture.pool, V8_AUTH, {
+        now: () => NOW,
+        assertFoundationReady: runtimeFoundation({ retainedV6: "INVALID" }),
+        createRepository() { return {}; },
+        createStore(repository) {
+          return { async storeStagedUnboundInboxConversationSweepTranscript() {
+            return repository.withTransaction(async () => { lifecycleWork += 1; return { status: "ACCEPTED" }; });
+          } };
+        }
+      })
+      : createAuthenticatedUnboundInboxConversationSweepReturnService(fixture.pool, V8_AUTH, {
+        now: () => NOW,
+        assertFoundationReady: runtimeFoundation({ retainedV6: "INVALID" }),
+        createRepository() { return {}; },
+        createService(repository) {
+          return { async acceptSignedSweepReturnReceipt() {
+            return repository.withTransaction(async () => { lifecycleWork += 1; return { status: "READ_QUEUED" }; });
+          } };
+        }
+      });
+    await assert.rejects(
+      () => kind === "TRANSCRIPT"
+        ? factory.storeStagedUnboundInboxConversationSweepTranscript({ deviceId: DEVICE_ID, transcript: transcript() })
+        : factory.acceptSignedSweepReturnReceipt({ commandId: RETURN_COMMAND_ID, deviceId: DEVICE_ID, status: "RETURNED" }),
+      /foundation/i
+    );
+    assert.equal(lifecycleWork, 0);
+    assert.equal(fixture.state.replayWrites, 0);
+    assert.equal(fixture.state.committed, 0);
+    assert.equal(fixture.state.rolledBack, 1);
   }
 });
 

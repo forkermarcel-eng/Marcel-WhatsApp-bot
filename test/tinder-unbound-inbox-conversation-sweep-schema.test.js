@@ -25,6 +25,14 @@ import {
 import {
   TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE
 } from "../device-bridge/tinder-local-conversation-attestation-schema.js";
+import {
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady,
+  inspectTinderUnboundInboxConversationSweepRuntimeSchema,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE
+} from "../device-bridge/tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
+import {
+  TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE
+} from "../device-bridge/tinder-verified-chat-return-schema.js";
 
 function canonicalV6() {
   return { state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL };
@@ -254,5 +262,80 @@ test("V8 postcheck recognizes PostgreSQL's fixed catalog rendering without weake
     contractChecks.has(canonicalCheckDefinition("next_slot BETWEEN 1 AND 9")),
     false,
     "the inspector must compare PostgreSQL catalog form, never broaden semantic acceptance"
+  );
+});
+
+test("V8 runtime accepts its exact foundation or jointly verified retained V6, V8 and V9, never a partial successor", async () => {
+  const exactV8 = async () => ({
+    state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+  });
+  let v9Read = false;
+  assert.deepEqual(
+    await inspectTinderUnboundInboxConversationSweepRuntimeSchema({}, {
+      inspectV8Schema: exactV8,
+      inspectV9Schema: async () => {
+        v9Read = true;
+        return { state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL };
+      }
+    }),
+    { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL }
+  );
+  assert.equal(v9Read, false, "exact V8 must remain its own runtime proof");
+
+  const v9Only = {
+    inspectV8Schema: async () => ({
+      state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+    }),
+    inspectV9Schema: async () => ({
+      state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL
+    })
+  };
+  assert.deepEqual(
+    await inspectTinderUnboundInboxConversationSweepRuntimeSchema({}, {
+      ...v9Only,
+      inspectV8RetainedSchemaForV9: async () => ({
+        state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+      }),
+      inspectV6RetainedSchemaForV9: async () => ({
+        state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL
+      })
+    }),
+    { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL }
+  );
+
+  await assert.rejects(
+    () => assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+      ...v9Only,
+      inspectV8RetainedSchemaForV9: async () => ({
+        state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+      }),
+      inspectV6RetainedSchemaForV9: async () => ({
+        state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL
+      })
+    }),
+    /runtime schema is not ready/i
+  );
+  await assert.rejects(
+    () => assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+      ...v9Only,
+      inspectV8RetainedSchemaForV9: async () => ({
+        state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+      }),
+      inspectV6RetainedSchemaForV9: async () => ({
+        state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.INVALID
+      })
+    }),
+    /runtime schema is not ready/i
+  );
+  await assert.rejects(
+    () => assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+      inspectV8Schema: async () => ({
+        state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+      }),
+      inspectV9Schema: async () => ({
+        state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.UPGRADE_REQUIRED
+      })
+    }),
+    /runtime schema is not ready/i
   );
 });

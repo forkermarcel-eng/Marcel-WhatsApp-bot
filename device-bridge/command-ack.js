@@ -66,8 +66,8 @@ import {
   isExactVerifiedChatReturnStagedAcknowledgement
 } from "../services/tinder-verified-chat-return.js";
 import {
-  assertTinderUnboundInboxConversationSweepSchemaReady
-} from "./tinder-unbound-inbox-conversation-sweep-schema.js";
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
+} from "./tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
 import {
   assertTinderVerifiedChatReturnSchemaReady,
   inspectTinderVerifiedChatReturnSchema,
@@ -437,7 +437,7 @@ function ackResponse(commandId, status, now) {
 
 export async function processCommandAckTransaction(pool, auth, ack, now = new Date(), {
   assertUnboundInboxConversationSweepFoundationReady: assertFoundationReady =
-    assertTinderUnboundInboxConversationSweepSchemaReady,
+    assertTinderUnboundInboxConversationSweepRuntimeSchemaReady,
   assertVerifiedChatReturnFoundationReady: assertReturnFoundationReady =
     assertTinderVerifiedChatReturnSchemaReady,
   inspectVerifiedChatReturnSchema = inspectTinderVerifiedChatReturnSchema

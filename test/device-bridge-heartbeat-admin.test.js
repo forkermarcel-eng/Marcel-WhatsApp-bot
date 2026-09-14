@@ -56,13 +56,25 @@ const CAPABILITIES = T0_DEVICE_CAPABILITIES;
 // emulate the catalog inspector's complete V6 query set.  Keep that explicit:
 // callers exercising V8/drift pass their own exact inspector result below.
 async function processHeartbeatTransaction(pool, auth, heartbeat, now, options = {}) {
+  const {
+    inspectUnboundInboxConversationSweepFoundation: inspectV8Foundation = UPGRADE_REQUIRED_V8_FOUNDATION,
+    inspectUnboundInboxConversationSweepRuntimeFoundation,
+    inspectVerifiedChatReturnFoundation = UPGRADE_REQUIRED_V9_FOUNDATION,
+    ...otherOptions
+  } = options;
   return processHeartbeatTransactionRaw(pool, auth, heartbeat, now, {
-    inspectUnboundInboxConversationSweepFoundation: UPGRADE_REQUIRED_V8_FOUNDATION,
+    ...otherOptions,
+    inspectUnboundInboxConversationSweepFoundation: inspectV8Foundation,
+    // A direct V8 fixture is its own proof. V9-only tests inject a retained
+    // V8 runtime inspector explicitly; the production code only invokes it
+    // after the exact V9 successor was found canonical.
+    inspectUnboundInboxConversationSweepRuntimeFoundation:
+      inspectUnboundInboxConversationSweepRuntimeFoundation
+      || (async () => ({ state: "INVALID" })),
     // Most fixtures intentionally model the predecessor catalog only. A V9
     // upgrade-required response preserves that historical command surface;
     // V9-specific tests inject CANONICAL explicitly.
-    inspectVerifiedChatReturnFoundation: UPGRADE_REQUIRED_V9_FOUNDATION,
-    ...options
+    inspectVerifiedChatReturnFoundation
   });
 }
 
@@ -782,6 +794,107 @@ test("a fresh reviewed Inbox observation cannot mint V8 beside a partial V9 cata
   const heartbeatAudit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
   assert.equal(JSON.parse(heartbeatAudit.params[3]).tinder_inbox_navigation.observation_nonce, observationNonce);
   assert.equal(JSON.stringify(response).includes(observationNonce), false);
+});
+
+test("V9 alone cannot mint a V8 child when retained V8 runtime proof is invalid", async () => {
+  const observationNonce = "5bfa798e-85ce-4c2e-830e-df8465c58f70";
+  const capabilities = T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES;
+  const payload = heartbeatPayload({
+    capabilities,
+    tinder_state: "CONNECTED",
+    tinder_inbox_navigation: {
+      stage: "INBOX_READY",
+      reason: "NONE",
+      visible_conversation_count: 2,
+      observed_event_count: 3,
+      observation_kind: "FRESH_REVIEWED_INBOX_V1",
+      observation_nonce: observationNonce
+    }
+  });
+  const request = heartbeatRequest(payload, {
+    requestId: "5bfa798e-85ce-4c2e-830e-df8465c58f70"
+  });
+  const fake = heartbeatPool({
+    request,
+    unboundInboxSweepFoundation: true,
+    sweepRuntime: {
+      device_id: DEVICE_ID,
+      enrollment_state: "ACTIVE",
+      revoked_at: null,
+      last_heartbeat_sequence: payload.sequence,
+      last_accepted_heartbeat_at: NOW,
+      bridge_service_state: "RUNNING",
+      tinder_state: "CONNECTED",
+      automation_state: "STOPPED",
+      capabilities
+    }
+  });
+
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "5bfa798e-85ce-4c2e-830e-df8465c58f70", contentSha256: request.hash },
+    payload,
+    NOW,
+    {
+      inspectUnboundInboxConversationSweepFoundation: async () => ({ state: "INVALID" }),
+      inspectUnboundInboxConversationSweepRuntimeFoundation: async () => ({ state: "INVALID" }),
+      inspectVerifiedChatReturnFoundation: async () => ({ state: "CANONICAL" })
+    }
+  );
+
+  assert.equal(response.commands.some(command => command.type.includes("UNBOUND_INBOX_CONVERSATION_SWEEP")), false);
+  assert.equal(fake.state.createdSweeps.length, 0);
+  assert.equal(fake.state.createdSweepSteps.length, 0);
+});
+
+test("jointly canonical V9 and retained V8 runtime proof can mint a V8 child", async () => {
+  const observationNonce = "6bfa798e-85ce-4c2e-830e-df8465c58f70";
+  const capabilities = T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES;
+  const payload = heartbeatPayload({
+    capabilities,
+    tinder_state: "CONNECTED",
+    tinder_inbox_navigation: {
+      stage: "INBOX_READY",
+      reason: "NONE",
+      visible_conversation_count: 2,
+      observed_event_count: 3,
+      observation_kind: "FRESH_REVIEWED_INBOX_V1",
+      observation_nonce: observationNonce
+    }
+  });
+  const request = heartbeatRequest(payload, {
+    requestId: "6bfa798e-85ce-4c2e-830e-df8465c58f70"
+  });
+  const fake = heartbeatPool({
+    request,
+    unboundInboxSweepFoundation: true,
+    sweepRuntime: {
+      device_id: DEVICE_ID,
+      enrollment_state: "ACTIVE",
+      revoked_at: null,
+      last_heartbeat_sequence: payload.sequence,
+      last_accepted_heartbeat_at: NOW,
+      bridge_service_state: "RUNNING",
+      tinder_state: "CONNECTED",
+      automation_state: "STOPPED",
+      capabilities
+    }
+  });
+
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "6bfa798e-85ce-4c2e-830e-df8465c58f70", contentSha256: request.hash },
+    payload,
+    NOW,
+    {
+      inspectUnboundInboxConversationSweepFoundation: async () => ({ state: "INVALID" }),
+      inspectUnboundInboxConversationSweepRuntimeFoundation: async () => ({ state: "CANONICAL" }),
+      inspectVerifiedChatReturnFoundation: async () => ({ state: "CANONICAL" })
+    }
+  );
+
+  assert.equal(response.commands.filter(command => command.type === "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT").length, 1);
+  assert.equal(fake.state.createdSweeps.length, 1);
 });
 
 test("partial, unknown, or repair-required V8 schema is inert: it cannot issue or deliver a V8 child", async () => {

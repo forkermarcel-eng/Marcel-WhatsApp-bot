@@ -11,7 +11,8 @@ import { canonicalSchemaPredicate } from "./schema-contract.js";
 import {
   inspectDeviceBridgeT1Schema,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
-  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME,
+  TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
 } from "./t1-schema.js";
 import {
   inspectTinderLocalConversationAttestationSchema,
@@ -567,4 +568,47 @@ export async function assertTinderUnboundInboxConversationSweepSchemaReady(clien
   const inspection = await inspectTinderUnboundInboxConversationSweepSchema(client, options);
   if (inspection.state !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL) throw new Error("Tinder unbound Inbox conversation sweep schema is not ready.");
   return inspection;
+}
+
+/**
+ * Validates the retained V8 catalog only after the exact V9 command-vocabulary
+ * successor is canonical.  This is deliberately not the V8 migration
+ * inspector: V8 itself remains exact on its V8 constraint and its preflight
+ * semantics.  The later runtime needs to prove that V8's durable tables,
+ * constraints, indexes, and immutable guards survived the V9 successor
+ * unchanged before it can process a V8 child.
+ *
+ * This function is catalog-only. It neither treats V9 as a V8 migration
+ * result nor grants a V8 runtime authority on its own; callers must also
+ * verify the separate V9 foundation.
+ */
+export async function inspectTinderUnboundInboxConversationSweepRetainedSchemaForV9(client, {
+  inspectDeviceBridgeSchema = inspectDeviceBridgeT1Schema
+} = {}) {
+  const relations = await readRelations(client);
+  const columns = await readColumns(client);
+  const indexes = await readIndexes(client);
+  const constraints = await readTinderFoundationConstraints(client, TARGET_RELATIONS);
+  const triggers = await readTriggers(client);
+  const commandConstraintName = await currentCommandConstraintName(client, inspectDeviceBridgeSchema);
+  const coreCatalogCanonical = commandConstraintName
+    === TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
+    && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE) === "r"
+    && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE) === "r"
+    && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE) === "r"
+    && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE) === "r"
+    && exactColumns(mapColumns(columns.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE), SWEEP_COLUMNS, SWEEP_DEFAULTS)
+    && exactColumns(mapColumns(columns.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE), STEP_COLUMNS, STEP_DEFAULTS)
+    && exactColumns(mapColumns(columns.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE), TRANSCRIPT_COLUMNS, TRANSCRIPT_DEFAULTS)
+    && exactColumns(mapColumns(columns.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_AUDIT_TABLE), AUDIT_COLUMNS, AUDIT_DEFAULTS)
+    && indexesCanonical(indexes.rows)
+    && hasExpectedTinderFoundationConstraints(constraints.rows,
+      TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CONSTRAINT_CONTRACT,
+      { exactTables: TARGET_RELATIONS });
+  if (!coreCatalogCanonical
+      || classifyTinderUnboundInboxConversationSweepTriggerContract(triggers.rows)
+        !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL) {
+    return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID };
+  }
+  return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL };
 }

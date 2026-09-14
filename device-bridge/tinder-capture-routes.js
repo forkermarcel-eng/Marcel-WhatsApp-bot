@@ -59,13 +59,8 @@ import {
   createTinderUnboundInboxConversationSweepService
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
 import {
-  inspectTinderUnboundInboxConversationSweepSchema,
-  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
-} from "./tinder-unbound-inbox-conversation-sweep-schema.js";
-import {
-  inspectTinderVerifiedChatReturnSchema,
-  TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE
-} from "./tinder-verified-chat-return-schema.js";
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
+} from "./tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
 import {
   boundedTinderUnboundInboxSweepDiagnostic
 } from "./tinder-unbound-inbox-sweep-diagnostic-contract.js";
@@ -967,31 +962,6 @@ function createTinderDashboardOfficialAppResumeQueueHandler(pool, {
  * row, name, identity, or Inbox-observation value crosses the dashboard
  * boundary. V8 issuance is heartbeat-only and has no dashboard start route.
  */
-/**
- * The V8 catalog inspector deliberately rejects the later V9 command
- * constraint: it is an exact V8 inspector, not a retained-runtime verdict.
- * A canonical V9 inspector is the only forward-compatible proof that the
- * retained V8 relations may still be read.  Any partial V8 or noncanonical V9
- * state remains fail-closed.
- */
-async function assertTinderUnboundInboxConversationSweepRuntimeSchemaReady(transaction, {
-  inspectV8Schema = inspectTinderUnboundInboxConversationSweepSchema,
-  inspectV9Schema = inspectTinderVerifiedChatReturnSchema
-} = {}) {
-  const v8 = await inspectV8Schema(transaction);
-  if (v8?.state === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL) {
-    return v8;
-  }
-  if (v8?.state !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID) {
-    throw new Error("Tinder unbound Inbox sweep schema is not ready.");
-  }
-  const v9 = await inspectV9Schema(transaction);
-  if (v9?.state === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL) {
-    return v9;
-  }
-  throw new Error("Tinder unbound Inbox sweep schema is not ready.");
-}
-
 function createTinderDashboardUnboundInboxConversationSweepStatusHandler(pool, {
   createRepository = createPgTinderUnboundInboxConversationSweepRepository,
   createService = createTinderUnboundInboxConversationSweepService,

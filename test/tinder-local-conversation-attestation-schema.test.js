@@ -5,6 +5,7 @@ import {
   assertTinderLocalConversationAttestationMigrationSource
 } from "../device-bridge/tinder-local-conversation-attestation-migration.js";
 import {
+  inspectTinderLocalConversationAttestationRetainedSchemaForV9,
   inspectTinderLocalConversationAttestationSchema,
   preflightTinderLocalConversationAttestationMigration,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE,
@@ -17,7 +18,8 @@ import {
 } from "../device-bridge/tinder-visible-chat-sync-permit-schema.js";
 import {
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
-  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME
+  TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
+  TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
 } from "../device-bridge/t1-schema.js";
 
 function bridgeInspection(constraintName) {
@@ -138,6 +140,22 @@ test("attestation catalog inspection keeps one pg client query in flight", async
     state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.UPGRADE_REQUIRED
   });
   assert.equal(client.maxActive, 1);
+});
+
+test("retained V6 inspection is catalog-read-only and refuses an incomplete V9 successor", async () => {
+  const client = catalogClient();
+  assert.deepEqual(
+    await inspectTinderLocalConversationAttestationRetainedSchemaForV9(client, {
+      inspectDeviceBridgeSchema: async () => bridgeInspection(
+        TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
+      )
+    }),
+    { state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.INVALID }
+  );
+  for (const sql of client.queries) {
+    assert.match(sql, /^\s*SELECT/i);
+    assert.doesNotMatch(sql, /\b(?:ALTER|CREATE|DROP|INSERT|UPDATE|DELETE|LOCK)\b/i);
+  }
 });
 
 test("fixed attestation DDL is exact and contains no durable Tinder/UI identity material", () => {

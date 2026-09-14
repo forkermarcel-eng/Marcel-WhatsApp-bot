@@ -84,12 +84,18 @@ test("V8 unbound Inbox sweep status is bounded and exposes no correlation data",
   assert.deepEqual(statusResponse.body, { ok: true, unbound_inbox_sweep: { status: "ACTIVE" } });
 });
 
-test("V8 status accepts only a canonical V9 successor after its exact V8 inspector rejects the V9 constraint", async () => {
+test("V8 status accepts only a jointly canonical V6, V8 and V9 runtime foundation", async () => {
   let v9Inspections = 0;
   const result = await assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
     async inspectV8Schema() { return { state: "INVALID" }; },
     async inspectV9Schema() {
       v9Inspections += 1;
+      return { state: "CANONICAL" };
+    },
+    async inspectV8RetainedSchemaForV9() {
+      return { state: "CANONICAL" };
+    },
+    async inspectV6RetainedSchemaForV9() {
       return { state: "CANONICAL" };
     }
   });
@@ -109,6 +115,15 @@ test("V8 status remains fail-closed for partial V8 or noncanonical V9 schema", a
     assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
       async inspectV8Schema() { return { state: "INVALID" }; },
       async inspectV9Schema() { return { state: "INVALID" }; }
+    }),
+    /not ready/
+  );
+  await assert.rejects(
+    assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+      async inspectV8Schema() { return { state: "INVALID" }; },
+      async inspectV9Schema() { return { state: "CANONICAL" }; },
+      async inspectV8RetainedSchemaForV9() { return { state: "INVALID" }; },
+      async inspectV6RetainedSchemaForV9() { return { state: "CANONICAL" }; }
     }),
     /not ready/
   );

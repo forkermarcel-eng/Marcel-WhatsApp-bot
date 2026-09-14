@@ -20,8 +20,8 @@ import {
   TinderUnboundInboxConversationSweepStoreError
 } from "../services/tinder-unbound-inbox-conversation-sweep-store.js";
 import {
-  assertTinderUnboundInboxConversationSweepSchemaReady
-} from "./tinder-unbound-inbox-conversation-sweep-schema.js";
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
+} from "./tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
 
 /* Signed V8 READ transcript ingress. Separate from V4. */
 
@@ -47,9 +47,10 @@ function foundationNotReadyError() {
 }
 
 // The transcript ingress is a V8 state transition, not a best-effort
-// persistence endpoint.  Inspect the exact canonical catalog inside the
-// same transaction before replay registration or any sweep write.  A catalog
-// mismatch is deliberately indistinguishable from an unavailable foundation.
+// persistence endpoint. Inspect the exact V8-or-retained-V8/V9 runtime
+// catalog inside the same transaction before replay registration or any sweep
+// write. A catalog mismatch is deliberately indistinguishable from an
+// unavailable foundation.
 async function assertUnboundInboxConversationSweepFoundationReady(client, assertFoundationReady) {
   try {
     await assertFoundationReady(client);
@@ -129,7 +130,7 @@ export function createAuthenticatedUnboundInboxConversationSweepStore(pool, auth
   now = () => new Date(),
   createRepository = createPgTinderUnboundInboxConversationSweepRepository,
   createStore = createTinderUnboundInboxConversationSweepStore,
-  assertFoundationReady = assertTinderUnboundInboxConversationSweepSchemaReady
+  assertFoundationReady = assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
 } = {}) {
   const repository = createRepository(pool);
   const transactionRepository = Object.freeze({

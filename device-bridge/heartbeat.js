@@ -31,6 +31,10 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE
 } from "./tinder-unbound-inbox-conversation-sweep-schema.js";
 import {
+  inspectTinderUnboundInboxConversationSweepRuntimeSchema,
+  TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE
+} from "./tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
+import {
   inspectTinderVerifiedChatReturnSchema,
   TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE
 } from "./tinder-verified-chat-return-schema.js";
@@ -60,7 +64,7 @@ const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits"
 const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conversation_v1";
 const HEARTBEAT_FAILURE_STAGE_PROPERTY = "deviceBridgeHeartbeatFailureStage";
 const HEARTBEAT_FAILURE_STAGES = new Set([
-  "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION", "V9_FOUNDATION",
+  "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION", "V8_RUNTIME_FOUNDATION", "V9_FOUNDATION",
   "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_EXPIRY",
   "V9_EXPIRY", "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
 ]);
@@ -381,6 +385,21 @@ async function inspectUnboundInboxConversationSweepFoundationState(client, inspe
         : TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID;
   } catch {
     return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID;
+  }
+}
+
+// The V8 migration inspector deliberately remains version-exact.  Once V9
+// owns the command vocabulary, a V8 child may continue only if the shared
+// runtime inspector proves both the canonical V9 successor and every retained
+// V6/V8 relation it still depends on. A failed catalog read remains inert.
+async function inspectUnboundInboxConversationSweepRuntimeFoundationState(client, inspectFoundation, options) {
+  try {
+    const inspection = await inspectFoundation(client, options);
+    return inspection?.state === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL
+      ? TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL
+      : TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.INVALID;
+  } catch {
+    return TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.INVALID;
   }
 }
 
@@ -947,10 +966,14 @@ function heartbeatResponse(serverTime, acceptedAt, commands) {
 
 export async function processHeartbeatTransaction(pool, auth, heartbeat, now = new Date(), {
   inspectUnboundInboxConversationSweepFoundation = inspectTinderUnboundInboxConversationSweepSchema,
+  inspectUnboundInboxConversationSweepRuntimeFoundation = inspectTinderUnboundInboxConversationSweepRuntimeSchema,
   inspectVerifiedChatReturnFoundation = inspectTinderVerifiedChatReturnSchema
 } = {}) {
   if (typeof inspectUnboundInboxConversationSweepFoundation !== "function") {
     throw new TypeError("inspectUnboundInboxConversationSweepFoundation must be a function");
+  }
+  if (typeof inspectUnboundInboxConversationSweepRuntimeFoundation !== "function") {
+    throw new TypeError("inspectUnboundInboxConversationSweepRuntimeFoundation must be a function");
   }
   if (typeof inspectVerifiedChatReturnFoundation !== "function") {
     throw new TypeError("inspectVerifiedChatReturnFoundation must be a function");
@@ -996,10 +1019,35 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
     failureStage = "V9_FOUNDATION";
     const verifiedChatReturnFoundationState =
       await inspectVerifiedChatReturnFoundationState(client, inspectVerifiedChatReturnFoundation);
+    // Reuse the exact catalog conclusions already read for this signed
+    // heartbeat. Only the V9-successor case needs retained V6/V8 catalog
+    // proofs; a direct V8 foundation is already a complete proof.
+    let unboundInboxConversationSweepRuntimeFoundationState =
+      TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.INVALID;
+    if (unboundInboxConversationSweepFoundationState
+        === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL) {
+      unboundInboxConversationSweepRuntimeFoundationState =
+        TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL;
+    } else if (verifiedChatReturnFoundationState
+        === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL) {
+      failureStage = "V8_RUNTIME_FOUNDATION";
+      unboundInboxConversationSweepRuntimeFoundationState =
+        await inspectUnboundInboxConversationSweepRuntimeFoundationState(
+          client,
+          inspectUnboundInboxConversationSweepRuntimeFoundation,
+          {
+            // The shared runtime inspector will only inspect retained V6/V8
+            // catalog facts after these exact already-read predecessor and
+            // successor results agree with the V9 compatibility branch.
+            inspectV8Schema: async () => ({ state: unboundInboxConversationSweepFoundationState }),
+            inspectV9Schema: async () => ({ state: verifiedChatReturnFoundationState })
+          }
+        );
+    }
     // V8's own exact inspector deliberately becomes INVALID after the V9
-    // command-constraint successor. V9 CANONICAL is therefore the only
-    // allowed forward-compatible evidence that the retained V8 relations may
-    // continue their narrow runtime lifecycle.
+    // command-constraint successor.  V9 alone is not enough: the shared
+    // runtime inspector independently proves retained V6/V8 relations before
+    // a V8 child may be minted, expired, delivered, acknowledged, or ingested.
     const verifiedChatReturnFoundationCanonical =
       verifiedChatReturnFoundationState === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.CANONICAL;
     // `UPGRADE_REQUIRED` is the one known pre-V9 catalog: the exact V8
@@ -1011,9 +1059,8 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       || verifiedChatReturnFoundationState
         === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.UPGRADE_REQUIRED;
     const unboundInboxConversationSweepFoundationCanonical =
-      unboundInboxConversationSweepFoundationState
-      === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
-      || verifiedChatReturnFoundationCanonical;
+      unboundInboxConversationSweepRuntimeFoundationState
+      === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL;
     const unboundInboxConversationSweepFoundationReady =
       unboundInboxConversationSweepFoundationCanonical
       && verifiedChatReturnFoundationAllowsV8Runtime
@@ -1102,6 +1149,12 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
           (unboundInboxConversationSweepFoundationState
             === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
             && !verifiedChatReturnFoundationCanonical)
+          // A canonical V9 successor is not by itself proof that every V8
+          // relation survived. Suppress dynamic Tinder delivery rather than
+          // issue a V8 child that the ACK/ingress boundary must reject.
+          || (verifiedChatReturnFoundationCanonical
+            && unboundInboxConversationSweepRuntimeFoundationState
+              !== TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL)
           || verifiedChatReturnFoundationState
             === TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.INVALID
           // A current legacy capability cannot receive a V8 child. If one is

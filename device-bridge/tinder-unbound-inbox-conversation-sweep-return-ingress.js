@@ -20,8 +20,8 @@ import {
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_RECEIPT_STATUS
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
 import {
-  assertTinderUnboundInboxConversationSweepSchemaReady
-} from "./tinder-unbound-inbox-conversation-sweep-schema.js";
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
+} from "./tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
 
 /* Signed V8 RETURN_ONLY completion receipt. It alone advances a parent. */
 
@@ -54,9 +54,10 @@ function foundationNotReadyError() {
   );
 }
 
-// RETURNED advances the parent and can mint the next child.  Canonical V8
-// catalog truth therefore has to be checked in this transaction before the
-// authenticated replay record or any parent/step mutation is written.
+// RETURNED advances the parent and can mint the next child. The exact
+// V8-or-retained-V8/V9 runtime catalog must therefore be checked in this
+// transaction before the authenticated replay record or any parent/step
+// mutation is written.
 async function assertUnboundInboxConversationSweepFoundationReady(client, assertFoundationReady) {
   try {
     await assertFoundationReady(client);
@@ -99,7 +100,7 @@ export function createAuthenticatedUnboundInboxConversationSweepReturnService(po
   now = () => new Date(),
   createRepository = createPgTinderUnboundInboxConversationSweepRepository,
   createService = createTinderUnboundInboxConversationSweepService,
-  assertFoundationReady = assertTinderUnboundInboxConversationSweepSchemaReady
+  assertFoundationReady = assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
 } = {}) {
   const repository = createRepository(pool);
   const transactionRepository = Object.freeze({

@@ -31,6 +31,9 @@ import {
   TINDER_SEND_COMMAND_TYPE,
   TINDER_SEND_INTENT_STATE
 } from "../services/tinder-manual-send.js";
+import {
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
+} from "../device-bridge/tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
 
 const NOW = new Date("2026-09-01T12:34:56.000Z");
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
@@ -647,6 +650,33 @@ test("a late matching EXPIRED ACK is idempotent after server-side V8 child expir
   assert.equal(fake.state.commits, 1);
 });
 
+test("V8 READ RECEIVED acknowledgement remains deliverable only with jointly verified V6, V8 and V9 runtime schema", async () => {
+  const commandType = "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
+  const runtimeReady = client => assertTinderUnboundInboxConversationSweepRuntimeSchemaReady(client, {
+    async inspectV8Schema() { return { state: "INVALID" }; },
+    async inspectV9Schema() { return { state: "CANONICAL" }; },
+    async inspectV8RetainedSchemaForV9() { return { state: "CANONICAL" }; },
+    async inspectV6RetainedSchemaForV9() { return { state: "CANONICAL" }; }
+  });
+  const fake = ackPool({
+    commandType,
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES
+  });
+  const response = await processCommandAckTransaction(
+    fake.pool,
+    auth(),
+    unboundInboxSweepAckPayload(commandType, "RECEIVED"),
+    NOW,
+    { assertUnboundInboxConversationSweepFoundationReady: runtimeReady }
+  );
+  assert.equal(response.status, "RECEIVED");
+  assert.equal(fake.state.nonce, 1);
+  assert.equal(fake.state.ackInserts, 1);
+  assert.equal(fake.state.commandUpdates, 0);
+  assert.equal(fake.state.audits, 1);
+  assert.equal(fake.state.commits, 1);
+});
+
 test("V8 child acknowledgement rejects catalog drift before replay or lifecycle writes", async () => {
   const commandType = "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT";
   const fake = ackPool({
@@ -659,7 +689,15 @@ test("V8 child acknowledgement rejects catalog drift before replay or lifecycle 
       auth(),
       unboundInboxSweepAckPayload(commandType, "SUCCEEDED"),
       NOW,
-      { assertUnboundInboxConversationSweepFoundationReady: async () => { throw new Error("catalog drift"); } }
+      {
+        assertUnboundInboxConversationSweepFoundationReady: client =>
+          assertTinderUnboundInboxConversationSweepRuntimeSchemaReady(client, {
+            async inspectV8Schema() { return { state: "INVALID" }; },
+            async inspectV9Schema() { return { state: "CANONICAL" }; },
+            async inspectV8RetainedSchemaForV9() { return { state: "CANONICAL" }; },
+            async inspectV6RetainedSchemaForV9() { return { state: "INVALID" }; }
+          })
+      }
     ),
     error => error.code === "TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_NOT_READY"
   );

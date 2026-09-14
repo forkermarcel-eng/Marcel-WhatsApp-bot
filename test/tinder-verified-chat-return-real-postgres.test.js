@@ -18,6 +18,9 @@ import {
   assertTinderVerifiedChatReturnSchemaReady
 } from "../device-bridge/tinder-verified-chat-return-schema.js";
 import {
+  assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
+} from "../device-bridge/tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
+import {
   migrateTinderVerifiedChatReturnFoundation,
   validateTinderVerifiedChatReturnPreDdl
 } from "../device-bridge/tinder-verified-chat-return-migration.js";
@@ -106,6 +109,7 @@ test("real loopback PostgreSQL applies V8 -> V9, postchecks canonical, commits, 
     const client = await pool.connect();
     try {
       await assertTinderVerifiedChatReturnSchemaReady(client);
+      await assertTinderUnboundInboxConversationSweepRuntimeSchemaReady(client);
     } finally {
       client.release();
     }

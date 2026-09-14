@@ -1048,6 +1048,9 @@
        <p class="enrollment-message" id="officialResumeSchemaEvidenceStatus" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="lastAcceptedOfficialResumeSchemaDiagnosticStatus" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
        <p class="enrollment-message" id="resumedForegroundChatReturnStatus" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
@@ -1203,6 +1206,7 @@
       inboxNavigationStatus: document.getElementById("inboxNavigationStatus"),
       officialResumeHandoffStatus: document.getElementById("officialResumeHandoffStatus"),
       officialResumeSchemaEvidenceStatus: document.getElementById("officialResumeSchemaEvidenceStatus"),
+      lastAcceptedOfficialResumeSchemaDiagnosticStatus: document.getElementById("lastAcceptedOfficialResumeSchemaDiagnosticStatus"),
       resumedForegroundChatReturnStatus: document.getElementById("resumedForegroundChatReturnStatus"),
       resumedForegroundChatReturnDiagnostic: document.getElementById("resumedForegroundChatReturnDiagnostic"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
@@ -3038,17 +3042,53 @@
          "Nicht verfuegbar: kein aktuelles, akzeptiertes Resume-Strukturprofil.";
        return;
      }
+     elements.officialResumeSchemaEvidenceStatus.textContent =
+       `RESUME_SCHEMA_EVIDENCE: ${formatOfficialResumeSchemaEvidence(evidence)}`;
+   }
+
+   function formatOfficialResumeSchemaEvidence(evidence) {
      // All values below have passed the fixed local grammar. No raw tree,
      // class/resource identifier, token, fingerprint, package, text, or
      // description is rendered.
-     elements.officialResumeSchemaEvidenceStatus.textContent =
-       `RESUME_SCHEMA_EVIDENCE: ${evidence.evidence_version} / ${evidence.safety_status} \u00b7 ` +
+     return `${evidence.evidence_version} / ${evidence.safety_status} \u00b7 ` +
        `TRUNCATED: ${evidence.tree_truncated ? "JA" : "NEIN"} \u00b7 ` +
        `NODES: ${evidence.visible_node_count} \u00b7 DEPTH: ${evidence.maximum_visible_depth} \u00b7 ` +
        `CLASS_FAMILIES: ${JSON.stringify(evidence.class_family_counts)} \u00b7 ` +
        `VIEW_ID_STATES: ${JSON.stringify(evidence.view_id_state_counts)} \u00b7 ` +
        `ROLES: ${JSON.stringify(evidence.role_counts)} \u00b7 ` +
        `RELATIONS: ${JSON.stringify(evidence.relation_flags)}`;
+   }
+
+   function lastAcceptedOfficialResumeSchemaDiagnosticIsSafe(value) {
+     return hasExactKeys(value, ["handoff", "schema_evidence"])
+       && officialResumeHandoffIsSafe(value.handoff)
+       && value.handoff.stage === "BLOCKED"
+       && value.handoff.reason === "UNREVIEWED_OFFICIAL_SURFACE"
+       && officialResumeSchemaEvidenceIsSafe(value.schema_evidence);
+   }
+
+   function renderLastAcceptedOfficialResumeSchemaDiagnosticStatus(device) {
+     const diagnostic = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.last_accepted_official_resume_schema_diagnostic
+       : null;
+     const currentHandoff = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.official_resume_handoff
+       : null;
+     elements.lastAcceptedOfficialResumeSchemaDiagnosticStatus.className = "enrollment-message";
+     if (!lastAcceptedOfficialResumeSchemaDiagnosticIsSafe(diagnostic)
+       || !officialResumeHandoffIsSafe(currentHandoff)
+       || currentHandoff.stage !== "BLOCKED"
+       || currentHandoff.reason !== "UNREVIEWED_OFFICIAL_SURFACE") {
+       elements.lastAcceptedOfficialResumeSchemaDiagnosticStatus.textContent =
+         "Nicht verfuegbar: kein letztes akzeptiertes terminales Resume-Strukturprofil.";
+       return;
+     }
+     // This is deliberately historical accepted evidence, not a current screen
+     // observation and not an authorization to issue any command or action.
+     elements.lastAcceptedOfficialResumeSchemaDiagnosticStatus.textContent =
+       `LAST_ACCEPTED_RESUME_SCHEMA_DIAGNOSTIC: ${formatOfficialResumeSchemaEvidence(
+         diagnostic.schema_evidence
+       )}`;
    }
 
    function resumedForegroundChatReturnIsSafe(value) {
@@ -3200,6 +3240,7 @@
      renderInboxNavigationStatus(null);
      renderOfficialResumeHandoffStatus(null);
      renderOfficialResumeSchemaEvidenceStatus(null);
+     renderLastAcceptedOfficialResumeSchemaDiagnosticStatus(null);
      renderResumedForegroundChatReturnStatus(null);
      renderResumedForegroundChatReturnDiagnostic(null);
      setDot(elements.bridgeDot, "info");
@@ -3332,6 +3373,7 @@
        renderInboxNavigationStatus(device);
        renderOfficialResumeHandoffStatus(device);
        renderOfficialResumeSchemaEvidenceStatus(device);
+       renderLastAcceptedOfficialResumeSchemaDiagnosticStatus(device);
        renderResumedForegroundChatReturnStatus(device);
        renderResumedForegroundChatReturnDiagnostic(device);
        const previousDeviceId = selectedDevice?.device_id;

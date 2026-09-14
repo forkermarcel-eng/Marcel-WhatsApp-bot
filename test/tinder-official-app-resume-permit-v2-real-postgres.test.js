@@ -21,6 +21,7 @@ import {
   migrateTinderOfficialAppResumePermitV2,
   validateTinderOfficialAppResumePermitV2PreDdl
 } from "../device-bridge/tinder-official-app-resume-permit-v2-migration.js";
+import { createAdminDeviceStatusHandler } from "../device-bridge/admin.js";
 import {
   runTinderOfficialAppResumePermitV2PreflightCli
 } from "../scripts/preflight-tinder-official-app-resume-permit-v2.js";
@@ -351,6 +352,15 @@ function deliveryAuth(sequence) {
   };
 }
 
+function responseRecorder() {
+  return {
+    statusCode: null,
+    body: null,
+    status(value) { this.statusCode = value; return this; },
+    json(value) { this.body = value; return this; }
+  };
+}
+
 function tracePool(pool, { afterQuery } = {}) {
   const records = [];
   return {
@@ -533,6 +543,41 @@ test("real loopback heartbeat accepts one server-provenanced schema profile and 
     );
     assert.deepEqual(after.rows[0], { audit_count: 1, last_sequence: "1" });
   }, { prefix: "marcel_resume_v2_schema_evidence" });
+});
+
+test("real loopback status retains accepted V2 schema evidence separately after a later handoff-only heartbeat", { timeout: 60_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV1Foundation(pool);
+    await migrateTinderOfficialAppResumePermitV2(pool);
+    await seedCurrentV2ResumeDeliveryFixture(pool);
+    await markCurrentV2ResumeDeliveredAndAcknowledged(pool);
+
+    const evidenceHeartbeat = schemaEvidenceHeartbeat(1);
+    await processHeartbeatTransaction(pool, deliveryAuth(1), evidenceHeartbeat, new Date());
+    const terminalHandoff = evidenceHeartbeat.tinder_official_resume_handoff;
+    await processHeartbeatTransaction(pool, deliveryAuth(2), {
+      ...deliveryHeartbeat(2),
+      tinder_official_resume_handoff: terminalHandoff
+    }, new Date());
+
+    const response = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, response);
+    assert.equal(response.statusCode, 200);
+    const device = response.body.device;
+    assert.equal(device.device_status, "ONLINE");
+    assert.deepEqual(device.official_resume_handoff, terminalHandoff);
+    assert.equal(device.tinder_official_resume_schema_evidence, null);
+    assert.deepEqual(device.last_accepted_official_resume_schema_diagnostic, {
+      handoff: terminalHandoff,
+      schema_evidence: evidenceHeartbeat.tinder_official_resume_schema_evidence
+    });
+    const serialized = JSON.stringify(device.last_accepted_official_resume_schema_diagnostic);
+    for (const forbidden of ["raw_accessibility_tree", "node_shapes", "fingerprint",
+      "package_name", "view_id_token", "class_name", "command_id", "permit_id",
+      "source_capture_id", "binding_id", "capture_id", "visible_name", "message_text"]) {
+      assert.equal(serialized.includes(forbidden), false);
+    }
+  }, { prefix: "marcel_resume_v2_historical_status" });
 });
 
 test("real loopback heartbeat omits an expired V2 resume permit even if its command remains live", { timeout: 60_000 }, async () => {

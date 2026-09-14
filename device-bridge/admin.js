@@ -121,12 +121,31 @@ export function normalizeAdminOfficialResumeHandoffStatus(value) {
 }
 
 /**
- * Only the newest accepted online heartbeat may expose this bounded structural
- * review evidence. The projection is diagnostic-only and has no command or
- * identity authority.
+ * The current accepted heartbeat is the sole source for this live diagnostic.
+ * Historical accepted evidence is deliberately exposed through the separate
+ * `last_accepted_official_resume_schema_diagnostic` projection below, so a
+ * later ordinary heartbeat cannot make a prior profile look current.
  */
 export function normalizeAdminOfficialResumeSchemaEvidence(value) {
   return boundedTinderOfficialResumeSchemaEvidence(value);
+}
+
+/**
+ * A separately labelled historical diagnostic may contain only the exact
+ * terminal handoff/evidence pair that was accepted for a V2 Resume command.
+ * It is observational: no permit, command, identity, or action is derived
+ * from it.
+ */
+export function normalizeAdminLastAcceptedOfficialResumeSchemaDiagnostic(value) {
+  if (!exactKeys(value, ["handoff", "schema_evidence"])) return null;
+  const handoff = normalizeAdminOfficialResumeHandoffStatus(value.handoff);
+  const schemaEvidence = normalizeAdminOfficialResumeSchemaEvidence(value.schema_evidence);
+  if (handoff?.stage !== "BLOCKED"
+      || handoff.reason !== "UNREVIEWED_OFFICIAL_SURFACE"
+      || schemaEvidence === null) {
+    return null;
+  }
+  return Object.freeze({ handoff, schema_evidence: schemaEvidence });
 }
 
 /**
@@ -154,6 +173,12 @@ function statusRow(row, now) {
       && officialResumeHandoff?.reason === "UNREVIEWED_OFFICIAL_SURFACE"
     ? normalizeAdminOfficialResumeSchemaEvidence(
       row.tinder_official_resume_schema_evidence)
+    : null;
+  const lastAcceptedOfficialResumeSchemaDiagnostic = deviceStatus === "ONLINE"
+      && officialResumeHandoff?.stage === "BLOCKED"
+      && officialResumeHandoff?.reason === "UNREVIEWED_OFFICIAL_SURFACE"
+    ? normalizeAdminLastAcceptedOfficialResumeSchemaDiagnostic(
+      row.last_accepted_official_resume_schema_diagnostic)
     : null;
   return {
     device_id: row.device_id,
@@ -183,6 +208,8 @@ function statusRow(row, now) {
       : null,
     official_resume_handoff: officialResumeHandoff,
     tinder_official_resume_schema_evidence: officialResumeSchemaEvidence,
+    last_accepted_official_resume_schema_diagnostic:
+      lastAcceptedOfficialResumeSchemaDiagnostic,
     tinder_resumed_foreground_chat_return: deviceStatus === "ONLINE"
       ? normalizeAdminResumedForegroundChatReturnReadiness(
         row.tinder_resumed_foreground_chat_return)
@@ -201,6 +228,8 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
   latest_heartbeat.details -> 'tinder_official_resume_handoff' AS official_resume_handoff,
   latest_heartbeat.details -> 'tinder_official_resume_schema_evidence'
     AS tinder_official_resume_schema_evidence,
+  paired_resume_schema_evidence.last_accepted_official_resume_schema_diagnostic
+    AS last_accepted_official_resume_schema_diagnostic,
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return'
     AS tinder_resumed_foreground_chat_return,
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return_diagnostic'
@@ -214,7 +243,36 @@ const STATUS_FROM = `FROM device_bridge_devices d
        AND e.event_type='HEARTBEAT_ACCEPTED'
      ORDER BY e.created_at DESC, e.audit_event_id DESC
      LIMIT 1
-  ) latest_heartbeat ON true`;
+  ) latest_heartbeat ON true
+  LEFT JOIN LATERAL (
+    -- Schema evidence is emitted at most once. Recover only an exact,
+    -- already accepted terminal V2 Resume pair and label it historical; it
+    -- never replaces the newest heartbeat's live evidence.
+    SELECT jsonb_build_object(
+      'handoff', evidence_heartbeat.details -> 'tinder_official_resume_handoff',
+      'schema_evidence', evidence_heartbeat.details -> 'tinder_official_resume_schema_evidence'
+    ) AS last_accepted_official_resume_schema_diagnostic
+      FROM tinder_official_app_resume_permits resume_permit
+      JOIN device_bridge_audit_events evidence_heartbeat
+        ON evidence_heartbeat.device_id=resume_permit.device_id
+       AND evidence_heartbeat.command_id=resume_permit.command_id
+     WHERE resume_permit.device_id=d.device_id
+       AND resume_permit.permit_contract_version=2
+       AND resume_permit.permit_state='DISPATCHED'
+       AND resume_permit.dispatched_at IS NOT NULL
+       AND evidence_heartbeat.command_id IS NOT NULL
+       AND evidence_heartbeat.event_type='HEARTBEAT_ACCEPTED'
+       AND evidence_heartbeat.result_code='SUCCEEDED'
+       AND evidence_heartbeat.http_status=200
+       AND evidence_heartbeat.created_at>=resume_permit.dispatched_at
+       AND evidence_heartbeat.created_at<resume_permit.expires_at
+       AND evidence_heartbeat.details ? 'tinder_official_resume_schema_evidence'
+       AND evidence_heartbeat.details -> 'tinder_official_resume_handoff'
+             = '{"stage":"BLOCKED","reason":"UNREVIEWED_OFFICIAL_SURFACE"}'::jsonb
+     ORDER BY evidence_heartbeat.created_at DESC, evidence_heartbeat.audit_event_id DESC,
+       resume_permit.dispatched_at DESC NULLS LAST, resume_permit.created_at DESC
+     LIMIT 1
+  ) paired_resume_schema_evidence ON true`;
 
 export function createAdminDeviceListHandler(pool) {
   return async function adminDeviceListHandler(req, res) {

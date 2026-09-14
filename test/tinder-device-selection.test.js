@@ -90,6 +90,31 @@ test("Tinder technical diagnostics render only the aggregate official-resume sch
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
 
+test("Tinder technical diagnostics label accepted resume schema evidence as historical", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="lastAcceptedOfficialResumeSchemaDiagnosticStatus"/);
+  assert.match(page, /function lastAcceptedOfficialResumeSchemaDiagnosticIsSafe\(value\)/);
+  assert.match(page, /function renderLastAcceptedOfficialResumeSchemaDiagnosticStatus\(device\)/);
+  assert.match(page, /renderLastAcceptedOfficialResumeSchemaDiagnosticStatus\(device\);/);
+  assert.match(page, /renderLastAcceptedOfficialResumeSchemaDiagnosticStatus\(null\);/);
+  assert.match(page, /LAST_ACCEPTED_RESUME_SCHEMA_DIAGNOSTIC:/);
+  assert.match(page, /historical accepted evidence/i);
+  for (const forbidden of [
+    "last_accepted_official_resume_schema_diagnostic.raw_accessibility_tree",
+    "last_accepted_official_resume_schema_diagnostic.node_shapes",
+    "last_accepted_official_resume_schema_diagnostic.class_name",
+    "last_accepted_official_resume_schema_diagnostic.view_id_token",
+    "last_accepted_official_resume_schema_diagnostic.fingerprint",
+    "last_accepted_official_resume_schema_diagnostic.package_name",
+    "last_accepted_official_resume_schema_diagnostic.command_id",
+    "last_accepted_official_resume_schema_diagnostic.permit_id",
+    "last_accepted_official_resume_schema_diagnostic.source_capture_id",
+    "last_accepted_official_resume_schema_diagnostic.binding_id",
+    "last_accepted_official_resume_schema_diagnostic.capture_id",
+    "last_accepted_official_resume_schema_diagnostic.visible_name",
+    "last_accepted_official_resume_schema_diagnostic.message_text"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the content-free V10 return readiness", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="resumedForegroundChatReturnStatus"/);
   assert.match(page, /function resumedForegroundChatReturnIsSafe\(value\)/);

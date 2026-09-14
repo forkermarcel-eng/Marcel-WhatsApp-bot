@@ -2140,7 +2140,8 @@ test("T5 heartbeat omits a descriptor when freshly locked source shows newer cap
 function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN",
     inboxNavigation = null, officialResumeHandoff = null,
     resumedForegroundChatReturn = null, resumedForegroundChatReturnDiagnostic = null,
-    officialResumeSchemaEvidence = null) {
+    officialResumeSchemaEvidence = null,
+    lastAcceptedOfficialResumeSchemaDiagnostic = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
@@ -2150,6 +2151,8 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
     tinder_official_resume_schema_evidence: officialResumeSchemaEvidence,
+    last_accepted_official_resume_schema_diagnostic:
+      lastAcceptedOfficialResumeSchemaDiagnostic,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic
   };
@@ -2255,7 +2258,7 @@ test("admin status projects only the newest bounded official resume handoff diag
   assert.equal(JSON.stringify(res.body.device).includes("details"), false);
 });
 
-test("admin status projects only the current bounded aggregate resume schema evidence", async () => {
+test("admin status keeps current resume schema evidence current-heartbeat-only", async () => {
   const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
   const evidence = officialResumeSchemaEvidence();
   let sql = "";
@@ -2270,6 +2273,43 @@ test("admin status projects only the current bounded aggregate resume schema evi
   await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
   assert.deepEqual(res.body.device.tinder_official_resume_schema_evidence, evidence);
   assert.match(sql, /tinder_official_resume_schema_evidence/);
+  assert.doesNotMatch(sql, /COALESCE\s*\(/i);
+  assert.equal(res.body.device.last_accepted_official_resume_schema_diagnostic, null);
+});
+
+test("admin status projects separately labelled accepted V2 resume schema evidence without replacing live evidence", async () => {
+  const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const evidence = officialResumeSchemaEvidence();
+  const retained = { handoff, schema_evidence: evidence };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+        "CONNECTED", null, handoff, null, null, null, retained)] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.equal(res.body.device.tinder_official_resume_schema_evidence, null);
+  assert.deepEqual(res.body.device.last_accepted_official_resume_schema_diagnostic, retained);
+  assert.match(sql, /last_accepted_official_resume_schema_diagnostic/);
+  assert.match(sql, /jsonb_build_object\(/i);
+  assert.match(sql, /FROM tinder_official_app_resume_permits resume_permit/i);
+  assert.match(sql, /evidence_heartbeat\.command_id=resume_permit\.command_id/i);
+  assert.match(sql, /resume_permit\.permit_contract_version=2/i);
+  assert.match(sql, /resume_permit\.permit_state='DISPATCHED'/i);
+  assert.match(sql, /resume_permit\.dispatched_at IS NOT NULL/i);
+  assert.match(sql, /evidence_heartbeat\.command_id IS NOT NULL/i);
+  assert.match(sql, /evidence_heartbeat\.result_code='SUCCEEDED'/i);
+  assert.match(sql, /evidence_heartbeat\.http_status=200/i);
+  assert.match(sql, /evidence_heartbeat\.created_at>=resume_permit\.dispatched_at/i);
+  assert.match(sql, /evidence_heartbeat\.created_at<resume_permit\.expires_at/i);
+  assert.match(sql, /ORDER BY evidence_heartbeat\.created_at DESC, evidence_heartbeat\.audit_event_id DESC/i);
+  assert.match(sql, /evidence_heartbeat\.details \? 'tinder_official_resume_schema_evidence'/i);
+  assert.match(sql, /UNREVIEWED_OFFICIAL_SURFACE/);
+  assert.doesNotMatch(sql, /COALESCE\s*\(/i);
+  assert.doesNotMatch(sql, /source_capture_id|binding_id|capture_id|visible_name|message_text/i);
   const serialized = JSON.stringify(res.body.device);
   for (const forbidden of ["raw_accessibility_tree", "node_shapes", "fingerprint",
     "package_name", "view_id_token", "class_name"]) {
@@ -2277,7 +2317,7 @@ test("admin status projects only the current bounded aggregate resume schema evi
   }
 });
 
-test("admin status suppresses malformed, offline, or orphaned resume schema evidence", async () => {
+test("admin status suppresses malformed, offline, or orphaned live and retained resume schema evidence", async () => {
   const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
   const evidence = officialResumeSchemaEvidence();
   for (const [acceptedAt, currentHandoff, candidate] of [
@@ -2294,6 +2334,23 @@ test("admin status suppresses malformed, offline, or orphaned resume schema evid
     const res = responseRecorder();
     await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
     assert.equal(res.body.device.tinder_official_resume_schema_evidence, null);
+  }
+
+  for (const [acceptedAt, currentHandoff, retained] of [
+    [new Date(), handoff, { handoff, schema_evidence: { ...evidence, raw_accessibility_tree: "forbidden" } }],
+    [new Date(), handoff, { handoff: { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" }, schema_evidence: evidence }],
+    [new Date(Date.now() - 91_000), handoff, { handoff, schema_evidence: evidence }],
+    [new Date(), null, { handoff, schema_evidence: evidence }]
+  ]) {
+    const pool = {
+      async query() {
+        return { rows: [statusRow(acceptedAt, T4_RESUME_DEVICE_CAPABILITIES,
+          "CONNECTED", null, currentHandoff, null, null, null, retained)] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.last_accepted_official_resume_schema_diagnostic, null);
   }
 });
 

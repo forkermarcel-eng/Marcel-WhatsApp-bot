@@ -67,7 +67,8 @@ function backendResponse({ ok = true, status = 200 } = {}) {
 
 function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
   officialResumeSchemaEvidence = null, resumedForegroundChatReturn = null,
-  resumedForegroundChatReturnDiagnostic = null, extra = {} } = {}) {
+  resumedForegroundChatReturnDiagnostic = null,
+  lastAcceptedOfficialResumeSchemaDiagnostic = null, extra = {} } = {}) {
   return {
     device_id: DEVICE_ID,
     display_name: "ZTE",
@@ -86,6 +87,8 @@ function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
     tinder_official_resume_schema_evidence: officialResumeSchemaEvidence,
+    last_accepted_official_resume_schema_diagnostic:
+      lastAcceptedOfficialResumeSchemaDiagnostic,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
     ...extra
@@ -220,7 +223,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
   assert.deepEqual(Object.keys(res.body.devices[0]).sort(), [
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
-    "inbox_navigation", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
+    "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
     "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence", "tinder_resumed_foreground_chat_return",
     "tinder_resumed_foreground_chat_return_diagnostic", "tinder_state"
   ]);
@@ -278,6 +281,43 @@ test("device-list proxy allowlists only aggregate resume schema evidence with it
   }
 }));
 
+test("device-list proxy separately allowlists only the accepted historical resume schema pair", async () => withEnvironment(async () => {
+  const officialResumeHandoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const historical = {
+    handoff: officialResumeHandoff,
+    schema_evidence: schemaEvidence()
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({
+          officialResumeHandoff,
+          lastAcceptedOfficialResumeSchemaDiagnostic: historical
+        })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.devices[0].tinder_official_resume_schema_evidence, null);
+  assert.deepEqual(res.body.devices[0].last_accepted_official_resume_schema_diagnostic,
+    historical);
+  const serialized = JSON.stringify(res.body.devices[0]
+    .last_accepted_official_resume_schema_diagnostic);
+  for (const forbidden of ["raw_accessibility_tree", "node_shapes", "fingerprint",
+    "package_name", "view_id_token", "class_name", "command_id", "permit_id",
+    "source_capture_id", "binding_id", "capture_id", "visible_name", "message_text"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+}));
+
 test("device-list proxy suppresses malformed or orphaned resume schema evidence", async () => withEnvironment(async () => {
   const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
   for (const [officialResumeHandoff, officialResumeSchemaEvidence] of [
@@ -301,6 +341,51 @@ test("device-list proxy suppresses malformed or orphaned resume schema evidence"
     await handler(req, res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.devices[0].tinder_official_resume_schema_evidence, null);
+  }
+}));
+
+test("device-list proxy suppresses malformed, offline, or nonterminal historical resume schema pairs", async () => withEnvironment(async () => {
+  const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const validHistorical = { handoff, schema_evidence: schemaEvidence() };
+  for (const device of [
+    deviceStatus({
+      officialResumeHandoff: handoff,
+      lastAcceptedOfficialResumeSchemaDiagnostic: {
+        handoff,
+        schema_evidence: { ...schemaEvidence(), raw_accessibility_tree: "forbidden" }
+      }
+    }),
+    deviceStatus({
+      officialResumeHandoff: handoff,
+      lastAcceptedOfficialResumeSchemaDiagnostic: {
+        handoff: { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" },
+        schema_evidence: schemaEvidence()
+      }
+    }),
+    deviceStatus({ lastAcceptedOfficialResumeSchemaDiagnostic: validHistorical }),
+    deviceStatus({
+      officialResumeHandoff: handoff,
+      lastAcceptedOfficialResumeSchemaDiagnostic: validHistorical,
+      extra: { device_status: "OFFLINE" }
+    })
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          server_time: "2026-09-02T12:00:04.000Z",
+          devices: [device]
+        });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].last_accepted_official_resume_schema_diagnostic, null);
   }
 }));
 

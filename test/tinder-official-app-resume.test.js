@@ -198,6 +198,44 @@ test("official-app resume permits a distinct new V2 authority after terminal V1 
   assert.equal(repository.state.calls.some(call => call.type === "used-source"), false);
 });
 
+test("an offline rejection creates no Resume authority and a later fresh request remains separate", async () => {
+  const deviceRuntime = runtime({ online: false });
+  const historicalPermit = Object.freeze({
+    commandId: "legacy-terminal-command",
+    sourceCaptureId: CAPTURE_ID,
+    permitState: "DISPATCHED",
+    permitContractVersion: 1,
+    expiresAt: "2026-09-08T11:59:00.000Z"
+  });
+  const repository = fixtureRepository({
+    deviceRuntime,
+    historicalPermits: [historicalPermit]
+  });
+
+  assert.deepEqual(await service(repository).queueOfficialAppResume({
+    deviceId: DEVICE_ID,
+    sourceCaptureId: CAPTURE_ID
+  }), {
+    status: TINDER_OFFICIAL_APP_RESUME_STATUS.DEVICE_NOT_READY,
+    reasonCode: TINDER_OFFICIAL_APP_RESUME_REASON.DEVICE_OFFLINE
+  });
+  assert.equal(repository.state.commands.length, 0);
+  assert.equal(repository.state.permits.length, 1);
+  assert.equal(repository.state.permits[0], historicalPermit);
+  assert.deepEqual(repository.state.calls, []);
+
+  deviceRuntime.online = true;
+  assert.deepEqual(await service(repository).queueOfficialAppResume({
+    deviceId: DEVICE_ID,
+    sourceCaptureId: CAPTURE_ID
+  }), { status: TINDER_OFFICIAL_APP_RESUME_STATUS.QUEUED });
+  assert.equal(repository.state.commands.length, 1);
+  assert.equal(repository.state.permits.length, 2);
+  assert.equal(repository.state.permits[0], historicalPermit);
+  assert.equal(repository.state.permits[1].permitContractVersion, 2);
+  assert.notEqual(repository.state.permits[1].commandId, historicalPermit.commandId);
+});
+
 test("official-app resume blocks a new permit while another Resume authority is active", async () => {
   const repository = fixtureRepository({ activeResume: true });
   assert.deepEqual(await service(repository).queueOfficialAppResume({

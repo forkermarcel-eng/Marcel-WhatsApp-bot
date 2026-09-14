@@ -316,6 +316,29 @@ test("official-app resume rejects browser targeting input and fails closed on ma
     conflict: true,
     resume: {
       command_type: "RESUME_OFFICIAL_TINDER_APP",
+      status: "DEVICE_NOT_READY",
+      reason_code: "DEVICE_OFFLINE"
+    },
+    error: "private database detail"
+  }, { ok: false, status: 409 });
+  const deviceNotReady = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { captureId: CAPTURE_ID, operation: "resume-official-app" }
+  }), deviceNotReady);
+  assert.equal(deviceNotReady.statusCode, 409);
+  assert.deepEqual(deviceNotReady.body.resume, {
+    command_type: "RESUME_OFFICIAL_TINDER_APP",
+    status: "DEVICE_NOT_READY",
+    reason_code: "DEVICE_OFFLINE"
+  });
+  assert.equal(JSON.stringify(deviceNotReady.body).includes("private database detail"), false);
+
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    conflict: true,
+    resume: {
+      command_type: "RESUME_OFFICIAL_TINDER_APP",
       status: "PERMIT_CONFLICT",
       reason_code: "UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE"
     },

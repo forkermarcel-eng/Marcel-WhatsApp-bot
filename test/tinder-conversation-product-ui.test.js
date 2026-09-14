@@ -94,8 +94,16 @@ test("selected Conversation detail cannot bypass the confirmed-binding local-att
   assert.doesNotMatch(detailCode, /operation=visible-chat-sync/);
 });
 
-test("a terminal official-app resume status clears only the local latch for a later separate permit", () => {
+test("a fresh official-app resume status clears only the local latch for a later separate request", () => {
   const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
+  const refreshCode = sourceBetween(
+    "async function refreshOfficialAppResumeDetail",
+    "function scheduleOfficialAppResumeDetailRefresh"
+  );
+  const requestCode = sourceBetween(
+    "async function requestOfficialAppResume",
+    "function renderConfirmedConversationDetail"
+  );
 
   assert.match(conversationCode, /function scheduleOfficialAppResumeDetailRefresh\(captureId\)/);
   assert.match(conversationCode, /await selectConfirmedConversation\(captureId\)/);
@@ -104,7 +112,26 @@ test("a terminal official-app resume status clears only the local latch for a la
   assert.match(conversationCode, /officialAppResumeQueuedCaptureId = null/);
   assert.match(conversationCode, /officialAppResumeAttemptedCaptureId = null/);
   assert.match(conversationCode, /scheduleOfficialAppResumeDetailRefresh\(captureId\)/);
-  assert.equal((conversationCode.match(/operation=resume-official-app/g) || []).length, 1);
+  assert.match(
+    conversationCode,
+    /officialAppResumeQueuedCaptureId !== captureId\s*&&\s*officialAppResumeAttemptedCaptureId !== captureId/
+  );
+  assert.match(
+    conversationCode,
+    /catch \(error\) \{[\s\S]*?scheduleOfficialAppResumeDetailRefresh\(captureId\);/
+  );
+  assert.match(
+    conversationCode,
+    /status === "NOT_REQUESTED"\s*&&\s*officialAppResumeAttemptedCaptureId === captureId\s*&&\s*officialAppResumeQueuedCaptureId !== captureId/
+  );
+  assert.match(refreshCode, /status === "PENDING"[\s\S]*?refreshOfficialAppResumeDetail\(captureId, generation, attempt \+ 1\);[\s\S]*?return;/);
+  assert.doesNotMatch(refreshCode, /requestOfficialAppResume\(|operation=resume-official-app|method:\s*"POST"/);
+  assert.ok(
+    refreshCode.indexOf('status === "PENDING"')
+      < refreshCode.indexOf("officialAppResumeQueuedCaptureId = null")
+  );
+  assert.equal((requestCode.match(/operation=resume-official-app/g) || []).length, 1);
+  assert.equal((requestCode.match(/method:\s*"POST"/g) || []).length, 1);
 });
 
 test("verified-chat return status is display-only and cannot become a browser control surface", () => {

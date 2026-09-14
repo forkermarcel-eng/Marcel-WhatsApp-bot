@@ -2591,11 +2591,13 @@
      window.setTimeout(async () => {
        if (generation !== officialAppResumeRefreshGeneration
            || selectedConversationCaptureId !== captureId
-           || officialAppResumeQueuedCaptureId !== captureId) return;
+           || (officialAppResumeQueuedCaptureId !== captureId
+             && officialAppResumeAttemptedCaptureId !== captureId)) return;
        const conversation = await selectConfirmedConversation(captureId);
        if (!conversation || generation !== officialAppResumeRefreshGeneration
            || selectedConversationCaptureId !== captureId
-           || officialAppResumeQueuedCaptureId !== captureId
+           || (officialAppResumeQueuedCaptureId !== captureId
+             && officialAppResumeAttemptedCaptureId !== captureId)
            || !officialAppResumeIsSafe(conversation.official_app_resume)) return;
        const status = conversation.official_app_resume.status;
        if (status === "PENDING") {
@@ -2604,9 +2606,12 @@
          }
          return;
        }
-       // Only a freshly read terminal state clears the in-page click latch.
+       // Only a freshly read safe server state clears the in-page click latch.
       // It never mutates, resets, or reuses the historic server record.
-       if (OFFICIAL_APP_RESUME_TERMINAL_STATUSES.has(status)) {
+       if (OFFICIAL_APP_RESUME_TERMINAL_STATUSES.has(status)
+           || (status === "NOT_REQUESTED"
+             && officialAppResumeAttemptedCaptureId === captureId
+             && officialAppResumeQueuedCaptureId !== captureId)) {
          officialAppResumeQueuedCaptureId = null;
          officialAppResumeAttemptedCaptureId = null;
          renderConfirmedConversationDetail(conversation);
@@ -2681,6 +2686,9 @@
      } catch (error) {
        message.className = "conversation-sync-message error";
        message.textContent = "Die einmalige offizielle Startanfrage wurde nicht angenommen. Kein zweiter Versuch wird vorbereitet.";
+       // A rejected request creates no replacement action. Re-read the current bounded status
+       // before clearing the local latch; this never retries or reuses an earlier request.
+       scheduleOfficialAppResumeDetailRefresh(captureId);
      } finally {
        officialAppResumeBusy = false;
        button.disabled = officialAppResumeAttemptedCaptureId === captureId

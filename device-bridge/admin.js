@@ -16,6 +16,9 @@ import {
   boundedTinderOfficialResumeHandoffDiagnostic
 } from "./tinder-official-resume-handoff-diagnostic-contract.js";
 import {
+  boundedTinderOfficialResumeSchemaEvidence
+} from "./tinder-official-resume-schema-evidence-contract.js";
+import {
   boundedTinderResumedForegroundChatReturnDiagnostic
 } from "./tinder-resumed-foreground-chat-return-diagnostic-contract.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
@@ -118,6 +121,15 @@ export function normalizeAdminOfficialResumeHandoffStatus(value) {
 }
 
 /**
+ * Only the newest accepted online heartbeat may expose this bounded structural
+ * review evidence. The projection is diagnostic-only and has no command or
+ * identity authority.
+ */
+export function normalizeAdminOfficialResumeSchemaEvidence(value) {
+  return boundedTinderOfficialResumeSchemaEvidence(value);
+}
+
+/**
  * V10 publishes only the current, content-free readiness bit through an
  * accepted heartbeat.  It is deliberately not a permit, command, identity,
  * source, binding, capture, header, or local-proof projection.
@@ -134,6 +146,15 @@ export function normalizeAdminResumedForegroundChatReturnDiagnostic(value) {
 
 function statusRow(row, now) {
   const deviceStatus = deriveDeviceStatus(row.last_accepted_heartbeat_at, now);
+  const officialResumeHandoff = deviceStatus === "ONLINE"
+    ? normalizeAdminOfficialResumeHandoffStatus(row.official_resume_handoff)
+    : null;
+  const officialResumeSchemaEvidence = deviceStatus === "ONLINE"
+      && officialResumeHandoff?.stage === "BLOCKED"
+      && officialResumeHandoff?.reason === "UNREVIEWED_OFFICIAL_SURFACE"
+    ? normalizeAdminOfficialResumeSchemaEvidence(
+      row.tinder_official_resume_schema_evidence)
+    : null;
   return {
     device_id: row.device_id,
     display_name: row.display_name,
@@ -160,9 +181,8 @@ function statusRow(row, now) {
     inbox_navigation: deviceStatus === "ONLINE"
       ? normalizeAdminInboxNavigationStatus(row.inbox_navigation)
       : null,
-    official_resume_handoff: deviceStatus === "ONLINE"
-      ? normalizeAdminOfficialResumeHandoffStatus(row.official_resume_handoff)
-      : null,
+    official_resume_handoff: officialResumeHandoff,
+    tinder_official_resume_schema_evidence: officialResumeSchemaEvidence,
     tinder_resumed_foreground_chat_return: deviceStatus === "ONLINE"
       ? normalizeAdminResumedForegroundChatReturnReadiness(
         row.tinder_resumed_foreground_chat_return)
@@ -179,6 +199,8 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
   d.automation_state, d.capabilities, d.configuration_revision,
   latest_heartbeat.details -> 'tinder_inbox_navigation' AS inbox_navigation,
   latest_heartbeat.details -> 'tinder_official_resume_handoff' AS official_resume_handoff,
+  latest_heartbeat.details -> 'tinder_official_resume_schema_evidence'
+    AS tinder_official_resume_schema_evidence,
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return'
     AS tinder_resumed_foreground_chat_return,
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return_diagnostic'
@@ -197,11 +219,14 @@ const STATUS_FROM = `FROM device_bridge_devices d
 export function createAdminDeviceListHandler(pool) {
   return async function adminDeviceListHandler(req, res) {
     try {
-      const now = new Date();
       const result = await pool.query(
         `SELECT ${STATUS_COLUMNS} ${STATUS_FROM}
          ORDER BY d.created_at ASC, d.device_id ASC LIMIT 100`
       );
+      // Capture the status reference after the asynchronous read.  Otherwise
+      // a just-accepted heartbeat can appear to be from the future by a few
+      // milliseconds and be incorrectly projected offline.
+      const now = new Date();
       return res.status(200).json({ ok: true, server_time: now.toISOString(), devices: result.rows.map(row => statusRow(row, now)) });
     } catch (error) {
       console.error("Device Bridge admin device-list read failed.");
@@ -214,13 +239,14 @@ export function createAdminDeviceStatusHandler(pool) {
   return async function adminDeviceStatusHandler(req, res) {
     try {
       if (!isUuidV4(req.params.deviceId)) throw new DeviceBridgeProtocolError(400, "INVALID_IDENTIFIER", "Device identifier is invalid");
-      const now = new Date();
       const result = await pool.query(
         `SELECT ${STATUS_COLUMNS} ${STATUS_FROM}
          WHERE d.device_id=$1`,
         [req.params.deviceId]
       );
       if (!result.rows[0]) throw new DeviceBridgeProtocolError(404, "DEVICE_NOT_FOUND", "Device was not found");
+      // See list handler: avoid an avoidable future-timestamp/offline race.
+      const now = new Date();
       return res.status(200).json({ ok: true, server_time: now.toISOString(), device: statusRow(result.rows[0], now) });
     } catch (error) {
       const status = error instanceof DeviceBridgeProtocolError ? error.status : 500;

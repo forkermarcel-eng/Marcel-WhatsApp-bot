@@ -54,6 +54,9 @@ import {
   boundedTinderOfficialResumeHandoffDiagnostic
 } from "./tinder-official-resume-handoff-diagnostic-contract.js";
 import {
+  boundedTinderOfficialResumeSchemaEvidence
+} from "./tinder-official-resume-schema-evidence-contract.js";
+import {
   boundedTinderResumedForegroundChatReturnDiagnostic
 } from "./tinder-resumed-foreground-chat-return-diagnostic-contract.js";
 
@@ -72,12 +75,13 @@ const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE =
   "RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX";
 const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_PERMIT_TABLE =
   "tinder_resumed_foreground_chat_return_permits";
+const TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE = "tinder_official_app_resume_permits";
 const TINDER_VISIBLE_CHAT_SYNC_PERMIT_TABLE = "tinder_visible_chat_sync_permits";
 const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conversation_v1";
 const HEARTBEAT_FAILURE_STAGE_PROPERTY = "deviceBridgeHeartbeatFailureStage";
 const HEARTBEAT_FAILURE_STAGES = new Set([
   "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION", "V8_RUNTIME_FOUNDATION", "V9_FOUNDATION", "V10_FOUNDATION",
-  "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_EXPIRY",
+  "SCHEMA_EVIDENCE_AUTHORIZATION", "SCHEMA_EVIDENCE_AUDIT", "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_EXPIRY",
   "V9_EXPIRY", "V10_EXPIRY", "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
 ]);
 
@@ -269,6 +273,190 @@ export function isBoundedTinderOfficialResumeHandoffDiagnostic(value) {
 }
 
 /**
+ * Optional post-ACK schema evidence is observational only. It is distinct
+ * from the exact two-enum handoff result and cannot alter a command, permit,
+ * reader, capture, ingress, or readiness decision.
+ */
+export function isBoundedTinderOfficialResumeSchemaEvidence(value) {
+  return boundedTinderOfficialResumeSchemaEvidence(value) !== null;
+}
+
+/**
+ * The aggregate profile is a one-shot diagnostic companion, not a general
+ * heartbeat capability.  Keeping this exact pair in one predicate lets both
+ * the HTTP parser and the transaction/audit boundary reject an orphaned or
+ * relabelled profile before it can become durable state.
+ */
+function isExactOfficialResumeSchemaEvidenceHeartbeat(heartbeat) {
+  if (!heartbeat || typeof heartbeat !== "object"
+      || !Object.hasOwn(heartbeat, "tinder_official_resume_schema_evidence")) {
+    return false;
+  }
+  const handoff = Object.hasOwn(heartbeat, "tinder_official_resume_handoff")
+    ? boundedTinderOfficialResumeHandoffDiagnostic(heartbeat.tinder_official_resume_handoff)
+    : null;
+  return handoff?.stage === "BLOCKED"
+    && handoff.reason === "UNREVIEWED_OFFICIAL_SURFACE"
+    && boundedTinderOfficialResumeSchemaEvidence(
+      heartbeat.tinder_official_resume_schema_evidence) !== null;
+}
+
+function assertExactOfficialResumeSchemaEvidenceHeartbeat(heartbeat) {
+  if (Object.hasOwn(heartbeat || {}, "tinder_official_resume_schema_evidence")
+      && !isExactOfficialResumeSchemaEvidenceHeartbeat(heartbeat)) {
+    throw new DeviceBridgeProtocolError(400, "INVALID_DEVICE_STATE",
+      "Heartbeat official resume schema evidence is invalid");
+  }
+}
+
+function officialResumeSchemaEvidenceAuditDetails(heartbeat) {
+  assertExactOfficialResumeSchemaEvidenceHeartbeat(heartbeat);
+  const evidence = boundedTinderOfficialResumeSchemaEvidence(
+    heartbeat.tinder_official_resume_schema_evidence);
+  if (evidence === null) {
+    throw new DeviceBridgeProtocolError(400, "INVALID_DEVICE_STATE",
+      "Heartbeat official resume schema evidence is invalid");
+  }
+  // This special heartbeat must never piggyback any operational status,
+  // command, fresh-observation material, or unbounded sequencing value into
+  // durable audit data. The audit row itself retains request/device/key/time
+  // provenance without widening this diagnostic profile.
+  return {
+    tinder_official_resume_handoff: {
+      stage: "BLOCKED",
+      reason: "UNREVIEWED_OFFICIAL_SURFACE"
+    },
+    tinder_official_resume_schema_evidence: evidence
+  };
+}
+
+function isOfficialResumeSchemaEvidenceAuthorizationError(error) {
+  return error?.code === "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_NOT_AUTHORIZED"
+    || error?.code === "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ALREADY_REPORTED";
+}
+
+/**
+ * Atomically derive the one current V2 Resume command that authorizes this
+ * diagnostic and append its paired audit record.  The caller already holds
+ * the device row lock, while this statement binds exact-once to the derived
+ * command rather than treating a device as globally consumed.  No Android
+ * self-report can create provenance or widen the command surface.
+ */
+async function persistOfficialResumeSchemaEvidenceAudit(client, {
+  auth, heartbeat, now
+}) {
+  const { deviceId, keyId, requestId } = auth;
+  const capabilities = heartbeat.capabilities;
+  if (!isTinderOfficialAppResumeCapable(capabilities)) {
+    throw new DeviceBridgeProtocolError(409,
+      "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_NOT_AUTHORIZED",
+      "Official resume schema evidence is not authorized");
+  }
+  const details = officialResumeSchemaEvidenceAuditDetails(heartbeat);
+  const result = await client.query(
+    `WITH current_resume_candidates AS (
+       SELECT DISTINCT resume_permit.command_id
+         FROM ${TINDER_OFFICIAL_APP_RESUME_PERMIT_TABLE} resume_permit
+           JOIN device_bridge_commands resume_command
+             ON resume_command.command_id=resume_permit.command_id
+           JOIN device_bridge_command_acks resume_ack
+             ON resume_ack.command_id=resume_command.command_id
+            AND resume_ack.device_id=resume_command.device_id
+           JOIN contact_human_armed_conversation_bindings binding
+             ON binding.binding_id=resume_permit.binding_id
+           JOIN tinder_visible_chat_captures source_capture
+             ON source_capture.capture_id=resume_permit.source_capture_id
+          WHERE resume_permit.device_id=$1
+            AND resume_permit.permit_contract_version=2
+            AND resume_permit.permit_state='DISPATCHED'
+            AND resume_permit.dispatched_at IS NOT NULL
+            AND resume_permit.dispatched_at <= $2
+            AND resume_permit.expires_at>$2
+            AND resume_command.device_id=resume_permit.device_id
+            AND resume_command.command_type='${TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE}'
+            AND resume_command.terminal_status='SUCCEEDED'
+            AND resume_command.payload='{}'::jsonb
+            AND resume_ack.status='SUCCEEDED'
+            AND resume_ack.result='{"official_tinder_app_resume":"INTENT_DISPATCHED"}'::jsonb
+            AND binding.device_id=resume_permit.device_id
+            AND binding.binding_revision=resume_permit.binding_revision
+            AND binding.channel='tinder'
+            AND binding.reference_kind='${TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND}'
+            AND binding.binding_state='CONFIRMED'
+            AND binding.human_verified=TRUE
+            AND source_capture.device_id=binding.device_id
+            AND source_capture.source_package='com.tinder'
+            AND source_capture.capture_safety_status='SAFE'
+            AND source_capture.mapping_status='RESOLVED'
+            AND source_capture.human_review_status='CONFIRMED'
+            AND source_capture.resolved_contact_id=binding.contact_id
+            AND source_capture.capture_revision=(
+              SELECT MAX(newer.capture_revision)
+                FROM tinder_visible_chat_captures newer
+               WHERE newer.device_id=source_capture.device_id
+                 AND newer.runtime_thread_fingerprint=source_capture.runtime_thread_fingerprint
+            )
+            AND EXISTS (
+              SELECT 1
+                FROM contact_human_armed_conversation_binding_permits binding_permit
+               WHERE binding_permit.binding_id=binding.binding_id
+                 AND binding_permit.device_id=binding.device_id
+                 AND binding_permit.binding_revision=binding.binding_revision
+                 AND binding_permit.permit_state='CONSUMED'
+                 AND binding_permit.consumed_capture_id=resume_permit.source_capture_id
+            )
+     ),
+     candidate_summary AS (
+       SELECT COUNT(*)::int AS schema_evidence_candidate_count
+         FROM current_resume_candidates
+     ),
+     prior_evidence AS (
+       SELECT EXISTS (
+         SELECT 1
+           FROM device_bridge_audit_events existing
+           JOIN current_resume_candidates candidate
+             ON candidate.command_id=existing.command_id
+          WHERE existing.device_id=$1
+            AND existing.event_type='HEARTBEAT_ACCEPTED'
+            AND existing.details ? 'tinder_official_resume_schema_evidence'
+       ) AS schema_evidence_already_reported
+     ),
+     paired_audit AS (
+       INSERT INTO device_bridge_audit_events
+         (event_type, request_id, device_id, key_id, command_id, result_code, http_status, details)
+       SELECT 'HEARTBEAT_ACCEPTED',$3,$1,$4,candidate.command_id,'SUCCEEDED',200,$5::jsonb
+         FROM current_resume_candidates candidate
+        WHERE (SELECT schema_evidence_candidate_count FROM candidate_summary)=1
+          AND NOT (SELECT schema_evidence_already_reported FROM prior_evidence)
+       RETURNING audit_event_id
+     )
+     SELECT
+       (SELECT schema_evidence_candidate_count FROM candidate_summary)
+         AS schema_evidence_candidate_count,
+       (SELECT schema_evidence_already_reported FROM prior_evidence)
+         AS schema_evidence_already_reported,
+       EXISTS (SELECT 1 FROM paired_audit) AS schema_evidence_inserted`,
+    [deviceId, now, requestId, keyId, JSON.stringify(details)]
+  );
+  const row = result.rows[0] || {};
+  if (row.schema_evidence_already_reported === true) {
+    throw new DeviceBridgeProtocolError(409,
+      "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ALREADY_REPORTED",
+      "Official resume schema evidence was already reported");
+  }
+  if (row.schema_evidence_candidate_count !== 1) {
+    throw new DeviceBridgeProtocolError(409,
+      "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_NOT_AUTHORIZED",
+      "Official resume schema evidence is not authorized");
+  }
+  if (row.schema_evidence_inserted !== true) {
+    throw new DeviceBridgeProtocolError(500,
+      "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_AUDIT_FAILED",
+      "Official resume schema evidence could not be accepted");
+  }
+}
+
+/**
  * Optional V10 lifecycle evidence is observational only. It must never be
  * consulted by readiness, permit, expiry, or command-selection paths.
  */
@@ -287,6 +475,9 @@ export function isExactTinderResumedForegroundChatReturnReadiness(value) {
 }
 
 function heartbeatAuditDetails(heartbeat) {
+  // Defense in depth for callers that invoke the exported transaction
+  // directly rather than entering through parseAndValidateHeartbeat().
+  assertExactOfficialResumeSchemaEvidenceHeartbeat(heartbeat);
   const details = { sequence: heartbeat.sequence };
   if (Object.hasOwn(heartbeat, "tinder_inbox_navigation")) {
     const navigation = heartbeat.tinder_inbox_navigation;
@@ -568,6 +759,21 @@ export function parseAndValidateHeartbeat(req) {
       && !isBoundedTinderOfficialResumeHandoffDiagnostic(
         body.tinder_official_resume_handoff)) {
     throw invalidHeartbeat("Heartbeat official resume handoff diagnostic is invalid");
+  }
+  if (Object.hasOwn(body, "tinder_official_resume_schema_evidence")
+      && !isBoundedTinderOfficialResumeSchemaEvidence(
+        body.tinder_official_resume_schema_evidence)) {
+    throw invalidHeartbeat("Heartbeat official resume schema evidence is invalid");
+  }
+  // The new aggregate profile is not general Evidence-V2 transport. It may exist
+  // only alongside the exact terminal post-ACK handoff fact that explains why
+  // this separate, observational report was produced.
+  if (Object.hasOwn(body, "tinder_official_resume_schema_evidence")
+      && (!Object.hasOwn(body, "tinder_official_resume_handoff")
+        || body.tinder_official_resume_handoff?.stage !== "BLOCKED"
+        || body.tinder_official_resume_handoff?.reason
+          !== "UNREVIEWED_OFFICIAL_SURFACE")) {
+    throw invalidHeartbeat("Heartbeat official resume schema evidence lacks its terminal handoff fact");
   }
   if (Object.hasOwn(body, "tinder_verified_chat_return")
       && !isExactTinderVerifiedChatReturnReadiness(body.tinder_verified_chat_return)) {
@@ -1140,6 +1346,12 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
   if (typeof inspectResumedForegroundChatReturnFoundation !== "function") {
     throw new TypeError("inspectResumedForegroundChatReturnFoundation must be a function");
   }
+  // The HTTP route parses first, but this exported transaction is also used
+  // by trusted internal callers and tests.  Do not let such a caller persist
+  // a profile without its exact terminal companion fact.
+  assertExactOfficialResumeSchemaEvidenceHeartbeat(heartbeat);
+  const hasOfficialResumeSchemaEvidence = Object.hasOwn(heartbeat || {},
+    "tinder_official_resume_schema_evidence");
   const client = await pool.connect();
   let failureStage = "BEGIN";
   try {
@@ -1170,6 +1382,53 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
     const idempotent = previousSequence !== null && heartbeat.sequence === previousSequence && device.last_heartbeat_body_sha256 === auth.contentSha256;
     if (previousSequence !== null && (heartbeat.sequence < previousSequence || (heartbeat.sequence === previousSequence && !idempotent))) {
       throw new DeviceBridgeProtocolError(409, "HEARTBEAT_SEQUENCE_CONFLICT", "Heartbeat sequence conflicts with the last accepted heartbeat");
+    }
+
+    if (hasOfficialResumeSchemaEvidence) {
+      // The profile is the one expressly authorized diagnostic heartbeat. It
+      // has no action authority: do not inspect/mint/expire a child, select
+      // any command, or even deliver administrative commands in this branch.
+      // The locked device row serializes the exact command-paired audit gate.
+      if (!idempotent) {
+        failureStage = "SCHEMA_EVIDENCE_AUTHORIZATION";
+        if (!isTinderOfficialAppResumeCapable(heartbeat.capabilities)) {
+          throw new DeviceBridgeProtocolError(409,
+            "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_NOT_AUTHORIZED",
+            "Official resume schema evidence is not authorized");
+        }
+      }
+      let acceptedAt = now;
+      if (!idempotent) {
+        failureStage = "DEVICE_UPDATE";
+        await client.query(
+          `UPDATE device_bridge_devices SET
+            app_version_name=$2, app_version_code=$3, manufacturer=$4, model=$5,
+            android_api=$6, abis=$7::jsonb, capabilities=$8::jsonb,
+            bridge_service_state=$9, tinder_state=$10, automation_state='STOPPED',
+            last_heartbeat_sequence=$11, last_heartbeat_body_sha256=$12,
+            last_accepted_heartbeat_at=$13, updated_at=$13
+           WHERE device_id=$1`,
+          [auth.deviceId, heartbeat.app.version_name, heartbeat.app.version_code,
+            heartbeat.device.manufacturer, heartbeat.device.model, heartbeat.device.android_api,
+            JSON.stringify(heartbeat.device.abis), JSON.stringify(heartbeat.capabilities),
+            heartbeat.bridge.service_state, heartbeat.tinder_state, heartbeat.sequence,
+            auth.contentSha256, now]
+        );
+        failureStage = "SCHEMA_EVIDENCE_AUTHORIZATION";
+        try {
+          await persistOfficialResumeSchemaEvidenceAudit(client, { auth, heartbeat, now });
+        } catch (error) {
+          failureStage = isOfficialResumeSchemaEvidenceAuthorizationError(error)
+            ? "SCHEMA_EVIDENCE_AUTHORIZATION"
+            : "SCHEMA_EVIDENCE_AUDIT";
+          throw error;
+        }
+      } else {
+        acceptedAt = new Date(device.last_accepted_heartbeat_at);
+      }
+      failureStage = "COMMIT";
+      await client.query("COMMIT");
+      return heartbeatResponse(now, acceptedAt, []);
     }
 
     failureStage = "V8_FOUNDATION";

@@ -1045,6 +1045,9 @@
        <p class="enrollment-message" id="officialResumeHandoffStatus" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="officialResumeSchemaEvidenceStatus" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
        <p class="enrollment-message" id="resumedForegroundChatReturnStatus" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
@@ -1199,6 +1202,7 @@
       deviceCommandMessage: document.getElementById("deviceCommandMessage"),
       inboxNavigationStatus: document.getElementById("inboxNavigationStatus"),
       officialResumeHandoffStatus: document.getElementById("officialResumeHandoffStatus"),
+      officialResumeSchemaEvidenceStatus: document.getElementById("officialResumeSchemaEvidenceStatus"),
       resumedForegroundChatReturnStatus: document.getElementById("resumedForegroundChatReturnStatus"),
       resumedForegroundChatReturnDiagnostic: document.getElementById("resumedForegroundChatReturnDiagnostic"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
@@ -1306,6 +1310,29 @@
      "CURRENT_ROOT_SCHEDULE_FAILED",
      "INBOX_PREPARATION_REJECTED", "LIFECYCLE_RESET"
    ]);
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_VERSION = "tinder-official-resume-schema-profile-v1";
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_STATUS = "BLOCKED_UNKNOWN_STRUCTURE";
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_MAX_NODES = 128;
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_MAX_DEPTH = 12;
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES = new Set([
+     "TEXT_VIEW", "EDIT_TEXT", "IMAGE_VIEW", "IMAGE_SWITCHER", "RECYCLER_VIEW",
+     "FRAME_LAYOUT", "RELATIVE_LAYOUT", "LINEAR_LAYOUT", "VIEW_GROUP", "VIEW_FLIPPER",
+     "VIEW", "OTHER"
+   ]);
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES = new Set([
+     "ABSENT", "STATIC_TINDER_ID", "REDACTED_OR_INVALID"
+   ]);
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS = [
+     "HEADER_CONTAINER", "HEADER_TITLE_LEAF", "MESSAGE_LIST", "COMPOSER_CONTAINER",
+     "COMPOSER_EDITABLE", "MESSAGE_TEXT_LEAF", "SYSTEM_OR_DATE_LEAF",
+     "MESSAGE_ROW_CONTROL"
+   ];
+   const OFFICIAL_RESUME_SCHEMA_EVIDENCE_RELATION_FLAGS = [
+     "header_before_message_list", "message_list_before_composer",
+     "message_list_has_text_leaf", "composer_has_editable_leaf",
+     "has_clickable_node", "has_long_clickable_node", "has_scrollable_node",
+     "has_text_present_node", "has_content_description_present_node"
+   ];
    const RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_STAGES = new Set([
      "CANDIDATE_ARMED", "RESUME_ACK_ACCEPTED", "CHAT_REPROVED",
      "READY_FOR_HEARTBEAT", "RETURN_ACTION_STAGED", "AWAITING_EXPECTED_CLICK",
@@ -2935,6 +2962,95 @@
        `RESUME_HANDOFF_REASON: ${handoff.reason}`;
    }
 
+   function hasExactKeys(value, fields) {
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|") === [...fields].sort().join("|");
+   }
+
+   function boundedSchemaEvidenceCounts(value, fields, nodeCount, mustSumToNodeCount) {
+     if (!hasExactKeys(value, fields)) return false;
+     let sum = 0;
+     for (const field of fields) {
+       if (!Number.isSafeInteger(value[field]) || value[field] < 0 || value[field] > 128) {
+         return false;
+       }
+       sum += value[field];
+     }
+     return !mustSumToNodeCount || sum === nodeCount;
+   }
+
+   function schemaEvidenceCountDoesNotExceed(value, fields, nodeCount) {
+     return fields.every(field => value[field] <= nodeCount);
+   }
+
+   function officialResumeSchemaEvidenceIsSafe(value) {
+     const topFields = [
+       "evidence_version", "safety_status", "tree_truncated", "visible_node_count",
+       "maximum_visible_depth", "class_family_counts", "view_id_state_counts",
+       "role_counts", "relation_flags"
+     ];
+     if (!hasExactKeys(value, topFields)
+       || value.evidence_version !== OFFICIAL_RESUME_SCHEMA_EVIDENCE_VERSION
+       || value.safety_status !== OFFICIAL_RESUME_SCHEMA_EVIDENCE_STATUS
+       || typeof value.tree_truncated !== "boolean"
+       || !Number.isSafeInteger(value.visible_node_count)
+       || value.visible_node_count < 0 || value.visible_node_count > OFFICIAL_RESUME_SCHEMA_EVIDENCE_MAX_NODES
+       || !Number.isSafeInteger(value.maximum_visible_depth)
+       || value.maximum_visible_depth < 0 || value.maximum_visible_depth > OFFICIAL_RESUME_SCHEMA_EVIDENCE_MAX_DEPTH
+       || !boundedSchemaEvidenceCounts(value.class_family_counts,
+         [...OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES], value.visible_node_count, true)
+       || !boundedSchemaEvidenceCounts(value.view_id_state_counts,
+         [...OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES], value.visible_node_count, true)
+       || !boundedSchemaEvidenceCounts(value.role_counts,
+         OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS, value.visible_node_count, false)
+       || !schemaEvidenceCountDoesNotExceed(value.role_counts,
+         OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS, value.visible_node_count)
+       || !hasExactKeys(value.relation_flags, OFFICIAL_RESUME_SCHEMA_EVIDENCE_RELATION_FLAGS)) {
+       return false;
+     }
+     for (const field of OFFICIAL_RESUME_SCHEMA_EVIDENCE_RELATION_FLAGS) {
+       if (typeof value.relation_flags[field] !== "boolean") return false;
+     }
+     if (value.visible_node_count === 0 && value.maximum_visible_depth !== 0) return false;
+     if ((value.role_counts.HEADER_CONTAINER === 0 || value.role_counts.MESSAGE_LIST === 0)
+       && value.relation_flags.header_before_message_list) return false;
+     if ((value.role_counts.MESSAGE_LIST === 0 || value.role_counts.COMPOSER_CONTAINER === 0)
+       && value.relation_flags.message_list_before_composer) return false;
+     if (value.role_counts.COMPOSER_EDITABLE === 0
+       && value.relation_flags.composer_has_editable_leaf) return false;
+     return value.role_counts.MESSAGE_TEXT_LEAF !== 0
+       || !value.relation_flags.message_list_has_text_leaf;
+   }
+
+   function renderOfficialResumeSchemaEvidenceStatus(device) {
+     const evidence = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.tinder_official_resume_schema_evidence
+       : null;
+     const handoff = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.official_resume_handoff
+       : null;
+     elements.officialResumeSchemaEvidenceStatus.className = "enrollment-message";
+     if (!officialResumeSchemaEvidenceIsSafe(evidence)
+       || !officialResumeHandoffIsSafe(handoff)
+       || handoff.stage !== "BLOCKED"
+       || handoff.reason !== "UNREVIEWED_OFFICIAL_SURFACE") {
+       elements.officialResumeSchemaEvidenceStatus.textContent =
+         "Nicht verfuegbar: kein aktuelles, akzeptiertes Resume-Strukturprofil.";
+       return;
+     }
+     // All values below have passed the fixed local grammar. No raw tree,
+     // class/resource identifier, token, fingerprint, package, text, or
+     // description is rendered.
+     elements.officialResumeSchemaEvidenceStatus.textContent =
+       `RESUME_SCHEMA_EVIDENCE: ${evidence.evidence_version} / ${evidence.safety_status} \u00b7 ` +
+       `TRUNCATED: ${evidence.tree_truncated ? "JA" : "NEIN"} \u00b7 ` +
+       `NODES: ${evidence.visible_node_count} \u00b7 DEPTH: ${evidence.maximum_visible_depth} \u00b7 ` +
+       `CLASS_FAMILIES: ${JSON.stringify(evidence.class_family_counts)} \u00b7 ` +
+       `VIEW_ID_STATES: ${JSON.stringify(evidence.view_id_state_counts)} \u00b7 ` +
+       `ROLES: ${JSON.stringify(evidence.role_counts)} \u00b7 ` +
+       `RELATIONS: ${JSON.stringify(evidence.relation_flags)}`;
+   }
+
    function resumedForegroundChatReturnIsSafe(value) {
      return value && typeof value === "object" && !Array.isArray(value)
        && Object.keys(value).sort().join("|") === "ready"
@@ -3083,6 +3199,7 @@
    function setUnavailableDeviceDetails(value) {
      renderInboxNavigationStatus(null);
      renderOfficialResumeHandoffStatus(null);
+     renderOfficialResumeSchemaEvidenceStatus(null);
      renderResumedForegroundChatReturnStatus(null);
      renderResumedForegroundChatReturnDiagnostic(null);
      setDot(elements.bridgeDot, "info");
@@ -3214,6 +3331,7 @@
        const device = devices[0];
        renderInboxNavigationStatus(device);
        renderOfficialResumeHandoffStatus(device);
+       renderOfficialResumeSchemaEvidenceStatus(device);
        renderResumedForegroundChatReturnStatus(device);
        renderResumedForegroundChatReturnDiagnostic(device);
        const previousDeviceId = selectedDevice?.device_id;

@@ -30,6 +30,11 @@ import {
 } from "./helpers/device-bridge-real-postgres-fixture.js";
 import { T2_DEVICE_CAPABILITIES, T4_RESUME_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
 import { processHeartbeatTransaction } from "../device-bridge/heartbeat.js";
+import {
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES,
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS,
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES
+} from "../device-bridge/tinder-official-resume-schema-evidence-contract.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const INSTALLATION_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
@@ -41,6 +46,48 @@ const DELIVERY_RESUME_COMMAND_ID = "2765e8a7-ef60-42d0-b19d-26e7904390fa";
 const DELIVERY_KEY_ID = "3765e8a7-ef60-42d0-b19d-26e7904390fa";
 const THREAD_FINGERPRINT = "a".repeat(64);
 const CAPTURE_FINGERPRINT = "b".repeat(64);
+
+function boundedCounts(fields, nonZero = {}) {
+  return Object.fromEntries(fields.map(field => [field, nonZero[field] || 0]));
+}
+
+function schemaEvidenceHeartbeat(sequence) {
+  return {
+    ...deliveryHeartbeat(sequence),
+    tinder_official_resume_handoff: {
+      stage: "BLOCKED",
+      reason: "UNREVIEWED_OFFICIAL_SURFACE"
+    },
+    tinder_official_resume_schema_evidence: {
+      evidence_version: "tinder-official-resume-schema-profile-v1",
+      safety_status: "BLOCKED_UNKNOWN_STRUCTURE",
+      tree_truncated: false,
+      visible_node_count: 4,
+      maximum_visible_depth: 3,
+      class_family_counts: boundedCounts(
+        TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES,
+        { TEXT_VIEW: 1, EDIT_TEXT: 1, RECYCLER_VIEW: 1, FRAME_LAYOUT: 1 }),
+      view_id_state_counts: boundedCounts(
+        TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES,
+        { ABSENT: 2, STATIC_TINDER_ID: 2 }),
+      role_counts: boundedCounts(
+        TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS,
+        { HEADER_CONTAINER: 1, MESSAGE_LIST: 1, COMPOSER_CONTAINER: 1,
+          COMPOSER_EDITABLE: 1, MESSAGE_TEXT_LEAF: 1 }),
+      relation_flags: {
+        header_before_message_list: true,
+        message_list_before_composer: true,
+        message_list_has_text_leaf: true,
+        composer_has_editable_leaf: true,
+        has_clickable_node: true,
+        has_long_clickable_node: false,
+        has_scrollable_node: true,
+        has_text_present_node: true,
+        has_content_description_present_node: false
+      }
+    }
+  };
+}
 
 async function withClient(pool, work) {
   const client = await pool.connect();
@@ -255,6 +302,29 @@ async function seedCurrentV2ResumeDeliveryFixture(pool) {
   );
 }
 
+async function markCurrentV2ResumeDeliveredAndAcknowledged(pool) {
+  await pool.query(
+    `UPDATE device_bridge_commands
+        SET terminal_status='SUCCEEDED', terminal_at=NOW()
+      WHERE command_id=$1`,
+    [DELIVERY_RESUME_COMMAND_ID]
+  );
+  await pool.query(
+    `UPDATE tinder_official_app_resume_permits
+        SET permit_state='DISPATCHED', dispatched_at=NOW()
+      WHERE command_id=$1`,
+    [DELIVERY_RESUME_COMMAND_ID]
+  );
+  await pool.query(
+    `INSERT INTO device_bridge_command_acks
+       (command_id, device_id, status, occurred_at, result, error, body_sha256, accepted_at)
+     VALUES ($1,$2,'SUCCEEDED',NOW(),$3::jsonb,NULL,$4,NOW())`,
+    [DELIVERY_RESUME_COMMAND_ID, DEVICE_ID,
+      JSON.stringify({ official_tinder_app_resume: "INTENT_DISPATCHED" }),
+      "c".repeat(64)]
+  );
+}
+
 function deliveryHeartbeat(sequence) {
   return {
     protocol_version: 1,
@@ -413,6 +483,56 @@ test("real loopback heartbeat delivers only a current V2 resume binding snapshot
     const stale = await processHeartbeatTransaction(pool, deliveryAuth(2), deliveryHeartbeat(2), new Date());
     assert.deepEqual(stale.commands, []);
   }, { prefix: "marcel_resume_v2_delivery_revision" });
+});
+
+test("real loopback heartbeat accepts one server-provenanced schema profile and rejects a second", { timeout: 60_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV1Foundation(pool);
+    await migrateTinderOfficialAppResumePermitV2(pool);
+    await seedCurrentV2ResumeDeliveryFixture(pool);
+    await markCurrentV2ResumeDeliveredAndAcknowledged(pool);
+
+    const first = await processHeartbeatTransaction(
+      pool, deliveryAuth(1), schemaEvidenceHeartbeat(1), new Date());
+    assert.deepEqual(first.commands, []);
+    const audit = await pool.query(
+      `SELECT command_id, details
+         FROM device_bridge_audit_events
+        WHERE device_id=$1
+          AND event_type='HEARTBEAT_ACCEPTED'
+          AND details ? 'tinder_official_resume_schema_evidence'`,
+      [DEVICE_ID]
+    );
+    assert.equal(audit.rows.length, 1);
+    assert.equal(audit.rows[0].command_id, DELIVERY_RESUME_COMMAND_ID);
+    assert.deepEqual(audit.rows[0].details, {
+      tinder_official_resume_handoff: {
+        stage: "BLOCKED",
+        reason: "UNREVIEWED_OFFICIAL_SURFACE"
+      },
+      tinder_official_resume_schema_evidence:
+        schemaEvidenceHeartbeat(1).tinder_official_resume_schema_evidence
+    });
+
+    await assert.rejects(
+      () => processHeartbeatTransaction(
+        pool, deliveryAuth(2), schemaEvidenceHeartbeat(2), new Date()),
+      error => error?.code === "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ALREADY_REPORTED"
+        && error?.deviceBridgeHeartbeatFailureStage === "SCHEMA_EVIDENCE_AUTHORIZATION"
+    );
+    const after = await pool.query(
+      `SELECT COUNT(*)::int AS audit_count,
+              (SELECT last_heartbeat_sequence
+                 FROM device_bridge_devices
+                WHERE device_id=$1) AS last_sequence
+         FROM device_bridge_audit_events
+        WHERE device_id=$1
+          AND event_type='HEARTBEAT_ACCEPTED'
+          AND details ? 'tinder_official_resume_schema_evidence'`,
+      [DEVICE_ID]
+    );
+    assert.deepEqual(after.rows[0], { audit_count: 1, last_sequence: "1" });
+  }, { prefix: "marcel_resume_v2_schema_evidence" });
 });
 
 test("real loopback heartbeat omits an expired V2 resume permit even if its command remains live", { timeout: 60_000 }, async () => {

@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import handler from "../api/tinder/device-status.js";
+import {
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES,
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS,
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES
+} from "../device-bridge/tinder-official-resume-schema-evidence-contract.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const COMMAND_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
@@ -61,7 +66,8 @@ function backendResponse({ ok = true, status = 200 } = {}) {
 }
 
 function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
-  resumedForegroundChatReturn = null, resumedForegroundChatReturnDiagnostic = null, extra = {} } = {}) {
+  officialResumeSchemaEvidence = null, resumedForegroundChatReturn = null,
+  resumedForegroundChatReturnDiagnostic = null, extra = {} } = {}) {
   return {
     device_id: DEVICE_ID,
     display_name: "ZTE",
@@ -79,10 +85,47 @@ function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
     configuration_revision: 1,
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
+    tinder_official_resume_schema_evidence: officialResumeSchemaEvidence,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
     ...extra
   };
+}
+
+function schemaEvidenceCounts(fields, values = {}) {
+  return Object.fromEntries(fields.map(field => [field, values[field] || 0]));
+}
+
+function schemaEvidence(overrides = {}) {
+  const value = {
+    evidence_version: "tinder-official-resume-schema-profile-v1",
+    safety_status: "BLOCKED_UNKNOWN_STRUCTURE",
+    tree_truncated: false,
+    visible_node_count: 4,
+    maximum_visible_depth: 3,
+    class_family_counts: schemaEvidenceCounts(
+      TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES,
+      { TEXT_VIEW: 1, EDIT_TEXT: 1, RECYCLER_VIEW: 1, FRAME_LAYOUT: 1 }),
+    view_id_state_counts: schemaEvidenceCounts(
+      TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES,
+      { ABSENT: 2, STATIC_TINDER_ID: 2 }),
+    role_counts: schemaEvidenceCounts(
+      TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS,
+      { HEADER_CONTAINER: 1, MESSAGE_LIST: 1, COMPOSER_CONTAINER: 1,
+        COMPOSER_EDITABLE: 1, MESSAGE_TEXT_LEAF: 1 }),
+    relation_flags: {
+      header_before_message_list: true,
+      message_list_before_composer: true,
+      message_list_has_text_leaf: true,
+      composer_has_editable_leaf: true,
+      has_clickable_node: true,
+      has_long_clickable_node: false,
+      has_scrollable_node: true,
+      has_text_present_node: true,
+      has_content_description_present_node: false
+    }
+  };
+  return { ...value, ...overrides };
 }
 
 async function withEnvironment(run) {
@@ -178,7 +221,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
     "inbox_navigation", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
-    "tinder_manual_gate_capable", "tinder_resumed_foreground_chat_return",
+    "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence", "tinder_resumed_foreground_chat_return",
     "tinder_resumed_foreground_chat_return_diagnostic", "tinder_state"
   ]);
 }));
@@ -204,6 +247,60 @@ test("device-list proxy allowlists the bounded official resume handoff projectio
   assert.deepEqual(res.body.devices[0].official_resume_handoff, officialResumeHandoff);
   for (const forbidden of ["permit", "capture", "binding", "identity", "text", "tree", "payload"]) {
     assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy allowlists only aggregate resume schema evidence with its terminal handoff", async () => withEnvironment(async () => {
+  const officialResumeHandoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const officialResumeSchemaEvidence = schemaEvidence();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ officialResumeHandoff, officialResumeSchemaEvidence })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].tinder_official_resume_schema_evidence,
+    officialResumeSchemaEvidence);
+  const serialized = JSON.stringify(res.body);
+  for (const forbidden of ["raw_accessibility_tree", "node_shapes", "fingerprint",
+    "package_name", "view_id_token", "class_name"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy suppresses malformed or orphaned resume schema evidence", async () => withEnvironment(async () => {
+  const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  for (const [officialResumeHandoff, officialResumeSchemaEvidence] of [
+    [handoff, { ...schemaEvidence(), raw_accessibility_tree: "forbidden" }],
+    [null, schemaEvidence()]
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ officialResumeHandoff, officialResumeSchemaEvidence })]
+        });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].tinder_official_resume_schema_evidence, null);
   }
 }));
 

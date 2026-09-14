@@ -71,6 +71,25 @@ test("Tinder technical diagnostics render only the bounded read-only official re
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
 
+test("Tinder technical diagnostics render only the aggregate official-resume schema evidence", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="officialResumeSchemaEvidenceStatus"/);
+  assert.match(page, /function officialResumeSchemaEvidenceIsSafe\(value\)/);
+  assert.match(page, /OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES/);
+  assert.match(page, /OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS/);
+  assert.match(page, /handoff\.reason !== "UNREVIEWED_OFFICIAL_SURFACE"/);
+  assert.match(page, /renderOfficialResumeSchemaEvidenceStatus\(device\);/);
+  assert.match(page, /renderOfficialResumeSchemaEvidenceStatus\(null\);/);
+  assert.match(page, /textContent =\s*`RESUME_SCHEMA_EVIDENCE:/);
+  for (const forbidden of [
+    "tinder_official_resume_schema_evidence.raw_accessibility_tree",
+    "tinder_official_resume_schema_evidence.node_shapes",
+    "tinder_official_resume_schema_evidence.class_name",
+    "tinder_official_resume_schema_evidence.view_id_token",
+    "tinder_official_resume_schema_evidence.fingerprint",
+    "tinder_official_resume_schema_evidence.package_name"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the content-free V10 return readiness", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="resumedForegroundChatReturnStatus"/);
   assert.match(page, /function resumedForegroundChatReturnIsSafe\(value\)/);

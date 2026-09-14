@@ -36,6 +36,11 @@ import {
   createAdminDeviceListHandler,
   createAdminDeviceStatusHandler
 } from "../device-bridge/admin.js";
+import {
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES,
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS,
+  TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES
+} from "../device-bridge/tinder-official-resume-schema-evidence-contract.js";
 
 const heartbeatSource = fs.readFileSync(
   new URL("../device-bridge/heartbeat.js", import.meta.url),
@@ -95,6 +100,42 @@ function heartbeatPayload(overrides = {}) {
     automation_state: "STOPPED",
     ...overrides
   };
+}
+
+function schemaEvidenceCounts(fields, values = {}) {
+  return Object.fromEntries(fields.map(field => [field, values[field] || 0]));
+}
+
+function officialResumeSchemaEvidence(overrides = {}) {
+  const value = {
+    evidence_version: "tinder-official-resume-schema-profile-v1",
+    safety_status: "BLOCKED_UNKNOWN_STRUCTURE",
+    tree_truncated: false,
+    visible_node_count: 4,
+    maximum_visible_depth: 3,
+    class_family_counts: schemaEvidenceCounts(
+      TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES,
+      { TEXT_VIEW: 1, EDIT_TEXT: 1, RECYCLER_VIEW: 1, FRAME_LAYOUT: 1 }),
+    view_id_state_counts: schemaEvidenceCounts(
+      TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES,
+      { ABSENT: 2, STATIC_TINDER_ID: 2 }),
+    role_counts: schemaEvidenceCounts(
+      TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS,
+      { HEADER_CONTAINER: 1, MESSAGE_LIST: 1, COMPOSER_CONTAINER: 1,
+        COMPOSER_EDITABLE: 1, MESSAGE_TEXT_LEAF: 1 }),
+    relation_flags: {
+      header_before_message_list: true,
+      message_list_before_composer: true,
+      message_list_has_text_leaf: true,
+      composer_has_editable_leaf: true,
+      has_clickable_node: true,
+      has_long_clickable_node: false,
+      has_scrollable_node: true,
+      has_text_present_node: true,
+      has_content_description_present_node: false
+    }
+  };
+  return { ...value, ...overrides };
 }
 
 function heartbeatRequest(payload = heartbeatPayload(), { requestId = REQUEST_ID, keys, now = NOW } = {}) {
@@ -288,7 +329,10 @@ function heartbeatPool({
   activeSweepChild = false, activeSweepParent = false, expiredSweepRows = [],
   activeVerifiedChatReturnPermit = false, expiredVerifiedChatReturnRows = [],
   activeResumedForegroundChatReturnPermit = false,
-  expiredResumedForegroundChatReturnRows = []
+  expiredResumedForegroundChatReturnRows = [],
+  schemaEvidenceAlreadyReported = false,
+  schemaEvidenceCandidateCount = 0,
+  schemaEvidenceAuditFailure = false
 } = {}) {
   const calls = [];
   const state = {
@@ -324,6 +368,24 @@ function heartbeatPool({
       if (sql.includes("INSERT INTO device_bridge_request_nonces")) {
         if (nonceReplay) { const error = new Error("duplicate"); error.code = "23505"; throw error; }
         state.nonceInserts += 1; return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes("schema_evidence_candidate_count")
+          && sql.includes("paired_audit")) {
+        if (schemaEvidenceAuditFailure) {
+          const error = new Error("simulated schema evidence audit failure");
+          error.code = "XX000";
+          throw error;
+        }
+        const inserted = schemaEvidenceCandidateCount === 1 && !schemaEvidenceAlreadyReported;
+        if (inserted) {
+          state.audits += 1;
+          state.schemaEvidenceAudit = { params };
+        }
+        return { rows: [{
+          schema_evidence_candidate_count: schemaEvidenceCandidateCount,
+          schema_evidence_already_reported: schemaEvidenceAlreadyReported,
+          schema_evidence_inserted: inserted
+        }] };
       }
       if (sql.includes("UPDATE device_bridge_devices")) {
         if (failUpdate) {
@@ -573,6 +635,177 @@ test("optional official resume handoff heartbeat diagnostic is exact, content-fr
       error => error.code === "INVALID_DEVICE_STATE"
     );
   }
+});
+
+test("optional official-resume schema evidence is aggregate-only and requires its exact terminal handoff", async () => {
+  const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const evidence = officialResumeSchemaEvidence();
+  const payload = heartbeatPayload({
+    capabilities: T4_RESUME_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED",
+    tinder_official_resume_handoff: handoff,
+    tinder_official_resume_schema_evidence: evidence
+  });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(parseAndValidateHeartbeat(request.req)
+    .tinder_official_resume_schema_evidence, evidence);
+
+  const fake = heartbeatPool({ request, schemaEvidenceCandidateCount: 1 });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.match(audit.sql, /WITH current_resume_candidates/i);
+  assert.match(audit.sql, /JOIN device_bridge_command_acks resume_ack/i);
+  assert.match(audit.sql, /resume_ack\.status='SUCCEEDED'/i);
+  assert.match(audit.sql, /official_tinder_app_resume/i);
+  assert.match(audit.sql, /key_id, command_id, result_code, http_status, details/i);
+  assert.deepEqual(JSON.parse(audit.params[4]), {
+    tinder_official_resume_handoff: handoff,
+    tinder_official_resume_schema_evidence: evidence
+  });
+  assert.deepEqual(response.commands, []);
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  const serialized = JSON.stringify({ audit: audit.params[4], update: update?.params, response });
+  for (const forbidden of ["raw_accessibility_tree", "node_shapes", "fingerprint",
+    "package_name", "view_id_token", "class_name", "sequence"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+
+  for (const invalidPayload of [
+    heartbeatPayload({ tinder_official_resume_schema_evidence: evidence }),
+    heartbeatPayload({
+      tinder_official_resume_handoff: { stage: "BLOCKED", reason: "STRUCTURAL_SAFETY_REJECTED" },
+      tinder_official_resume_schema_evidence: evidence
+    }),
+    heartbeatPayload({
+      tinder_official_resume_handoff: handoff,
+      tinder_official_resume_schema_evidence: { ...evidence, node_shapes: [] }
+    })
+  ]) {
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalidPayload).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
+test("official-resume schema evidence is exact-once, server-provenanced, and action-isolated", async () => {
+  const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const payload = heartbeatPayload({
+    capabilities: T4_RESUME_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED",
+    tinder_official_resume_handoff: handoff,
+    tinder_official_resume_schema_evidence: officialResumeSchemaEvidence(),
+    // A valid fresh observation would normally be able to start V8. The
+    // schema-evidence branch must not consult or consume it.
+    tinder_inbox_navigation: {
+      stage: "INBOX_READY",
+      reason: "NONE",
+      visible_conversation_count: 1,
+      observed_event_count: 1,
+      observation_kind: "REVIEWED_INBOX_READY",
+      observation_nonce: "b4e25555-1111-4111-8111-111111111111"
+    }
+  });
+  const request = heartbeatRequest(payload);
+  const fake = heartbeatPool({
+    request,
+    schemaEvidenceCandidateCount: 1,
+    commands: [commandRow("CONNECT_TINDER", NOW, "d4e25555-1111-4111-8111-111111111111")]
+  });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW,
+    { inspectUnboundInboxConversationSweepFoundation: CANONICAL_V8_FOUNDATION }
+  );
+  assert.deepEqual(response.commands, []);
+  assert.equal(fake.state.createdSweeps.length, 0);
+  assert.equal(fake.state.createdSweepSteps.length, 0);
+  assert.equal(fake.calls.some(call => call.sql.includes("WHERE device_id=$1 AND terminal_status IS NULL")), false);
+
+  const alreadyReported = heartbeatPool({
+    request,
+    schemaEvidenceCandidateCount: 1,
+    schemaEvidenceAlreadyReported: true
+  });
+  await assert.rejects(
+    () => processHeartbeatTransaction(
+      alreadyReported.pool,
+      { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+      payload,
+      NOW
+    ),
+    error => error.code === "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ALREADY_REPORTED"
+      && error.deviceBridgeHeartbeatFailureStage === "SCHEMA_EVIDENCE_AUTHORIZATION"
+  );
+  assert.equal(alreadyReported.state.audits, 0);
+
+  const unprovenanced = heartbeatPool({ request });
+  await assert.rejects(
+    () => processHeartbeatTransaction(
+      unprovenanced.pool,
+      { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+      payload,
+      NOW
+    ),
+    error => error.code === "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_NOT_AUTHORIZED"
+      && error.deviceBridgeHeartbeatFailureStage === "SCHEMA_EVIDENCE_AUTHORIZATION"
+  );
+  assert.equal(unprovenanced.state.audits, 0);
+
+  const ambiguous = heartbeatPool({ request, schemaEvidenceCandidateCount: 2 });
+  await assert.rejects(
+    () => processHeartbeatTransaction(
+      ambiguous.pool,
+      { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+      payload,
+      NOW
+    ),
+    error => error.code === "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_NOT_AUTHORIZED"
+      && error.deviceBridgeHeartbeatFailureStage === "SCHEMA_EVIDENCE_AUTHORIZATION"
+  );
+  assert.equal(ambiguous.state.audits, 0);
+
+  const auditFailure = heartbeatPool({
+    request,
+    schemaEvidenceCandidateCount: 1,
+    schemaEvidenceAuditFailure: true
+  });
+  await assert.rejects(
+    () => processHeartbeatTransaction(
+      auditFailure.pool,
+      { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+      payload,
+      NOW
+    ),
+    error => error?.deviceBridgeHeartbeatFailureStage === "SCHEMA_EVIDENCE_AUDIT"
+  );
+  assert.equal(auditFailure.state.audits, 0);
+  assert.equal(auditFailure.state.rollbacks, 1);
+
+  const t0Payload = heartbeatPayload({
+    tinder_official_resume_handoff: handoff,
+    tinder_official_resume_schema_evidence: officialResumeSchemaEvidence()
+  });
+  const t0Request = heartbeatRequest(t0Payload);
+  const t0 = heartbeatPool({ request: t0Request, schemaEvidenceCandidateCount: 1 });
+  await assert.rejects(
+    () => processHeartbeatTransaction(
+      t0.pool,
+      { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: t0Request.hash },
+      t0Payload,
+      NOW
+    ),
+    error => error.code === "TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_NOT_AUTHORIZED"
+      && error.deviceBridgeHeartbeatFailureStage === "SCHEMA_EVIDENCE_AUTHORIZATION"
+  );
+  assert.equal(t0.state.audits, 0);
 });
 
 test("optional V10 return lifecycle diagnostic is exact, content-free, and cannot select a return command", async () => {
@@ -1906,7 +2139,8 @@ test("T5 heartbeat omits a descriptor when freshly locked source shows newer cap
 
 function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN",
     inboxNavigation = null, officialResumeHandoff = null,
-    resumedForegroundChatReturn = null, resumedForegroundChatReturnDiagnostic = null) {
+    resumedForegroundChatReturn = null, resumedForegroundChatReturnDiagnostic = null,
+    officialResumeSchemaEvidence = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
@@ -1915,6 +2149,7 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     configuration_revision: 1,
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
+    tinder_official_resume_schema_evidence: officialResumeSchemaEvidence,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic
   };
@@ -1933,6 +2168,26 @@ test("admin list and status expose separated states without sensitive key data",
   assert.equal(statusRes.body.device.tinder_manual_gate_capable, false);
   const serialized = JSON.stringify(statusRes.body);
   for (const field of ["public_key", "signature", "enrollment_code", "key_id"]) assert.equal(serialized.includes(field), false);
+});
+
+test("admin list and status classify a heartbeat read after their asynchronous query as online", async () => {
+  let acceptedAt = null;
+  const pool = {
+    async query() {
+      await new Promise(resolve => setTimeout(resolve, 12));
+      acceptedAt = new Date();
+      return { rows: [statusRow(acceptedAt, T4_RESUME_DEVICE_CAPABILITIES, "CONNECTED")] };
+    }
+  };
+  const listRes = responseRecorder();
+  await createAdminDeviceListHandler(pool)({}, listRes);
+  assert.equal(listRes.body.devices[0].device_status, "ONLINE");
+  assert.ok(new Date(listRes.body.server_time).valueOf() >= acceptedAt.valueOf());
+
+  const statusRes = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, statusRes);
+  assert.equal(statusRes.body.device.device_status, "ONLINE");
+  assert.ok(new Date(statusRes.body.server_time).valueOf() >= acceptedAt.valueOf());
 });
 
 test("admin status exposes only the derived T1 capability flag", async () => {
@@ -1998,6 +2253,48 @@ test("admin status projects only the newest bounded official resume handoff diag
   assert.match(sql, /tinder_official_resume_handoff/);
   assert.match(sql, /HEARTBEAT_ACCEPTED/);
   assert.equal(JSON.stringify(res.body.device).includes("details"), false);
+});
+
+test("admin status projects only the current bounded aggregate resume schema evidence", async () => {
+  const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const evidence = officialResumeSchemaEvidence();
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+        "CONNECTED", null, handoff, null, null, evidence)] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.tinder_official_resume_schema_evidence, evidence);
+  assert.match(sql, /tinder_official_resume_schema_evidence/);
+  const serialized = JSON.stringify(res.body.device);
+  for (const forbidden of ["raw_accessibility_tree", "node_shapes", "fingerprint",
+    "package_name", "view_id_token", "class_name"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed, offline, or orphaned resume schema evidence", async () => {
+  const handoff = { stage: "BLOCKED", reason: "UNREVIEWED_OFFICIAL_SURFACE" };
+  const evidence = officialResumeSchemaEvidence();
+  for (const [acceptedAt, currentHandoff, candidate] of [
+    [new Date(), handoff, { ...evidence, raw_accessibility_tree: "forbidden" }],
+    [new Date(Date.now() - 91_000), handoff, evidence],
+    [new Date(), null, evidence]
+  ]) {
+    const pool = {
+      async query() {
+        return { rows: [statusRow(acceptedAt, T4_RESUME_DEVICE_CAPABILITIES,
+          "CONNECTED", null, currentHandoff, null, null, candidate)] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.tinder_official_resume_schema_evidence, null);
+  }
 });
 
 test("admin status projects only the newest content-free V10 return readiness", async () => {

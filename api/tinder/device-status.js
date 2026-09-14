@@ -3,6 +3,9 @@ import {
   boundedTinderOfficialResumeHandoffDiagnostic
 } from "../../device-bridge/tinder-official-resume-handoff-diagnostic-contract.js";
 import {
+  boundedTinderOfficialResumeSchemaEvidence
+} from "../../device-bridge/tinder-official-resume-schema-evidence-contract.js";
+import {
   boundedTinderResumedForegroundChatReturnDiagnostic
 } from "../../device-bridge/tinder-resumed-foreground-chat-return-diagnostic-contract.js";
 
@@ -32,7 +35,8 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "last_heartbeat_accepted_at", "app_version", "app_build", "bridge_service_state",
   "tinder_state", "automation_state", "tinder_manual_gate_capable",
   "tinder_local_conversation_attestation_post_chat_capable", "configuration_revision",
-  "official_resume_handoff", "tinder_resumed_foreground_chat_return",
+  "official_resume_handoff", "tinder_official_resume_schema_evidence",
+  "tinder_resumed_foreground_chat_return",
   "tinder_resumed_foreground_chat_return_diagnostic"
 ]);
 
@@ -122,6 +126,10 @@ function normalizePublicOfficialResumeHandoff(value) {
   return boundedTinderOfficialResumeHandoffDiagnostic(value);
 }
 
+function normalizePublicOfficialResumeSchemaEvidence(value) {
+  return boundedTinderOfficialResumeSchemaEvidence(value);
+}
+
 function normalizePublicResumedForegroundChatReturnReadiness(value) {
   if (value === null || !exactKeys(value, ["ready"]) || typeof value.ready !== "boolean") {
     return null;
@@ -155,6 +163,16 @@ function sanitizePublicDeviceStatus(value) {
     && hasOfficialResumeHandoff
     ? normalizePublicOfficialResumeHandoff(value.official_resume_handoff)
     : null;
+  const hasOfficialResumeSchemaEvidence = Object.hasOwn(
+    value, "tinder_official_resume_schema_evidence"
+  );
+  const officialResumeSchemaEvidence = String(value.device_status || "").toUpperCase()
+      === "ONLINE" && officialResumeHandoff?.stage === "BLOCKED"
+      && officialResumeHandoff?.reason === "UNREVIEWED_OFFICIAL_SURFACE"
+      && hasOfficialResumeSchemaEvidence
+    ? normalizePublicOfficialResumeSchemaEvidence(
+      value.tinder_official_resume_schema_evidence)
+    : null;
   const hasResumedForegroundChatReturn = Object.hasOwn(
     value, "tinder_resumed_foreground_chat_return"
   );
@@ -182,6 +200,7 @@ function sanitizePublicDeviceStatus(value) {
       value.tinder_local_conversation_attestation_post_chat_capable === true,
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
+    tinder_official_resume_schema_evidence: officialResumeSchemaEvidence,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic
   });

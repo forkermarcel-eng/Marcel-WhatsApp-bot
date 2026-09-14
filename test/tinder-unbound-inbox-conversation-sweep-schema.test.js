@@ -33,6 +33,9 @@ import {
 import {
   TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE
 } from "../device-bridge/tinder-verified-chat-return-schema.js";
+import {
+  TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE
+} from "../device-bridge/tinder-resumed-foreground-chat-return-schema.js";
 
 function canonicalV6() {
   return { state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL };
@@ -334,6 +337,47 @@ test("V8 runtime accepts its exact foundation or jointly verified retained V6, V
       }),
       inspectV9Schema: async () => ({
         state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.UPGRADE_REQUIRED
+      }),
+      inspectV10Schema: async () => ({
+        state: TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE.INVALID
+      })
+    }),
+    /runtime schema is not ready/i
+  );
+});
+
+test("V8 runtime retains its own exact catalog under a canonical V10 successor and rejects a partial V10 proof", async () => {
+  const v10Only = {
+    inspectV8Schema: async () => ({
+      state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID
+    }),
+    inspectV9Schema: async () => ({
+      state: TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE.INVALID
+    }),
+    inspectV10Schema: async () => ({
+      state: TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE.CANONICAL
+    })
+  };
+  assert.deepEqual(
+    await inspectTinderUnboundInboxConversationSweepRuntimeSchema({}, {
+      ...v10Only,
+      inspectV8RetainedSchemaForV10: async () => ({
+        state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+      }),
+      inspectV6RetainedSchemaForV10: async () => ({
+        state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL
+      })
+    }),
+    { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RUNTIME_FOUNDATION_STATE.CANONICAL }
+  );
+  await assert.rejects(
+    () => assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {
+      ...v10Only,
+      inspectV8RetainedSchemaForV10: async () => ({
+        state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL
+      }),
+      inspectV6RetainedSchemaForV10: async () => ({
+        state: TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.INVALID
       })
     }),
     /runtime schema is not ready/i

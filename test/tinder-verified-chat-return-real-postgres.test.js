@@ -27,6 +27,16 @@ import {
 import {
   runTinderVerifiedChatReturnPreflightCli
 } from "../scripts/preflight-tinder-verified-chat-return.js";
+import {
+  assertTinderResumedForegroundChatReturnSchemaReady
+} from "../device-bridge/tinder-resumed-foreground-chat-return-schema.js";
+import {
+  migrateTinderResumedForegroundChatReturnFoundation,
+  validateTinderResumedForegroundChatReturnPreDdl
+} from "../device-bridge/tinder-resumed-foreground-chat-return-migration.js";
+import {
+  runTinderResumedForegroundChatReturnPreflightCli
+} from "../scripts/preflight-tinder-resumed-foreground-chat-return.js";
 
 /*
  * Opt-in only: the fixture itself refuses anything except the explicitly
@@ -68,6 +78,12 @@ async function prepareV8Foundation(pool, { createDeviceBridgeLegacyRealPostgresF
   await migrateTinderLocalConversationAttestation(pool);
   const v8 = await migrateTinderUnboundInboxConversationSweepFoundation(pool);
   assert.equal(v8.migrated, true);
+}
+
+async function prepareV9Foundation(pool, fixture) {
+  await prepareV8Foundation(pool, fixture);
+  const v9 = await migrateTinderVerifiedChatReturnFoundation(pool);
+  assert.equal(v9.migrated, true);
 }
 
 function tracePool(pool) {
@@ -155,4 +171,75 @@ test("real loopback V9 CLI preflight is repeatable-read/read-only, rollback-only
     assert.equal(trace.records.at(-1)?.sql.trim(), "ROLLBACK");
     assert.equal(trace.records.some(record => /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|LOCK)\b/i.test(record.sql)), false);
   }, { prefix: "marcel_verified_return_v9_preflight" });
+});
+
+test("real loopback PostgreSQL applies V9 -> V10, postchecks canonical, commits, and retains V8 runtime safety", {
+  timeout: 60_000,
+  skip: !REAL_PG_TEST_URL_CONFIGURED && "DEVICE_BRIDGE_REAL_PG_TEST_URL is not configured"
+}, async () => {
+  const fixture = await loopbackFixture();
+  await fixture.withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV9Foundation(pool, fixture);
+
+    assert.deepEqual(await validateTinderResumedForegroundChatReturnPreDdl(pool), {
+      migrated: false,
+      preflight: { foundation: { state: "UPGRADE_REQUIRED" }, mutate: true }
+    });
+
+    assert.deepEqual(await migrateTinderResumedForegroundChatReturnFoundation(pool), {
+      migrated: true,
+      preflight: { foundation: { state: "UPGRADE_REQUIRED" }, mutate: true }
+    });
+
+    const client = await pool.connect();
+    try {
+      await assertTinderResumedForegroundChatReturnSchemaReady(client);
+      await assertTinderUnboundInboxConversationSweepRuntimeSchemaReady(client);
+    } finally {
+      client.release();
+    }
+
+    assert.deepEqual(await validateTinderResumedForegroundChatReturnPreDdl(pool), {
+      migrated: false,
+      preflight: { foundation: { state: "CANONICAL" }, mutate: false }
+    });
+  }, { prefix: "marcel_resumed_foreground_return_v10" });
+});
+
+test("real loopback V10 CLI preflight is repeatable-read/read-only, rollback-only, and performs no DDL or locks", {
+  timeout: 60_000,
+  skip: !REAL_PG_TEST_URL_CONFIGURED && "DEVICE_BRIDGE_REAL_PG_TEST_URL is not configured"
+}, async () => {
+  const fixture = await loopbackFixture();
+  await fixture.withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV9Foundation(pool, fixture);
+    await migrateTinderResumedForegroundChatReturnFoundation(pool);
+
+    const trace = tracePool(pool);
+    const result = await runTinderResumedForegroundChatReturnPreflightCli({
+      environment: { DATABASE_URL: fixture.localDeviceBridgeRealPostgresTestUrl().toString() },
+      createPool: async () => trace,
+      logger: { log() {}, error() {} }
+    });
+
+    assert.deepEqual(result, {
+      ok: true,
+      reason: "ALREADY_CANONICAL",
+      foundation_state: "CANONICAL",
+      migration_required: false,
+      transaction: "READ_ONLY_REPEATABLE_READ",
+      rollback: "COMPLETED",
+      stage: "RESULT_VALIDATION"
+    });
+    assert.equal(trace.records[0]?.sql.trim(), "BEGIN");
+    assert.equal(
+      trace.records[1]?.sql.trim(),
+      "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+    );
+    assert.equal(trace.records.at(-1)?.sql.trim(), "ROLLBACK");
+    assert.equal(
+      trace.records.some(record => /\b(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|LOCK)\b/i.test(record.sql)),
+      false
+    );
+  }, { prefix: "marcel_resumed_foreground_return_v10_preflight" });
 });

@@ -21,6 +21,7 @@ import { registerTinderLocalConversationAttestationIngress } from "./device-brid
 import { registerTinderUnboundInboxConversationSweepTranscriptIngress } from "./device-bridge/tinder-unbound-inbox-conversation-sweep-ingress.js";
 import { registerTinderUnboundInboxConversationSweepReturnIngress } from "./device-bridge/tinder-unbound-inbox-conversation-sweep-return-ingress.js";
 import { registerTinderVerifiedChatReturnIngress } from "./device-bridge/tinder-verified-chat-return-ingress.js";
+import { registerTinderResumedForegroundChatReturnIngress } from "./device-bridge/tinder-resumed-foreground-chat-return-ingress.js";
 import { registerTinderCaptureRoutes } from "./device-bridge/tinder-capture-routes.js";
 import { registerTinderDraftRoutes } from "./device-bridge/tinder-draft-routes.js";
 import { registerTinderManualSendRoutes } from "./device-bridge/tinder-manual-send-routes.js";
@@ -8481,6 +8482,7 @@ registerTinderLocalConversationAttestationIngress({ app, pool });
 registerTinderUnboundInboxConversationSweepTranscriptIngress({ app, pool });
 registerTinderUnboundInboxConversationSweepReturnIngress({ app, pool });
 registerTinderVerifiedChatReturnIngress({ app, pool });
+registerTinderResumedForegroundChatReturnIngress({ app, pool });
 
 registerTinderCaptureRoutes({
   app,

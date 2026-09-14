@@ -1,0 +1,23 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { getTinderResumedForegroundChatReturnMigrationFailureDiagnostic, migrateTinderResumedForegroundChatReturnFoundation, TINDER_RESUMED_FOREGROUND_CHAT_RETURN_MIGRATION_DIAGNOSTIC_REASONS, TINDER_RESUMED_FOREGROUND_CHAT_RETURN_MIGRATION_DIAGNOSTIC_STAGES } from "../device-bridge/tinder-resumed-foreground-chat-return-migration.js";
+
+const STAGES = new Set(["CLI_ARGUMENT_VALIDATION","ENVIRONMENT_VALIDATION","COMMIT_CONFIRMED",...TINDER_RESUMED_FOREGROUND_CHAT_RETURN_MIGRATION_DIAGNOSTIC_STAGES]);
+const CODES = new Set(["APPLY_REQUIRED","DATABASE_URL_REQUIRED","DATABASE_CONNECTION_FAILED","MIGRATION_SOURCE_INVALID","MIGRATION_APPLIED","ALREADY_CANONICAL","ADVISORY_LOCK_UNAVAILABLE","LOCK_TIMEOUT","COMMIT_OUTCOME_UNRESOLVED","CLEANUP_FAILED","DATABASE_OPERATION_FAILED"]);
+const REASONS = new Set(TINDER_RESUMED_FOREGROUND_CHAT_RETURN_MIGRATION_DIAGNOSTIC_REASONS);
+const TRANSACTIONS = new Set(["NOT_STARTED","STARTED","COMMITTED","COMMIT_OUTCOME_UNKNOWN","UNRESOLVED"]);
+const ROLLBACKS = new Set(["NOT_ATTEMPTED","COMPLETED","FAILED","UNRESOLVED"]);
+function diagnostic(value, fallback = {}) { return { stage: STAGES.has(value?.stage) ? value.stage : fallback.stage || "UNKNOWN", code: CODES.has(value?.code) ? value.code : fallback.code || "DATABASE_OPERATION_FAILED", transaction: TRANSACTIONS.has(value?.transaction) ? value.transaction : fallback.transaction || "UNRESOLVED", rollback: ROLLBACKS.has(value?.rollback) ? value.rollback : fallback.rollback || "UNRESOLVED", ddl_started: typeof value?.ddl_started === "boolean" ? value.ddl_started : fallback.ddl_started ?? "UNRESOLVED", ...(REASONS.has(value?.reason) ? { reason: value.reason } : {}) }; }
+function log(logger, value) { const d = diagnostic(value); logger.error(`Tinder resumed foreground chat return migration diagnostic: stage=${d.stage} code=${d.code} transaction=${d.transaction} rollback=${d.rollback} ddl_started=${d.ddl_started}${d.reason ? ` reason=${d.reason}` : ""}`); }
+export async function runTinderResumedForegroundChatReturnMigrationCli({ argv = process.argv.slice(2), environment = process.env, createPool = async options => { const { default: pg } = await import("pg"); return new pg.Pool(options); }, migrate = migrateTinderResumedForegroundChatReturnFoundation, getFailureDiagnostic = getTinderResumedForegroundChatReturnMigrationFailureDiagnostic, logger = console } = {}) {
+  if (!argv.includes("--apply")) { logger.error("Refusing Tinder resumed foreground chat return migration without --apply."); log(logger, { stage: "CLI_ARGUMENT_VALIDATION", code: "APPLY_REQUIRED", transaction: "NOT_STARTED", rollback: "NOT_ATTEMPTED", ddl_started: false }); return false; }
+  if (!environment.DATABASE_URL) { logger.error("Tinder resumed foreground chat return migration requires DATABASE_URL."); log(logger, { stage: "ENVIRONMENT_VALIDATION", code: "DATABASE_URL_REQUIRED", transaction: "NOT_STARTED", rollback: "NOT_ATTEMPTED", ddl_started: false }); return false; }
+  let pool; let started = false; let committed = false; let ddlStarted = "UNRESOLVED"; let output; let failure;
+  try { pool = await createPool({ connectionString: environment.DATABASE_URL }); started = true; output = await migrate(pool); committed = true; ddlStarted = output?.migrated === true; } catch (error) { failure = getFailureDiagnostic(error) || (started ? { stage: "UNKNOWN", code: "DATABASE_OPERATION_FAILED", transaction: "UNRESOLVED", rollback: "UNRESOLVED", ddl_started: "UNRESOLVED" } : { stage: "DATABASE_CONNECTION", code: "DATABASE_CONNECTION_FAILED", transaction: "NOT_STARTED", rollback: "NOT_ATTEMPTED", ddl_started: false }); }
+  try { await pool?.end(); } catch { if (!failure) failure = { stage: "CLEANUP", code: "CLEANUP_FAILED", transaction: committed ? "COMMITTED" : started ? "UNRESOLVED" : "NOT_STARTED", rollback: "NOT_ATTEMPTED", ddl_started: ddlStarted }; }
+  if (failure) { logger.error("Tinder resumed foreground chat return migration failed."); log(logger, failure); return false; }
+  logger.log(output.migrated ? "Tinder resumed foreground chat return migration completed." : "Tinder resumed foreground chat return foundation already canonical.");
+  logger.log(`Tinder resumed foreground chat return migration diagnostic: stage=COMMIT_CONFIRMED code=${output.migrated ? "MIGRATION_APPLIED" : "ALREADY_CANONICAL"} transaction=COMMITTED rollback=NOT_ATTEMPTED ddl_started=${output.migrated === true}`); return true;
+}
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
+if (invokedPath === fileURLToPath(import.meta.url)) { const success = await runTinderResumedForegroundChatReturnMigrationCli(); if (!success) process.exitCode = 1; }

@@ -12,6 +12,7 @@ import {
   T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -45,6 +46,7 @@ const NOW = new Date("2026-09-01T12:34:56.000Z");
 const CANONICAL_V8_FOUNDATION = async () => ({ state: "CANONICAL" });
 const UPGRADE_REQUIRED_V8_FOUNDATION = async () => ({ state: "UPGRADE_REQUIRED" });
 const UPGRADE_REQUIRED_V9_FOUNDATION = async () => ({ state: "UPGRADE_REQUIRED" });
+const UPGRADE_REQUIRED_V10_FOUNDATION = async () => ({ state: "UPGRADE_REQUIRED" });
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
 const REQUEST_ID = "d2675347-0888-4548-9feb-ae4d71a972cf";
@@ -60,6 +62,7 @@ async function processHeartbeatTransaction(pool, auth, heartbeat, now, options =
     inspectUnboundInboxConversationSweepFoundation: inspectV8Foundation = UPGRADE_REQUIRED_V8_FOUNDATION,
     inspectUnboundInboxConversationSweepRuntimeFoundation,
     inspectVerifiedChatReturnFoundation = UPGRADE_REQUIRED_V9_FOUNDATION,
+    inspectResumedForegroundChatReturnFoundation = UPGRADE_REQUIRED_V10_FOUNDATION,
     ...otherOptions
   } = options;
   return processHeartbeatTransactionRaw(pool, auth, heartbeat, now, {
@@ -74,7 +77,8 @@ async function processHeartbeatTransaction(pool, auth, heartbeat, now, options =
     // Most fixtures intentionally model the predecessor catalog only. A V9
     // upgrade-required response preserves that historical command surface;
     // V9-specific tests inject CANONICAL explicitly.
-    inspectVerifiedChatReturnFoundation
+    inspectVerifiedChatReturnFoundation,
+    inspectResumedForegroundChatReturnFoundation
   });
 }
 
@@ -282,13 +286,15 @@ function heartbeatPool({
   unboundInboxSweepFoundation = false, sweepRuntime = null,
   priorFreshInboxObservation = false, persistedSweepObservation = false,
   activeSweepChild = false, activeSweepParent = false, expiredSweepRows = [],
-  activeVerifiedChatReturnPermit = false, expiredVerifiedChatReturnRows = []
+  activeVerifiedChatReturnPermit = false, expiredVerifiedChatReturnRows = [],
+  activeResumedForegroundChatReturnPermit = false,
+  expiredResumedForegroundChatReturnRows = []
 } = {}) {
   const calls = [];
   const state = {
     updates: 0, audits: 0, commits: 0, rollbacks: 0, nonceInserts: 0, hydrationQueries: 0,
     queuedSweepCommands: [], createdSweeps: [], createdSweepSteps: [], sweepAudits: [],
-    verifiedChatReturnAudits: []
+    verifiedChatReturnAudits: [], resumedForegroundChatReturnAudits: []
   };
   const authRow = {
     device_id: DEVICE_ID, key_id: KEY_ID, enrollment_state: "ACTIVE",
@@ -352,12 +358,23 @@ function heartbeatPool({
         state.verifiedChatReturnAudits.push({ params });
         return { rows: [{ audit_id: params[0] }] };
       }
+      if (sql.includes("UPDATE tinder_resumed_foreground_chat_return_permits")
+          && sql.includes("RETURNING command_id, device_id")) {
+        return { rows: expiredResumedForegroundChatReturnRows };
+      }
+      if (sql.includes("INSERT INTO tinder_resumed_foreground_chat_return_audit")) {
+        state.resumedForegroundChatReturnAudits.push({ params });
+        return { rows: [{ audit_id: params[0] }] };
+      }
       if (sql.includes("FROM tinder_unbound_inbox_conversation_sweeps")
           && sql.includes("AS active")) {
         return { rows: [{ active: activeSweepParent }] };
       }
       if (sql.includes("FROM tinder_verified_chat_return_permits") && sql.includes("AS active")) {
         return { rows: [{ active: activeVerifiedChatReturnPermit }] };
+      }
+      if (sql.includes("FROM tinder_resumed_foreground_chat_return_permits") && sql.includes("AS active")) {
+        return { rows: [{ active: activeResumedForegroundChatReturnPermit }] };
       }
       if (sql.includes("AS active") && (sql.includes("permit_state") || sql.includes("sweep_state"))) {
         return { rows: [{ active: false }] };
@@ -397,8 +414,12 @@ function heartbeatPool({
           && sql.includes("RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT");
         const deliversVerifiedChatReturn = deliversUnboundInboxSweep
           && sql.includes("RETURN_TINDER_VERIFIED_CHAT_TO_INBOX");
+        const deliversResumedForegroundChatReturn = deliversVerifiedChatReturn
+          && sql.includes("RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX");
         const allowed = explicitlyAdminOnly
           ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE"])
+          : deliversResumedForegroundChatReturn
+          ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SYNC_TINDER_VISIBLE_CHAT", "RESUME_OFFICIAL_TINDER_APP", "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT", "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT", "RETURN_TINDER_VERIFIED_CHAT_TO_INBOX", "RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX"])
           : deliversVerifiedChatReturn
           ? new Set(["PING", "REQUEST_STATUS", "STOP_BRIDGE", "CONNECT_TINDER", "DISCONNECT_TINDER", "ARM_TINDER_CONVERSATION_BINDING", "SYNC_TINDER_VISIBLE_CHAT", "RESUME_OFFICIAL_TINDER_APP", "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION", "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT", "RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT", "RETURN_TINDER_VERIFIED_CHAT_TO_INBOX"])
           : deliversUnboundInboxSweep
@@ -1398,6 +1419,112 @@ test("V9 delivers only on an exact same-heartbeat readiness bit and audits no sc
       error => error.code === "INVALID_DEVICE_STATE"
     );
   }
+});
+
+test("V10 delivers only on an exact same-heartbeat identity-free readiness bit", async () => {
+  const returnCommandId = "50444444-4444-4444-8444-444444444444";
+  const capabilities =
+    T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES;
+  const payload = heartbeatPayload({
+    capabilities,
+    tinder_state: "CONNECTED",
+    tinder_resumed_foreground_chat_return: { ready: true }
+  });
+  const request = heartbeatRequest(payload);
+  const staged = commandRow(
+    "RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX",
+    NOW,
+    returnCommandId
+  );
+  const fake = heartbeatPool({ request, commands: [staged] });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW,
+    {
+      inspectUnboundInboxConversationSweepFoundation: CANONICAL_V8_FOUNDATION,
+      inspectUnboundInboxConversationSweepRuntimeFoundation: async () => ({ state: "CANONICAL" }),
+      inspectVerifiedChatReturnFoundation: async () => ({ state: "INVALID" }),
+      inspectResumedForegroundChatReturnFoundation: async () => ({ state: "CANONICAL" })
+    }
+  );
+  assert.deepEqual(response.commands, [{
+    command_id: returnCommandId,
+    protocol_version: 1,
+    type: "RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX",
+    issued_at: NOW.toISOString(),
+    expires_at: new Date(NOW.valueOf() + 300_000).toISOString(),
+    configuration_revision: 1,
+    payload: {}
+  }]);
+  const audit = fake.calls.find(call => String(call.sql).includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_resumed_foreground_chat_return: { ready: true }
+  });
+  const selection = fake.calls.find(call => String(call.sql).includes("FROM device_bridge_commands")
+    && String(call.sql).includes("RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX"));
+  assert.match(String(selection?.sql), /return_permit\.permit_state='ISSUED'/);
+  assert.match(String(selection?.sql), /resume_permit\.permit_state='DISPATCHED'/);
+  const v10Predicate = String(selection?.sql).slice(
+    String(selection?.sql).indexOf("command_type <> 'RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX'")
+  );
+  assert.doesNotMatch(
+    v10Predicate,
+    /binding_revision|source_capture|capture_fingerprint|thread_fingerprint/i
+  );
+  assert.equal(JSON.stringify(response).match(/source_capture|binding_revision|resume_command|fingerprint|message/i), null);
+
+  const withheldPayload = heartbeatPayload({ capabilities, tinder_state: "CONNECTED" });
+  const withheldRequest = heartbeatRequest(withheldPayload, {
+    requestId: "51444444-4444-4444-8444-444444444444"
+  });
+  const withheld = heartbeatPool({ request: withheldRequest, commands: [staged] });
+  const withheldResponse = await processHeartbeatTransaction(
+    withheld.pool,
+    {
+      deviceId: DEVICE_ID,
+      keyId: KEY_ID,
+      requestId: "51444444-4444-4444-8444-444444444444",
+      contentSha256: withheldRequest.hash
+    },
+    withheldPayload,
+    NOW,
+    {
+      inspectUnboundInboxConversationSweepFoundation: CANONICAL_V8_FOUNDATION,
+      inspectUnboundInboxConversationSweepRuntimeFoundation: async () => ({ state: "CANONICAL" }),
+      inspectVerifiedChatReturnFoundation: async () => ({ state: "INVALID" }),
+      inspectResumedForegroundChatReturnFoundation: async () => ({ state: "CANONICAL" })
+    }
+  );
+  assert.deepEqual(withheldResponse.commands, []);
+
+  for (const tinder_resumed_foreground_chat_return of [
+    {},
+    { ready: "true" },
+    { ready: true, extra: false },
+    null
+  ]) {
+    const invalid = heartbeatPayload({
+      capabilities,
+      tinder_state: "CONNECTED",
+      tinder_resumed_foreground_chat_return
+    });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+  assert.throws(
+    () => parseAndValidateHeartbeat(heartbeatRequest(heartbeatPayload({
+      capabilities,
+      tinder_state: "CONNECTED",
+      tinder_verified_chat_return: { ready: true },
+      tinder_resumed_foreground_chat_return: { ready: true }
+    })).req),
+    error => error.code === "INVALID_DEVICE_STATE"
+  );
 });
 
 test("V9 expiry is terminalized and content-free audited before command selection", async () => {

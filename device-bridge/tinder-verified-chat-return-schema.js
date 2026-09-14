@@ -355,6 +355,20 @@ function canonicalCatalog({ relations, columns, indexes, triggers, constraints }
     );
 }
 
+/**
+ * Reads only the retained V9 relation contract.  A later successor must use
+ * this narrow catalog proof rather than treating V9's version-exact command
+ * inspector as forward compatible.
+ */
+export async function inspectTinderVerifiedChatReturnCatalog(client) {
+  const relations = await readRelationRows(client);
+  const columns = await readColumnRows(client);
+  const indexes = await readIndexRows(client);
+  const constraints = await readTinderFoundationConstraints(client, TARGET_RELATIONS);
+  const triggers = await readTriggerRows(client);
+  return canonicalCatalog({ relations, columns, indexes, triggers, constraints });
+}
+
 /** Reads exact V9 catalog facts only. No DDL, data read, lock, or mutation. */
 export async function inspectTinderVerifiedChatReturnSchema(client, {
   inspectV8Schema = inspectTinderUnboundInboxConversationSweepSchema,

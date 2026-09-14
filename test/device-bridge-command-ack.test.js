@@ -23,6 +23,7 @@ import {
   T4_RESUME_ATTESTATION_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES,
   T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES,
+  T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
   T5_DEVICE_CAPABILITIES,
   canonicalRequest,
   sha256Hex
@@ -130,7 +131,8 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
   deviceState = "ACTIVE", deviceRevoked = false, keyRevoked = false, missingCommand = false,
   nonceReplay = false, failAudit = false, capabilities = T0_DEVICE_CAPABILITIES,
   commandPayload = {}, tinderIntent = null, visibleChatSyncPermit = null,
-  officialAppResumePermit = null, attestationBootstrap = null } = {}) {
+  officialAppResumePermit = null, attestationBootstrap = null,
+  resumedForegroundChatReturnPermit = null } = {}) {
   const calls = [];
   const state = {
     nonce: 0, ackInserts: 0, commandUpdates: 0, audits: 0, commits: 0, rollbacks: 0,
@@ -138,7 +140,10 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
     visibleChatSyncPermit: visibleChatSyncPermit ? { ...visibleChatSyncPermit } : null,
     visibleChatSyncPermitUpdates: 0,
     officialAppResumePermit: officialAppResumePermit ? { ...officialAppResumePermit } : null,
-    officialAppResumePermitUpdates: 0
+    officialAppResumePermitUpdates: 0,
+    resumedForegroundChatReturnPermit: resumedForegroundChatReturnPermit
+      ? { ...resumedForegroundChatReturnPermit } : null,
+    resumedForegroundChatReturnAudits: 0
   };
   const authRow = {
     device_id: DEVICE_ID, key_id: KEY_ID, enrollment_state: "ACTIVE", device_revoked_at: null,
@@ -182,7 +187,8 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
         state.visibleChatSyncPermitUpdates += 1;
         return { rows: [{ command_id: COMMAND_ID }] };
       }
-      if (sql.includes("FROM tinder_official_app_resume_permits") && sql.includes("FOR UPDATE")) {
+      if (sql.includes("FROM tinder_official_app_resume_permits") && sql.includes("FOR UPDATE")
+          && !sql.includes("JOIN device_bridge_commands command")) {
         return { rows: state.officialAppResumePermit ? [{ ...state.officialAppResumePermit }] : [] };
       }
       if (sql.includes("UPDATE tinder_official_app_resume_permits")) {
@@ -192,6 +198,38 @@ function ackPool({ request, history = [], terminalStatus = null, commandDeviceId
         state.officialAppResumePermit.closed_at = params[3];
         state.officialAppResumePermitUpdates += 1;
         return { rows: [{ command_id: COMMAND_ID }] };
+      }
+      if (sql.includes("UPDATE tinder_resumed_foreground_chat_return_permits")) {
+        return { rows: [] };
+      }
+      if (sql.includes("FROM tinder_official_app_resume_permits resume")
+          && sql.includes("JOIN device_bridge_commands command")) {
+        return { rows: [{
+          command_id: COMMAND_ID,
+          expires_at: new Date(NOW.valueOf() + 60_000).toISOString()
+        }] };
+      }
+      if (sql.includes("SELECT command_id FROM tinder_resumed_foreground_chat_return_permits")) {
+        return { rows: state.resumedForegroundChatReturnPermit
+          ? [{ command_id: state.resumedForegroundChatReturnPermit.command_id }] : [] };
+      }
+      if (sql.includes("INSERT INTO device_bridge_commands")
+          && sql.includes("RETURNING command_id")) {
+        return { rows: [{ command_id: params[0] }] };
+      }
+      if (sql.includes("INSERT INTO tinder_resumed_foreground_chat_return_permits")) {
+        state.resumedForegroundChatReturnPermit = {
+          command_id: params[0], device_id: params[1], resume_command_id: params[2],
+          permit_state: "ISSUED"
+        };
+        return { rows: [{ command_id: params[0] }] };
+      }
+      if (sql.includes("INSERT INTO tinder_resumed_foreground_chat_return_audit")) {
+        state.resumedForegroundChatReturnAudits += 1;
+        return { rows: [{ audit_id: params[0] }] };
+      }
+      if (sql.includes("SELECT EXISTS") && sql.includes("AS active")) {
+        return { rows: [{ active: false }] };
       }
       if (sql.includes("FROM tinder_reply_send_intents") && sql.includes("FOR UPDATE")) {
         return { rows: state.tinderIntent ? [{ ...state.tinderIntent }] : [] };
@@ -506,6 +544,83 @@ test("official Tinder app resume ACK is exact, capability-gated, and projects on
       NOW
     ),
     error => error.code === "DEVICE_CAPABILITY_UNSUPPORTED"
+  );
+});
+
+test("a terminal Resume ACK selects one identity-free V10 child and never its V9 sibling", async () => {
+  const received = officialAppResumeAckPayload("RECEIVED");
+  const succeeded = officialAppResumeAckPayload("SUCCEEDED");
+  const fake = ackPool({
+    commandType: "RESUME_OFFICIAL_TINDER_APP",
+    capabilities:
+      T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
+    history: [historyRow(received)],
+    officialAppResumePermit: {
+      command_id: COMMAND_ID,
+      device_id: DEVICE_ID,
+      permit_state: "ISSUED"
+    }
+  });
+  const response = await processCommandAckTransaction(
+    fake.pool,
+    auth(),
+    succeeded,
+    NOW,
+    {
+      inspectVerifiedChatReturnSchema: async () => ({ state: "INVALID" }),
+      inspectResumedForegroundChatReturnSchema: async () => ({ state: "CANONICAL" })
+    }
+  );
+  assert.equal(response.status, "SUCCEEDED");
+  assert.equal(fake.state.officialAppResumePermit.permit_state, "DISPATCHED");
+  assert.ok(fake.state.resumedForegroundChatReturnPermit);
+  assert.equal(fake.state.resumedForegroundChatReturnPermit.device_id, DEVICE_ID);
+  assert.equal(fake.state.resumedForegroundChatReturnPermit.resume_command_id, COMMAND_ID);
+  assert.equal(fake.state.resumedForegroundChatReturnAudits, 1);
+  const queued = fake.calls.find(call => String(call.sql).includes("INSERT INTO device_bridge_commands")
+    && String(call.sql).includes("'{}'::jsonb"));
+  assert.ok(queued);
+  assert.doesNotMatch(
+    JSON.stringify(fake.calls.filter(call => String(call.sql).includes("tinder_resumed_foreground_chat_return"))),
+    /source_capture|binding_revision|contact_id|thread|fingerprint|message/i
+  );
+  assert.equal(
+    fake.calls.some(call => /INSERT INTO tinder_verified_chat_return_permits|UPDATE tinder_verified_chat_return_permits/i
+      .test(String(call.sql))),
+    false
+  );
+});
+
+test("a partial V10 catalog blocks V9 fallback after a terminal Resume ACK", async () => {
+  const received = officialAppResumeAckPayload("RECEIVED");
+  const succeeded = officialAppResumeAckPayload("SUCCEEDED");
+  const fake = ackPool({
+    commandType: "RESUME_OFFICIAL_TINDER_APP",
+    capabilities:
+      T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
+    history: [historyRow(received)],
+    officialAppResumePermit: {
+      command_id: COMMAND_ID,
+      device_id: DEVICE_ID,
+      permit_state: "ISSUED"
+    }
+  });
+  const response = await processCommandAckTransaction(
+    fake.pool,
+    auth(),
+    succeeded,
+    NOW,
+    {
+      inspectVerifiedChatReturnSchema: async () => ({ state: "CANONICAL" }),
+      inspectResumedForegroundChatReturnSchema: async () => ({ state: "INVALID" })
+    }
+  );
+  assert.equal(response.status, "SUCCEEDED");
+  assert.equal(fake.state.resumedForegroundChatReturnPermit, null);
+  assert.equal(
+    fake.calls.some(call => /INSERT INTO tinder_(verified|resumed_foreground)_chat_return_permits/i
+      .test(String(call.sql))),
+    false
   );
 });
 

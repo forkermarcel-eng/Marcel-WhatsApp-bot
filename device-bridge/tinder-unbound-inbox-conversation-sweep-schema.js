@@ -12,7 +12,8 @@ import {
   inspectDeviceBridgeT1Schema,
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME,
-  TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
+  TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME,
+  TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
 } from "./t1-schema.js";
 import {
   inspectTinderLocalConversationAttestationSchema,
@@ -583,7 +584,8 @@ export async function assertTinderUnboundInboxConversationSweepSchemaReady(clien
  * verify the separate V9 foundation.
  */
 export async function inspectTinderUnboundInboxConversationSweepRetainedSchemaForV9(client, {
-  inspectDeviceBridgeSchema = inspectDeviceBridgeT1Schema
+  inspectDeviceBridgeSchema = inspectDeviceBridgeT1Schema,
+  expectedCommandConstraintName = TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
 } = {}) {
   const relations = await readRelations(client);
   const columns = await readColumns(client);
@@ -592,7 +594,7 @@ export async function inspectTinderUnboundInboxConversationSweepRetainedSchemaFo
   const triggers = await readTriggers(client);
   const commandConstraintName = await currentCommandConstraintName(client, inspectDeviceBridgeSchema);
   const coreCatalogCanonical = commandConstraintName
-    === TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
+    === expectedCommandConstraintName
     && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TABLE) === "r"
     && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE) === "r"
     && relationKind(relations.rows, TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_TABLE) === "r"
@@ -611,4 +613,17 @@ export async function inspectTinderUnboundInboxConversationSweepRetainedSchemaFo
     return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.INVALID };
   }
   return { state: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_FOUNDATION_STATE.CANONICAL };
+}
+
+/**
+ * The V10 command vocabulary is a successor of V9.  It must prove the
+ * unchanged V8 catalog independently; this helper never reclassifies V10 as
+ * a V8 migration result.
+ */
+export async function inspectTinderUnboundInboxConversationSweepRetainedSchemaForV10(client, options = {}) {
+  return inspectTinderUnboundInboxConversationSweepRetainedSchemaForV9(client, {
+    ...options,
+    expectedCommandConstraintName:
+      TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
+  });
 }

@@ -13,7 +13,8 @@ import {
   TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE_CONSTRAINT_NAME,
   TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE_CONSTRAINT_NAME,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME,
-  TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
+  TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME,
+  TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME
 } from "./t1-schema.js";
 import {
   inspectTinderOfficialAppResumePermitV2Schema,
@@ -496,6 +497,7 @@ async function commandConstraintState(client, inspectDeviceBridgeSchema) {
   // remains forward-compatible after the V8 upgrade.
   if (command?.constraintName === TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAME) return "V8";
   if (command?.constraintName === TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME) return "V9";
+  if (command?.constraintName === TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME) return "V10";
   return "INVALID";
 }
 
@@ -644,7 +646,8 @@ export async function assertTinderLocalConversationAttestationSchemaReady(client
  * V6 migration/preflight semantics.
  */
 export async function inspectTinderLocalConversationAttestationRetainedSchemaForV9(client, {
-  inspectDeviceBridgeSchema = inspectDeviceBridgeT1Schema
+  inspectDeviceBridgeSchema = inspectDeviceBridgeT1Schema,
+  expectedCommandState = "V9"
 } = {}) {
   let relations;
   let columns;
@@ -665,9 +668,17 @@ export async function inspectTinderLocalConversationAttestationRetainedSchemaFor
     );
   }
   return {
-    state: commandState === "V9"
+    state: commandState === expectedCommandState
         && canonicalAttestationCatalog({ relations, columns, indexes, constraints })
       ? TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.CANONICAL
       : TINDER_LOCAL_CONVERSATION_ATTESTATION_FOUNDATION_STATE.INVALID
   };
+}
+
+/** Retained V6 catalog proof required while V10 owns the command vocabulary. */
+export async function inspectTinderLocalConversationAttestationRetainedSchemaForV10(client, options = {}) {
+  return inspectTinderLocalConversationAttestationRetainedSchemaForV9(client, {
+    ...options,
+    expectedCommandState: "V10"
+  });
 }

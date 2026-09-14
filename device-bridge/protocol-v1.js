@@ -45,6 +45,11 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_CAPABILITY =
 // not broaden the launcher-only Resume V2 permit or grant reader authority.
 export const TINDER_VERIFIED_CHAT_RETURN_CAPABILITY =
   "TINDER_VERIFIED_CHAT_RETURN_V1";
+// V10 is deliberately separate from V9: it can return only the presently
+// foreground, structurally safe official chat to Inbox and carries no person,
+// capture, binding, revision, or reader authority.
+export const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_CAPABILITY =
+  "TINDER_RESUMED_FOREGROUND_CHAT_RETURN_V1";
 // This marker is deliberately part of the signed, persisted bootstrap
 // command payload rather than inferred from the mutable device profile.  It
 // lets every later server-side transition distinguish a new post-chat proof
@@ -125,6 +130,13 @@ export const T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_DEVICE_C
 export const TINDER_VERIFIED_CHAT_RETURN_DEVICE_CAPABILITIES =
   T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_DEVICE_CAPABILITIES;
 
+export const T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES = Object.freeze([
+  ...T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_DEVICE_CAPABILITIES,
+  TINDER_RESUMED_FOREGROUND_CHAT_RETURN_CAPABILITY
+]);
+export const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_DEVICE_CAPABILITIES =
+  T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES;
+
 export const T0_DEVICE_BRIDGE_COMMANDS = Object.freeze([
   "PING",
   "REQUEST_STATUS",
@@ -164,6 +176,9 @@ export const T4_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS = Object.freeze
 export const T4_TINDER_VERIFIED_CHAT_RETURN_COMMANDS = Object.freeze([
   "RETURN_TINDER_VERIFIED_CHAT_TO_INBOX"
 ]);
+export const T4_TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS = Object.freeze([
+  "RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX"
+]);
 
 export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
   ...T0_DEVICE_BRIDGE_COMMANDS,
@@ -174,7 +189,8 @@ export const DEVICE_BRIDGE_COMMANDS = Object.freeze([
   ...T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS,
   ...T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS,
   ...T4_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS,
-  ...T4_TINDER_VERIFIED_CHAT_RETURN_COMMANDS
+  ...T4_TINDER_VERIFIED_CHAT_RETURN_COMMANDS,
+  ...T4_TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS
 ]);
 
 export const BRIDGE_SERVICE_STATES = Object.freeze([
@@ -234,17 +250,18 @@ export function deviceBridgeCapabilityProfile(capabilities) {
   if (exactArray(capabilities, T4_RESUME_ATTESTATION_POST_CHAT_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION_POST_CHAT";
   if (exactArray(capabilities, T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP";
   if (exactArray(capabilities, T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+  if (exactArray(capabilities, T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES)) return "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
   return null;
 }
 
 export function isTinderManualGateCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+  return profile === "T1" || profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 export function isTinderHumanArmedConversationBindingCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+  return profile === "T2" || profile === "T5" || profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 export function isTinderManualSendCapable(capabilities) {
@@ -253,17 +270,17 @@ export function isTinderManualSendCapable(capabilities) {
 
 export function isTinderVisibleChatSyncCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+  return profile === "T4" || profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 export function isTinderOfficialAppResumeCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+  return profile === "T4_RESUME" || profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 export function isTinderLocalConversationAttestationCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
-  return profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+  return profile === "T4_RESUME_ATTESTATION" || profile === "T4_RESUME_ATTESTATION_POST_CHAT" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN" || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 // New bootstrap, its STAGED acknowledgement, signed positive ATTESTED
@@ -274,18 +291,26 @@ export function isTinderLocalConversationAttestationPostChatCapable(capabilities
   const profile = deviceBridgeCapabilityProfile(capabilities);
   return profile === "T4_RESUME_ATTESTATION_POST_CHAT"
     || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP"
-    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN"
+    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 export function isTinderUnboundInboxConversationSweepCapable(capabilities) {
   const profile = deviceBridgeCapabilityProfile(capabilities);
   return profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP"
-    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN"
+    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 export function isTinderVerifiedChatReturnCapable(capabilities) {
+  const profile = deviceBridgeCapabilityProfile(capabilities);
+  return profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN"
+    || profile === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
+}
+
+export function isTinderResumedForegroundChatReturnCapable(capabilities) {
   return deviceBridgeCapabilityProfile(capabilities)
-    === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN";
+    === "T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN";
 }
 
 export function isKnownTinderStateForCapabilities(state, capabilities) {

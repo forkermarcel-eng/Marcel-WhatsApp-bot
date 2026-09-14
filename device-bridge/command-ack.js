@@ -5,6 +5,7 @@ import {
   T4_TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS,
   T4_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS,
   T4_TINDER_VERIFIED_CHAT_RETURN_COMMANDS,
+  T4_TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS,
   T4_TINDER_OFFICIAL_APP_RESUME_COMMANDS,
   T4_TINDER_VISIBLE_CHAT_SYNC_COMMANDS,
   T5_TINDER_MANUAL_SEND_COMMANDS,
@@ -15,6 +16,7 @@ import {
   isTinderLocalConversationAttestationPostChatCapable,
   isTinderUnboundInboxConversationSweepCapable,
   isTinderVerifiedChatReturnCapable,
+  isTinderResumedForegroundChatReturnCapable,
   isTinderManualGateCapable,
   isTinderManualSendCapable,
   isTinderOfficialAppResumeCapable,
@@ -49,6 +51,10 @@ import {
   stageTinderVerifiedChatReturnAfterOfficialResumeAck
 } from "./tinder-verified-chat-return-command-ack.js";
 import {
+  projectTinderResumedForegroundChatReturnCommandAck,
+  stageTinderResumedForegroundChatReturnAfterOfficialResumeAck
+} from "./tinder-resumed-foreground-chat-return-command-ack.js";
+import {
   isExactVisibleChatSyncStagedAcknowledgement
 } from "../services/tinder-visible-chat-sync.js";
 import {
@@ -66,6 +72,9 @@ import {
   isExactVerifiedChatReturnStagedAcknowledgement
 } from "../services/tinder-verified-chat-return.js";
 import {
+  isExactResumedForegroundChatReturnStagedAcknowledgement
+} from "../services/tinder-resumed-foreground-chat-return.js";
+import {
   assertTinderUnboundInboxConversationSweepRuntimeSchemaReady
 } from "./tinder-unbound-inbox-conversation-sweep-runtime-schema.js";
 import {
@@ -73,6 +82,11 @@ import {
   inspectTinderVerifiedChatReturnSchema,
   TINDER_VERIFIED_CHAT_RETURN_FOUNDATION_STATE
 } from "./tinder-verified-chat-return-schema.js";
+import {
+  assertTinderResumedForegroundChatReturnSchemaReady,
+  inspectTinderResumedForegroundChatReturnSchema,
+  TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE
+} from "./tinder-resumed-foreground-chat-return-schema.js";
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 COMMAND ACK
@@ -94,6 +108,9 @@ const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS = new Set(
 );
 const TINDER_VERIFIED_CHAT_RETURN_COMMANDS = new Set(
   T4_TINDER_VERIFIED_CHAT_RETURN_COMMANDS
+);
+const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS = new Set(
+  T4_TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS
 );
 const BRIDGE_STATES = new Set(BRIDGE_SERVICE_STATES);
 const MAX_RESULT_BYTES = 1024;
@@ -159,6 +176,15 @@ function verifiedChatReturnFoundationNotReadyError() {
   );
 }
 
+function resumedForegroundChatReturnFoundationNotReadyError() {
+  return new DeviceBridgeProtocolError(
+    503,
+    "TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_NOT_READY",
+    "Resumed foreground chat return foundation is not ready",
+    true
+  );
+}
+
 async function assertUnboundInboxConversationSweepFoundationReady(client, assertFoundationReady) {
   try {
     await assertFoundationReady(client);
@@ -172,6 +198,14 @@ async function assertVerifiedChatReturnFoundationReady(client, assertFoundationR
     await assertFoundationReady(client);
   } catch {
     throw verifiedChatReturnFoundationNotReadyError();
+  }
+}
+
+async function assertResumedForegroundChatReturnFoundationReady(client, assertFoundationReady) {
+  try {
+    await assertFoundationReady(client);
+  } catch {
+    throw resumedForegroundChatReturnFoundationNotReadyError();
   }
 }
 
@@ -202,7 +236,8 @@ function validateSucceededResult(commandType, result, capabilities = null) {
         && !TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
         && !TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMANDS.has(commandType)
         && !TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(commandType)
-        && !TINDER_VERIFIED_CHAT_RETURN_COMMANDS.has(commandType)) return;
+        && !TINDER_VERIFIED_CHAT_RETURN_COMMANDS.has(commandType)
+        && !TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS.has(commandType)) return;
     throw invalidAck("Ack result is required for this Tinder command");
   }
   if (jsonBytes(result) > MAX_RESULT_BYTES) throw invalidAck("Ack result exceeds the T0 limit");
@@ -230,6 +265,8 @@ function validateSucceededResult(commandType, result, capabilities = null) {
       && isExactUnboundInboxConversationSweepReturnAcknowledgement(result)) return;
   if (TINDER_VERIFIED_CHAT_RETURN_COMMANDS.has(commandType)
       && isExactVerifiedChatReturnStagedAcknowledgement(result)) return;
+  if (TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS.has(commandType)
+      && isExactResumedForegroundChatReturnStagedAcknowledgement(result)) return;
   throw invalidAck("Ack result is not allowed for this T0 command");
 }
 
@@ -359,6 +396,10 @@ function validateAckForCommand(ack, commandType, capabilities) {
       && !isTinderVerifiedChatReturnCapable(capabilities)) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support verified chat return");
   }
+  if (TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS.has(commandType)
+      && !isTinderResumedForegroundChatReturnCapable(capabilities)) {
+    throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support resumed foreground chat return");
+  }
   if (TINDER_OFFICIAL_APP_RESUME_COMMANDS.has(commandType)
       && ack.status === "FAILED" && ack.result === null
       && isTinderOfficialAppResumeTerminalError(ack.error)) return;
@@ -440,7 +481,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     assertTinderUnboundInboxConversationSweepRuntimeSchemaReady,
   assertVerifiedChatReturnFoundationReady: assertReturnFoundationReady =
     assertTinderVerifiedChatReturnSchemaReady,
-  inspectVerifiedChatReturnSchema = inspectTinderVerifiedChatReturnSchema
+  assertResumedForegroundChatReturnFoundationReady: assertForegroundReturnFoundationReady =
+    assertTinderResumedForegroundChatReturnSchemaReady,
+  inspectVerifiedChatReturnSchema = inspectTinderVerifiedChatReturnSchema,
+  inspectResumedForegroundChatReturnSchema = inspectTinderResumedForegroundChatReturnSchema
 } = {}) {
   const client = await pool.connect();
   try {
@@ -505,6 +549,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         && !isTinderVerifiedChatReturnCapable(device.capabilities)) {
       throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support verified chat return");
     }
+    if (TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS.has(command.command_type)
+        && !isTinderResumedForegroundChatReturnCapable(device.capabilities)) {
+      throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support resumed foreground chat return");
+    }
     if (TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMANDS.has(command.command_type)
         && !exactKeys(command.payload, [])) {
       throw new DeviceBridgeProtocolError(409, "COMMAND_CONTRACT_UNSUPPORTED", "Unbound Inbox sweep child command contract is unsupported");
@@ -512,6 +560,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     if (TINDER_VERIFIED_CHAT_RETURN_COMMANDS.has(command.command_type)
         && !exactKeys(command.payload, [])) {
       throw new DeviceBridgeProtocolError(409, "COMMAND_CONTRACT_UNSUPPORTED", "Verified chat return command payload is unsupported");
+    }
+    if (TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS.has(command.command_type)
+        && !exactKeys(command.payload, [])) {
+      throw new DeviceBridgeProtocolError(409, "COMMAND_CONTRACT_UNSUPPORTED", "Resumed foreground chat return command payload is unsupported");
     }
     // A V8 ACK mutates the child, parent, and audit lifecycle.  Verify the
     // exact catalog while this command is locked and before the request
@@ -522,6 +574,9 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     }
     if (TINDER_VERIFIED_CHAT_RETURN_COMMANDS.has(command.command_type)) {
       await assertVerifiedChatReturnFoundationReady(client, assertReturnFoundationReady);
+    }
+    if (TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS.has(command.command_type)) {
+      await assertResumedForegroundChatReturnFoundationReady(client, assertForegroundReturnFoundationReady);
     }
     await registerAuthenticatedRequestReplay(client, auth, now);
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
@@ -569,6 +624,10 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
         && ack.status === "SUCCEEDED") {
       throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Verified chat return command expired before terminal acknowledgement");
     }
+    if (expired && TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMANDS.has(command.command_type)
+        && ack.status === "SUCCEEDED") {
+      throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Resumed foreground chat return command expired before terminal acknowledgement");
+    }
     if (expired && currentStatus === null && ack.status !== "EXPIRED") throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Command has expired");
     if (!expired && currentStatus === null && ack.status === "EXPIRED") throw new DeviceBridgeProtocolError(409, "INVALID_ACK_TRANSITION", "Command has not expired");
 
@@ -589,11 +648,14 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
     await projectTinderManualSendCommandAck(client, { command, ack });
     await projectTinderVisibleChatSyncCommandAck(client, { command, ack });
     await projectTinderOfficialAppResumeCommandAck(client, { command, ack });
-    // The V9 permit is not dashboard requested.  It is created only after
-    // this exact terminal Resume ACK and only if the later foundation is
-    // already canonical.  A deploy-before-DDL window leaves Resume terminal
-    // and does not replay it when V9 later appears.
+    // A post-Resume return child is not dashboard requested.  It is created
+    // only after this exact terminal Resume ACK.  V10 is the canonical,
+    // identity-free child for the newer profile; V9 remains available only
+    // to the exact older V9 profile.  They are deliberately never siblings.
     let returnFoundationReady = false;
+    let foregroundReturnFoundationReady = false;
+    let foregroundReturnFoundationState =
+      TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE.INVALID;
     if (command.command_type === "RESUME_OFFICIAL_TINDER_APP"
         && ack.status === "SUCCEEDED") {
       try {
@@ -602,20 +664,43 @@ export async function processCommandAckTransaction(pool, auth, ack, now = new Da
       } catch {
         returnFoundationReady = false;
       }
+      try {
+        const inspection = await inspectResumedForegroundChatReturnSchema(client);
+        foregroundReturnFoundationState = inspection?.state
+          || TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE.INVALID;
+        foregroundReturnFoundationReady =
+          foregroundReturnFoundationState
+          === TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE.CANONICAL;
+      } catch {
+        foregroundReturnFoundationState =
+          TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE.INVALID;
+        foregroundReturnFoundationReady = false;
+      }
     }
-    await stageTinderVerifiedChatReturnAfterOfficialResumeAck(client, {
-      command,
-      ack,
-      // A historical Resume-capable runtime cannot safely observe V9. Do not
-      // mint a live child that only a later exact V9 profile could receive.
-      // The V9 issuer remains server-side and separately audited; this is
-      // only the exact capability gate for its initial creation.
-      foundationReady: returnFoundationReady
-        && isTinderVerifiedChatReturnCapable(device.capabilities)
-    });
+    if (foregroundReturnFoundationReady
+        && isTinderResumedForegroundChatReturnCapable(device.capabilities)) {
+      await stageTinderResumedForegroundChatReturnAfterOfficialResumeAck(client, {
+        command,
+        ack,
+        foundationReady: true,
+        now: () => now
+      });
+    } else if (foregroundReturnFoundationState
+        !== TINDER_RESUMED_FOREGROUND_CHAT_RETURN_FOUNDATION_STATE.INVALID) {
+      await stageTinderVerifiedChatReturnAfterOfficialResumeAck(client, {
+        command,
+        ack,
+        // A historical Resume-capable runtime cannot safely observe V9. Do
+        // not mint a live child that only a later exact V9 profile could
+        // receive.
+        foundationReady: returnFoundationReady
+          && isTinderVerifiedChatReturnCapable(device.capabilities)
+      });
+    }
     await projectTinderLocalConversationAttestationCommandAck(client, { command, ack });
     await projectTinderUnboundInboxConversationSweepCommandAck(client, { command, ack });
     await projectTinderVerifiedChatReturnCommandAck(client, { command, ack });
+    await projectTinderResumedForegroundChatReturnCommandAck(client, { command, ack });
     await client.query(
       `INSERT INTO device_bridge_audit_events
         (event_type, request_id, device_id, key_id, command_id, result_code, http_status, details)

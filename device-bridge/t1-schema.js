@@ -39,6 +39,11 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CONSTRAINT_NAM
 // It must not reinterpret a launcher-only Resume permit or either V8 child.
 export const TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME =
   "device_bridge_commands_command_type_check_v9";
+// V10 adds an identity-free, launcher-derived foreground-chat return.  It is
+// intentionally a new command vocabulary rather than a reinterpretation of
+// V9's binding-scoped return authority.
+export const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME =
+  "device_bridge_commands_command_type_check_v10";
 
 const LEGACY_T1_TINDER_STATE_CONSTRAINT_NAME = "device_bridge_devices_tinder_state_check";
 const LEGACY_T1_COMMAND_TYPE_CONSTRAINT_NAME = "device_bridge_commands_command_type_check";
@@ -95,6 +100,10 @@ export const TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPES = Object.freeze([
   ...TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPES,
   "RETURN_TINDER_VERIFIED_CHAT_TO_INBOX"
 ]);
+export const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPES = Object.freeze([
+  ...TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPES,
+  "RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX"
+]);
 
 export const T1_TINDER_STATE_CHECK_EXPRESSION = `
   tinder_state IN ('DISCONNECTED', 'CONNECTING', 'CONNECTED', 'AUTH_REQUIRED', 'REVIEW_REQUIRED', 'UNKNOWN')
@@ -130,6 +139,10 @@ export const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPE_CHECK_EXPRESSI
 
 export const TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CHECK_EXPRESSION = `
   command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT', 'RESUME_OFFICIAL_TINDER_APP', 'STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION', 'READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT', 'RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT', 'RETURN_TINDER_VERIFIED_CHAT_TO_INBOX')
+`;
+
+export const TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CHECK_EXPRESSION = `
+  command_type IN ('PING', 'REQUEST_STATUS', 'STOP_BRIDGE', 'CONNECT_TINDER', 'DISCONNECT_TINDER', 'ARM_TINDER_CONVERSATION_BINDING', 'SEND_TINDER_DRAFT', 'SYNC_TINDER_VISIBLE_CHAT', 'RESUME_OFFICIAL_TINDER_APP', 'STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION', 'READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT', 'RETURN_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT', 'RETURN_TINDER_VERIFIED_CHAT_TO_INBOX', 'RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX')
 `;
 
 export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
@@ -170,7 +183,10 @@ export const T1_SCHEMA_CONSTRAINTS = Object.freeze([
     unboundInboxSweepCompatibleValues: TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_COMMAND_TYPES,
     verifiedChatReturnCompatibleName: TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME,
     verifiedChatReturnCompatibleExpression: TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPE_CHECK_EXPRESSION,
-    verifiedChatReturnCompatibleValues: TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPES
+    verifiedChatReturnCompatibleValues: TINDER_VERIFIED_CHAT_RETURN_COMMAND_TYPES,
+    resumedForegroundChatReturnCompatibleName: TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CONSTRAINT_NAME,
+    resumedForegroundChatReturnCompatibleExpression: TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPE_CHECK_EXPRESSION,
+    resumedForegroundChatReturnCompatibleValues: TINDER_RESUMED_FOREGROUND_CHAT_RETURN_COMMAND_TYPES
   })
 ]);
 
@@ -286,6 +302,15 @@ async function inspectColumnConstraint(client, specification) {
       state: "FINAL",
       constraintName: current.conname,
       compatibilityExpression: specification.verifiedChatReturnCompatibleExpression
+    };
+  }
+  if (current.conname === specification.resumedForegroundChatReturnCompatibleName
+      && hasExactCheckDefinition(current.constraint_definition, specification.resumedForegroundChatReturnCompatibleExpression)) {
+    return {
+      specification,
+      state: "FINAL",
+      constraintName: current.conname,
+      compatibilityExpression: specification.resumedForegroundChatReturnCompatibleExpression
     };
   }
   const legacyExpression = `${specification.column} IN (${specification.legacyValues.map(value => `'${value}'`).join(", ")})`;

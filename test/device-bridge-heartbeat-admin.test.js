@@ -575,6 +575,70 @@ test("optional official resume handoff heartbeat diagnostic is exact, content-fr
   }
 });
 
+test("optional V10 return lifecycle diagnostic is exact, content-free, and cannot select a return command", async () => {
+  const diagnostic = { stage: "READY_FOR_HEARTBEAT", reason: "NONE" };
+  const returnCommandId = "50f44444-4444-4444-8444-444444444444";
+  const capabilities =
+    T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES;
+  const payload = heartbeatPayload({
+    capabilities,
+    tinder_state: "CONNECTED",
+    tinder_resumed_foreground_chat_return: { ready: false },
+    tinder_resumed_foreground_chat_return_diagnostic: diagnostic
+  });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(
+    parseAndValidateHeartbeat(request.req).tinder_resumed_foreground_chat_return_diagnostic,
+    diagnostic
+  );
+
+  const fake = heartbeatPool({
+    request,
+    commands: [commandRow("RETURN_TINDER_RESUMED_FOREGROUND_CHAT_TO_INBOX", NOW, returnCommandId)]
+  });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW,
+    {
+      inspectUnboundInboxConversationSweepFoundation: CANONICAL_V8_FOUNDATION,
+      inspectUnboundInboxConversationSweepRuntimeFoundation: async () => ({ state: "CANONICAL" }),
+      inspectVerifiedChatReturnFoundation: async () => ({ state: "INVALID" }),
+      inspectResumedForegroundChatReturnFoundation: async () => ({ state: "CANONICAL" })
+    }
+  );
+  assert.deepEqual(response.commands, []);
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_resumed_foreground_chat_return: { ready: false },
+    tinder_resumed_foreground_chat_return_diagnostic: diagnostic
+  });
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  const serialized = JSON.stringify({ response, update: update?.params });
+  for (const value of ["READY_FOR_HEARTBEAT", "NONE"]) assert.equal(serialized.includes(value), false);
+
+  for (const invalidDiagnostic of [
+    null,
+    {},
+    { ...diagnostic, stage: "IDLE" },
+    { ...diagnostic, reason: "raw exception" },
+    { ...diagnostic, extra: "forbidden" },
+    { ...diagnostic, text: "forbidden" }
+  ]) {
+    const invalid = heartbeatPayload({
+      capabilities,
+      tinder_state: "CONNECTED",
+      tinder_resumed_foreground_chat_return_diagnostic: invalidDiagnostic
+    });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("optional V8 sweep heartbeat diagnostic is exact, content-free, and cannot affect command issuance", async () => {
   const diagnostic = {
     stage: "INGRESS",
@@ -1842,7 +1906,7 @@ test("T5 heartbeat omits a descriptor when freshly locked source shows newer cap
 
 function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState = "UNKNOWN",
     inboxNavigation = null, officialResumeHandoff = null,
-    resumedForegroundChatReturn = null) {
+    resumedForegroundChatReturn = null, resumedForegroundChatReturnDiagnostic = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
@@ -1851,7 +1915,8 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     configuration_revision: 1,
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
-    tinder_resumed_foreground_chat_return: resumedForegroundChatReturn
+    tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
+    tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic
   };
 }
 
@@ -1971,6 +2036,46 @@ test("admin status suppresses malformed or offline V10 return readiness", async 
     const res = responseRecorder();
     await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
     assert.equal(res.body.device.tinder_resumed_foreground_chat_return, null);
+  }
+});
+
+test("admin status projects only the bounded online V10 lifecycle diagnostic", async () => {
+  const diagnostic = { stage: "RETURN_ACTION_STAGED", reason: "NONE" };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      return { rows: [statusRow(new Date(),
+        T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
+        "CONNECTED", null, null, null, diagnostic)] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.tinder_resumed_foreground_chat_return_diagnostic, diagnostic);
+  assert.match(sql, /tinder_resumed_foreground_chat_return_diagnostic/);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body.device).includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed or offline V10 lifecycle diagnostic", async () => {
+  const valid = { stage: "BLOCKED", reason: "RETURN_TIMEOUT" };
+  for (const [acceptedAt, diagnostic] of [
+    [new Date(), { ...valid, raw: "forbidden" }],
+    [new Date(), { stage: "IDLE", reason: "NONE" }],
+    [new Date(Date.now() - 91_000), valid]
+  ]) {
+    const pool = {
+      async query() {
+        return { rows: [statusRow(acceptedAt,
+          T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
+          "CONNECTED", null, null, null, diagnostic)] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.tinder_resumed_foreground_chat_return_diagnostic, null);
   }
 });
 

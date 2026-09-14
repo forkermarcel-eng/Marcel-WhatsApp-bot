@@ -74,3 +74,23 @@ test("Tinder technical diagnostics render only the content-free V10 return readi
     "tinder_resumed_foreground_chat_return.header", "tinder_resumed_foreground_chat_return.text"
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
+
+test("Tinder technical diagnostics render only the bounded V10 lifecycle sibling", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="resumedForegroundChatReturnDiagnostic"/);
+  assert.match(page, /function resumedForegroundChatReturnDiagnosticIsSafe\(value\)/);
+  assert.match(page, /RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_STAGES\.has\(value\.stage\)/);
+  assert.match(page, /RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_REASONS\.has\(value\.reason\)/);
+  assert.match(page, /renderResumedForegroundChatReturnDiagnostic\(device\);/);
+  assert.match(page, /renderResumedForegroundChatReturnDiagnostic\(null\);/);
+  assert.match(page, /textContent =\s*`V10_STAGE:/);
+  for (const forbidden of [
+    "tinder_resumed_foreground_chat_return_diagnostic.permit",
+    "tinder_resumed_foreground_chat_return_diagnostic.command",
+    "tinder_resumed_foreground_chat_return_diagnostic.identity",
+    "tinder_resumed_foreground_chat_return_diagnostic.source",
+    "tinder_resumed_foreground_chat_return_diagnostic.binding",
+    "tinder_resumed_foreground_chat_return_diagnostic.capture",
+    "tinder_resumed_foreground_chat_return_diagnostic.header",
+    "tinder_resumed_foreground_chat_return_diagnostic.text"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});

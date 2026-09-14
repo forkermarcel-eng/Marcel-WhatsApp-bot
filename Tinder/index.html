@@ -1048,6 +1048,9 @@
        <p class="enrollment-message" id="resumedForegroundChatReturnStatus" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="resumedForegroundChatReturnDiagnostic" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
      </section>
 
      <section class="enrollment-panel capture-mapping-panel" id="captureMappingPanel" hidden aria-labelledby="captureMappingHeading">
@@ -1197,6 +1200,7 @@
       inboxNavigationStatus: document.getElementById("inboxNavigationStatus"),
       officialResumeHandoffStatus: document.getElementById("officialResumeHandoffStatus"),
       resumedForegroundChatReturnStatus: document.getElementById("resumedForegroundChatReturnStatus"),
+      resumedForegroundChatReturnDiagnostic: document.getElementById("resumedForegroundChatReturnDiagnostic"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        unboundConversationList: document.getElementById("unboundConversationList"),
@@ -1297,6 +1301,18 @@
      "NONE", "ACK_WINDOW_EXPIRED", "ACK_ENVELOPE_UNAVAILABLE",
      "CANDIDATE_POLICY_REJECTED", "CURRENT_ROOT_SCHEDULE_FAILED",
      "INBOX_PREPARATION_REJECTED", "LIFECYCLE_RESET"
+   ]);
+   const RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_STAGES = new Set([
+     "CANDIDATE_ARMED", "RESUME_ACK_ACCEPTED", "CHAT_REPROVED",
+     "READY_FOR_HEARTBEAT", "RETURN_ACTION_STAGED", "AWAITING_EXPECTED_CLICK",
+     "AWAITING_FRESH_INBOX", "RETURNED", "BLOCKED"
+   ]);
+   const RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_REASONS = new Set([
+     "NONE", "PRECONDITION_REJECTED", "ACK_MISMATCH_OR_EXPIRED",
+     "STRICT_REPROOF_REJECTED", "CONTINUITY_MISMATCH", "EVENT_DRIFT",
+     "READINESS_EXPIRED", "LIFECYCLE_RESET", "PERMIT_OR_STAGE_INVALID",
+     "FOREGROUND_PROOF_INVALID", "HEADER_ACTION_REJECTED", "HEADER_CLICK_UNOBSERVED",
+     "FRESH_INBOX_REJECTED", "RECEIPT_REJECTED", "RETURN_TIMEOUT"
    ]);
     const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
       "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
@@ -2902,6 +2918,27 @@
        `V10_CHAT_RETURN_READY: ${readiness.ready ? "JA" : "NEIN"}`;
    }
 
+   function resumedForegroundChatReturnDiagnosticIsSafe(value) {
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|") === ["reason", "stage"].join("|")
+       && RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_STAGES.has(value.stage)
+       && RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_REASONS.has(value.reason);
+   }
+
+   function renderResumedForegroundChatReturnDiagnostic(device) {
+     const diagnostic = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.tinder_resumed_foreground_chat_return_diagnostic
+       : null;
+     elements.resumedForegroundChatReturnDiagnostic.className = "enrollment-message";
+     if (!resumedForegroundChatReturnDiagnosticIsSafe(diagnostic)) {
+       elements.resumedForegroundChatReturnDiagnostic.textContent =
+         "Nicht verfuegbar: kein aktueller V10-Lebenszyklusstatus im akzeptierten Heartbeat.";
+       return;
+     }
+     elements.resumedForegroundChatReturnDiagnostic.textContent =
+       `V10_STAGE: ${diagnostic.stage} / V10_REASON: ${diagnostic.reason}`;
+   }
+
    function pendingUnboundConversationTranscriptIsSafe(transcript) {
      const receivedAt = new Date(transcript?.received_at || "");
      return hasExactConversationFields(transcript, [
@@ -3010,6 +3047,7 @@
      renderInboxNavigationStatus(null);
      renderOfficialResumeHandoffStatus(null);
      renderResumedForegroundChatReturnStatus(null);
+     renderResumedForegroundChatReturnDiagnostic(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
      elements.bridgeSub.textContent = "Kein eindeutiger Gerätestatus";
@@ -3133,6 +3171,7 @@
        renderInboxNavigationStatus(device);
        renderOfficialResumeHandoffStatus(device);
        renderResumedForegroundChatReturnStatus(device);
+       renderResumedForegroundChatReturnDiagnostic(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
        const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();

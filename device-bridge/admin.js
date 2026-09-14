@@ -15,6 +15,9 @@ import {
 import {
   boundedTinderOfficialResumeHandoffDiagnostic
 } from "./tinder-official-resume-handoff-diagnostic-contract.js";
+import {
+  boundedTinderResumedForegroundChatReturnDiagnostic
+} from "./tinder-resumed-foreground-chat-return-diagnostic-contract.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
 import {
@@ -124,6 +127,11 @@ export function normalizeAdminResumedForegroundChatReturnReadiness(value) {
   return Object.freeze({ ready: value.ready });
 }
 
+/** V10 lifecycle evidence remains observational and online-only. */
+export function normalizeAdminResumedForegroundChatReturnDiagnostic(value) {
+  return boundedTinderResumedForegroundChatReturnDiagnostic(value);
+}
+
 function statusRow(row, now) {
   const deviceStatus = deriveDeviceStatus(row.last_accepted_heartbeat_at, now);
   return {
@@ -158,6 +166,10 @@ function statusRow(row, now) {
     tinder_resumed_foreground_chat_return: deviceStatus === "ONLINE"
       ? normalizeAdminResumedForegroundChatReturnReadiness(
         row.tinder_resumed_foreground_chat_return)
+      : null,
+    tinder_resumed_foreground_chat_return_diagnostic: deviceStatus === "ONLINE"
+      ? normalizeAdminResumedForegroundChatReturnDiagnostic(
+        row.tinder_resumed_foreground_chat_return_diagnostic)
       : null
   };
 }
@@ -168,7 +180,9 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
   latest_heartbeat.details -> 'tinder_inbox_navigation' AS inbox_navigation,
   latest_heartbeat.details -> 'tinder_official_resume_handoff' AS official_resume_handoff,
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return'
-    AS tinder_resumed_foreground_chat_return`;
+    AS tinder_resumed_foreground_chat_return,
+  latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return_diagnostic'
+    AS tinder_resumed_foreground_chat_return_diagnostic`;
 
 const STATUS_FROM = `FROM device_bridge_devices d
   LEFT JOIN LATERAL (

@@ -53,6 +53,9 @@ import {
 import {
   boundedTinderOfficialResumeHandoffDiagnostic
 } from "./tinder-official-resume-handoff-diagnostic-contract.js";
+import {
+  boundedTinderResumedForegroundChatReturnDiagnostic
+} from "./tinder-resumed-foreground-chat-return-diagnostic-contract.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
@@ -265,6 +268,14 @@ export function isBoundedTinderOfficialResumeHandoffDiagnostic(value) {
   return boundedTinderOfficialResumeHandoffDiagnostic(value) !== null;
 }
 
+/**
+ * Optional V10 lifecycle evidence is observational only. It must never be
+ * consulted by readiness, permit, expiry, or command-selection paths.
+ */
+export function isBoundedTinderResumedForegroundChatReturnDiagnostic(value) {
+  return boundedTinderResumedForegroundChatReturnDiagnostic(value) !== null;
+}
+
 export function isExactTinderVerifiedChatReturnReadiness(value) {
   return exactKeys(value, TINDER_VERIFIED_CHAT_RETURN_READINESS_FIELDS)
     && typeof value.ready === "boolean";
@@ -318,6 +329,14 @@ function heartbeatAuditDetails(heartbeat) {
     details.tinder_resumed_foreground_chat_return = {
       ready: heartbeat.tinder_resumed_foreground_chat_return.ready
     };
+  }
+  const resumedForegroundReturnDiagnostic = Object.hasOwn(heartbeat,
+    "tinder_resumed_foreground_chat_return_diagnostic")
+    ? boundedTinderResumedForegroundChatReturnDiagnostic(
+      heartbeat.tinder_resumed_foreground_chat_return_diagnostic)
+    : null;
+  if (resumedForegroundReturnDiagnostic !== null) {
+    details.tinder_resumed_foreground_chat_return_diagnostic = resumedForegroundReturnDiagnostic;
   }
   return details;
 }
@@ -558,6 +577,11 @@ export function parseAndValidateHeartbeat(req) {
       && !isExactTinderResumedForegroundChatReturnReadiness(
         body.tinder_resumed_foreground_chat_return)) {
     throw invalidHeartbeat("Heartbeat resumed foreground chat return readiness is invalid");
+  }
+  if (Object.hasOwn(body, "tinder_resumed_foreground_chat_return_diagnostic")
+      && !isBoundedTinderResumedForegroundChatReturnDiagnostic(
+        body.tinder_resumed_foreground_chat_return_diagnostic)) {
+    throw invalidHeartbeat("Heartbeat resumed foreground chat return diagnostic is invalid");
   }
   if (body.tinder_verified_chat_return?.ready === true
       && body.tinder_resumed_foreground_chat_return?.ready === true) {

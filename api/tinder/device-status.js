@@ -2,6 +2,9 @@ import crypto from "crypto";
 import {
   boundedTinderOfficialResumeHandoffDiagnostic
 } from "../../device-bridge/tinder-official-resume-handoff-diagnostic-contract.js";
+import {
+  boundedTinderResumedForegroundChatReturnDiagnostic
+} from "../../device-bridge/tinder-resumed-foreground-chat-return-diagnostic-contract.js";
 
 const ALLOWED_COMMANDS = new Set(["PING", "REQUEST_STATUS", "CONNECT_TINDER", "DISCONNECT_TINDER"]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -29,7 +32,8 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "last_heartbeat_accepted_at", "app_version", "app_build", "bridge_service_state",
   "tinder_state", "automation_state", "tinder_manual_gate_capable",
   "tinder_local_conversation_attestation_post_chat_capable", "configuration_revision",
-  "official_resume_handoff", "tinder_resumed_foreground_chat_return"
+  "official_resume_handoff", "tinder_resumed_foreground_chat_return",
+  "tinder_resumed_foreground_chat_return_diagnostic"
 ]);
 
 function getCookie(req, name) {
@@ -125,6 +129,10 @@ function normalizePublicResumedForegroundChatReturnReadiness(value) {
   return Object.freeze({ ready: value.ready });
 }
 
+function normalizePublicResumedForegroundChatReturnDiagnostic(value) {
+  return boundedTinderResumedForegroundChatReturnDiagnostic(value);
+}
+
 /**
  * Preserve the pre-existing device-status fields without changing their
  * validation semantics, while explicitly allowlisting the new optional
@@ -156,6 +164,16 @@ function sanitizePublicDeviceStatus(value) {
       value.tinder_resumed_foreground_chat_return
     )
     : null;
+  const hasResumedForegroundChatReturnDiagnostic = Object.hasOwn(
+    value, "tinder_resumed_foreground_chat_return_diagnostic"
+  );
+  const resumedForegroundChatReturnDiagnostic =
+    String(value.device_status || "").toUpperCase() === "ONLINE"
+      && hasResumedForegroundChatReturnDiagnostic
+      ? normalizePublicResumedForegroundChatReturnDiagnostic(
+        value.tinder_resumed_foreground_chat_return_diagnostic
+      )
+      : null;
   return Object.freeze({
     ...Object.fromEntries(LEGACY_DEVICE_STATUS_FIELDS.map(field => [field, value[field]])),
     // This is a bounded derived compatibility bit, not the raw capability
@@ -164,7 +182,8 @@ function sanitizePublicDeviceStatus(value) {
       value.tinder_local_conversation_attestation_post_chat_capable === true,
     inbox_navigation: inboxNavigation,
     official_resume_handoff: officialResumeHandoff,
-    tinder_resumed_foreground_chat_return: resumedForegroundChatReturn
+    tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
+    tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic
   });
 }
 

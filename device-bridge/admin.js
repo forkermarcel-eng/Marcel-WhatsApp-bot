@@ -8,6 +8,7 @@ import {
 } from "./protocol-v1.js";
 import {
   deriveDeviceStatus,
+  TINDER_DISCOVERY_V16_STATES,
   TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND,
   TINDER_INBOX_NAVIGATION_REASONS,
   TINDER_INBOX_NAVIGATION_STAGES
@@ -67,10 +68,14 @@ const TINDER_INBOX_NAVIGATION_REASON_SET = new Set(TINDER_INBOX_NAVIGATION_REASO
 const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
   "stage", "reason", "visible_conversation_count", "observed_event_count"
 ]);
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_FIELDS, "discovery_v16_state"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
 const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
+const TINDER_DISCOVERY_V16_STATE_SET = new Set(TINDER_DISCOVERY_V16_STATES);
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -87,8 +92,9 @@ function exactKeys(value, keys) {
  * unavailable instead of falling back to a stale observation.
  */
 export function normalizeAdminInboxNavigationStatus(value) {
+  const discoveryV16 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS);
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
-  if (!(exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || freshObservation)
+  if (!(exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || discoveryV16 || freshObservation)
       || !TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
       || !TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
@@ -100,6 +106,11 @@ export function normalizeAdminInboxNavigationStatus(value) {
       || (freshObservation && (
         value.observation_kind !== TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
         || !isUuidV4(value.observation_nonce)
+      ))
+      || (discoveryV16 && (
+        value.stage !== "BLOCKED"
+        || value.reason !== "DISCOVERY_STRUCTURE_REJECTED"
+        || !TINDER_DISCOVERY_V16_STATE_SET.has(value.discovery_v16_state)
       ))) {
     return null;
   }
@@ -107,7 +118,8 @@ export function normalizeAdminInboxNavigationStatus(value) {
     stage: value.stage,
     reason: value.reason,
     visible_conversation_count: value.visible_conversation_count,
-    observed_event_count: value.observed_event_count
+    observed_event_count: value.observed_event_count,
+    ...(discoveryV16 ? { discovery_v16_state: value.discovery_v16_state } : {})
   });
 }
 

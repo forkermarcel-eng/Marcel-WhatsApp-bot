@@ -53,6 +53,21 @@ test("Tinder technical diagnostics render only a bounded selected-device inbox n
   assert.doesNotMatch(page, /inbox_navigation\.last_observation/i);
 });
 
+test("Tinder Inbox diagnostics surface the terminal discovery V16 enum only with its exact blocked pair", () => {
+  assert.match(page, /const DISCOVERY_V16_STATES = new Set\(/);
+  assert.match(page, /"BASE_STRUCTURE_REJECTED"/);
+  assert.match(page, /"STRICT_CHAT_LABEL_INBOX_CANDIDATE"/);
+  assert.match(page, /value\.stage === "BLOCKED"/);
+  assert.match(page, /value\.reason === "DISCOVERY_STRUCTURE_REJECTED"/);
+  assert.match(page, /DISCOVERY_V16_STATES\.has\(value\.discovery_v16_state\)/);
+  assert.match(page, /DISCOVERY_V16_STATE:/);
+  for (const forbidden of [
+    "inbox_navigation.raw_accessibility_tree", "inbox_navigation.message_text",
+    "inbox_navigation.visible_name", "inbox_navigation.node_id",
+    "inbox_navigation.fingerprint", "inbox_navigation.exception_message"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the bounded read-only official resume handoff", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="officialResumeHandoffStatus"/);
   assert.match(page, /function officialResumeHandoffIsSafe\(value\)/);

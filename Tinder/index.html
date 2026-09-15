@@ -1301,6 +1301,11 @@
      "ACCESSIBILITY_DESTROYED", "BRIDGE_NOT_RUNNING", "TINDER_GATE_NOT_CONNECTED",
      "LIFECYCLE_RESET", "LOCAL_STATE_UNAVAILABLE"
    ]);
+   const DISCOVERY_V16_STATES = new Set([
+     "NOT_EVALUATED", "BASE_STRUCTURE_REJECTED", "LABEL_MATCH_COUNT_REJECTED",
+     "TARGET_PARENT_REJECTED", "TARGET_ACTION_REJECTED",
+     "STRICT_CHAT_LABEL_INBOX_CANDIDATE"
+   ]);
    const OFFICIAL_RESUME_HANDOFF_STAGES = new Set([
      "ARMED", "ACK_ACCEPTED", "CURRENT_ROOT_SAMPLED", "CANDIDATE_ACCEPTED",
      "INBOX_PREPARATION_REQUESTED", "BLOCKED"
@@ -2916,16 +2921,27 @@
    }
 
    function inboxNavigationIsSafe(value) {
+     const baseFields = [
+       "observed_event_count", "reason", "stage", "visible_conversation_count"
+     ];
+     const discoveryV16Fields = [...baseFields, "discovery_v16_state"];
+     const fieldNames = value && typeof value === "object" && !Array.isArray(value)
+       ? Object.keys(value).sort().join("|")
+       : "";
+     const discoveryV16 = fieldNames === discoveryV16Fields.sort().join("|");
      return value && typeof value === "object" && !Array.isArray(value)
-       && Object.keys(value).sort().join("|") === [
-         "observed_event_count", "reason", "stage", "visible_conversation_count"
-       ].join("|")
+       && (fieldNames === baseFields.join("|") || discoveryV16)
        && INBOX_NAVIGATION_STAGES.has(value.stage)
        && INBOX_NAVIGATION_REASONS.has(value.reason)
        && Number.isSafeInteger(value.visible_conversation_count)
        && value.visible_conversation_count >= 0 && value.visible_conversation_count <= 8
        && Number.isSafeInteger(value.observed_event_count)
-       && value.observed_event_count >= 0 && value.observed_event_count <= 8;
+       && value.observed_event_count >= 0 && value.observed_event_count <= 8
+       && (!discoveryV16 || (
+         value.stage === "BLOCKED"
+         && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
+         && DISCOVERY_V16_STATES.has(value.discovery_v16_state)
+       ));
    }
 
    function renderInboxNavigationStatus(device) {
@@ -2941,7 +2957,10 @@
      elements.inboxNavigationStatus.textContent =
        `STAGE: ${navigation.stage} · REASON: ${navigation.reason} · ` +
        `VISIBLE_CONVERSATIONS: ${navigation.visible_conversation_count} · ` +
-       `OBSERVED_EVENTS: ${navigation.observed_event_count}`;
+       `OBSERVED_EVENTS: ${navigation.observed_event_count}` +
+       (Object.hasOwn(navigation, "discovery_v16_state")
+         ? ` \u00b7 DISCOVERY_V16_STATE: ${navigation.discovery_v16_state}`
+         : "");
    }
 
    function officialResumeHandoffIsSafe(value) {

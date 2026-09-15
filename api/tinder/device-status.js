@@ -30,6 +30,17 @@ const INBOX_NAVIGATION_REASONS = new Set([
 const INBOX_NAVIGATION_FIELDS = Object.freeze([
   "stage", "reason", "visible_conversation_count", "observed_event_count"
 ]);
+const INBOX_NAVIGATION_DISCOVERY_V16_FIELDS = Object.freeze([
+  ...INBOX_NAVIGATION_FIELDS, "discovery_v16_state"
+]);
+const DISCOVERY_V16_STATES = new Set([
+  "NOT_EVALUATED",
+  "BASE_STRUCTURE_REJECTED",
+  "LABEL_MATCH_COUNT_REJECTED",
+  "TARGET_PARENT_REJECTED",
+  "TARGET_ACTION_REJECTED",
+  "STRICT_CHAT_LABEL_INBOX_CANDIDATE"
+]);
 const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "device_id", "display_name", "enrollment_state", "device_status", "enrolled_at",
   "last_heartbeat_accepted_at", "app_version", "app_build", "bridge_service_state",
@@ -106,20 +117,27 @@ function exactKeys(value, keys) {
 
 function normalizePublicInboxNavigation(value) {
   if (value === null) return null;
-  if (!exactKeys(value, INBOX_NAVIGATION_FIELDS)
+  const discoveryV16 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V16_FIELDS);
+  if (!(exactKeys(value, INBOX_NAVIGATION_FIELDS) || discoveryV16)
       || !INBOX_NAVIGATION_STAGES.has(value.stage)
       || !INBOX_NAVIGATION_REASONS.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
       || value.visible_conversation_count < 0 || value.visible_conversation_count > 8
       || !Number.isSafeInteger(value.observed_event_count)
-      || value.observed_event_count < 0 || value.observed_event_count > 8) {
+      || value.observed_event_count < 0 || value.observed_event_count > 8
+      || (discoveryV16 && (
+        value.stage !== "BLOCKED"
+        || value.reason !== "DISCOVERY_STRUCTURE_REJECTED"
+        || !DISCOVERY_V16_STATES.has(value.discovery_v16_state)
+      ))) {
     return null;
   }
   return Object.freeze({
     stage: value.stage,
     reason: value.reason,
     visible_conversation_count: value.visible_conversation_count,
-    observed_event_count: value.observed_event_count
+    observed_event_count: value.observed_event_count,
+    ...(discoveryV16 ? { discovery_v16_state: value.discovery_v16_state } : {})
   });
 }
 

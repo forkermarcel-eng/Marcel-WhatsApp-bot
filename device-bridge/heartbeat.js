@@ -137,11 +137,28 @@ const TINDER_INBOX_NAVIGATION_REASON_SET = new Set(TINDER_INBOX_NAVIGATION_REASO
 const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
   "stage", "reason", "visible_conversation_count", "observed_event_count"
 ]);
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_FIELDS, "discovery_v16_state"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
 export const TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND = "FRESH_REVIEWED_INBOX_V1";
 const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
+// This terminal-only enum deliberately contains no view data, content,
+// identifiers, bounds, fingerprints, or driver detail. It exists only to
+// distinguish reviewed finite V16 discovery branches after a local
+// fail-closed Inbox rejection. It is never a navigation target, permit, or
+// command input.
+export const TINDER_DISCOVERY_V16_STATES = Object.freeze([
+  "NOT_EVALUATED",
+  "BASE_STRUCTURE_REJECTED",
+  "LABEL_MATCH_COUNT_REJECTED",
+  "TARGET_PARENT_REJECTED",
+  "TARGET_ACTION_REJECTED",
+  "STRICT_CHAT_LABEL_INBOX_CANDIDATE"
+]);
+const TINDER_DISCOVERY_V16_STATE_SET = new Set(TINDER_DISCOVERY_V16_STATES);
 // This is not a permit, target, or identity assertion.  It is a transient
 // same-heartbeat readiness bit from the V9-capable Android runtime after it
 // has locally revalidated the retained human-attested V3 continuity proof.
@@ -238,8 +255,9 @@ function boundedHeartbeatFailurePhase(error) {
 }
 
 export function isBoundedTinderInboxNavigationDiagnostic(value) {
+  const discoveryV16 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS);
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
-  return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || freshObservation)
+  return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || discoveryV16 || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -251,6 +269,11 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
     && (!freshObservation || (
       value.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
       && isUuidV4(value.observation_nonce)
+    ))
+    && (!discoveryV16 || (
+      value.stage === "BLOCKED"
+      && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
+      && TINDER_DISCOVERY_V16_STATE_SET.has(value.discovery_v16_state)
     ));
 }
 
@@ -481,6 +504,9 @@ function heartbeatAuditDetails(heartbeat) {
   const details = { sequence: heartbeat.sequence };
   if (Object.hasOwn(heartbeat, "tinder_inbox_navigation")) {
     const navigation = heartbeat.tinder_inbox_navigation;
+    if (!isBoundedTinderInboxNavigationDiagnostic(navigation)) {
+      throw invalidHeartbeat("Heartbeat inbox navigation diagnostic is invalid");
+    }
     // Do not serialize the heartbeat object itself. This explicit allowlist
     // prevents future local diagnostics from becoming durable audit metadata.
     const boundedNavigation = {
@@ -495,6 +521,12 @@ function heartbeatAuditDetails(heartbeat) {
       // Inbox observation; it is never projected through dashboard/status APIs.
       boundedNavigation.observation_kind = TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND;
       boundedNavigation.observation_nonce = navigation.observation_nonce;
+    }
+    if (Object.hasOwn(navigation, "discovery_v16_state")) {
+      // This value is admitted only by the terminal exact-pair validation
+      // above. Keep the durable audit projection explicitly allowlisted so a
+      // future local diagnostic cannot widen this transport surface.
+      boundedNavigation.discovery_v16_state = navigation.discovery_v16_state;
     }
     details.tinder_inbox_navigation = boundedNavigation;
   }

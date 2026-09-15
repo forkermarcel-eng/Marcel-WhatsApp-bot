@@ -9,6 +9,7 @@ import {
 import {
   deriveDeviceStatus,
   TINDER_DIRECT_STATIC_V2_STATES,
+  TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES,
   TINDER_DISCOVERY_V17_CARRIER_RELATION_STATES,
   TINDER_DISCOVERY_V16_STATES,
   TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND,
@@ -86,6 +87,10 @@ const TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS,
   "discovery_v17_carrier_relation_state"
 ]);
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS,
+  "discovery_v18_singleton_grandchild_relation_state"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
@@ -95,6 +100,8 @@ const TINDER_DISCOVERY_V16_STATE_SET = new Set(TINDER_DISCOVERY_V16_STATES);
 const TINDER_DIRECT_STATIC_V2_STATE_SET = new Set(TINDER_DIRECT_STATIC_V2_STATES);
 const TINDER_DISCOVERY_V17_CARRIER_RELATION_STATE_SET =
   new Set(TINDER_DISCOVERY_V17_CARRIER_RELATION_STATES);
+const TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE_SET =
+  new Set(TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES);
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -117,13 +124,15 @@ export function normalizeAdminInboxNavigationStatus(value) {
   const discoveryV16DirectStaticV2 = exactKeys(
     value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS);
   const discoveryV17 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
+  const discoveryV18 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS);
   const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
-    || discoveryV16DirectStaticV2 || discoveryV17;
-  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17;
+    || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
+  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
+  const hasDiscoveryV17 = discoveryV17 || discoveryV18;
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   if (!(exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
       || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
-      || discoveryV17 || freshObservation)
+      || discoveryV17 || discoveryV18 || freshObservation)
       || !TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
       || !TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
@@ -158,6 +167,15 @@ export function normalizeAdminInboxNavigationStatus(value) {
         || !TINDER_DISCOVERY_V17_CARRIER_RELATION_STATE_SET.has(
           value.discovery_v17_carrier_relation_state)
       ))
+      || (discoveryV18 && (
+        value.discovery_v16_state !== "LABEL_MATCH_COUNT_REJECTED"
+        || value.discovery_v16_raw_selector_match_count !== 0
+        || value.discovery_v16_qualified_selector_match_count !== 0
+        || value.discovery_v17_carrier_relation_state
+          !== "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
+        || !TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE_SET.has(
+          value.discovery_v18_singleton_grandchild_relation_state)
+      ))
       ) {
     return null;
   }
@@ -174,8 +192,12 @@ export function normalizeAdminInboxNavigationStatus(value) {
     } : {}),
     ...(hasDiscoveryV16DirectStaticV2
       ? { direct_static_v2_state: value.direct_static_v2_state } : {}),
-    ...(discoveryV17
-      ? { discovery_v17_carrier_relation_state: value.discovery_v17_carrier_relation_state } : {})
+    ...(hasDiscoveryV17
+      ? { discovery_v17_carrier_relation_state: value.discovery_v17_carrier_relation_state } : {}),
+    ...(discoveryV18 ? {
+      discovery_v18_singleton_grandchild_relation_state:
+        value.discovery_v18_singleton_grandchild_relation_state
+    } : {})
   });
 }
 

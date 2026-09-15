@@ -122,6 +122,24 @@ test("Tinder Inbox diagnostics surface V17 only as the exact V16 zero-count term
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
 
+test("Tinder Inbox diagnostics surface V18 only as the exact V16 zero and V17 negative extension", () => {
+  assert.match(page, /const DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES = new Set\(/);
+  assert.match(page, /"EXACT_CARRIER_SINGLETON_GRANDCHILD"/);
+  assert.match(page, /"SINGLETON_GRANDCHILD_CARDINALITY_REJECTED"/);
+  assert.match(page, /discoveryV18Fields/);
+  assert.match(page, /discovery_v18_singleton_grandchild_relation_state/);
+  assert.match(page, /discoveryV18/);
+  assert.match(page, /value\.discovery_v17_carrier_relation_state\s*===\s*"NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"/);
+  assert.match(page, /DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES\.has\(/);
+  assert.match(page, /DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE:/);
+  for (const forbidden of [
+    "inbox_navigation.raw_accessibility_tree", "inbox_navigation.message_text",
+    "inbox_navigation.visible_name", "inbox_navigation.node_id",
+    "inbox_navigation.fingerprint", "inbox_navigation.exception_message",
+    "inbox_navigation.selector_text", "inbox_navigation.selector_id"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the bounded read-only official resume handoff", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="officialResumeHandoffStatus"/);
   assert.match(page, /function officialResumeHandoffIsSafe\(value\)/);

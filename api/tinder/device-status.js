@@ -46,6 +46,10 @@ const INBOX_NAVIGATION_DISCOVERY_V17_FIELDS = Object.freeze([
   ...INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS,
   "discovery_v17_carrier_relation_state"
 ]);
+const INBOX_NAVIGATION_DISCOVERY_V18_FIELDS = Object.freeze([
+  ...INBOX_NAVIGATION_DISCOVERY_V17_FIELDS,
+  "discovery_v18_singleton_grandchild_relation_state"
+]);
 const DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX = 2;
 const DISCOVERY_V16_STATES = new Set([
   "NOT_EVALUATED",
@@ -71,6 +75,12 @@ const DISCOVERY_V17_CARRIER_RELATION_STATES = new Set([
   "AMBIGUOUS_EXACT_CARRIER_FOUR_DIRECT_CHILDREN",
   "DIRECT_CHILD_CARDINALITY_OVER_FOUR",
   "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
+]);
+const DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES = new Set([
+  "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED",
+  "EXACT_CARRIER_SINGLETON_GRANDCHILD",
+  "AMBIGUOUS_EXACT_CARRIER_SINGLETON_GRANDCHILD",
+  "NO_EXACT_CARRIER_SINGLETON_GRANDCHILD"
 ]);
 const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "device_id", "display_name", "enrollment_state", "device_status", "enrolled_at",
@@ -154,11 +164,14 @@ function normalizePublicInboxNavigation(value) {
   const discoveryV16DirectStaticV2 = exactKeys(
     value, INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS);
   const discoveryV17 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
+  const discoveryV18 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V18_FIELDS);
   const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
-    || discoveryV16DirectStaticV2 || discoveryV17;
-  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17;
+    || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
+  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
+  const hasDiscoveryV17 = discoveryV17 || discoveryV18;
   if (!(exactKeys(value, INBOX_NAVIGATION_FIELDS)
-      || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2 || discoveryV17)
+      || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
+      || discoveryV17 || discoveryV18)
       || !INBOX_NAVIGATION_STAGES.has(value.stage)
       || !INBOX_NAVIGATION_REASONS.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
@@ -186,6 +199,15 @@ function normalizePublicInboxNavigation(value) {
         || value.discovery_v16_qualified_selector_match_count !== 0
         || !DISCOVERY_V17_CARRIER_RELATION_STATES.has(
           value.discovery_v17_carrier_relation_state)
+      ))
+      || (discoveryV18 && (
+        value.discovery_v16_state !== "LABEL_MATCH_COUNT_REJECTED"
+        || value.discovery_v16_raw_selector_match_count !== 0
+        || value.discovery_v16_qualified_selector_match_count !== 0
+        || value.discovery_v17_carrier_relation_state
+          !== "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
+        || !DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES.has(
+          value.discovery_v18_singleton_grandchild_relation_state)
       ))) {
     return null;
   }
@@ -202,8 +224,12 @@ function normalizePublicInboxNavigation(value) {
     } : {}),
     ...(hasDiscoveryV16DirectStaticV2
       ? { direct_static_v2_state: value.direct_static_v2_state } : {}),
-    ...(discoveryV17
-      ? { discovery_v17_carrier_relation_state: value.discovery_v17_carrier_relation_state } : {})
+    ...(hasDiscoveryV17
+      ? { discovery_v17_carrier_relation_state: value.discovery_v17_carrier_relation_state } : {}),
+    ...(discoveryV18 ? {
+      discovery_v18_singleton_grandchild_relation_state:
+        value.discovery_v18_singleton_grandchild_relation_state
+    } : {})
   });
 }
 

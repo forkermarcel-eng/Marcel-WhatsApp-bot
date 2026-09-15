@@ -170,6 +170,13 @@ const TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS,
   "discovery_v17_carrier_relation_state"
 ]);
+// V18 is a terminal-only finite observation constrained by the exact V16
+// zero-count and V17 negative chain. It cannot widen any command, target,
+// selector, identity, or action surface.
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS,
+  "discovery_v18_singleton_grandchild_relation_state"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
@@ -212,6 +219,14 @@ export const TINDER_DISCOVERY_V17_CARRIER_RELATION_STATES = Object.freeze([
 ]);
 const TINDER_DISCOVERY_V17_CARRIER_RELATION_STATE_SET =
   new Set(TINDER_DISCOVERY_V17_CARRIER_RELATION_STATES);
+export const TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES = Object.freeze([
+  "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED",
+  "EXACT_CARRIER_SINGLETON_GRANDCHILD",
+  "AMBIGUOUS_EXACT_CARRIER_SINGLETON_GRANDCHILD",
+  "NO_EXACT_CARRIER_SINGLETON_GRANDCHILD"
+]);
+const TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE_SET =
+  new Set(TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES);
 // This is not a permit, target, or identity assertion.  It is a transient
 // same-heartbeat readiness bit from the V9-capable Android runtime after it
 // has locally revalidated the retained human-attested V3 continuity proof.
@@ -314,13 +329,14 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
   const discoveryV16DirectStaticV2 = exactKeys(
     value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS);
   const discoveryV17 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
+  const discoveryV18 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS);
   const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
-    || discoveryV16DirectStaticV2 || discoveryV17;
-  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17;
+    || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
+  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
       || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
-      || discoveryV17 || freshObservation)
+      || discoveryV17 || discoveryV18 || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -354,6 +370,15 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
       && value.discovery_v16_qualified_selector_match_count === 0
       && TINDER_DISCOVERY_V17_CARRIER_RELATION_STATE_SET.has(
         value.discovery_v17_carrier_relation_state)
+    ))
+    && (!discoveryV18 || (
+      value.discovery_v16_state === "LABEL_MATCH_COUNT_REJECTED"
+      && value.discovery_v16_raw_selector_match_count === 0
+      && value.discovery_v16_qualified_selector_match_count === 0
+      && value.discovery_v17_carrier_relation_state
+        === "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
+      && TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE_SET.has(
+        value.discovery_v18_singleton_grandchild_relation_state)
     ));
 }
 
@@ -628,6 +653,12 @@ function heartbeatAuditDetails(heartbeat) {
       // Persist only that finite enum so no local relation detail can widen the audit surface.
       boundedNavigation.discovery_v17_carrier_relation_state =
         navigation.discovery_v17_carrier_relation_state;
+    }
+    if (Object.hasOwn(navigation, "discovery_v18_singleton_grandchild_relation_state")) {
+      // V18 is accepted only as the exact V16 zero-count and V17 negative chain.
+      // Persist only that finite enum so no local relation detail widens the audit surface.
+      boundedNavigation.discovery_v18_singleton_grandchild_relation_state =
+        navigation.discovery_v18_singleton_grandchild_relation_state;
     }
     details.tinder_inbox_navigation = boundedNavigation;
   }

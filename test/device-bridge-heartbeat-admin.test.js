@@ -872,6 +872,21 @@ test("optional V10 return lifecycle diagnostic is exact, content-free, and canno
   }
 });
 
+test("V10 accepts the bounded Initial-Chat-shell rejection without adding authority", () => {
+  const diagnostic = { stage: "BLOCKED", reason: "INITIAL_SHELL_REJECTED" };
+  const payload = heartbeatPayload({
+    capabilities: T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_RETURN_FOREGROUND_RETURN_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED",
+    tinder_resumed_foreground_chat_return: { ready: false },
+    tinder_resumed_foreground_chat_return_diagnostic: diagnostic
+  });
+  assert.deepEqual(
+    parseAndValidateHeartbeat(heartbeatRequest(payload).req)
+      .tinder_resumed_foreground_chat_return_diagnostic,
+    diagnostic
+  );
+});
+
 test("optional V8 sweep heartbeat diagnostic is exact, content-free, and cannot affect command issuance", async () => {
   const diagnostic = {
     stage: "INGRESS",

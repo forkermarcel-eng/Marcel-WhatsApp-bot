@@ -135,6 +135,7 @@ test("Tinder technical diagnostics render only the bounded V10 lifecycle sibling
   assert.match(page, /function resumedForegroundChatReturnDiagnosticIsSafe\(value\)/);
   assert.match(page, /RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_STAGES\.has\(value\.stage\)/);
   assert.match(page, /RESUMED_FOREGROUND_CHAT_RETURN_DIAGNOSTIC_REASONS\.has\(value\.reason\)/);
+  assert.match(page, /"INITIAL_SHELL_REJECTED"/);
   assert.match(page, /renderResumedForegroundChatReturnDiagnostic\(device\);/);
   assert.match(page, /renderResumedForegroundChatReturnDiagnostic\(null\);/);
   assert.match(page, /textContent =\s*`V10_STAGE:/);

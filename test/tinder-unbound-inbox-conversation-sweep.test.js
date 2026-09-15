@@ -90,12 +90,12 @@ function issuedReturn(overrides = {}) {
   };
 }
 
-function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = activeSweep(), stepRow = stagedRead(), priorObservation = false, persistedObservation = false, expiredRows = [], sweepDiagnostic = null } = {}) {
+function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = activeSweep(), stepRow = stagedRead(), priorObservation = false, persistedObservation = false, expiredRows = [], sweepDiagnostic = null, sweepChildRow = null } = {}) {
   const state = {
     commands: [], sweeps: [], steps: [], audits: [], runtimeRow, conflicts,
     sweepRow, stepRow, priorObservation, persistedObservation, expiredRows,
-    sweepDiagnostic, accepted: [], stopped: [], expiryCalls: 0,
-    readOnlyTransactions: 0, statusReads: 0
+    sweepDiagnostic, sweepChildRow, accepted: [], stopped: [], expiryCalls: 0,
+    readOnlyTransactions: 0, statusReads: 0, statusChildReads: 0,
   };
   const repository = {
     state,
@@ -125,6 +125,12 @@ function fixtureRepository({ runtimeRow = runtime(), conflicts = {}, sweepRow = 
     async getUnboundInboxConversationSweepForDevice() {
       state.statusReads += 1;
       return state.sweepRow;
+    },
+    async getLatestUnboundInboxConversationSweepChildForStatus(_transaction, sweepId, deviceId) {
+      state.statusChildReads += 1;
+      assert.equal(sweepId, SWEEP_ID);
+      assert.equal(deviceId, DEVICE_ID);
+      return state.sweepChildRow;
     },
     async getUnboundInboxConversationSweepForDeviceForUpdate() { return state.sweepRow; },
     async getLatestTinderUnboundInboxSweepDiagnosticForDevice() { return state.sweepDiagnostic; },
@@ -259,6 +265,7 @@ test("V8 dashboard status is read-only and reflects the persisted sweep without 
   });
   assert.equal(repository.state.readOnlyTransactions, 1);
   assert.equal(repository.state.statusReads, 1);
+  assert.equal(repository.state.statusChildReads, 1);
   assert.equal(repository.state.expiryCalls, 0);
   assert.deepEqual(repository.state.audits, []);
   assert.deepEqual(repository.state.commands, []);
@@ -300,6 +307,39 @@ test("V8 dashboard status is read-only and reflects the persisted sweep without 
   });
 });
 
+test("V8 dashboard status projects only the newest content-free child lifecycle fact", async () => {
+  const repository = fixtureRepository({
+    sweepChildRow: {
+      child_kind: "READ", child_state: "STAGED", ack_status: "SUCCEEDED",
+      command_id: READ_COMMAND_ID, device_id: DEVICE_ID, payload: { forbidden: true }
+    }
+  });
+  const result = await service(repository).getBoundedSweepStatus({ deviceId: DEVICE_ID });
+  assert.deepEqual(result, {
+    status: "ACTIVE",
+    child: { phase: "READ_STAGED", acknowledgementState: "SUCCEEDED" }
+  });
+  const rendered = JSON.stringify(result);
+  for (const forbidden of [READ_COMMAND_ID, DEVICE_ID, "forbidden"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
+
+  const malformed = fixtureRepository({
+    sweepChildRow: { child_kind: "READ", child_state: "STAGED", ack_status: "NOT_AN_ACK" }
+  });
+  await assert.rejects(
+    () => service(malformed).getBoundedSweepStatus({ deviceId: DEVICE_ID }),
+    error => error instanceof TinderUnboundInboxConversationSweepError
+      && error.code === "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_REPOSITORY"
+  );
+
+  const noParent = fixtureRepository({ sweepRow: null, sweepChildRow: stagedRead() });
+  assert.deepEqual(await service(noParent).getBoundedSweepStatus({ deviceId: DEVICE_ID }), {
+    status: "NOT_REQUESTED"
+  });
+  assert.equal(noParent.state.statusChildReads, 0);
+});
+
 test("V8 PostgreSQL dashboard status projection is SELECT-only, rollback-only, and never invokes expiry", async () => {
   const calls = [];
   let released = false;
@@ -309,6 +349,9 @@ test("V8 PostgreSQL dashboard status projection is SELECT-only, rollback-only, a
       calls.push({ sql, parameters });
       if (sql === "BEGIN" || sql === "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
           || sql === "ROLLBACK") return { rows: [] };
+      if (sql.includes("FROM tinder_unbound_inbox_conversation_sweep_steps")) {
+        return { rows: [{ child_kind: "READ", child_state: "STAGED", ack_status: "SUCCEEDED" }] };
+      }
       if (sql.includes("FROM tinder_unbound_inbox_conversation_sweeps")) {
         return { rows: [expiredButPersistedActiveSweep] };
       }
@@ -326,12 +369,18 @@ test("V8 PostgreSQL dashboard status projection is SELECT-only, rollback-only, a
     now: () => NOW
   }).getBoundedSweepStatus({ deviceId: DEVICE_ID });
 
-  assert.deepEqual(result, { status: "ACTIVE" });
+  assert.deepEqual(result, {
+    status: "ACTIVE",
+    child: { phase: "READ_STAGED", acknowledgementState: "SUCCEEDED" }
+  });
   assert.equal(calls[0]?.sql, "BEGIN");
   assert.equal(calls[1]?.sql, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
   assert.equal(calls.at(-1)?.sql, "ROLLBACK");
   assert.equal(calls.some(call => /\b(?:COMMIT|FOR\s+UPDATE|INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|LOCK)\b/i.test(call.sql)), false);
   assert.equal(calls.slice(2, -1).every(call => /^\s*SELECT\b/i.test(call.sql)), true);
+  const childStatusQuery = calls.find(call => call.sql.includes("FROM tinder_unbound_inbox_conversation_sweep_steps"));
+  assert.equal(Boolean(childStatusQuery), true);
+  assert.equal(/\b(?:payload|result|error|transcript_id)\b/i.test(childStatusQuery.sql), false);
   assert.equal(released, true);
 });
 

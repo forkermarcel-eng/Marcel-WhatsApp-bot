@@ -104,6 +104,13 @@ const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS = new Set([
   "UNKNOWN_OUTCOME",
   "SWEEP_EXPIRED"
 ]);
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_CHILD_PHASES = new Set([
+  "READ_ISSUED", "READ_STAGED", "READ_TRANSCRIPT_ACCEPTED", "READ_CANCELLED", "READ_EXPIRED",
+  "RETURN_ISSUED", "RETURN_STAGED", "RETURN_ACCEPTED", "RETURN_CANCELLED", "RETURN_EXPIRED"
+]);
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_ACKNOWLEDGEMENT_STATES = new Set([
+  "NONE", "RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"
+]);
 const PUBLIC_VISIBLE_CHAT_SYNC_STATUSES = new Set([
   "QUEUED", "DEVICE_NOT_READY", "PERMIT_CONFLICT", "PERMIT_NOT_AVAILABLE"
 ]);
@@ -847,23 +854,35 @@ function normalizePublicUnboundInboxConversationSweepStatus(value) {
   const status = value?.status;
   const terminal = status === "STOPPED" || status === "EXPIRED";
   const hasReason = Object.hasOwn(value || {}, "reason_code");
+  const hasChild = Object.hasOwn(value || {}, "child");
   const hasDiagnostic = Object.hasOwn(value || {}, "diagnostic");
+  const child = hasChild && exactKeys(value?.child, ["phase", "acknowledgement_state"])
+    && PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_CHILD_PHASES.has(value.child.phase)
+    && PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_ACKNOWLEDGEMENT_STATES.has(value.child.acknowledgement_state)
+    ? Object.freeze({
+      phase: value.child.phase,
+      acknowledgement_state: value.child.acknowledgement_state
+    })
+    : null;
   const diagnostic = hasDiagnostic
     ? boundedTinderUnboundInboxSweepDiagnostic(value?.diagnostic)
     : null;
-  const expectedKeys = hasReason
-    ? (hasDiagnostic ? ["status", "reason_code", "diagnostic"] : ["status", "reason_code"])
-    : (hasDiagnostic ? ["status", "diagnostic"] : ["status"]);
+  const expectedKeys = ["status"];
+  if (hasReason) expectedKeys.push("reason_code");
+  if (hasChild) expectedKeys.push("child");
+  if (hasDiagnostic) expectedKeys.push("diagnostic");
   if (!PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES.has(status)
       || !exactKeys(value, expectedKeys)
       || (hasReason && (!terminal
         || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(value.reason_code)))
+      || (hasChild && child === null)
       || (hasDiagnostic && diagnostic === null)) {
     return null;
   }
   return Object.freeze({
     status,
     ...(hasReason ? { reason_code: value.reason_code } : {}),
+    ...(child === null ? {} : { child }),
     ...(diagnostic === null ? {} : { diagnostic })
   });
 }

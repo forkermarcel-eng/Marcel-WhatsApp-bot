@@ -133,6 +133,13 @@ const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS = new Set([
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.UNKNOWN_OUTCOME,
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED
 ]);
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_CHILD_PHASES = new Set([
+  "READ_ISSUED", "READ_STAGED", "READ_TRANSCRIPT_ACCEPTED", "READ_CANCELLED", "READ_EXPIRED",
+  "RETURN_ISSUED", "RETURN_STAGED", "RETURN_ACCEPTED", "RETURN_CANCELLED", "RETURN_EXPIRED"
+]);
+const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_ACKNOWLEDGEMENT_STATES = new Set([
+  "NONE", "RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"
+]);
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TRANSCRIPT_LIMIT = 8;
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_MESSAGE_LIMIT = 100;
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TEXT_LIMIT = 4096;
@@ -638,14 +645,26 @@ function boundedOfficialAppResumeQueueResult(result) {
 function boundedUnboundInboxConversationSweepStatus(result) {
   const status = String(result?.status || "").trim().toUpperCase();
   const hasReason = Object.hasOwn(result || {}, "reasonCode");
+  const hasChild = Object.hasOwn(result || {}, "child");
   const hasDiagnostic = Object.hasOwn(result || {}, "diagnostic");
   const terminal = status === "STOPPED" || status === "EXPIRED";
+  const child = hasChild && exactKeys(result.child, ["phase", "acknowledgementState"])
+    && PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_CHILD_PHASES.has(result.child.phase)
+    && PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_ACKNOWLEDGEMENT_STATES.has(result.child.acknowledgementState)
+    ? Object.freeze({
+      phase: result.child.phase,
+      acknowledgement_state: result.child.acknowledgementState
+    })
+    : null;
+  const expectedKeys = ["status"];
+  if (hasReason) expectedKeys.push("reasonCode");
+  if (hasChild) expectedKeys.push("child");
+  if (hasDiagnostic) expectedKeys.push("diagnostic");
   if (!PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUSES.has(status)
-      || (!hasReason && !exactKeys(result, hasDiagnostic ? ["status", "diagnostic"] : ["status"]))
+      || !exactKeys(result, expectedKeys)
       || (hasReason && (!terminal
-        || !exactKeys(result, hasDiagnostic ? ["status", "reasonCode", "diagnostic"]
-          : ["status", "reasonCode"])
         || !PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_TERMINAL_REASONS.has(result.reasonCode)))
+      || (hasChild && child === null)
       || (hasDiagnostic && boundedTinderUnboundInboxSweepDiagnostic(result.diagnostic) === null)) {
     const error = new Error("Invalid unbound Inbox sweep status.");
     error.statusCode = 500;
@@ -655,6 +674,7 @@ function boundedUnboundInboxConversationSweepStatus(result) {
   return Object.freeze({
     status,
     ...(hasReason ? { reason_code: result.reasonCode } : {}),
+    ...(child === null ? {} : { child }),
     ...(hasDiagnostic ? { diagnostic: boundedTinderUnboundInboxSweepDiagnostic(result.diagnostic) } : {})
   });
 }

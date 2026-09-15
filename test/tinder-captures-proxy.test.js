@@ -917,6 +917,24 @@ test("V8 unbound Inbox sweep proxy exposes bounded status only and has no browse
 
   globalThis.fetch = async () => backendResponse({
     ok: true,
+    unbound_inbox_sweep: {
+      status: "STOPPED", reason_code: "CHILD_EXPIRED",
+      child: { phase: "READ_EXPIRED", acknowledgement_state: "SUCCEEDED" }
+    }
+  });
+  const boundedChild = responseRecorder();
+  await handler(request({ query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-status" } }), boundedChild);
+  assert.equal(boundedChild.statusCode, 200);
+  assert.deepEqual(boundedChild.body, {
+    ok: true,
+    unbound_inbox_sweep: {
+      status: "STOPPED", reason_code: "CHILD_EXPIRED",
+      child: { phase: "READ_EXPIRED", acknowledgement_state: "SUCCEEDED" }
+    }
+  });
+
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
     unbound_inbox_sweep: { status: "STOPPED", reason_code: "CHILD_EXPIRED" }
   });
   const terminalStatus = responseRecorder();
@@ -959,6 +977,18 @@ test("V8 unbound Inbox sweep proxy exposes bounded status only and has no browse
   await handler(request({ query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-status" } }), rejectedDiagnostic);
   assert.equal(rejectedDiagnostic.statusCode, 502);
   assert.equal(JSON.stringify(rejectedDiagnostic.body).includes("forbidden"), false);
+
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    unbound_inbox_sweep: {
+      status: "ACTIVE",
+      child: { phase: "READ_STAGED", acknowledgement_state: "SUCCEEDED", payload: "forbidden" }
+    }
+  });
+  const rejectedChild = responseRecorder();
+  await handler(request({ query: { deviceId: DEVICE_ID, view: "unbound-inbox-conversation-sweep-status" } }), rejectedChild);
+  assert.equal(rejectedChild.statusCode, 502);
+  assert.equal(JSON.stringify(rejectedChild.body).includes("forbidden"), false);
 
   globalThis.fetch = async () => { throw new Error("fetch must not run"); };
   const manualStart = responseRecorder();

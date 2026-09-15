@@ -84,6 +84,53 @@ test("V8 unbound Inbox sweep status is bounded and exposes no correlation data",
   assert.deepEqual(statusResponse.body, { ok: true, unbound_inbox_sweep: { status: "ACTIVE" } });
 });
 
+test("V8 status may project only finite child and acknowledgement lifecycle enums", async () => {
+  const handler = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return {
+        async getBoundedSweepStatus() {
+          return {
+            status: "STOPPED", reasonCode: "CHILD_EXPIRED",
+            child: { phase: "READ_EXPIRED", acknowledgementState: "SUCCEEDED" }
+          };
+        }
+      };
+    }
+  });
+  const response = responseRecorder();
+  response.setHeader = () => {};
+  await handler({ params: { deviceId: DEVICE_ID } }, response);
+  assert.deepEqual(response.body, {
+    ok: true,
+    unbound_inbox_sweep: {
+      status: "STOPPED", reason_code: "CHILD_EXPIRED",
+      child: { phase: "READ_EXPIRED", acknowledgement_state: "SUCCEEDED" }
+    }
+  });
+
+  const invalid = createTinderDashboardUnboundInboxConversationSweepStatusHandler({}, {
+    createRepository() { return {}; },
+    createService() {
+      return {
+        async getBoundedSweepStatus() {
+          return {
+            status: "ACTIVE",
+            child: {
+              phase: "READ_STAGED", acknowledgementState: "SUCCEEDED", command_id: "forbidden"
+            }
+          };
+        }
+      };
+    }
+  });
+  const invalidResponse = responseRecorder();
+  invalidResponse.setHeader = () => {};
+  await invalid({ params: { deviceId: DEVICE_ID } }, invalidResponse);
+  assert.equal(invalidResponse.statusCode, 500);
+  assert.equal(JSON.stringify(invalidResponse.body).includes("forbidden"), false);
+});
+
 test("V8 status accepts only a jointly canonical V6, V8 and V9 runtime foundation", async () => {
   let v9Inspections = 0;
   const result = await assertTinderUnboundInboxConversationSweepRuntimeSchemaReady({}, {

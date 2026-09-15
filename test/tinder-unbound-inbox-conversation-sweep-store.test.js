@@ -103,6 +103,7 @@ function repositoryFixture({ storedTranscript = null } = {}) {
     },
     async getUnboundInboxConversationSweepForUpdate() { return state.sweep; },
     async getUnboundInboxConversationSweepForDevice() { return state.sweep; },
+    async getLatestUnboundInboxConversationSweepChildForStatus() { return null; },
     async getUnboundInboxConversationSweepForDeviceForUpdate() { return state.sweep; },
     async getUnboundInboxConversationSweepStepForUpdate(_transaction, commandId) {
       return commandId === state.step.command_id ? state.step : null;

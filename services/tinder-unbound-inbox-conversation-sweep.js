@@ -373,6 +373,26 @@ const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_TERMINAL_REASONS = new Set(
   TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_REASON.SWEEP_EXPIRED
 ]);
 
+// This is deliberately a status projection rather than a correlation handle.
+// It describes only the newest persisted V8 child of the already-selected
+// parent.  In particular, it does not make the independent latest heartbeat
+// diagnostic command-correlated.
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_CHILD_PHASES = new Map([
+  ["READ:ISSUED", "READ_ISSUED"],
+  ["READ:STAGED", "READ_STAGED"],
+  ["READ:TRANSCRIPT_ACCEPTED", "READ_TRANSCRIPT_ACCEPTED"],
+  ["READ:CANCELLED", "READ_CANCELLED"],
+  ["READ:EXPIRED", "READ_EXPIRED"],
+  ["RETURN_ONLY:ISSUED", "RETURN_ISSUED"],
+  ["RETURN_ONLY:RETURN_STAGED", "RETURN_STAGED"],
+  ["RETURN_ONLY:RETURN_ACCEPTED", "RETURN_ACCEPTED"],
+  ["RETURN_ONLY:CANCELLED", "RETURN_CANCELLED"],
+  ["RETURN_ONLY:EXPIRED", "RETURN_EXPIRED"]
+]);
+const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_ACK_STATES = new Set([
+  "NONE", "RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"
+]);
+
 function boundedSweepStatus(sweep) {
   const status = ["ACTIVE", "COMPLETED", "STOPPED", "EXPIRED"].includes(sweep?.sweepState)
     ? sweep.sweepState : "STOPPED";
@@ -382,6 +402,37 @@ function boundedSweepStatus(sweep) {
     ...(terminal && TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_TERMINAL_REASONS
       .has(sweep?.terminalReason) ? { reasonCode: sweep.terminalReason } : {})
   });
+}
+
+function boundedSweepChildStatus(row) {
+  if (row === null || row === undefined) return null;
+  const childKind = normalizedStatus(sourceValue(row, "childKind", "child_kind"));
+  const childState = normalizedStatus(sourceValue(row, "childState", "child_state"));
+  const phase = TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_CHILD_PHASES.get(
+    `${childKind}:${childState}`
+  );
+  const acknowledgementRaw = sourceValue(row, "acknowledgementStatus", "ack_status");
+  const acknowledgementState = acknowledgementRaw === null || acknowledgementRaw === undefined
+    ? "NONE"
+    : normalizedStatus(acknowledgementRaw);
+  if (!phase || !TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_PUBLIC_ACK_STATES.has(acknowledgementState)) {
+    return null;
+  }
+  return Object.freeze({ phase, acknowledgementState });
+}
+
+async function latestBoundedSweepChildStatus(repository, transaction, sweepId, deviceId) {
+  const row = await repository.getLatestUnboundInboxConversationSweepChildForStatus(
+    transaction, sweepId, deviceId
+  );
+  const child = boundedSweepChildStatus(row);
+  if (row !== null && row !== undefined && child === null) {
+    throw new TinderUnboundInboxConversationSweepError(
+      "Unbound Inbox sweep child status is invalid.",
+      "INVALID_UNBOUND_INBOX_CONVERSATION_SWEEP_REPOSITORY", 500
+    );
+  }
+  return child;
 }
 
 async function latestBoundedSweepDiagnostic(repository, transaction, deviceId) {
@@ -396,10 +447,13 @@ async function latestBoundedSweepDiagnostic(repository, transaction, deviceId) {
   );
 }
 
-function withBoundedSweepDiagnostic(status, diagnostic) {
-  return diagnostic === null
-    ? status
-    : Object.freeze({ ...status, diagnostic });
+function withBoundedSweepStatusFacts(status, child, diagnostic) {
+  if (child === null && diagnostic === null) return status;
+  return Object.freeze({
+    ...status,
+    ...(child === null ? {} : { child }),
+    ...(diagnostic === null ? {} : { diagnostic })
+  });
 }
 
 function currentStepFromRow(row) {
@@ -463,6 +517,7 @@ function requireRepository(repository, {
     "setUnboundInboxConversationSweepActiveStep",
     "getUnboundInboxConversationSweepForUpdate",
     "getUnboundInboxConversationSweepForDevice",
+    "getLatestUnboundInboxConversationSweepChildForStatus",
     "getUnboundInboxConversationSweepForDeviceForUpdate",
     "getUnboundInboxConversationSweepStepForUpdate",
     "stageUnboundInboxConversationSweepReadStep",
@@ -1017,9 +1072,12 @@ export function createTinderUnboundInboxConversationSweepService(repository, {
       const sweep = currentSweepFromRow(await repository.getUnboundInboxConversationSweepForDevice(transaction, normalized.deviceId));
       const diagnostic = await latestBoundedSweepDiagnostic(repository, transaction,
         normalized.deviceId);
-      if (!sweep) return withBoundedSweepDiagnostic(
-        Object.freeze({ status: "NOT_REQUESTED" }), diagnostic);
-      return withBoundedSweepDiagnostic(boundedSweepStatus(sweep), diagnostic);
+      if (!sweep) return withBoundedSweepStatusFacts(
+        Object.freeze({ status: "NOT_REQUESTED" }), null, diagnostic);
+      const child = await latestBoundedSweepChildStatus(
+        repository, transaction, sweep.sweepId, sweep.deviceId
+      );
+      return withBoundedSweepStatusFacts(boundedSweepStatus(sweep), child, diagnostic);
     });
   }
 
@@ -1387,6 +1445,27 @@ export function createPgTinderUnboundInboxConversationSweepRepository(pool) {
           ORDER BY issued_at DESC, sweep_id DESC
           LIMIT 1`,
         [deviceId]
+      );
+      return result.rows[0] || null;
+    },
+
+    async getLatestUnboundInboxConversationSweepChildForStatus(client, sweepId, deviceId) {
+      const result = await client.query(
+        `SELECT step.child_kind, step.child_state, acknowledgement.status AS ack_status
+           FROM ${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_STEP_TABLE} step
+      LEFT JOIN LATERAL (
+             SELECT status
+               FROM device_bridge_command_acks
+              WHERE command_id=step.command_id AND device_id=step.device_id
+              ORDER BY accepted_at DESC, ack_id DESC
+              LIMIT 1
+           ) acknowledgement ON TRUE
+          WHERE step.sweep_id=$1 AND step.device_id=$2
+          ORDER BY step.slot_ordinal DESC,
+                   CASE step.child_kind WHEN 'RETURN_ONLY' THEN 1 ELSE 0 END DESC,
+                   step.issued_at DESC, step.command_id DESC
+          LIMIT 1`,
+        [sweepId, deviceId]
       );
       return result.rows[0] || null;
     },

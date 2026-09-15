@@ -9,6 +9,7 @@ import {
 import {
   deriveDeviceStatus,
   TINDER_DIRECT_STATIC_V2_STATES,
+  TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES,
   TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES,
   TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES,
   TINDER_DISCOVERY_V17_CARRIER_RELATION_STATES,
@@ -96,6 +97,14 @@ const TINDER_INBOX_NAVIGATION_DISCOVERY_V19_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS,
   "discovery_v19_singleton_wrapper_shape_state"
 ]);
+// V20 is an independent terminal branch: exactly the bounded base status,
+// a finite V20 state, and its two capped counters. It does not carry V16–V19.
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V20_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_FIELDS,
+  "discovery_v20_five_structural_chat_state",
+  "discovery_v20_raw_selector_match_count",
+  "discovery_v20_qualified_selector_match_count"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
@@ -109,9 +118,22 @@ const TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE_SET =
   new Set(TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES);
 const TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE_SET =
   new Set(TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES);
+const TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATE_SET =
+  new Set(TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES);
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function v20CountsMatchState(state, rawCount, qualifiedCount) {
+  if (qualifiedCount > rawCount) return false;
+  if (state === "LABEL_MATCH_COUNT_REJECTED") return rawCount !== 1;
+  if (state === "TARGET_PARENT_REJECTED") return rawCount === 1 && qualifiedCount === 0;
+  if (state === "TARGET_ACTION_REJECTED"
+      || state === "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE") {
+    return rawCount === 1 && qualifiedCount === 1;
+  }
+  return state === "BASE_STRUCTURE_REJECTED";
 }
 
 function exactKeys(value, keys) {
@@ -133,6 +155,7 @@ export function normalizeAdminInboxNavigationStatus(value) {
   const discoveryV17 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
   const discoveryV18 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS);
   const discoveryV19 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V19_FIELDS);
+  const discoveryV20 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V20_FIELDS);
   const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
     || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19;
   const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17
@@ -142,7 +165,7 @@ export function normalizeAdminInboxNavigationStatus(value) {
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   if (!(exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
       || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
-      || discoveryV17 || discoveryV18 || discoveryV19 || freshObservation)
+      || discoveryV17 || discoveryV18 || discoveryV19 || discoveryV20 || freshObservation)
       || !TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
       || !TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
@@ -197,6 +220,21 @@ export function normalizeAdminInboxNavigationStatus(value) {
         || !TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE_SET.has(
           value.discovery_v19_singleton_wrapper_shape_state)
       ))
+      || (discoveryV20 && (
+        value.stage !== "BLOCKED"
+        || value.reason !== "DISCOVERY_STRUCTURE_REJECTED"
+        || !TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATE_SET.has(
+          value.discovery_v20_five_structural_chat_state)
+        || !Number.isSafeInteger(value.discovery_v20_raw_selector_match_count)
+        || value.discovery_v20_raw_selector_match_count < 0
+        || value.discovery_v20_raw_selector_match_count > TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+        || !Number.isSafeInteger(value.discovery_v20_qualified_selector_match_count)
+        || value.discovery_v20_qualified_selector_match_count < 0
+        || value.discovery_v20_qualified_selector_match_count > TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+        || !v20CountsMatchState(value.discovery_v20_five_structural_chat_state,
+          value.discovery_v20_raw_selector_match_count,
+          value.discovery_v20_qualified_selector_match_count)
+      ))
       ) {
     return null;
   }
@@ -222,6 +260,14 @@ export function normalizeAdminInboxNavigationStatus(value) {
     ...(discoveryV19 ? {
       discovery_v19_singleton_wrapper_shape_state:
         value.discovery_v19_singleton_wrapper_shape_state
+    } : {}),
+    ...(discoveryV20 ? {
+      discovery_v20_five_structural_chat_state:
+        value.discovery_v20_five_structural_chat_state,
+      discovery_v20_raw_selector_match_count:
+        value.discovery_v20_raw_selector_match_count,
+      discovery_v20_qualified_selector_match_count:
+        value.discovery_v20_qualified_selector_match_count
     } : {})
   });
 }

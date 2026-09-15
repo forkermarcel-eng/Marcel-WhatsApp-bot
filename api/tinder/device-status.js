@@ -54,6 +54,14 @@ const INBOX_NAVIGATION_DISCOVERY_V19_FIELDS = Object.freeze([
   ...INBOX_NAVIGATION_DISCOVERY_V18_FIELDS,
   "discovery_v19_singleton_wrapper_shape_state"
 ]);
+// V20 is a stand-alone terminal grammar: the bounded Inbox base, one finite
+// V20 state, and two capped counters. It cannot be mixed with V16–V19.
+const INBOX_NAVIGATION_DISCOVERY_V20_FIELDS = Object.freeze([
+  ...INBOX_NAVIGATION_FIELDS,
+  "discovery_v20_five_structural_chat_state",
+  "discovery_v20_raw_selector_match_count",
+  "discovery_v20_qualified_selector_match_count"
+]);
 const DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX = 2;
 const DISCOVERY_V16_STATES = new Set([
   "NOT_EVALUATED",
@@ -94,6 +102,13 @@ const DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES = new Set([
   "WRAPPER_SHAPE_MIXED_REJECTED",
   "V18_CARDINALITY_NOT_REPRODUCED"
 ]);
+const DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = new Set([
+  "BASE_STRUCTURE_REJECTED",
+  "LABEL_MATCH_COUNT_REJECTED",
+  "TARGET_PARENT_REJECTED",
+  "TARGET_ACTION_REJECTED",
+  "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE"
+]);
 const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "device_id", "display_name", "enrollment_state", "device_status", "enrolled_at",
   "last_heartbeat_accepted_at", "app_version", "app_build", "bridge_service_state",
@@ -104,6 +119,17 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "tinder_resumed_foreground_chat_return",
   "tinder_resumed_foreground_chat_return_diagnostic"
 ]);
+
+function v20CountsMatchState(state, rawCount, qualifiedCount) {
+  if (qualifiedCount > rawCount) return false;
+  if (state === "LABEL_MATCH_COUNT_REJECTED") return rawCount !== 1;
+  if (state === "TARGET_PARENT_REJECTED") return rawCount === 1 && qualifiedCount === 0;
+  if (state === "TARGET_ACTION_REJECTED"
+      || state === "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE") {
+    return rawCount === 1 && qualifiedCount === 1;
+  }
+  return state === "BASE_STRUCTURE_REJECTED";
+}
 
 function getCookie(req, name) {
   const cookies = String(req.headers.cookie || "").split(";").map(cookie => cookie.trim());
@@ -178,6 +204,7 @@ function normalizePublicInboxNavigation(value) {
   const discoveryV17 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
   const discoveryV18 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V18_FIELDS);
   const discoveryV19 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V19_FIELDS);
+  const discoveryV20 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V20_FIELDS);
   const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
     || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19;
   const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17
@@ -186,7 +213,7 @@ function normalizePublicInboxNavigation(value) {
   const hasDiscoveryV18 = discoveryV18 || discoveryV19;
   if (!(exactKeys(value, INBOX_NAVIGATION_FIELDS)
       || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
-      || discoveryV17 || discoveryV18 || discoveryV19)
+      || discoveryV17 || discoveryV18 || discoveryV19 || discoveryV20)
       || !INBOX_NAVIGATION_STAGES.has(value.stage)
       || !INBOX_NAVIGATION_REASONS.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
@@ -234,6 +261,21 @@ function normalizePublicInboxNavigation(value) {
           !== "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED"
         || !DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES.has(
           value.discovery_v19_singleton_wrapper_shape_state)
+      ))
+      || (discoveryV20 && (
+        value.stage !== "BLOCKED"
+        || value.reason !== "DISCOVERY_STRUCTURE_REJECTED"
+        || !DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES.has(
+          value.discovery_v20_five_structural_chat_state)
+        || !Number.isSafeInteger(value.discovery_v20_raw_selector_match_count)
+        || value.discovery_v20_raw_selector_match_count < 0
+        || value.discovery_v20_raw_selector_match_count > DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+        || !Number.isSafeInteger(value.discovery_v20_qualified_selector_match_count)
+        || value.discovery_v20_qualified_selector_match_count < 0
+        || value.discovery_v20_qualified_selector_match_count > DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+        || !v20CountsMatchState(value.discovery_v20_five_structural_chat_state,
+          value.discovery_v20_raw_selector_match_count,
+          value.discovery_v20_qualified_selector_match_count)
       ))) {
     return null;
   }
@@ -259,6 +301,14 @@ function normalizePublicInboxNavigation(value) {
     ...(discoveryV19 ? {
       discovery_v19_singleton_wrapper_shape_state:
         value.discovery_v19_singleton_wrapper_shape_state
+    } : {}),
+    ...(discoveryV20 ? {
+      discovery_v20_five_structural_chat_state:
+        value.discovery_v20_five_structural_chat_state,
+      discovery_v20_raw_selector_match_count:
+        value.discovery_v20_raw_selector_match_count,
+      discovery_v20_qualified_selector_match_count:
+        value.discovery_v20_qualified_selector_match_count
     } : {})
   });
 }

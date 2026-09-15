@@ -164,6 +164,33 @@ test("Tinder Inbox diagnostics surface V19 only as the exact V18 cardinality-rej
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
 
+test("Tinder Inbox diagnostics surface V20 as a separate bounded base-and-counters branch", () => {
+  assert.match(page, /const DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = new Set\(/);
+  for (const state of [
+    "BASE_STRUCTURE_REJECTED",
+    "LABEL_MATCH_COUNT_REJECTED",
+    "TARGET_PARENT_REJECTED",
+    "TARGET_ACTION_REJECTED",
+    "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE"
+  ]) assert.match(page, new RegExp(`"${state}"`));
+  assert.match(page, /const discoveryV20Fields = \[\s*\.\.\.baseFields,/);
+  assert.match(page, /discovery_v20_five_structural_chat_state/);
+  assert.match(page, /discovery_v20_raw_selector_match_count/);
+  assert.match(page, /discovery_v20_qualified_selector_match_count/);
+  assert.match(page, /const discoveryV20 = fieldNames === discoveryV20Fields/);
+  assert.match(page, /DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES\.has\(/);
+  assert.match(page, /function discoveryV20CountsMatchState\(state, rawCount, qualifiedCount\)/);
+  assert.match(page, /discoveryV20CountsMatchState\(value\.discovery_v20_five_structural_chat_state,/);
+  assert.doesNotMatch(page, /DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = new Set\(\[\s*"NOT_EVALUATED"/);
+  assert.match(page, /DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATE:/);
+  for (const forbidden of [
+    "inbox_navigation.raw_accessibility_tree", "inbox_navigation.message_text",
+    "inbox_navigation.visible_name", "inbox_navigation.node_id",
+    "inbox_navigation.fingerprint", "inbox_navigation.exception_message",
+    "inbox_navigation.selector_text", "inbox_navigation.selector_id"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the bounded read-only official resume handoff", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="officialResumeHandoffStatus"/);
   assert.match(page, /function officialResumeHandoffIsSafe\(value\)/);

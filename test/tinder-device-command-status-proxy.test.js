@@ -593,6 +593,66 @@ test("device-list proxy projects V19 only behind the exact V18 cardinality rejec
   }
 }));
 
+test("device-list proxy projects V20 only as its independent exact base-and-counters branch", async () => withEnvironment(async () => {
+  const inboxNavigation = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v20_five_structural_chat_state: "TARGET_ACTION_REJECTED",
+    discovery_v20_raw_selector_match_count: 1,
+    discovery_v20_qualified_selector_match_count: 1
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ inboxNavigation })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].inbox_navigation, inboxNavigation);
+  for (const forbidden of [
+    "raw_accessibility_tree", "message_text", "visible_name", "node_id",
+    "fingerprint", "exception_message", "selector_text", "selector_id"
+  ]) assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+
+  for (const invalid of [
+    { ...inboxNavigation, discovery_v20_five_structural_chat_state: "UNBOUNDED" },
+    { ...inboxNavigation, discovery_v20_five_structural_chat_state: "NOT_EVALUATED" },
+    { ...inboxNavigation, discovery_v20_raw_selector_match_count: 3 },
+    { ...inboxNavigation, discovery_v20_qualified_selector_match_count: 0 },
+    { ...inboxNavigation, discovery_v19_singleton_wrapper_shape_state: "WRAPPER_EMPTY" },
+    { ...inboxNavigation, observation_kind: "FRESH_REVIEWED_INBOX_V1",
+      observation_nonce: "c7cb0b92-ad3c-4ec6-88dc-d149ef536c3d" },
+    { ...inboxNavigation, stage: "INBOX_READY", reason: "NONE" }
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ inboxNavigation: invalid })]
+        });
+      }
+    });
+    const invalidRes = responseRecorder();
+    await handler(req, invalidRes);
+    assert.equal(invalidRes.statusCode, 200);
+    assert.equal(invalidRes.body.devices[0].inbox_navigation, null);
+  }
+}));
+
 test("device-list proxy allowlists the bounded official resume handoff projection", async () => withEnvironment(async () => {
   const officialResumeHandoff = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   globalThis.fetch = async () => ({

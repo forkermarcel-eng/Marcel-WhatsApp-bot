@@ -958,6 +958,54 @@ test("terminal Tinder discovery V19 requires the exact V18 cardinality-rejection
   }
 });
 
+test("terminal Tinder discovery V20 is an independent exact base-and-counters branch", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v20_five_structural_chat_state: "LABEL_MATCH_COUNT_REJECTED",
+    discovery_v20_raw_selector_match_count: 0,
+    discovery_v20_qualified_selector_match_count: 0
+  };
+  const payload = heartbeatPayload({ tinder_inbox_navigation: diagnostic });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(parseAndValidateHeartbeat(request.req).tinder_inbox_navigation, diagnostic);
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_inbox_navigation: diagnostic
+  });
+  assert.deepEqual(response.commands, []);
+
+  for (const inboxNavigation of [
+    { ...diagnostic, discovery_v20_five_structural_chat_state: "UNBOUNDED" },
+    { ...diagnostic, discovery_v20_five_structural_chat_state: "NOT_EVALUATED" },
+    { ...diagnostic, discovery_v20_raw_selector_match_count: 3 },
+    { ...diagnostic, discovery_v20_qualified_selector_match_count: 1 },
+    { ...diagnostic, stage: "INBOX_READY", reason: "NONE" },
+    { ...diagnostic, discovery_v19_singleton_wrapper_shape_state: "WRAPPER_EMPTY" },
+    (() => {
+      const { discovery_v20_qualified_selector_match_count, ...withoutQualifiedCount } = diagnostic;
+      return withoutQualifiedCount;
+    })()
+  ]) {
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(
+        heartbeatPayload({ tinder_inbox_navigation: inboxNavigation })).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("optional official resume handoff heartbeat diagnostic is exact, content-free, and observational", async () => {
   const diagnostic = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   const payload = heartbeatPayload({ tinder_official_resume_handoff: diagnostic });
@@ -3036,6 +3084,47 @@ test("admin status projects V19 only behind the exact V18 cardinality rejection"
       const { discovery_v18_singleton_grandchild_relation_state, ...withoutV18 } = diagnostic;
       return withoutV18;
     })()
+  ]) {
+    const invalidPool = { async query() {
+      return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+        "CONNECTED", invalid)] };
+    } };
+    const invalidRes = responseRecorder();
+    await createAdminDeviceStatusHandler(invalidPool)(
+      { params: { deviceId: DEVICE_ID } }, invalidRes);
+    assert.equal(invalidRes.body.device.inbox_navigation, null);
+  }
+});
+
+test("admin status projects V20 only as its independent exact base-and-counters branch", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v20_five_structural_chat_state: "TARGET_PARENT_REJECTED",
+    discovery_v20_raw_selector_match_count: 1,
+    discovery_v20_qualified_selector_match_count: 0
+  };
+  const pool = { async query() {
+    return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+      "CONNECTED", diagnostic)] };
+  } };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.inbox_navigation, diagnostic);
+  for (const forbidden of [
+    "raw_accessibility_tree", "message_text", "visible_name", "node_id",
+    "fingerprint", "exception_message", "selector_text", "selector_id"
+  ]) assert.equal(JSON.stringify(res.body.device).includes(forbidden), false);
+
+  for (const invalid of [
+    { ...diagnostic, discovery_v20_five_structural_chat_state: "UNBOUNDED" },
+    { ...diagnostic, discovery_v20_five_structural_chat_state: "NOT_EVALUATED" },
+    { ...diagnostic, discovery_v20_qualified_selector_match_count: 3 },
+    { ...diagnostic, discovery_v20_qualified_selector_match_count: 2 },
+    { ...diagnostic, discovery_v16_state: "LABEL_MATCH_COUNT_REJECTED" },
+    { ...diagnostic, stage: "INBOX_READY", reason: "NONE" }
   ]) {
     const invalidPool = { async query() {
       return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,

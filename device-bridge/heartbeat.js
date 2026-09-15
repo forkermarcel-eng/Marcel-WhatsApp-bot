@@ -183,6 +183,15 @@ const TINDER_INBOX_NAVIGATION_DISCOVERY_V19_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS,
   "discovery_v19_singleton_wrapper_shape_state"
 ]);
+// V20 is deliberately a separate terminal schema branch. It is based only
+// on the four bounded Inbox fields plus its own finite state and capped
+// counters; it must never inherit, imply, or extend V16 through V19.
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V20_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_FIELDS,
+  "discovery_v20_five_structural_chat_state",
+  "discovery_v20_raw_selector_match_count",
+  "discovery_v20_qualified_selector_match_count"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
@@ -243,6 +252,29 @@ export const TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES = Object.freeze
 ]);
 const TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE_SET =
   new Set(TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES);
+// V20 is a finite, content-free observation of a separately reviewed five
+// structural-control branch. It is terminal-only and cannot mint a target,
+// command, permit, identity, or action.
+export const TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = Object.freeze([
+  "BASE_STRUCTURE_REJECTED",
+  "LABEL_MATCH_COUNT_REJECTED",
+  "TARGET_PARENT_REJECTED",
+  "TARGET_ACTION_REJECTED",
+  "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE"
+]);
+const TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATE_SET =
+  new Set(TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES);
+
+function v20CountsMatchState(state, rawCount, qualifiedCount) {
+  if (qualifiedCount > rawCount) return false;
+  if (state === "LABEL_MATCH_COUNT_REJECTED") return rawCount !== 1;
+  if (state === "TARGET_PARENT_REJECTED") return rawCount === 1 && qualifiedCount === 0;
+  if (state === "TARGET_ACTION_REJECTED"
+      || state === "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE") {
+    return rawCount === 1 && qualifiedCount === 1;
+  }
+  return state === "BASE_STRUCTURE_REJECTED";
+}
 // This is not a permit, target, or identity assertion.  It is a transient
 // same-heartbeat readiness bit from the V9-capable Android runtime after it
 // has locally revalidated the retained human-attested V3 continuity proof.
@@ -347,6 +379,7 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
   const discoveryV17 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
   const discoveryV18 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS);
   const discoveryV19 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V19_FIELDS);
+  const discoveryV20 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V20_FIELDS);
   const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
     || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19;
   const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17
@@ -354,7 +387,7 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
       || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
-      || discoveryV17 || discoveryV18 || discoveryV19 || freshObservation)
+      || discoveryV17 || discoveryV18 || discoveryV19 || discoveryV20 || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -408,6 +441,21 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
         === "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED"
       && TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE_SET.has(
         value.discovery_v19_singleton_wrapper_shape_state)
+    ))
+    && (!discoveryV20 || (
+      value.stage === "BLOCKED"
+      && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
+      && TINDER_DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATE_SET.has(
+        value.discovery_v20_five_structural_chat_state)
+      && Number.isSafeInteger(value.discovery_v20_raw_selector_match_count)
+      && value.discovery_v20_raw_selector_match_count >= 0
+      && value.discovery_v20_raw_selector_match_count <= TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+      && Number.isSafeInteger(value.discovery_v20_qualified_selector_match_count)
+      && value.discovery_v20_qualified_selector_match_count >= 0
+      && value.discovery_v20_qualified_selector_match_count <= TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+      && v20CountsMatchState(value.discovery_v20_five_structural_chat_state,
+        value.discovery_v20_raw_selector_match_count,
+        value.discovery_v20_qualified_selector_match_count)
     ));
 }
 
@@ -693,6 +741,16 @@ function heartbeatAuditDetails(heartbeat) {
       // V19 is accepted only behind V18's exact terminal cardinality rejection.
       boundedNavigation.discovery_v19_singleton_wrapper_shape_state =
         navigation.discovery_v19_singleton_wrapper_shape_state;
+    }
+    if (Object.hasOwn(navigation, "discovery_v20_five_structural_chat_state")) {
+      // V20 is an independent exact terminal branch. Persist only its finite
+      // state and capped counters after the whole shape passed parser validation.
+      boundedNavigation.discovery_v20_five_structural_chat_state =
+        navigation.discovery_v20_five_structural_chat_state;
+      boundedNavigation.discovery_v20_raw_selector_match_count =
+        navigation.discovery_v20_raw_selector_match_count;
+      boundedNavigation.discovery_v20_qualified_selector_match_count =
+        navigation.discovery_v20_qualified_selector_match_count;
     }
     details.tinder_inbox_navigation = boundedNavigation;
   }

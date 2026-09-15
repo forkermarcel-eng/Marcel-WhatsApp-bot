@@ -1335,6 +1335,25 @@
       "WRAPPER_SHAPE_MIXED_REJECTED",
       "V18_CARDINALITY_NOT_REPRODUCED"
     ]);
+    // V20 is a separate terminal grammar: it is the bounded base status plus
+    // its own finite state and capped counters, never a V16–V19 extension.
+    const DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = new Set([
+      "BASE_STRUCTURE_REJECTED",
+      "LABEL_MATCH_COUNT_REJECTED",
+      "TARGET_PARENT_REJECTED",
+      "TARGET_ACTION_REJECTED",
+      "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE"
+    ]);
+    function discoveryV20CountsMatchState(state, rawCount, qualifiedCount) {
+      if (qualifiedCount > rawCount) return false;
+      if (state === "LABEL_MATCH_COUNT_REJECTED") return rawCount !== 1;
+      if (state === "TARGET_PARENT_REJECTED") return rawCount === 1 && qualifiedCount === 0;
+      if (state === "TARGET_ACTION_REJECTED"
+          || state === "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE") {
+        return rawCount === 1 && qualifiedCount === 1;
+      }
+      return state === "BASE_STRUCTURE_REJECTED";
+    }
    const OFFICIAL_RESUME_HANDOFF_STAGES = new Set([
      "ARMED", "ACK_ACCEPTED", "CURRENT_ROOT_SAMPLED", "CANDIDATE_ACCEPTED",
      "INBOX_PREPARATION_REQUESTED", "BLOCKED"
@@ -2975,6 +2994,12 @@
         ...discoveryV18Fields,
         "discovery_v19_singleton_wrapper_shape_state"
       ];
+      const discoveryV20Fields = [
+        ...baseFields,
+        "discovery_v20_five_structural_chat_state",
+        "discovery_v20_raw_selector_match_count",
+        "discovery_v20_qualified_selector_match_count"
+      ];
      const fieldNames = value && typeof value === "object" && !Array.isArray(value)
        ? Object.keys(value).sort().join("|")
        : "";
@@ -2986,13 +3011,14 @@
       const discoveryV17 = fieldNames === discoveryV17Fields.sort().join("|");
       const discoveryV18 = fieldNames === discoveryV18Fields.sort().join("|");
       const discoveryV19 = fieldNames === discoveryV19Fields.sort().join("|");
+      const discoveryV20 = fieldNames === discoveryV20Fields.sort().join("|");
       const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
         || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19;
       const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17
         || discoveryV18 || discoveryV19;
      return value && typeof value === "object" && !Array.isArray(value)
        && (fieldNames === baseFields.join("|") || discoveryV16 || discoveryV16SelectorCounts
-          || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19)
+          || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19 || discoveryV20)
        && INBOX_NAVIGATION_STAGES.has(value.stage)
        && INBOX_NAVIGATION_REASONS.has(value.reason)
        && Number.isSafeInteger(value.visible_conversation_count)
@@ -3040,6 +3066,21 @@
             === "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED"
           && DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES.has(
             value.discovery_v19_singleton_wrapper_shape_state)
+        ))
+        && (!discoveryV20 || (
+          value.stage === "BLOCKED"
+          && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
+          && DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES.has(
+            value.discovery_v20_five_structural_chat_state)
+          && Number.isSafeInteger(value.discovery_v20_raw_selector_match_count)
+          && value.discovery_v20_raw_selector_match_count >= 0
+          && value.discovery_v20_raw_selector_match_count <= 2
+          && Number.isSafeInteger(value.discovery_v20_qualified_selector_match_count)
+          && value.discovery_v20_qualified_selector_match_count >= 0
+          && value.discovery_v20_qualified_selector_match_count <= 2
+          && discoveryV20CountsMatchState(value.discovery_v20_five_structural_chat_state,
+            value.discovery_v20_raw_selector_match_count,
+            value.discovery_v20_qualified_selector_match_count)
         ));
    }
 
@@ -3075,6 +3116,11 @@
           : "") +
         (Object.hasOwn(navigation, "discovery_v19_singleton_wrapper_shape_state")
           ? ` \u00b7 DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE: ${navigation.discovery_v19_singleton_wrapper_shape_state}`
+          : "") +
+        (Object.hasOwn(navigation, "discovery_v20_five_structural_chat_state")
+          ? ` \u00b7 DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATE: ${navigation.discovery_v20_five_structural_chat_state}` +
+            ` \u00b7 DISCOVERY_V20_RAW_SELECTOR_MATCH_COUNT: ${navigation.discovery_v20_raw_selector_match_count}` +
+            ` \u00b7 DISCOVERY_V20_QUALIFIED_SELECTOR_MATCH_COUNT: ${navigation.discovery_v20_qualified_selector_match_count}`
           : "");
    }
 

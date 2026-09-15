@@ -1306,6 +1306,15 @@
      "TARGET_PARENT_REJECTED", "TARGET_ACTION_REJECTED",
      "STRICT_CHAT_LABEL_INBOX_CANDIDATE"
    ]);
+   // Terminal diagnostic evidence only. This finite V2 branch label never
+   // identifies a view, selector, person, or navigation target.
+   const DIRECT_STATIC_V2_STATES = new Set([
+     "NOT_EVALUATED", "DIRECT_ID_INCOMPLETE_OR_AMBIGUOUS",
+     "DIRECT_PARENTS_NOT_COMMON", "DIRECT_PARENT_SHAPE_REJECTED",
+     "DIRECT_CHILD_SET_REJECTED", "DIRECT_TAB_SHAPE_REJECTED",
+     "DIRECT_TAB_SELECTION_ACTION_REJECTED", "DIRECT_TAB_BOUNDS_REJECTED",
+     "STRICT_V2_CANDIDATE"
+   ]);
    const OFFICIAL_RESUME_HANDOFF_STAGES = new Set([
      "ARMED", "ACK_ACCEPTED", "CURRENT_ROOT_SAMPLED", "CANDIDATE_ACCEPTED",
      "INBOX_PREPARATION_REQUESTED", "BLOCKED"
@@ -2930,21 +2939,28 @@
        "discovery_v16_raw_selector_match_count",
        "discovery_v16_qualified_selector_match_count"
      ];
+     const discoveryV16DirectStaticV2Fields = [
+       ...discoveryV16SelectorCountFields,
+       "direct_static_v2_state"
+     ];
      const fieldNames = value && typeof value === "object" && !Array.isArray(value)
        ? Object.keys(value).sort().join("|")
        : "";
      const discoveryV16 = fieldNames === discoveryV16Fields.sort().join("|");
      const discoveryV16SelectorCounts =
        fieldNames === discoveryV16SelectorCountFields.sort().join("|");
+     const discoveryV16DirectStaticV2 =
+       fieldNames === discoveryV16DirectStaticV2Fields.sort().join("|");
      return value && typeof value === "object" && !Array.isArray(value)
-       && (fieldNames === baseFields.join("|") || discoveryV16 || discoveryV16SelectorCounts)
+       && (fieldNames === baseFields.join("|") || discoveryV16 || discoveryV16SelectorCounts
+         || discoveryV16DirectStaticV2)
        && INBOX_NAVIGATION_STAGES.has(value.stage)
        && INBOX_NAVIGATION_REASONS.has(value.reason)
        && Number.isSafeInteger(value.visible_conversation_count)
        && value.visible_conversation_count >= 0 && value.visible_conversation_count <= 8
        && Number.isSafeInteger(value.observed_event_count)
        && value.observed_event_count >= 0 && value.observed_event_count <= 8
-       && (!(discoveryV16 || discoveryV16SelectorCounts) || (
+       && (!(discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2) || (
          value.stage === "BLOCKED"
          && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
          && DISCOVERY_V16_STATES.has(value.discovery_v16_state)
@@ -2956,7 +2972,9 @@
          && Number.isSafeInteger(value.discovery_v16_qualified_selector_match_count)
          && value.discovery_v16_qualified_selector_match_count >= 0
          && value.discovery_v16_qualified_selector_match_count <= 2
-       ));
+       ))
+       && (!discoveryV16DirectStaticV2
+         || DIRECT_STATIC_V2_STATES.has(value.direct_static_v2_state));
    }
 
    function renderInboxNavigationStatus(device) {
@@ -2979,6 +2997,9 @@
        (Object.hasOwn(navigation, "discovery_v16_raw_selector_match_count")
          ? ` \u00b7 DISCOVERY_V16_RAW_SELECTOR_MATCH_COUNT: ${navigation.discovery_v16_raw_selector_match_count}` +
            ` \u00b7 DISCOVERY_V16_QUALIFIED_SELECTOR_MATCH_COUNT: ${navigation.discovery_v16_qualified_selector_match_count}`
+         : "") +
+       (Object.hasOwn(navigation, "direct_static_v2_state")
+         ? ` \u00b7 DIRECT_STATIC_V2_STATE: ${navigation.direct_static_v2_state}`
          : "");
    }
 

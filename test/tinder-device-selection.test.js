@@ -85,6 +85,23 @@ test("Tinder Inbox diagnostics surface V16 selector counts only as a capped term
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
 
+test("Tinder Inbox diagnostics surface direct-static V2 only as the exact V16 terminal extension", () => {
+  assert.match(page, /const DIRECT_STATIC_V2_STATES = new Set\(/);
+  assert.match(page, /"DIRECT_ID_INCOMPLETE_OR_AMBIGUOUS"/);
+  assert.match(page, /"STRICT_V2_CANDIDATE"/);
+  assert.match(page, /discoveryV16DirectStaticV2Fields/);
+  assert.match(page, /direct_static_v2_state/);
+  assert.match(page, /discoveryV16DirectStaticV2/);
+  assert.match(page, /DIRECT_STATIC_V2_STATES\.has\(value\.direct_static_v2_state\)/);
+  assert.match(page, /DIRECT_STATIC_V2_STATE:/);
+  for (const forbidden of [
+    "inbox_navigation.raw_accessibility_tree", "inbox_navigation.message_text",
+    "inbox_navigation.visible_name", "inbox_navigation.node_id",
+    "inbox_navigation.fingerprint", "inbox_navigation.exception_message",
+    "inbox_navigation.selector_text", "inbox_navigation.selector_id"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the bounded read-only official resume handoff", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="officialResumeHandoffStatus"/);
   assert.match(page, /function officialResumeHandoffIsSafe\(value\)/);

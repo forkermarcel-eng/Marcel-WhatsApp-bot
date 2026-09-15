@@ -149,6 +149,14 @@ const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS = Object.freez
   "discovery_v16_raw_selector_match_count",
   "discovery_v16_qualified_selector_match_count"
 ]);
+// This is an exact extension of the V16 selector-count terminal shape.  It
+// deliberately cannot be sent on its own or with any legacy Inbox shape.
+// The field is a finite branch label from the already-reviewed local V2
+// projection; it contains no selector, view, content, identifier, or target.
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS,
+  "direct_static_v2_state"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
@@ -169,6 +177,20 @@ export const TINDER_DISCOVERY_V16_STATES = Object.freeze([
   "STRICT_CHAT_LABEL_INBOX_CANDIDATE"
 ]);
 const TINDER_DISCOVERY_V16_STATE_SET = new Set(TINDER_DISCOVERY_V16_STATES);
+// Kept separate from V16 because this is observational evidence about an
+// earlier reviewed projection branch, never a navigation authorization.
+export const TINDER_DIRECT_STATIC_V2_STATES = Object.freeze([
+  "NOT_EVALUATED",
+  "DIRECT_ID_INCOMPLETE_OR_AMBIGUOUS",
+  "DIRECT_PARENTS_NOT_COMMON",
+  "DIRECT_PARENT_SHAPE_REJECTED",
+  "DIRECT_CHILD_SET_REJECTED",
+  "DIRECT_TAB_SHAPE_REJECTED",
+  "DIRECT_TAB_SELECTION_ACTION_REJECTED",
+  "DIRECT_TAB_BOUNDS_REJECTED",
+  "STRICT_V2_CANDIDATE"
+]);
+const TINDER_DIRECT_STATIC_V2_STATE_SET = new Set(TINDER_DIRECT_STATIC_V2_STATES);
 // This is not a permit, target, or identity assertion.  It is a transient
 // same-heartbeat readiness bit from the V9-capable Android runtime after it
 // has locally revalidated the retained human-attested V3 continuity proof.
@@ -268,9 +290,11 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
   const discoveryV16 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS);
   const discoveryV16SelectorCounts = exactKeys(
     value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS);
+  const discoveryV16DirectStaticV2 = exactKeys(
+    value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS);
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
-      || discoveryV16 || discoveryV16SelectorCounts || freshObservation)
+      || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2 || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -283,7 +307,7 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
       value.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
       && isUuidV4(value.observation_nonce)
     ))
-    && (!(discoveryV16 || discoveryV16SelectorCounts) || (
+    && (!(discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2) || (
       value.stage === "BLOCKED"
       && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
       && TINDER_DISCOVERY_V16_STATE_SET.has(value.discovery_v16_state)
@@ -295,7 +319,9 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
       && Number.isSafeInteger(value.discovery_v16_qualified_selector_match_count)
       && value.discovery_v16_qualified_selector_match_count >= 0
       && value.discovery_v16_qualified_selector_match_count <= TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
-    ));
+    ))
+    && (!discoveryV16DirectStaticV2
+      || TINDER_DIRECT_STATIC_V2_STATE_SET.has(value.direct_static_v2_state));
 }
 
 /**
@@ -557,6 +583,12 @@ function heartbeatAuditDetails(heartbeat) {
         navigation.discovery_v16_raw_selector_match_count;
       boundedNavigation.discovery_v16_qualified_selector_match_count =
         navigation.discovery_v16_qualified_selector_match_count;
+    }
+    if (Object.hasOwn(navigation, "direct_static_v2_state")) {
+      // This exact terminal-only extension is a finite local branch label,
+      // not a selector, target, identity, or capability. Preserve it only
+      // after the same strict parser gate above has accepted the whole shape.
+      boundedNavigation.direct_static_v2_state = navigation.direct_static_v2_state;
     }
     details.tinder_inbox_navigation = boundedNavigation;
   }

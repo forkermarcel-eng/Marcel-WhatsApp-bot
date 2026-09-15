@@ -48,6 +48,12 @@ import {
   boundedTinderUnboundInboxConversationSweepIssuePhase
 } from "../services/tinder-unbound-inbox-conversation-sweep.js";
 import {
+  createPgTinderUnboundInboxSweepGateRecoveryRepository,
+  createTinderUnboundInboxSweepGateRecoveryCoordinator,
+  TINDER_UNBOUND_INBOX_SWEEP_GATE_RECOVERY_CREATED_BY,
+  TINDER_UNBOUND_INBOX_SWEEP_GATE_RECOVERY_STATUS
+} from "../services/tinder-unbound-inbox-conversation-sweep-gate-recovery.js";
+import {
   boundedTinderUnboundInboxSweepDiagnostic
 } from "./tinder-unbound-inbox-sweep-diagnostic-contract.js";
 import {
@@ -82,7 +88,7 @@ const HEARTBEAT_FAILURE_STAGE_PROPERTY = "deviceBridgeHeartbeatFailureStage";
 const HEARTBEAT_FAILURE_STAGES = new Set([
   "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION", "V8_RUNTIME_FOUNDATION", "V9_FOUNDATION", "V10_FOUNDATION",
   "SCHEMA_EVIDENCE_AUTHORIZATION", "SCHEMA_EVIDENCE_AUDIT", "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_EXPIRY",
-  "V9_EXPIRY", "V10_EXPIRY", "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
+  "V9_EXPIRY", "V10_EXPIRY", "V8_GATE_RECOVERY", "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
 ]);
 
 // This is deliberately a bounded, content-free diagnostic contract. It is
@@ -706,6 +712,25 @@ async function expireUnboundInboxConversationSweepForHeartbeat(client, {
   });
 }
 
+// The signed heartbeat already owns the device-row lock. This bounded helper
+// takes the same lock again through its repository, then considers only a
+// currently active V8 parent with one still-ISSUED child. It never restarts a
+// terminal coordinator command or an expired/terminal V8 parent.
+async function coordinateUnboundInboxSweepManualGateRecoveryForHeartbeat(client, {
+  pool, deviceId, now, unboundInboxConversationSweepFoundationCanonical, mayIssue
+}) {
+  if (unboundInboxConversationSweepFoundationCanonical !== true) {
+    return Object.freeze({
+      status: TINDER_UNBOUND_INBOX_SWEEP_GATE_RECOVERY_STATUS.NOT_APPLICABLE
+    });
+  }
+  const coordinator = createTinderUnboundInboxSweepGateRecoveryCoordinator(
+    createPgTinderUnboundInboxSweepGateRecoveryRepository(pool),
+    { now: () => now }
+  );
+  return coordinator.coordinateExistingActiveSweep(client, { deviceId, mayIssue });
+}
+
 // V8 commands are permitted only after the exact catalog inspector accepts the
 // complete direct-V6-to-V8 foundation. A pair of relations is not sufficient:
 // a partial, drifted, or otherwise uninspectable foundation must not mint or
@@ -919,6 +944,8 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
   resumedForegroundChatReturnFoundationReady = false,
   resumedForegroundChatReturnDeliveryReady = false,
   resumedForegroundChatReturnActive = false,
+  unboundInboxSweepGateRecovery = null,
+  tinderGateConnected = false,
   suppressDynamicTinderCommands = false
 } = {}) {
   const t1Capable = isTinderManualGateCapable(capabilities);
@@ -947,6 +974,13 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
   }
   const unboundInboxConversationSweepCapable = advertisedUnboundInboxConversationSweepCapability
     && unboundInboxConversationSweepFoundationReady === true;
+  const coordinatorCommandId =
+    unboundInboxSweepGateRecovery?.status === TINDER_UNBOUND_INBOX_SWEEP_GATE_RECOVERY_STATUS.PENDING
+    && isUuidV4(unboundInboxSweepGateRecovery?.commandId)
+      ? unboundInboxSweepGateRecovery.commandId
+      : null;
+  const coordinatorBlocksDynamicDelivery =
+    unboundInboxSweepGateRecovery?.status === TINDER_UNBOUND_INBOX_SWEEP_GATE_RECOVERY_STATUS.BLOCKED;
   const verifiedChatReturnCapable = advertisedVerifiedChatReturnCapability
     && verifiedChatReturnFoundationReady === true;
   const verifiedChatReturnDeliverable = verifiedChatReturnCapable
@@ -1205,7 +1239,11 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
           )
         )`
     : "";
+  // The V8 child reaches Android only while the current signed runtime has
+  // reaffirmed the manual gate. A stale earlier CONNECTED heartbeat cannot
+  // carry a reader child across a genuine Bridge-runtime reset.
   const unboundInboxConversationSweepDeliveryPredicate = unboundInboxConversationSweepCapable
+    && tinderGateConnected === true
     ? `
         AND (
           command_type NOT IN ('${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}')
@@ -1251,7 +1289,27 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
                AND active_step.expires_at>$2
           )
           OR command_type IN ('${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_READ_COMMAND_TYPE}','${TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_RETURN_COMMAND_TYPE}')
+          ${coordinatorCommandId === null ? "" : "OR command_id=$4"}
         )`
+    : "";
+  // A gate-recovery CONNECT command is tied to one active V8 parent through
+  // its generic audit record. While it is pending, it is intentionally the
+  // only delivered command; its exact empty payload is still rechecked by
+  // the ordinary selection predicate. A consumed/expired/anomalous prior
+  // coordinator row instead suppresses dynamic delivery until the V8 parent
+  // reaches its immutable terminal state.
+  const unboundInboxSweepGateRecoveryExclusiveDeliveryPredicate = coordinatorCommandId !== null
+    ? " AND command_id=$4"
+    : coordinatorBlocksDynamicDelivery
+      ? " AND command_type IN ('PING','REQUEST_STATUS','STOP_BRIDGE')"
+      : "";
+  // A coordinator-created CONNECT is never an ordinary T1 command after it
+  // has been inserted.  It is selectable only when this very heartbeat has
+  // just revalidated its active parent and returned its exact pending command
+  // id above.  Otherwise every marked row is suppressed, including orphaned,
+  // expired-parent, already-connected, or malformed historical rows.
+  const unboundInboxSweepGateRecoveryDeliveryPredicate = coordinatorCommandId === null
+    ? ` AND created_by IS DISTINCT FROM '${TINDER_UNBOUND_INBOX_SWEEP_GATE_RECOVERY_CREATED_BY}'`
     : "";
   // V10 is an identity-free post-Resume return. Its single current-heartbeat
   // readiness bit permits delivery only after Android has separately proved
@@ -1373,13 +1431,17 @@ async function selectDeliverableCommands(client, deviceId, capabilities, now, {
         ${localConversationAttestationDeliveryPredicate}
         ${unboundInboxConversationSweepDeliveryPredicate}
         ${unboundInboxConversationSweepExclusiveDeliveryPredicate}
+        ${unboundInboxSweepGateRecoveryExclusiveDeliveryPredicate}
+        ${unboundInboxSweepGateRecoveryDeliveryPredicate}
         ${resumedForegroundChatReturnDeliveryPredicate}
         ${resumedForegroundChatReturnExclusiveDeliveryPredicate}
         ${verifiedChatReturnDeliveryPredicate}
         ${verifiedChatReturnExclusiveDeliveryPredicate}
      ORDER BY issued_at ASC, command_id ASC
      LIMIT $3`,
-    [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit]
+    coordinatorCommandId === null
+      ? [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit]
+      : [deviceId, now, DEVICE_BRIDGE_PROTOCOL.commandBatchLimit, coordinatorCommandId]
   );
   const commands = [];
   for (const row of result.rows) {
@@ -1657,6 +1719,15 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       now,
       resumedForegroundChatReturnFoundationCanonical
     });
+    failureStage = "V8_GATE_RECOVERY";
+    const unboundInboxSweepGateRecovery =
+      await coordinateUnboundInboxSweepManualGateRecoveryForHeartbeat(client, {
+        pool,
+        deviceId: auth.deviceId,
+        now,
+        unboundInboxConversationSweepFoundationCanonical,
+        mayIssue: !idempotent
+      });
     if (!idempotent) {
       // The audit fact was intentionally written before the expiration and
       // serial gate. A valid fresh observation nonce is therefore consumed
@@ -1687,6 +1758,8 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
         resumedForegroundChatReturnFoundationReady,
         resumedForegroundChatReturnDeliveryReady,
         resumedForegroundChatReturnActive: v10ReturnRuntime.active,
+        unboundInboxSweepGateRecovery,
+        tinderGateConnected: heartbeat.tinder_state === "CONNECTED",
         suppressDynamicTinderCommands:
           // An INVALID result can mean a previously canonical V8 catalog
           // drifted after an active parent/child was issued. The current

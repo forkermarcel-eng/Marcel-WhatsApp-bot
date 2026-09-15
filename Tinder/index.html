@@ -1327,6 +1327,14 @@
       "AMBIGUOUS_EXACT_CARRIER_SINGLETON_GRANDCHILD",
       "NO_EXACT_CARRIER_SINGLETON_GRANDCHILD"
     ]);
+    const DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES = new Set([
+      "LEAF_SHAPE_NOT_REPRODUCED",
+      "WRAPPER_REFERENCE_UNAVAILABLE",
+      "WRAPPER_EMPTY",
+      "WRAPPER_BRANCHING",
+      "WRAPPER_SHAPE_MIXED_REJECTED",
+      "V18_CARDINALITY_NOT_REPRODUCED"
+    ]);
    const OFFICIAL_RESUME_HANDOFF_STAGES = new Set([
      "ARMED", "ACK_ACCEPTED", "CURRENT_ROOT_SAMPLED", "CANDIDATE_ACCEPTED",
      "INBOX_PREPARATION_REQUESTED", "BLOCKED"
@@ -2963,6 +2971,10 @@
         ...discoveryV17Fields,
         "discovery_v18_singleton_grandchild_relation_state"
       ];
+      const discoveryV19Fields = [
+        ...discoveryV18Fields,
+        "discovery_v19_singleton_wrapper_shape_state"
+      ];
      const fieldNames = value && typeof value === "object" && !Array.isArray(value)
        ? Object.keys(value).sort().join("|")
        : "";
@@ -2973,12 +2985,14 @@
         fieldNames === discoveryV16DirectStaticV2Fields.sort().join("|");
       const discoveryV17 = fieldNames === discoveryV17Fields.sort().join("|");
       const discoveryV18 = fieldNames === discoveryV18Fields.sort().join("|");
+      const discoveryV19 = fieldNames === discoveryV19Fields.sort().join("|");
       const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
-        || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
-      const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
+        || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19;
+      const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17
+        || discoveryV18 || discoveryV19;
      return value && typeof value === "object" && !Array.isArray(value)
        && (fieldNames === baseFields.join("|") || discoveryV16 || discoveryV16SelectorCounts
-          || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18)
+          || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19)
        && INBOX_NAVIGATION_STAGES.has(value.stage)
        && INBOX_NAVIGATION_REASONS.has(value.reason)
        && Number.isSafeInteger(value.visible_conversation_count)
@@ -3015,6 +3029,17 @@
             === "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
           && DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES.has(
             value.discovery_v18_singleton_grandchild_relation_state)
+        ))
+        && (!discoveryV19 || (
+          value.discovery_v16_state === "LABEL_MATCH_COUNT_REJECTED"
+          && value.discovery_v16_raw_selector_match_count === 0
+          && value.discovery_v16_qualified_selector_match_count === 0
+          && value.discovery_v17_carrier_relation_state
+            === "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
+          && value.discovery_v18_singleton_grandchild_relation_state
+            === "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED"
+          && DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES.has(
+            value.discovery_v19_singleton_wrapper_shape_state)
         ));
    }
 
@@ -3047,6 +3072,9 @@
           : "") +
         (Object.hasOwn(navigation, "discovery_v18_singleton_grandchild_relation_state")
           ? ` \u00b7 DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE: ${navigation.discovery_v18_singleton_grandchild_relation_state}`
+          : "") +
+        (Object.hasOwn(navigation, "discovery_v19_singleton_wrapper_shape_state")
+          ? ` \u00b7 DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE: ${navigation.discovery_v19_singleton_wrapper_shape_state}`
           : "");
    }
 

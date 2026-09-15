@@ -140,6 +140,30 @@ test("Tinder Inbox diagnostics surface V18 only as the exact V16 zero and V17 ne
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
 
+test("Tinder Inbox diagnostics surface V19 only as the exact V18 cardinality-rejection extension", () => {
+  assert.match(page, /const DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES = new Set\(/);
+  for (const state of [
+    "LEAF_SHAPE_NOT_REPRODUCED",
+    "WRAPPER_REFERENCE_UNAVAILABLE",
+    "WRAPPER_EMPTY",
+    "WRAPPER_BRANCHING",
+    "WRAPPER_SHAPE_MIXED_REJECTED",
+    "V18_CARDINALITY_NOT_REPRODUCED"
+  ]) assert.match(page, new RegExp(`"${state}"`));
+  assert.match(page, /discoveryV19Fields/);
+  assert.match(page, /discovery_v19_singleton_wrapper_shape_state/);
+  assert.match(page, /discoveryV19/);
+  assert.match(page, /value\.discovery_v18_singleton_grandchild_relation_state\s*===\s*"SINGLETON_GRANDCHILD_CARDINALITY_REJECTED"/);
+  assert.match(page, /DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES\.has\(/);
+  assert.match(page, /DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE:/);
+  for (const forbidden of [
+    "inbox_navigation.raw_accessibility_tree", "inbox_navigation.message_text",
+    "inbox_navigation.visible_name", "inbox_navigation.node_id",
+    "inbox_navigation.fingerprint", "inbox_navigation.exception_message",
+    "inbox_navigation.selector_text", "inbox_navigation.selector_id"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the bounded read-only official resume handoff", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="officialResumeHandoffStatus"/);
   assert.match(page, /function officialResumeHandoffIsSafe\(value\)/);

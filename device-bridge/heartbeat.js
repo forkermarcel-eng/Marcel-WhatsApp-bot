@@ -177,6 +177,12 @@ const TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS,
   "discovery_v18_singleton_grandchild_relation_state"
 ]);
+// V19 is a finite wrapper-shape diagnosis constrained by the exact V18
+// cardinality rejection. It cannot widen any command, target, or action surface.
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V19_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS,
+  "discovery_v19_singleton_wrapper_shape_state"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
@@ -227,6 +233,16 @@ export const TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES = Object.
 ]);
 const TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE_SET =
   new Set(TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATES);
+export const TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES = Object.freeze([
+  "LEAF_SHAPE_NOT_REPRODUCED",
+  "WRAPPER_REFERENCE_UNAVAILABLE",
+  "WRAPPER_EMPTY",
+  "WRAPPER_BRANCHING",
+  "WRAPPER_SHAPE_MIXED_REJECTED",
+  "V18_CARDINALITY_NOT_REPRODUCED"
+]);
+const TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE_SET =
+  new Set(TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES);
 // This is not a permit, target, or identity assertion.  It is a transient
 // same-heartbeat readiness bit from the V9-capable Android runtime after it
 // has locally revalidated the retained human-attested V3 continuity proof.
@@ -330,13 +346,15 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
     value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS);
   const discoveryV17 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
   const discoveryV18 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V18_FIELDS);
+  const discoveryV19 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V19_FIELDS);
   const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
-    || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
-  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18;
+    || discoveryV16DirectStaticV2 || discoveryV17 || discoveryV18 || discoveryV19;
+  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17
+    || discoveryV18 || discoveryV19;
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
       || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
-      || discoveryV17 || discoveryV18 || freshObservation)
+      || discoveryV17 || discoveryV18 || discoveryV19 || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -379,6 +397,17 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
         === "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
       && TINDER_DISCOVERY_V18_SINGLETON_GRANDCHILD_RELATION_STATE_SET.has(
         value.discovery_v18_singleton_grandchild_relation_state)
+    ))
+    && (!discoveryV19 || (
+      value.discovery_v16_state === "LABEL_MATCH_COUNT_REJECTED"
+      && value.discovery_v16_raw_selector_match_count === 0
+      && value.discovery_v16_qualified_selector_match_count === 0
+      && value.discovery_v17_carrier_relation_state
+        === "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
+      && value.discovery_v18_singleton_grandchild_relation_state
+        === "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED"
+      && TINDER_DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATE_SET.has(
+        value.discovery_v19_singleton_wrapper_shape_state)
     ));
 }
 
@@ -659,6 +688,11 @@ function heartbeatAuditDetails(heartbeat) {
       // Persist only that finite enum so no local relation detail widens the audit surface.
       boundedNavigation.discovery_v18_singleton_grandchild_relation_state =
         navigation.discovery_v18_singleton_grandchild_relation_state;
+    }
+    if (Object.hasOwn(navigation, "discovery_v19_singleton_wrapper_shape_state")) {
+      // V19 is accepted only behind V18's exact terminal cardinality rejection.
+      boundedNavigation.discovery_v19_singleton_wrapper_shape_state =
+        navigation.discovery_v19_singleton_wrapper_shape_state;
     }
     details.tinder_inbox_navigation = boundedNavigation;
   }

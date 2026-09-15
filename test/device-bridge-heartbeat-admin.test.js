@@ -905,6 +905,59 @@ test("terminal Tinder discovery V18 requires the exact V16 zero and V17 negative
   }
 });
 
+test("terminal Tinder discovery V19 requires the exact V18 cardinality-rejection chain", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v16_state: "LABEL_MATCH_COUNT_REJECTED",
+    discovery_v16_raw_selector_match_count: 0,
+    discovery_v16_qualified_selector_match_count: 0,
+    direct_static_v2_state: "DIRECT_CHILD_SET_REJECTED",
+    discovery_v17_carrier_relation_state: "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW",
+    discovery_v18_singleton_grandchild_relation_state:
+      "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED",
+    discovery_v19_singleton_wrapper_shape_state: "WRAPPER_BRANCHING"
+  };
+  const payload = heartbeatPayload({ tinder_inbox_navigation: diagnostic });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(parseAndValidateHeartbeat(request.req).tinder_inbox_navigation, diagnostic);
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_inbox_navigation: diagnostic
+  });
+  assert.deepEqual(response.commands, []);
+
+  for (const inboxNavigation of [
+    { ...diagnostic, discovery_v19_singleton_wrapper_shape_state: "UNBOUNDED" },
+    { ...diagnostic, discovery_v18_singleton_grandchild_relation_state:
+      "EXACT_CARRIER_SINGLETON_GRANDCHILD" },
+    { ...diagnostic, discovery_v17_carrier_relation_state: "DIRECT_CHILD_CARDINALITY_OVER_FOUR" },
+    { ...diagnostic, discovery_v16_raw_selector_match_count: 1 },
+    { ...diagnostic, stage: "INBOX_READY", reason: "NONE" },
+    (() => {
+      const { discovery_v18_singleton_grandchild_relation_state, ...withoutV18 } = diagnostic;
+      return withoutV18;
+    })()
+  ]) {
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(
+        heartbeatPayload({ tinder_inbox_navigation: inboxNavigation })).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("optional official resume handoff heartbeat diagnostic is exact, content-free, and observational", async () => {
   const diagnostic = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   const payload = heartbeatPayload({ tinder_official_resume_handoff: diagnostic });
@@ -2942,6 +2995,55 @@ test("admin status projects direct-static V2 only as the exact V16 terminal exte
     } };
     const invalidRes = responseRecorder();
     await createAdminDeviceStatusHandler(invalidPool)({ params: { deviceId: DEVICE_ID } }, invalidRes);
+    assert.equal(invalidRes.body.device.inbox_navigation, null);
+  }
+});
+
+test("admin status projects V19 only behind the exact V18 cardinality rejection", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v16_state: "LABEL_MATCH_COUNT_REJECTED",
+    discovery_v16_raw_selector_match_count: 0,
+    discovery_v16_qualified_selector_match_count: 0,
+    direct_static_v2_state: "DIRECT_CHILD_SET_REJECTED",
+    discovery_v17_carrier_relation_state: "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW",
+    discovery_v18_singleton_grandchild_relation_state:
+      "SINGLETON_GRANDCHILD_CARDINALITY_REJECTED",
+    discovery_v19_singleton_wrapper_shape_state: "WRAPPER_REFERENCE_UNAVAILABLE"
+  };
+  const pool = { async query() {
+    return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+      "CONNECTED", diagnostic)] };
+  } };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.inbox_navigation, diagnostic);
+  for (const forbidden of [
+    "raw_accessibility_tree", "message_text", "visible_name", "node_id",
+    "fingerprint", "exception_message", "selector_text", "selector_id"
+  ]) assert.equal(JSON.stringify(res.body.device).includes(forbidden), false);
+
+  for (const invalid of [
+    { ...diagnostic, discovery_v19_singleton_wrapper_shape_state: "UNBOUNDED" },
+    { ...diagnostic, discovery_v18_singleton_grandchild_relation_state:
+      "EXACT_CARRIER_SINGLETON_GRANDCHILD" },
+    { ...diagnostic, discovery_v16_raw_selector_match_count: 1 },
+    { ...diagnostic, unexpected: "extra" },
+    (() => {
+      const { discovery_v18_singleton_grandchild_relation_state, ...withoutV18 } = diagnostic;
+      return withoutV18;
+    })()
+  ]) {
+    const invalidPool = { async query() {
+      return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+        "CONNECTED", invalid)] };
+    } };
+    const invalidRes = responseRecorder();
+    await createAdminDeviceStatusHandler(invalidPool)(
+      { params: { deviceId: DEVICE_ID } }, invalidRes);
     assert.equal(invalidRes.body.device.inbox_navigation, null);
   }
 });

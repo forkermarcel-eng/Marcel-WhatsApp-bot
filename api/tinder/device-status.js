@@ -42,6 +42,10 @@ const INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS = Object.freeze([
   ...INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS,
   "direct_static_v2_state"
 ]);
+const INBOX_NAVIGATION_DISCOVERY_V17_FIELDS = Object.freeze([
+  ...INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS,
+  "discovery_v17_carrier_relation_state"
+]);
 const DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX = 2;
 const DISCOVERY_V16_STATES = new Set([
   "NOT_EVALUATED",
@@ -61,6 +65,12 @@ const DIRECT_STATIC_V2_STATES = new Set([
   "DIRECT_TAB_SELECTION_ACTION_REJECTED",
   "DIRECT_TAB_BOUNDS_REJECTED",
   "STRICT_V2_CANDIDATE"
+]);
+const DISCOVERY_V17_CARRIER_RELATION_STATES = new Set([
+  "EXACT_CARRIER_FOUR_DIRECT_CHILDREN",
+  "AMBIGUOUS_EXACT_CARRIER_FOUR_DIRECT_CHILDREN",
+  "DIRECT_CHILD_CARDINALITY_OVER_FOUR",
+  "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
 ]);
 const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "device_id", "display_name", "enrollment_state", "device_status", "enrolled_at",
@@ -143,20 +153,24 @@ function normalizePublicInboxNavigation(value) {
     value, INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS);
   const discoveryV16DirectStaticV2 = exactKeys(
     value, INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS);
+  const discoveryV17 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
+  const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
+    || discoveryV16DirectStaticV2 || discoveryV17;
+  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17;
   if (!(exactKeys(value, INBOX_NAVIGATION_FIELDS)
-      || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2)
+      || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2 || discoveryV17)
       || !INBOX_NAVIGATION_STAGES.has(value.stage)
       || !INBOX_NAVIGATION_REASONS.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
       || value.visible_conversation_count < 0 || value.visible_conversation_count > 8
       || !Number.isSafeInteger(value.observed_event_count)
       || value.observed_event_count < 0 || value.observed_event_count > 8
-      || ((discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2) && (
+      || ((discoveryV16 || discoveryV16SelectorCounts || hasDiscoveryV16DirectStaticV2) && (
         value.stage !== "BLOCKED"
         || value.reason !== "DISCOVERY_STRUCTURE_REJECTED"
         || !DISCOVERY_V16_STATES.has(value.discovery_v16_state)
       ))
-      || (discoveryV16SelectorCounts && (
+      || (hasDiscoveryV16SelectorCounts && (
         !Number.isSafeInteger(value.discovery_v16_raw_selector_match_count)
         || value.discovery_v16_raw_selector_match_count < 0
         || value.discovery_v16_raw_selector_match_count > DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
@@ -164,8 +178,15 @@ function normalizePublicInboxNavigation(value) {
         || value.discovery_v16_qualified_selector_match_count < 0
         || value.discovery_v16_qualified_selector_match_count > DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
       ))
-      || (discoveryV16DirectStaticV2
-        && !DIRECT_STATIC_V2_STATES.has(value.direct_static_v2_state))) {
+      || (hasDiscoveryV16DirectStaticV2
+        && !DIRECT_STATIC_V2_STATES.has(value.direct_static_v2_state))
+      || (discoveryV17 && (
+        value.discovery_v16_state !== "LABEL_MATCH_COUNT_REJECTED"
+        || value.discovery_v16_raw_selector_match_count !== 0
+        || value.discovery_v16_qualified_selector_match_count !== 0
+        || !DISCOVERY_V17_CARRIER_RELATION_STATES.has(
+          value.discovery_v17_carrier_relation_state)
+      ))) {
     return null;
   }
   return Object.freeze({
@@ -173,14 +194,16 @@ function normalizePublicInboxNavigation(value) {
     reason: value.reason,
     visible_conversation_count: value.visible_conversation_count,
     observed_event_count: value.observed_event_count,
-    ...((discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2)
+    ...((discoveryV16 || discoveryV16SelectorCounts || hasDiscoveryV16DirectStaticV2)
       ? { discovery_v16_state: value.discovery_v16_state } : {}),
-    ...((discoveryV16SelectorCounts || discoveryV16DirectStaticV2) ? {
+    ...(hasDiscoveryV16SelectorCounts ? {
       discovery_v16_raw_selector_match_count: value.discovery_v16_raw_selector_match_count,
       discovery_v16_qualified_selector_match_count: value.discovery_v16_qualified_selector_match_count
     } : {}),
-    ...(discoveryV16DirectStaticV2
-      ? { direct_static_v2_state: value.direct_static_v2_state } : {})
+    ...(hasDiscoveryV16DirectStaticV2
+      ? { direct_static_v2_state: value.direct_static_v2_state } : {}),
+    ...(discoveryV17
+      ? { discovery_v17_carrier_relation_state: value.discovery_v17_carrier_relation_state } : {})
   });
 }
 

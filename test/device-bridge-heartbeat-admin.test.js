@@ -806,6 +806,55 @@ test("terminal Tinder discovery V16 may add only the finite direct-static V2 bra
   }
 });
 
+test("terminal Tinder discovery V17 requires the exact V2 and V16 zero-count shape", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v16_state: "LABEL_MATCH_COUNT_REJECTED",
+    discovery_v16_raw_selector_match_count: 0,
+    discovery_v16_qualified_selector_match_count: 0,
+    direct_static_v2_state: "DIRECT_CHILD_SET_REJECTED",
+    discovery_v17_carrier_relation_state: "EXACT_CARRIER_FOUR_DIRECT_CHILDREN"
+  };
+  const payload = heartbeatPayload({ tinder_inbox_navigation: diagnostic });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(parseAndValidateHeartbeat(request.req).tinder_inbox_navigation, diagnostic);
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_inbox_navigation: diagnostic
+  });
+  assert.deepEqual(response.commands, []);
+
+  for (const inboxNavigation of [
+    { ...diagnostic, discovery_v17_carrier_relation_state: "UNBOUNDED" },
+    { ...diagnostic, discovery_v16_state: "BASE_STRUCTURE_REJECTED" },
+    { ...diagnostic, discovery_v16_raw_selector_match_count: 1 },
+    { ...diagnostic, discovery_v16_qualified_selector_match_count: 1 },
+    { ...diagnostic, stage: "INBOX_READY", reason: "NONE" },
+    (() => {
+      const { direct_static_v2_state, ...withoutV2 } = diagnostic;
+      return withoutV2;
+    })()
+  ]) {
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(
+        heartbeatPayload({ tinder_inbox_navigation: inboxNavigation })).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("optional official resume handoff heartbeat diagnostic is exact, content-free, and observational", async () => {
   const diagnostic = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   const payload = heartbeatPayload({ tinder_official_resume_handoff: diagnostic });

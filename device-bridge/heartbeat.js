@@ -163,6 +163,13 @@ const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS = Object.fre
   ...TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS,
   "direct_static_v2_state"
 ]);
+// V17 is a terminal-only, finite carrier-relation observation. It is valid
+// only as the exact V2+V16 zero-count shape; it cannot widen any command,
+// target, selector, identity, or action surface.
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS,
+  "discovery_v17_carrier_relation_state"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
@@ -197,6 +204,14 @@ export const TINDER_DIRECT_STATIC_V2_STATES = Object.freeze([
   "STRICT_V2_CANDIDATE"
 ]);
 const TINDER_DIRECT_STATIC_V2_STATE_SET = new Set(TINDER_DIRECT_STATIC_V2_STATES);
+export const TINDER_DISCOVERY_V17_CARRIER_RELATION_STATES = Object.freeze([
+  "EXACT_CARRIER_FOUR_DIRECT_CHILDREN",
+  "AMBIGUOUS_EXACT_CARRIER_FOUR_DIRECT_CHILDREN",
+  "DIRECT_CHILD_CARDINALITY_OVER_FOUR",
+  "NO_EXACT_CARRIER_IN_FOUR_CHILD_WINDOW"
+]);
+const TINDER_DISCOVERY_V17_CARRIER_RELATION_STATE_SET =
+  new Set(TINDER_DISCOVERY_V17_CARRIER_RELATION_STATES);
 // This is not a permit, target, or identity assertion.  It is a transient
 // same-heartbeat readiness bit from the V9-capable Android runtime after it
 // has locally revalidated the retained human-attested V3 continuity proof.
@@ -298,9 +313,14 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
     value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS);
   const discoveryV16DirectStaticV2 = exactKeys(
     value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_DIRECT_STATIC_V2_FIELDS);
+  const discoveryV17 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V17_FIELDS);
+  const hasDiscoveryV16SelectorCounts = discoveryV16SelectorCounts
+    || discoveryV16DirectStaticV2 || discoveryV17;
+  const hasDiscoveryV16DirectStaticV2 = discoveryV16DirectStaticV2 || discoveryV17;
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
   return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
-      || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2 || freshObservation)
+      || discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2
+      || discoveryV17 || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -313,12 +333,12 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
       value.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
       && isUuidV4(value.observation_nonce)
     ))
-    && (!(discoveryV16 || discoveryV16SelectorCounts || discoveryV16DirectStaticV2) || (
+    && (!(discoveryV16 || discoveryV16SelectorCounts || hasDiscoveryV16DirectStaticV2) || (
       value.stage === "BLOCKED"
       && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
       && TINDER_DISCOVERY_V16_STATE_SET.has(value.discovery_v16_state)
     ))
-    && (!discoveryV16SelectorCounts || (
+    && (!hasDiscoveryV16SelectorCounts || (
       Number.isSafeInteger(value.discovery_v16_raw_selector_match_count)
       && value.discovery_v16_raw_selector_match_count >= 0
       && value.discovery_v16_raw_selector_match_count <= TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
@@ -326,8 +346,15 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
       && value.discovery_v16_qualified_selector_match_count >= 0
       && value.discovery_v16_qualified_selector_match_count <= TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
     ))
-    && (!discoveryV16DirectStaticV2
-      || TINDER_DIRECT_STATIC_V2_STATE_SET.has(value.direct_static_v2_state));
+    && (!hasDiscoveryV16DirectStaticV2
+      || TINDER_DIRECT_STATIC_V2_STATE_SET.has(value.direct_static_v2_state))
+    && (!discoveryV17 || (
+      value.discovery_v16_state === "LABEL_MATCH_COUNT_REJECTED"
+      && value.discovery_v16_raw_selector_match_count === 0
+      && value.discovery_v16_qualified_selector_match_count === 0
+      && TINDER_DISCOVERY_V17_CARRIER_RELATION_STATE_SET.has(
+        value.discovery_v17_carrier_relation_state)
+    ));
 }
 
 /**
@@ -595,6 +622,12 @@ function heartbeatAuditDetails(heartbeat) {
       // not a selector, target, identity, or capability. Preserve it only
       // after the same strict parser gate above has accepted the whole shape.
       boundedNavigation.direct_static_v2_state = navigation.direct_static_v2_state;
+    }
+    if (Object.hasOwn(navigation, "discovery_v17_carrier_relation_state")) {
+      // V17 is accepted only as the exact terminal V2+V16 zero-count shape.
+      // Persist only that finite enum so no local relation detail can widen the audit surface.
+      boundedNavigation.discovery_v17_carrier_relation_state =
+        navigation.discovery_v17_carrier_relation_state;
     }
     details.tinder_inbox_navigation = boundedNavigation;
   }

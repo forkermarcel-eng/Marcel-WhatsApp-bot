@@ -33,6 +33,12 @@ const INBOX_NAVIGATION_FIELDS = Object.freeze([
 const INBOX_NAVIGATION_DISCOVERY_V16_FIELDS = Object.freeze([
   ...INBOX_NAVIGATION_FIELDS, "discovery_v16_state"
 ]);
+const INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS = Object.freeze([
+  ...INBOX_NAVIGATION_DISCOVERY_V16_FIELDS,
+  "discovery_v16_raw_selector_match_count",
+  "discovery_v16_qualified_selector_match_count"
+]);
+const DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX = 2;
 const DISCOVERY_V16_STATES = new Set([
   "NOT_EVALUATED",
   "BASE_STRUCTURE_REJECTED",
@@ -118,17 +124,27 @@ function exactKeys(value, keys) {
 function normalizePublicInboxNavigation(value) {
   if (value === null) return null;
   const discoveryV16 = exactKeys(value, INBOX_NAVIGATION_DISCOVERY_V16_FIELDS);
-  if (!(exactKeys(value, INBOX_NAVIGATION_FIELDS) || discoveryV16)
+  const discoveryV16SelectorCounts = exactKeys(
+    value, INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS);
+  if (!(exactKeys(value, INBOX_NAVIGATION_FIELDS) || discoveryV16 || discoveryV16SelectorCounts)
       || !INBOX_NAVIGATION_STAGES.has(value.stage)
       || !INBOX_NAVIGATION_REASONS.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
       || value.visible_conversation_count < 0 || value.visible_conversation_count > 8
       || !Number.isSafeInteger(value.observed_event_count)
       || value.observed_event_count < 0 || value.observed_event_count > 8
-      || (discoveryV16 && (
+      || ((discoveryV16 || discoveryV16SelectorCounts) && (
         value.stage !== "BLOCKED"
         || value.reason !== "DISCOVERY_STRUCTURE_REJECTED"
         || !DISCOVERY_V16_STATES.has(value.discovery_v16_state)
+      ))
+      || (discoveryV16SelectorCounts && (
+        !Number.isSafeInteger(value.discovery_v16_raw_selector_match_count)
+        || value.discovery_v16_raw_selector_match_count < 0
+        || value.discovery_v16_raw_selector_match_count > DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+        || !Number.isSafeInteger(value.discovery_v16_qualified_selector_match_count)
+        || value.discovery_v16_qualified_selector_match_count < 0
+        || value.discovery_v16_qualified_selector_match_count > DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
       ))) {
     return null;
   }
@@ -137,7 +153,12 @@ function normalizePublicInboxNavigation(value) {
     reason: value.reason,
     visible_conversation_count: value.visible_conversation_count,
     observed_event_count: value.observed_event_count,
-    ...(discoveryV16 ? { discovery_v16_state: value.discovery_v16_state } : {})
+    ...((discoveryV16 || discoveryV16SelectorCounts)
+      ? { discovery_v16_state: value.discovery_v16_state } : {}),
+    ...(discoveryV16SelectorCounts ? {
+      discovery_v16_raw_selector_match_count: value.discovery_v16_raw_selector_match_count,
+      discovery_v16_qualified_selector_match_count: value.discovery_v16_qualified_selector_match_count
+    } : {})
   });
 }
 

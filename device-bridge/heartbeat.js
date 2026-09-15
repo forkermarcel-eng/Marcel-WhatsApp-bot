@@ -140,11 +140,21 @@ const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
 const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "discovery_v16_state"
 ]);
+// A V16 terminal diagnosis can additionally disclose only whether the exact
+// Chat-label selector had zero, one, or more-than-one raw/qualified matches.
+// The values are capped at two by Android before signing; they deliberately
+// reveal neither a selector, a view, nor any Tinder data.
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS,
+  "discovery_v16_raw_selector_match_count",
+  "discovery_v16_qualified_selector_match_count"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
 export const TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND = "FRESH_REVIEWED_INBOX_V1";
 const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
+const TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX = 2;
 // This terminal-only enum deliberately contains no view data, content,
 // identifiers, bounds, fingerprints, or driver detail. It exists only to
 // distinguish reviewed finite V16 discovery branches after a local
@@ -256,8 +266,11 @@ function boundedHeartbeatFailurePhase(error) {
 
 export function isBoundedTinderInboxNavigationDiagnostic(value) {
   const discoveryV16 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS);
+  const discoveryV16SelectorCounts = exactKeys(
+    value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS);
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
-  return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || discoveryV16 || freshObservation)
+  return (exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
+      || discoveryV16 || discoveryV16SelectorCounts || freshObservation)
     && TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
     && TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
     && Number.isSafeInteger(value.visible_conversation_count)
@@ -270,10 +283,18 @@ export function isBoundedTinderInboxNavigationDiagnostic(value) {
       value.observation_kind === TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
       && isUuidV4(value.observation_nonce)
     ))
-    && (!discoveryV16 || (
+    && (!(discoveryV16 || discoveryV16SelectorCounts) || (
       value.stage === "BLOCKED"
       && value.reason === "DISCOVERY_STRUCTURE_REJECTED"
       && TINDER_DISCOVERY_V16_STATE_SET.has(value.discovery_v16_state)
+    ))
+    && (!discoveryV16SelectorCounts || (
+      Number.isSafeInteger(value.discovery_v16_raw_selector_match_count)
+      && value.discovery_v16_raw_selector_match_count >= 0
+      && value.discovery_v16_raw_selector_match_count <= TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+      && Number.isSafeInteger(value.discovery_v16_qualified_selector_match_count)
+      && value.discovery_v16_qualified_selector_match_count >= 0
+      && value.discovery_v16_qualified_selector_match_count <= TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
     ));
 }
 
@@ -527,6 +548,15 @@ function heartbeatAuditDetails(heartbeat) {
       // above. Keep the durable audit projection explicitly allowlisted so a
       // future local diagnostic cannot widen this transport surface.
       boundedNavigation.discovery_v16_state = navigation.discovery_v16_state;
+    }
+    if (Object.hasOwn(navigation, "discovery_v16_raw_selector_match_count")) {
+      // The exact terminal-only validator above admits these two capped
+      // counters only as a pair. Keep that same allowlist at the durable
+      // audit boundary so no future local detail can widen the transport.
+      boundedNavigation.discovery_v16_raw_selector_match_count =
+        navigation.discovery_v16_raw_selector_match_count;
+      boundedNavigation.discovery_v16_qualified_selector_match_count =
+        navigation.discovery_v16_qualified_selector_match_count;
     }
     details.tinder_inbox_navigation = boundedNavigation;
   }

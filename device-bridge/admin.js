@@ -71,10 +71,16 @@ const TINDER_INBOX_NAVIGATION_FIELDS = Object.freeze([
 const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "discovery_v16_state"
 ]);
+const TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS = Object.freeze([
+  ...TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS,
+  "discovery_v16_raw_selector_match_count",
+  "discovery_v16_qualified_selector_match_count"
+]);
 const TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS = Object.freeze([
   ...TINDER_INBOX_NAVIGATION_FIELDS, "observation_kind", "observation_nonce"
 ]);
 const TINDER_INBOX_NAVIGATION_MAX_COUNT = 8;
+const TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX = 2;
 const TINDER_DISCOVERY_V16_STATE_SET = new Set(TINDER_DISCOVERY_V16_STATES);
 
 function plainObject(value) {
@@ -93,8 +99,11 @@ function exactKeys(value, keys) {
  */
 export function normalizeAdminInboxNavigationStatus(value) {
   const discoveryV16 = exactKeys(value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_FIELDS);
+  const discoveryV16SelectorCounts = exactKeys(
+    value, TINDER_INBOX_NAVIGATION_DISCOVERY_V16_SELECTOR_COUNT_FIELDS);
   const freshObservation = exactKeys(value, TINDER_INBOX_NAVIGATION_FRESH_OBSERVATION_FIELDS);
-  if (!(exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS) || discoveryV16 || freshObservation)
+  if (!(exactKeys(value, TINDER_INBOX_NAVIGATION_FIELDS)
+      || discoveryV16 || discoveryV16SelectorCounts || freshObservation)
       || !TINDER_INBOX_NAVIGATION_STAGE_SET.has(value.stage)
       || !TINDER_INBOX_NAVIGATION_REASON_SET.has(value.reason)
       || !Number.isSafeInteger(value.visible_conversation_count)
@@ -107,10 +116,18 @@ export function normalizeAdminInboxNavigationStatus(value) {
         value.observation_kind !== TINDER_INBOX_FRESH_REVIEWED_OBSERVATION_KIND
         || !isUuidV4(value.observation_nonce)
       ))
-      || (discoveryV16 && (
+      || ((discoveryV16 || discoveryV16SelectorCounts) && (
         value.stage !== "BLOCKED"
         || value.reason !== "DISCOVERY_STRUCTURE_REJECTED"
         || !TINDER_DISCOVERY_V16_STATE_SET.has(value.discovery_v16_state)
+      ))
+      || (discoveryV16SelectorCounts && (
+        !Number.isSafeInteger(value.discovery_v16_raw_selector_match_count)
+        || value.discovery_v16_raw_selector_match_count < 0
+        || value.discovery_v16_raw_selector_match_count > TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
+        || !Number.isSafeInteger(value.discovery_v16_qualified_selector_match_count)
+        || value.discovery_v16_qualified_selector_match_count < 0
+        || value.discovery_v16_qualified_selector_match_count > TINDER_DISCOVERY_V16_SELECTOR_MATCH_COUNT_MAX
       ))) {
     return null;
   }
@@ -119,7 +136,12 @@ export function normalizeAdminInboxNavigationStatus(value) {
     reason: value.reason,
     visible_conversation_count: value.visible_conversation_count,
     observed_event_count: value.observed_event_count,
-    ...(discoveryV16 ? { discovery_v16_state: value.discovery_v16_state } : {})
+    ...((discoveryV16 || discoveryV16SelectorCounts)
+      ? { discovery_v16_state: value.discovery_v16_state } : {}),
+    ...(discoveryV16SelectorCounts ? {
+      discovery_v16_raw_selector_match_count: value.discovery_v16_raw_selector_match_count,
+      discovery_v16_qualified_selector_match_count: value.discovery_v16_qualified_selector_match_count
+    } : {})
   });
 }
 

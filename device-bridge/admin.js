@@ -369,6 +369,17 @@ function statusRow(row, now) {
     ? normalizeAdminLastAcceptedOfficialResumeSchemaDiagnostic(
       row.last_accepted_official_resume_schema_diagnostic)
     : null;
+  // A passive Inbox observation is intentionally emitted only once by the
+  // Android runtime. Keep the live heartbeat projection authoritative for the
+  // current state, but retain a separately labelled, bounded historical value
+  // from accepted audit evidence after the newest terminal V2 Resume. This is
+  // observational only: it neither proves causal linkage to that Resume nor
+  // authorizes a command, retry, or state transition.
+  const lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume =
+    deviceStatus === "ONLINE"
+      ? normalizeAdminPassiveInboxObservationDiagnostic(
+        row.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume)
+      : null;
   return {
     device_id: row.device_id,
     display_name: row.display_name,
@@ -410,7 +421,9 @@ function statusRow(row, now) {
     tinder_passive_inbox_observation_diagnostic: deviceStatus === "ONLINE"
       ? normalizeAdminPassiveInboxObservationDiagnostic(
         row.tinder_passive_inbox_observation_diagnostic)
-      : null
+      : null,
+    last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
+      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume
   };
 }
 
@@ -428,7 +441,10 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return_diagnostic'
     AS tinder_resumed_foreground_chat_return_diagnostic,
   latest_heartbeat.details -> 'tinder_passive_inbox_observation_diagnostic'
-    AS tinder_passive_inbox_observation_diagnostic`;
+    AS tinder_passive_inbox_observation_diagnostic,
+  last_passive_inbox_observation
+    .last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
+    AS last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume`;
 
 const STATUS_FROM = `FROM device_bridge_devices d
   LEFT JOIN LATERAL (
@@ -467,7 +483,43 @@ const STATUS_FROM = `FROM device_bridge_devices d
      ORDER BY evidence_heartbeat.created_at DESC, evidence_heartbeat.audit_event_id DESC,
        resume_permit.dispatched_at DESC NULLS LAST, resume_permit.created_at DESC
      LIMIT 1
-  ) paired_resume_schema_evidence ON true`;
+  ) paired_resume_schema_evidence ON true
+  LEFT JOIN LATERAL (
+    -- This is deliberately temporal rather than causal pairing. A passive
+    -- observation heartbeat carries no Resume command identifier, so only the
+    -- newest terminal V2 Resume dispatch time fences this historical lookup.
+    SELECT resume_permit.dispatched_at
+      FROM tinder_official_app_resume_permits resume_permit
+      JOIN device_bridge_commands resume_command
+        ON resume_command.command_id=resume_permit.command_id
+       AND resume_command.device_id=resume_permit.device_id
+     WHERE resume_permit.device_id=d.device_id
+       AND resume_permit.permit_contract_version=2
+       AND resume_permit.permit_state='DISPATCHED'
+       AND resume_permit.dispatched_at IS NOT NULL
+       AND resume_command.command_type='RESUME_OFFICIAL_TINDER_APP'
+       AND resume_command.terminal_status='SUCCEEDED'
+       AND resume_command.payload='{}'::jsonb
+     ORDER BY resume_permit.dispatched_at DESC, resume_permit.created_at DESC
+     LIMIT 1
+  ) latest_v2_resume ON true
+  LEFT JOIN LATERAL (
+    -- A one-shot Android diagnostic may be followed by an ordinary heartbeat.
+    -- Recover only an already accepted bounded value, without exposing audit
+    -- time, permit, command, identity, source, binding, capture, or payload.
+    SELECT evidence_heartbeat.details -> 'tinder_passive_inbox_observation_diagnostic'
+      AS last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
+      FROM device_bridge_audit_events evidence_heartbeat
+     WHERE latest_v2_resume.dispatched_at IS NOT NULL
+       AND evidence_heartbeat.device_id=d.device_id
+       AND evidence_heartbeat.event_type='HEARTBEAT_ACCEPTED'
+       AND evidence_heartbeat.result_code='SUCCEEDED'
+       AND evidence_heartbeat.http_status=200
+       AND evidence_heartbeat.created_at>=latest_v2_resume.dispatched_at
+       AND evidence_heartbeat.details ? 'tinder_passive_inbox_observation_diagnostic'
+     ORDER BY evidence_heartbeat.created_at DESC, evidence_heartbeat.audit_event_id DESC
+     LIMIT 1
+  ) last_passive_inbox_observation ON true`;
 
 export function createAdminDeviceListHandler(pool) {
   return async function adminDeviceListHandler(req, res) {

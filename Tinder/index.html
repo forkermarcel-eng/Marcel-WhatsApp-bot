@@ -1060,6 +1060,9 @@
        <p class="enrollment-message" id="passiveInboxObservationDiagnostic" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
      </section>
 
      <section class="enrollment-panel capture-mapping-panel" id="captureMappingPanel" hidden aria-labelledby="captureMappingHeading">
@@ -1213,6 +1216,8 @@
       resumedForegroundChatReturnStatus: document.getElementById("resumedForegroundChatReturnStatus"),
       resumedForegroundChatReturnDiagnostic: document.getElementById("resumedForegroundChatReturnDiagnostic"),
       passiveInboxObservationDiagnostic: document.getElementById("passiveInboxObservationDiagnostic"),
+      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume:
+        document.getElementById("lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        unboundConversationList: document.getElementById("unboundConversationList"),
@@ -3438,6 +3443,26 @@
        + ` / VALIDATIONS: ${diagnostic.validation_count}`;
    }
 
+   function renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(device) {
+     // This is deliberately a separately labelled, temporal audit projection.
+     // It never replaces the current passive observation or grants any action.
+     const diagnostic = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
+       : null;
+     elements.lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume.className =
+       "enrollment-message";
+     if (!passiveInboxObservationDiagnosticIsSafe(diagnostic)) {
+       elements.lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume.textContent =
+         "Nicht verfuegbar: keine letzte akzeptierte passive Inbox-Beobachtung nach dem neuesten V2-Resume.";
+       return;
+     }
+     elements.lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume.textContent =
+       `LAST_ACCEPTED_PASSIVE_INBOX_AFTER_LATEST_V2_RESUME: ${diagnostic.stage}`
+       + ` / REASON: ${diagnostic.reason}`
+       + ` / SETTLE_SAMPLES: ${diagnostic.settle_sample_count}`
+       + ` / VALIDATIONS: ${diagnostic.validation_count}`;
+   }
+
    function pendingUnboundConversationTranscriptIsSafe(transcript) {
      const receivedAt = new Date(transcript?.received_at || "");
      return hasExactConversationFields(transcript, [
@@ -3550,6 +3575,7 @@
      renderResumedForegroundChatReturnStatus(null);
      renderResumedForegroundChatReturnDiagnostic(null);
      renderPassiveInboxObservationDiagnostic(null);
+     renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
      elements.bridgeSub.textContent = "Kein eindeutiger Gerätestatus";
@@ -3684,6 +3710,7 @@
        renderResumedForegroundChatReturnStatus(device);
        renderResumedForegroundChatReturnDiagnostic(device);
        renderPassiveInboxObservationDiagnostic(device);
+       renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
        const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();

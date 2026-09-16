@@ -580,6 +580,45 @@ test("real loopback status retains accepted V2 schema evidence separately after 
   }, { prefix: "marcel_resume_v2_historical_status" });
 });
 
+test("real loopback status retains bounded passive Inbox evidence after a later ordinary heartbeat", { timeout: 60_000 }, async () => {
+  await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
+    await prepareV1Foundation(pool);
+    await migrateTinderOfficialAppResumePermitV2(pool);
+    await seedCurrentV2ResumeDeliveryFixture(pool);
+    await markCurrentV2ResumeDeliveredAndAcknowledged(pool);
+
+    const diagnostic = {
+      stage: "BLOCKED",
+      reason: "RUNTIME_GATE_LOST",
+      settle_sample_count: 0,
+      validation_count: 0
+    };
+    await processHeartbeatTransaction(pool, deliveryAuth(1), {
+      ...deliveryHeartbeat(1),
+      tinder_passive_inbox_observation_diagnostic: diagnostic
+    }, new Date());
+    await processHeartbeatTransaction(pool, deliveryAuth(2), deliveryHeartbeat(2), new Date());
+
+    const response = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, response);
+    assert.equal(response.statusCode, 200);
+    const device = response.body.device;
+    assert.equal(device.device_status, "ONLINE");
+    assert.equal(device.tinder_passive_inbox_observation_diagnostic, null);
+    assert.deepEqual(
+      device.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+      diagnostic
+    );
+    const serialized = JSON.stringify(
+      device.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
+    );
+    for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture",
+      "header", "text", "fingerprint", "visible_name", "message_text"]) {
+      assert.equal(serialized.includes(forbidden), false);
+    }
+  }, { prefix: "marcel_resume_v2_historical_passive_inbox" });
+});
+
 test("real loopback heartbeat omits an expired V2 resume permit even if its command remains live", { timeout: 60_000 }, async () => {
   await withDisposableDeviceBridgeRealPostgresDatabase(async pool => {
     await prepareV1Foundation(pool);

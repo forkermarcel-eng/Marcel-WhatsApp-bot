@@ -224,7 +224,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
   assert.deepEqual(Object.keys(res.body.devices[0]).sort(), [
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
-    "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
+    "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
     "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence",
     "tinder_passive_inbox_observation_diagnostic", "tinder_resumed_foreground_chat_return",
     "tinder_resumed_foreground_chat_return_diagnostic", "tinder_state"
@@ -1035,6 +1035,80 @@ test("device-list proxy suppresses malformed or offline passive Inbox observatio
     await handler(req, res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.devices[0].tinder_passive_inbox_observation_diagnostic, null);
+  }
+}));
+
+test("device-list proxy allowlists only separately labelled historical passive Inbox evidence", async () => withEnvironment(async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "RUNTIME_GATE_LOST",
+    settle_sample_count: 0,
+    validation_count: 0
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ extra: {
+          last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
+            diagnostic
+        } })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.devices[0].tinder_passive_inbox_observation_diagnostic, null);
+  assert.deepEqual(
+    res.body.devices[0].last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+    diagnostic
+  );
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy suppresses malformed or offline historical passive Inbox evidence", async () => withEnvironment(async () => {
+  const valid = {
+    stage: "BLOCKED",
+    reason: "RUNTIME_GATE_LOST",
+    settle_sample_count: 0,
+    validation_count: 0
+  };
+  for (const extra of [
+    { last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
+      { ...valid, extra: "forbidden" } },
+    { last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
+      { ...valid, validation_count: 9 } },
+    { last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
+      { ...valid, stage: "UNKNOWN", reason: "NONE" } },
+    { last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume: valid,
+      device_status: "OFFLINE" }
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ extra })] });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(
+      res.body.devices[0]
+        .last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+      null
+    );
   }
 }));
 

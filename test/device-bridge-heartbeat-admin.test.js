@@ -2932,7 +2932,8 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     resumedForegroundChatReturn = null, resumedForegroundChatReturnDiagnostic = null,
     officialResumeSchemaEvidence = null,
     lastAcceptedOfficialResumeSchemaDiagnostic = null,
-    passiveInboxObservationDiagnostic = null) {
+    passiveInboxObservationDiagnostic = null,
+    lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
@@ -2946,7 +2947,9 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
       lastAcceptedOfficialResumeSchemaDiagnostic,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
-    tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic
+    tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic,
+    last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
+      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume
   };
 }
 
@@ -3542,6 +3545,75 @@ test("admin status suppresses malformed or offline passive Inbox observation dia
     const res = responseRecorder();
     await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
     assert.equal(res.body.device.tinder_passive_inbox_observation_diagnostic, null);
+  }
+});
+
+test("admin status retains separately labelled bounded passive Inbox evidence after the newest V2 Resume", async () => {
+  const historical = {
+    stage: "BLOCKED",
+    reason: "RUNTIME_GATE_LOST",
+    settle_sample_count: 0,
+    validation_count: 0
+  };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      const row = statusRow(new Date(), CAPABILITIES, "CONNECTED");
+      row.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume =
+        historical;
+      return { rows: [row] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.equal(res.body.device.tinder_passive_inbox_observation_diagnostic, null);
+  assert.deepEqual(
+    res.body.device.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+    historical
+  );
+  assert.match(sql, /latest_v2_resume/i);
+  assert.match(sql, /resume_command\.command_type='RESUME_OFFICIAL_TINDER_APP'/i);
+  assert.match(sql, /resume_command\.terminal_status='SUCCEEDED'/i);
+  assert.match(sql, /resume_command\.payload='\{\}'::jsonb/i);
+  assert.match(sql, /evidence_heartbeat\.created_at>=latest_v2_resume\.dispatched_at/i);
+  assert.match(sql, /evidence_heartbeat\.details \? 'tinder_passive_inbox_observation_diagnostic'/i);
+  const historicalPassiveLateral = sql.slice(sql.indexOf(") latest_v2_resume ON true"));
+  assert.doesNotMatch(historicalPassiveLateral, /expires_at/i);
+  const serialized = JSON.stringify(
+    res.body.device.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
+  );
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed or offline historical passive Inbox evidence", async () => {
+  const valid = {
+    stage: "BLOCKED",
+    reason: "RUNTIME_GATE_LOST",
+    settle_sample_count: 0,
+    validation_count: 0
+  };
+  for (const [acceptedAt, historical] of [
+    [new Date(), { ...valid, raw: "forbidden" }],
+    [new Date(), { ...valid, stage: "UNKNOWN", reason: "NONE" }],
+    [new Date(Date.now() - 91_000), valid]
+  ]) {
+    const pool = {
+      async query() {
+        const row = statusRow(acceptedAt, CAPABILITIES, "CONNECTED");
+        row.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume =
+          historical;
+        return { rows: [row] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(
+      res.body.device.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+      null
+    );
   }
 });
 

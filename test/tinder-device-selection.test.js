@@ -307,6 +307,26 @@ test("Tinder technical diagnostics render only the bounded V10 lifecycle sibling
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
 
+test("Tinder technical diagnostics keep accepted passive Inbox evidence separately labelled and bounded", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume"/);
+  assert.match(page, /function renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume\(device\)/);
+  assert.match(page, /last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume/);
+  assert.match(page, /renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume\(device\);/);
+  assert.match(page, /renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume\(null\);/);
+  assert.match(page, /LAST_ACCEPTED_PASSIVE_INBOX_AFTER_LATEST_V2_RESUME:/);
+  assert.match(page, /temporal audit projection/i);
+  for (const forbidden of [
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.permit",
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.command",
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.identity",
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.source",
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.binding",
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.capture",
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.header",
+    "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume.text"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});
+
 test("Tinder technical diagnostics render only the bounded passive Inbox observation", () => {
   assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="passiveInboxObservationDiagnostic"/);
   assert.match(page, /function passiveInboxObservationDiagnosticIsSafe\(value\)/);

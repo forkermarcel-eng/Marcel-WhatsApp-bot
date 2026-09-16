@@ -153,7 +153,8 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "last_accepted_official_resume_schema_diagnostic",
   "tinder_resumed_foreground_chat_return",
   "tinder_resumed_foreground_chat_return_diagnostic",
-  "tinder_passive_inbox_observation_diagnostic"
+  "tinder_passive_inbox_observation_diagnostic",
+  "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume"
 ]);
 
 function v20CountsMatchState(state, rawCount, qualifiedCount) {
@@ -459,6 +460,18 @@ function sanitizePublicDeviceStatus(value) {
         value.tinder_passive_inbox_observation_diagnostic
       )
       : null;
+  // This separately labelled temporal record is historical accepted evidence,
+  // not a current diagnostic or an authority for any command or permit.
+  const hasLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume =
+    Object.hasOwn(value,
+      "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume");
+  const lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume =
+    String(value.device_status || "").toUpperCase() === "ONLINE"
+      && hasLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume
+      ? normalizePublicPassiveInboxObservationDiagnostic(
+        value.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
+      )
+      : null;
   return Object.freeze({
     ...Object.fromEntries(LEGACY_DEVICE_STATUS_FIELDS.map(field => [field, value[field]])),
     // This is a bounded derived compatibility bit, not the raw capability
@@ -472,7 +485,9 @@ function sanitizePublicDeviceStatus(value) {
       lastAcceptedOfficialResumeSchemaDiagnostic,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
-    tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic
+    tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic,
+    last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
+      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume
   });
 }
 

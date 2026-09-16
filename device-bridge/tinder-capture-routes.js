@@ -488,10 +488,15 @@ function normalizeHumanArmedBindingRecords(rows) {
       row?.localConversationAttestationStatus ?? row?.local_conversation_attestation_status ?? "NOT_REQUESTED"
     ).trim().toUpperCase();
     const readerStatus = String(row?.readerStatus ?? row?.reader_status ?? "NOT_REQUESTED").trim().toUpperCase();
+    const officialAppResumeStatus = String(
+      row?.officialAppResumeStatus ?? row?.official_app_resume_status ?? "NOT_REQUESTED"
+    ).trim().toUpperCase();
     if (!contactName || contactName.length > 160 || bindingState !== "CONFIRMED"
         || !new Set(["NOT_REQUESTED", "PENDING", "ATTESTED", "INVALIDATED"])
           .has(localConversationAttestationStatus)
-        || !new Set(["NOT_REQUESTED", "READER_QUEUED"]).has(readerStatus)) {
+        || !new Set(["NOT_REQUESTED", "READER_QUEUED"]).has(readerStatus)
+        || !new Set(["NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"])
+          .has(officialAppResumeStatus)) {
       const error = new Error("Invalid human-armed binding record.");
       error.statusCode = 500;
       error.code = "INVALID_HUMAN_ARMED_BINDING_LIST";
@@ -503,7 +508,8 @@ function normalizeHumanArmedBindingRecords(rows) {
       binding_id: bindingId,
       contact_name: contactName,
       local_conversation_attestation_status: localConversationAttestationStatus,
-      reader_status: readerStatus
+      reader_status: readerStatus,
+      official_app_resume_status: officialAppResumeStatus
     });
   }));
 }
@@ -971,6 +977,54 @@ function createTinderDashboardOfficialAppResumeQueueHandler(pool, {
             : status === 404 && error?.code === "CAPTURE_NOT_FOUND"
               ? "CAPTURE_NOT_FOUND"
               : "TINDER_OFFICIAL_APP_RESUME_QUEUE_FAILED",
+        error: "Official Tinder app resume could not be queued."
+      });
+    }
+  };
+}
+
+/**
+ * Reload-safe variant of the launcher-only Resume path. The browser carries
+ * only the opaque, already human-confirmed binding handle from the existing
+ * binding card. The service derives and revalidates its current consumed
+ * source under lock; it never accepts a capture, device, thread, or Tinder
+ * identity from this route.
+ */
+function createTinderDashboardHumanBindingOfficialAppResumeQueueHandler(pool, {
+  createResumeRepository = createPgTinderOfficialAppResumeRepository,
+  createResumeService = createTinderOfficialAppResumeService
+} = {}) {
+  const resumeService = createResumeService(createResumeRepository(pool));
+  return async function tinderDashboardHumanBindingOfficialAppResumeQueueHandler(req, res) {
+    try {
+      assertEmptyOfficialAppResumeBody(req.body);
+      const resume = boundedOfficialAppResumeQueueResult(
+        await resumeService.queueOfficialAppResumeForHumanBinding({
+          bindingId: normalizeBindingId(req.params.bindingId)
+        })
+      );
+      if (resume.status !== TINDER_OFFICIAL_APP_RESUME_STATUS.QUEUED) {
+        return res.status(409).json({ ok: false, conflict: true, resume });
+      }
+      return res.status(202).json({ ok: true, resume });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        return res.status(503).json({
+          ok: false,
+          code: "TINDER_OFFICIAL_APP_RESUME_FOUNDATION_NOT_READY",
+          error: "Official Tinder app resume foundation is not ready."
+        });
+      }
+      const status = Number(error?.statusCode)
+        || (error instanceof TinderOfficialAppResumeError ? error.statusCode : 500);
+      if (status === 500) console.error("Human-bound official Tinder app resume queue failed.");
+      return res.status(status).json({
+        ok: false,
+        code: status === 400 && error?.code === "INVALID_HUMAN_BINDING_ID"
+          ? "INVALID_HUMAN_BINDING_ID"
+          : status === 400 && error?.code === "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST"
+            ? "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST"
+            : "TINDER_OFFICIAL_APP_RESUME_QUEUE_FAILED",
         error: "Official Tinder app resume could not be queued."
       });
     }
@@ -1464,6 +1518,8 @@ function registerTinderCaptureRoutes({
   const queueHumanArmedLocalConversationAttestation =
     createTinderDashboardHumanArmedLocalConversationAttestationQueueHandler(pool);
   const queueOfficialAppResume = createTinderDashboardOfficialAppResumeQueueHandler(pool);
+  const queueHumanBindingOfficialAppResume =
+    createTinderDashboardHumanBindingOfficialAppResumeQueueHandler(pool);
   const readUnboundInboxConversationSweepStatus =
     createTinderDashboardUnboundInboxConversationSweepStatusHandler(pool);
   const listUnboundInboxConversationSweepTranscripts =
@@ -1486,6 +1542,10 @@ function registerTinderCaptureRoutes({
   app.post("/dashboard-api/tinder/captures/:captureId/human-armed-binding", dashboard(armCaptureConversation));
   app.post("/dashboard-api/tinder/captures/:captureId/visible-chat-sync", dashboard(queueVisibleChatSync));
   app.post("/dashboard-api/tinder/captures/:captureId/resume-official-app", dashboard(queueOfficialAppResume));
+  app.post(
+    "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/resume-official-app",
+    dashboard(queueHumanBindingOfficialAppResume)
+  );
   app.get(
     "/dashboard-api/tinder/devices/:deviceId/unbound-inbox-conversation-sweeps/status",
     dashboard(readUnboundInboxConversationSweepStatus)
@@ -1538,6 +1598,7 @@ export {
   normalizeCaptureRecord,
   assertEmptyOfficialAppResumeBody,
   boundedOfficialAppResumeQueueResult,
+  createTinderDashboardHumanBindingOfficialAppResumeQueueHandler,
   boundedUnboundInboxConversationSweepStatus,
   normalizePendingUnboundInboxConversationSweepTranscriptRecords,
   normalizeDraftEligibleCaptureRecords,

@@ -12,6 +12,7 @@ import {
   createTinderDashboardConversationBindingHandler,
   createTinderDashboardHumanArmedBindingHandler,
   createTinderDashboardHumanArmedBindingListHandler,
+  createTinderDashboardHumanBindingOfficialAppResumeQueueHandler,
   createTinderDashboardHumanArmedRearmHandler,
   createTinderDashboardHumanArmedVisibleChatSyncQueueHandler,
   createTinderDashboardDraftEligibleCaptureListHandler,
@@ -70,6 +71,41 @@ test("official-app resume accepts exactly an empty object and no absent, null, o
       () => assertEmptyOfficialAppResumeBody(body),
       error => error.code === "INVALID_TINDER_OFFICIAL_APP_RESUME_REQUEST"
     );
+  }
+});
+
+test("human-bound official-app resume accepts only the opaque binding handle and exact empty body", async () => {
+  let received = null;
+  const handler = createTinderDashboardHumanBindingOfficialAppResumeQueueHandler({}, {
+    createResumeRepository() { return {}; },
+    createResumeService() {
+      return {
+        async queueOfficialAppResumeForHumanBinding(input) {
+          received = input;
+          return { status: "QUEUED" };
+        }
+      };
+    }
+  });
+
+  for (const body of [undefined, null, { capture_id: CAPTURE_ID }, { device_id: DEVICE_ID }]) {
+    const invalid = responseRecorder();
+    await handler({ params: { bindingId: BINDING_ID }, body }, invalid);
+    assert.equal(invalid.statusCode, 400);
+  }
+  assert.equal(received, null);
+
+  const success = responseRecorder();
+  await handler({ params: { bindingId: BINDING_ID }, body: {} }, success);
+  assert.equal(success.statusCode, 202);
+  assert.deepEqual(received, { bindingId: BINDING_ID });
+  assert.deepEqual(success.body, {
+    ok: true,
+    resume: { command_type: "RESUME_OFFICIAL_TINDER_APP", status: "QUEUED" }
+  });
+  const rendered = JSON.stringify(success.body);
+  for (const forbidden of [BINDING_ID, CAPTURE_ID, DEVICE_ID, "source_capture", "payload", "command_id"]) {
+    assert.equal(rendered.includes(forbidden), false);
   }
 });
 
@@ -917,6 +953,33 @@ test("official-app resume route retains dashboard authorization before any reade
   assert.equal(deviceBridgeReadinessCalled, false);
 });
 
+test("human-bound official-app resume route retains dashboard authorization before any command or readiness call", async () => {
+  let deviceBridgeReadinessCalled = false;
+  const registrations = [];
+  registerTinderCaptureRoutes({
+    app: {
+      get(path, handler) { registrations.push({ method: "GET", path, handler }); },
+      post(path, handler) { registrations.push({ method: "POST", path, handler }); }
+    },
+    pool: { connect() {}, query() {} },
+    dashboardApiReady() { return true; },
+    dashboardApiAuthorized() { return false; },
+    requireDeviceBridgeReady() {
+      deviceBridgeReadinessCalled = true;
+      return true;
+    }
+  });
+  const route = registrations.find(({ method, path }) =>
+    method === "POST"
+      && path === "/dashboard-api/tinder/human-armed-conversation-bindings/:bindingId/resume-official-app"
+  );
+  assert.ok(route);
+  const res = responseRecorder();
+  await route.handler({ params: { bindingId: BINDING_ID }, body: { capture_id: CAPTURE_ID } }, res);
+  assert.equal(res.statusCode, 401);
+  assert.equal(deviceBridgeReadinessCalled, false);
+});
+
 test("V8 unbound Inbox sweep status/transcript routes retain dashboard authorization and expose no manual start route", async () => {
   let deviceBridgeReadinessCalled = false;
   const registrations = [];
@@ -1323,7 +1386,7 @@ test("human-armed current-chat sync fails closed before service input and return
   }
 });
 
-test("human-armed binding list stays bounded and exposes only the opaque rearm handle plus contact label", async () => {
+test("human-armed binding list stays bounded and exposes only the opaque control handle, contact label, and finite statuses", async () => {
   const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
   const handler = createTinderDashboardHumanArmedBindingListHandler({}, {
     createRepository() { return {}; },
@@ -1351,7 +1414,8 @@ test("human-armed binding list stays bounded and exposes only the opaque rearm h
       binding_id: bindingId,
       contact_name: "M Tinder Test",
       local_conversation_attestation_status: "NOT_REQUESTED",
-      reader_status: "NOT_REQUESTED"
+      reader_status: "NOT_REQUESTED",
+      official_app_resume_status: "NOT_REQUESTED"
     }]
   });
   assert.equal(JSON.stringify(res.body).includes("contactId"), false);

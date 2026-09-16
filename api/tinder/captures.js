@@ -84,6 +84,7 @@ const CONFIRMED_CONVERSATIONS_VIEW = "confirmed-conversations";
 const CONFIRMED_CONVERSATION_VIEW = "confirmed-conversation";
 const VISIBLE_CHAT_SYNC_OPERATION = "visible-chat-sync";
 const OFFICIAL_APP_RESUME_OPERATION = "resume-official-app";
+const HUMAN_ARMED_OFFICIAL_APP_RESUME_OPERATION = "human-armed-official-app-resume";
 const UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW = "unbound-inbox-conversation-sweep-status";
 const UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW = "unbound-inbox-conversation-sweep-transcripts";
 const LATEST_CONFIRMED_CONVERSATION_LIMIT = 25;
@@ -182,8 +183,12 @@ const PUBLIC_OFFICIAL_APP_RESUME_REASONS = new Set([
   "HUMAN_ARMED_PERMIT_ACTIVE",
   "VISIBLE_CHAT_SYNC_PERMIT_ACTIVE",
   "RESUME_PERMIT_ACTIVE",
+  "LOCAL_CONVERSATION_ATTESTATION_PERMIT_ACTIVE",
   "UNBOUND_INBOX_CONVERSATION_SWEEP_ACTIVE",
+  "VERIFIED_CHAT_RETURN_PERMIT_ACTIVE",
+  "RESUMED_FOREGROUND_CHAT_RETURN_PERMIT_ACTIVE",
   "SOURCE_CAPTURE_NOT_CONFIRMED",
+  "RESUME_CONTEXT_UNAVAILABLE_OR_AMBIGUOUS",
   "SOURCE_CAPTURE_ALREADY_USED"
 ]);
 const PUBLIC_OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
@@ -457,6 +462,10 @@ function captureRequestFromQuery(req) {
       && query.operation === OFFICIAL_APP_RESUME_OPERATION) {
     return Object.freeze({ type: "official_app_resume", captureId: query.captureId });
   }
+  if (exactKeys(query, ["bindingId", "operation"]) && validCaptureId(query.bindingId)
+      && query.operation === HUMAN_ARMED_OFFICIAL_APP_RESUME_OPERATION) {
+    return Object.freeze({ type: "human_armed_official_app_resume", bindingId: query.bindingId });
+  }
   if (exactKeys(query, ["deviceId", "view"]) && validCaptureId(query.deviceId)
       && query.view === UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW) {
     return Object.freeze({ type: "unbound_inbox_conversation_sweep_status", deviceId: query.deviceId });
@@ -638,7 +647,8 @@ function normalizePublicHumanArmedBindings(value) {
   const bindings = value.map((binding) => {
     if (!binding || typeof binding !== "object" || Array.isArray(binding) ||
         !exactKeys(binding, [
-          "binding_id", "contact_name", "local_conversation_attestation_status", "reader_status"
+          "binding_id", "contact_name", "local_conversation_attestation_status", "reader_status",
+          "official_app_resume_status"
         ]) || !validCaptureId(binding.binding_id) || typeof binding.contact_name !== "string") {
       return null;
     }
@@ -647,16 +657,19 @@ function normalizePublicHumanArmedBindings(value) {
       binding.local_conversation_attestation_status || ""
     ).trim().toUpperCase();
     const readerStatus = String(binding.reader_status || "").trim().toUpperCase();
+    const officialAppResumeStatus = String(binding.official_app_resume_status || "").trim().toUpperCase();
     if (!contactName || contactName.length > 160
         || !PUBLIC_LOCAL_CONVERSATION_ATTESTATION_DASHBOARD_STATUSES.has(localConversationAttestationStatus)
-        || !PUBLIC_LOCAL_CONVERSATION_READER_STATUSES.has(readerStatus)) return null;
+        || !PUBLIC_LOCAL_CONVERSATION_READER_STATUSES.has(readerStatus)
+        || !PUBLIC_OFFICIAL_APP_RESUME_OBSERVATION_STATUSES.has(officialAppResumeStatus)) return null;
     // binding_id is an opaque JavaScript-only handle for the separate rearm
     // operation. It is intentionally not rendered or put in a URL.
     return Object.freeze({
       binding_id: binding.binding_id,
       contact_name: contactName,
       local_conversation_attestation_status: localConversationAttestationStatus,
-      reader_status: readerStatus
+      reader_status: readerStatus,
+      official_app_resume_status: officialAppResumeStatus
     });
   });
   return bindings.some((binding) => !binding) ? null : Object.freeze(bindings);
@@ -1106,6 +1119,44 @@ async function forwardOfficialAppResume(res, configuration, captureId) {
     return res.status(status).json({ ok: false, error: "Offizielle Tinder-App konnte nicht vorbereitet werden." });
   } catch {
     console.error("Verbindung zum offiziellen Tinder-App-Resume fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardHumanArmedOfficialAppResume(res, configuration, bindingId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/human-armed-conversation-bindings/${encodeURIComponent(bindingId)}/resume-official-app`,
+      {
+        method: "POST",
+        headers: backendHeaders(configuration, true),
+        // The opaque binding handle originated in the existing confirmed
+        // binding card. No browser value can choose a device, source capture,
+        // package, component, URI, thread, or payload.
+        body: JSON.stringify({}),
+        cache: "no-store"
+      }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const resume = normalizePublicOfficialAppResumeResult(data?.resume);
+    if (response.ok) {
+      if (data?.ok !== true || !resume || resume.status !== "QUEUED") {
+        return res.status(502).json({ ok: false, error: "UngÃ¼ltige offizielle Tinder-App-Antwort vom Backend." });
+      }
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(202).json({ ok: true, resume });
+    }
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    if (response.status === 409 && data?.ok === false && resume && resume.status !== "QUEUED") {
+      return res.status(409).json({ ok: false, conflict: true, resume, error: "Offizielle Tinder-App kann derzeit nicht einmalig geÃ¶ffnet werden." });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Offizielle Tinder-App konnte nicht vorbereitet werden." });
+  } catch {
+    console.error("Verbindung zum human-bound offiziellen Tinder-App-Resume fehlgeschlagen.");
     return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
   }
 }
@@ -1714,7 +1765,8 @@ export default async function handler(req, res) {
   if (!captureRequest || (req.method === "POST" && ![
     "capture", "human_arm", "human_rearm", "human_armed_visible_chat_sync",
     "human_armed_local_conversation_attestation", "draft", "draft_approve",
-    "draft_reject", "draft_cancel", "visible_chat_sync", "official_app_resume"
+    "draft_reject", "draft_cancel", "visible_chat_sync", "official_app_resume",
+    "human_armed_official_app_resume"
   ].includes(captureRequest.type))) {
     return res.status(400).json({ ok: false, error: "Ungültige Capture-ID." });
   }
@@ -1740,6 +1792,8 @@ export default async function handler(req, res) {
         ? "visible_chat_sync"
       : captureRequest.type === "official_app_resume" && validEmptyOfficialAppResumeBody(req.body)
         ? "official_app_resume"
+      : captureRequest.type === "human_armed_official_app_resume" && validEmptyOfficialAppResumeBody(req.body)
+        ? "human_armed_official_app_resume"
       : captureRequest.type === "capture" && validMappingBody(req.body)
           ? "profile_mapping"
           : captureRequest.type === "capture" && validConversationBindingBody(req.body)
@@ -1811,6 +1865,9 @@ export default async function handler(req, res) {
   if (requestKind === "official_app_resume") {
     return forwardOfficialAppResume(res, configuration, captureRequest.captureId);
   }
+  if (requestKind === "human_armed_official_app_resume") {
+    return forwardHumanArmedOfficialAppResume(res, configuration, captureRequest.bindingId);
+  }
   return requestKind === "conversation_binding"
     ? forwardConversationBinding(req, res, configuration, captureRequest.captureId)
     : forwardHumanMapping(req, res, configuration, captureRequest.captureId);
@@ -1838,6 +1895,7 @@ export {
   CONFIRMED_CONVERSATIONS_VIEW,
   VISIBLE_CHAT_SYNC_OPERATION,
   OFFICIAL_APP_RESUME_OPERATION,
+  HUMAN_ARMED_OFFICIAL_APP_RESUME_OPERATION,
   UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW,
   UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW,
   CONVERSATION_MESSAGE_LIMIT,

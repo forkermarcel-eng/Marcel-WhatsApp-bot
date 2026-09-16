@@ -20,6 +20,9 @@ audit details.  Android / protocol delivery is intentionally not wired here.
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
+const OFFICIAL_APP_RESUME_BINDING_STATUSES = new Set([
+  "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
+]);
 
 export const HUMAN_ARMED_CONVERSATION_CHANNEL = Object.freeze({
   TINDER: "tinder",
@@ -906,9 +909,13 @@ export function createTinderHumanArmedConversationBindingService(repository, {
       const readerStatus = normalizedStatus(
         sourceValue(row, "readerStatus", "reader_status") || "NOT_REQUESTED"
       );
+      const officialAppResumeStatus = normalizedStatus(
+        sourceValue(row, "officialAppResumeStatus", "official_app_resume_status") || "NOT_REQUESTED"
+      );
       if (!binding || bindingStateResult(binding) || !displayName || displayName.length > 160
           || !new Set(["NOT_REQUESTED", "PENDING", "ATTESTED", "INVALIDATED"]).has(localConversationAttestationStatus)
-          || !new Set(["NOT_REQUESTED", "READER_QUEUED"]).has(readerStatus)) {
+          || !new Set(["NOT_REQUESTED", "READER_QUEUED"]).has(readerStatus)
+          || !OFFICIAL_APP_RESUME_BINDING_STATUSES.has(officialAppResumeStatus)) {
         throw new TinderHumanArmedConversationBindingError(
           "Die Human-Armed-Bindings sind ungÃ¼ltig.",
           "INVALID_HUMAN_ARMED_BINDING_LIST",
@@ -920,7 +927,8 @@ export function createTinderHumanArmedConversationBindingService(repository, {
         contactName: displayName,
         state: binding.bindingState,
         localConversationAttestationStatus,
-        readerStatus
+        readerStatus,
+        officialAppResumeStatus
       });
     }));
   }
@@ -1176,10 +1184,12 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
     async listHumanArmedBindings() {
       const relation = await pool.query(
         `SELECT to_regclass('tinder_local_conversation_attestation_permits') AS attestation_relation,
-                to_regclass('tinder_visible_chat_sync_permits') AS sync_relation`
+                to_regclass('tinder_visible_chat_sync_permits') AS sync_relation,
+                to_regclass('tinder_official_app_resume_permits') AS resume_relation`
       );
       const attestationReady = Boolean(relation.rows[0]?.attestation_relation)
         && Boolean(relation.rows[0]?.sync_relation);
+      const resumeReady = Boolean(relation.rows[0]?.resume_relation);
       const statusProjection = attestationReady
         ? `,
                 COALESCE(local_attestation.local_conversation_attestation_status, 'NOT_REQUESTED')
@@ -1222,13 +1232,38 @@ export function createPgTinderHumanArmedConversationBindingRepository(pool) {
               LIMIT 1
            ) local_attestation ON TRUE`
         : "";
+      const resumeStatusProjection = resumeReady
+        ? `, COALESCE(official_resume.official_app_resume_status, 'NOT_REQUESTED')
+                  AS official_app_resume_status`
+        : `, 'NOT_REQUESTED'::text AS official_app_resume_status`;
+      const resumeStatusJoin = resumeReady
+        ? `
+           LEFT JOIN LATERAL (
+             SELECT CASE
+                      WHEN resume_permit.permit_state='ISSUED' AND resume_permit.expires_at > NOW() THEN 'PENDING'
+                      WHEN resume_permit.permit_state='DISPATCHED' THEN 'DISPATCHED'
+                      WHEN resume_permit.permit_state='CANCELLED' THEN 'CANCELLED'
+                      WHEN resume_permit.permit_state='EXPIRED' OR resume_permit.expires_at <= NOW() THEN 'EXPIRED'
+                      ELSE 'NOT_REQUESTED'
+                    END AS official_app_resume_status
+               FROM tinder_official_app_resume_permits resume_permit
+              WHERE resume_permit.binding_id=b.binding_id
+                AND resume_permit.binding_revision=b.binding_revision
+                AND resume_permit.device_id=b.device_id
+                AND resume_permit.permit_contract_version=2
+              ORDER BY resume_permit.created_at DESC, resume_permit.command_id DESC
+              LIMIT 1
+           ) official_resume ON TRUE`
+        : "";
       const result = await pool.query(
         `SELECT ${bindingSelectColumns},
                 COALESCE(NULLIF(c.canonical_name, ''), NULLIF(c.display_name, '')) AS contact_name
                 ${statusProjection}
+                ${resumeStatusProjection}
            FROM ${HUMAN_ARMED_CONVERSATION_BINDING_TABLE} b
            JOIN contacts c ON c.id = b.contact_id
            ${statusJoin}
+           ${resumeStatusJoin}
            WHERE b.channel = 'tinder'
             AND b.reference_kind = $1
             AND b.binding_state = 'CONFIRMED'

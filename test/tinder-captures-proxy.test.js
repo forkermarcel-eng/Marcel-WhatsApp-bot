@@ -1069,7 +1069,8 @@ test("human-armed binding GET keeps the UUID as a bounded browser handle and str
         binding_id: bindingId,
         contact_name: "M Tinder Test",
         local_conversation_attestation_status: "NOT_REQUESTED",
-        reader_status: "NOT_REQUESTED"
+        reader_status: "NOT_REQUESTED",
+        official_app_resume_status: "NOT_REQUESTED"
       }]
     });
   };
@@ -1084,13 +1085,105 @@ test("human-armed binding GET keeps the UUID as a bounded browser handle and str
       binding_id: bindingId,
       contact_name: "M Tinder Test",
       local_conversation_attestation_status: "NOT_REQUESTED",
-      reader_status: "NOT_REQUESTED"
+      reader_status: "NOT_REQUESTED",
+      official_app_resume_status: "NOT_REQUESTED"
     }]
   });
   assert.equal(JSON.stringify(res.body).includes("contact_id"), false);
   assert.equal(JSON.stringify(res.body).includes("device_id"), false);
   assert.equal(JSON.stringify(res.body).includes("reference_hash"), false);
   assert.equal(JSON.stringify(res.body).includes("permit_id"), false);
+}));
+
+test("human-bound official-app resume proxy forwards only the opaque binding handle and exact empty payload", async () => withEnvironment(async () => {
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return backendResponse({
+      ok: true,
+      resume: { command_type: "RESUME_OFFICIAL_TINDER_APP", status: "QUEUED" }
+    }, { status: 202 });
+  };
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-official-app-resume" },
+    body: {}
+  }), res);
+  assert.equal(res.statusCode, 202);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url,
+    `https://shared-backend.example/dashboard-api/tinder/human-armed-conversation-bindings/${BINDING_ID}/resume-official-app`);
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.body, "{}");
+  assert.deepEqual(res.body, {
+    ok: true,
+    resume: { command_type: "RESUME_OFFICIAL_TINDER_APP", status: "QUEUED" }
+  });
+  for (const forbidden of [BINDING_ID, CAPTURE_ID, DEVICE_ID, "source_capture", "command_id", "payload"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+
+  const injected = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: {
+      bindingId: BINDING_ID,
+      operation: "human-armed-official-app-resume",
+      captureId: CAPTURE_ID
+    },
+    body: {}
+  }), injected);
+  assert.equal(injected.statusCode, 400);
+  assert.equal(calls.length, 1);
+}));
+
+test("human-bound official-app resume proxy retains only bounded current-context rejection", async () => withEnvironment(async () => {
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    conflict: true,
+    resume: {
+      command_type: "RESUME_OFFICIAL_TINDER_APP",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "RESUME_CONTEXT_UNAVAILABLE_OR_AMBIGUOUS",
+      binding_id: BINDING_ID,
+      source_capture_id: CAPTURE_ID
+    }
+  }, { ok: false, status: 409 });
+  const res = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-official-app-resume" },
+    body: {}
+  }), res);
+  assert.equal(res.statusCode, 502);
+  assert.equal(JSON.stringify(res.body).includes(BINDING_ID), false);
+  assert.equal(JSON.stringify(res.body).includes(CAPTURE_ID), false);
+
+  globalThis.fetch = async () => backendResponse({
+    ok: false,
+    conflict: true,
+    resume: {
+      command_type: "RESUME_OFFICIAL_TINDER_APP",
+      status: "PERMIT_NOT_AVAILABLE",
+      reason_code: "RESUME_CONTEXT_UNAVAILABLE_OR_AMBIGUOUS"
+    }
+  }, { ok: false, status: 409 });
+  const bounded = responseRecorder();
+  await handler(request({
+    method: "POST",
+    query: { bindingId: BINDING_ID, operation: "human-armed-official-app-resume" },
+    body: {}
+  }), bounded);
+  assert.equal(bounded.statusCode, 409);
+  assert.equal(bounded.body.ok, false);
+  assert.equal(bounded.body.conflict, true);
+  assert.deepEqual(bounded.body.resume, {
+    command_type: "RESUME_OFFICIAL_TINDER_APP",
+    status: "PERMIT_NOT_AVAILABLE",
+    reason_code: "RESUME_CONTEXT_UNAVAILABLE_OR_AMBIGUOUS"
+  });
+  assert.equal(typeof bounded.body.error, "string");
 }));
 
 test("capture proxy preserves a controlled conflict and never leaks backend details", async () => withEnvironment(async () => {

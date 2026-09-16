@@ -73,6 +73,30 @@ test("selected detail has bounded one-shot official-app resume and visible-chat 
   assert.doesNotMatch(conversationCode, /startActivity|ComponentName|setPackage|setData|ACTION_VIEW|performAction|GLOBAL_ACTION|ACTION_CLICK|setText|openChat/i);
 });
 
+test("existing human-confirmed binding card can create a fresh launcher-only resume without exposing or selecting a source", () => {
+  const bindingCode = sourceBetween(
+    "function renderHumanArmedBindingList",
+    "async function loadHumanArmedBindingList"
+  );
+  const resumeStart = bindingCode.indexOf("resume.addEventListener");
+  const resumeEnd = bindingCode.indexOf("const confirmation", resumeStart);
+  assert.ok(resumeStart >= 0 && resumeEnd > resumeStart);
+  const resumeCode = bindingCode.slice(resumeStart, resumeEnd);
+  assert.match(bindingCode, /official_app_resume_status/);
+  assert.match(bindingCode, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\.has\(officialAppResumeStatus\)/);
+  assert.match(resumeCode, /operation=human-armed-official-app-resume/);
+  assert.match(resumeCode, /body: JSON\.stringify\(\{\}\)/);
+  assert.match(bindingCode, /RESUME_OFFICIAL_TINDER_APP/);
+  assert.match(bindingCode, /Offizielle Tinder-App einmal öffnen/);
+  assert.equal((resumeCode.match(/operation=human-armed-official-app-resume/g) || []).length, 1);
+  assert.equal((resumeCode.match(/method:\s*"POST"/g) || []).length, 1);
+  assert.doesNotMatch(resumeCode, /textContent\s*=\s*binding\.binding_id/);
+  for (const forbidden of [
+    /\bsourceCaptureId\b/, /\bdeviceId\b/, /\bthreadFingerprint\b/, /\bcaptureFingerprint\b/,
+    /\bsetPackage\b/, /\bACTION_VIEW\b/, /\bopenChat\b/
+  ]) assert.doesNotMatch(resumeCode, forbidden);
+});
+
 test("queued visible-chat sync refreshes only the selected product detail and never queues a retry", () => {
   const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
 

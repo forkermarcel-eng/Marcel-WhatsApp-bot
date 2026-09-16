@@ -24,6 +24,19 @@ test("official resume handoff diagnostic admits only reviewed finite rejection r
   assert.deepEqual(boundedTinderOfficialResumeHandoffDiagnostic(source), source);
 });
 
+test("official resume handoff diagnostic admits only the fixed V9 deferred states", () => {
+  const scheduled = {
+    stage: "V9_DEFERRED_REOBSERVATION_SCHEDULED",
+    reason: "NONE"
+  };
+  const rejected = {
+    stage: "BLOCKED",
+    reason: "V9_DEFERRED_REOBSERVATION_CONSUME_REJECTED"
+  };
+  assert.deepEqual(boundedTinderOfficialResumeHandoffDiagnostic(scheduled), scheduled);
+  assert.deepEqual(boundedTinderOfficialResumeHandoffDiagnostic(rejected), rejected);
+});
+
 test("official resume handoff diagnostic rejects IDLE, unknown vocabulary, extra keys, and non-objects", () => {
   const valid = { stage: "BLOCKED", reason: "CANDIDATE_POLICY_REJECTED" };
   for (const value of [

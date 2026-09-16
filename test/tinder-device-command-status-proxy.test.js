@@ -653,6 +653,64 @@ test("device-list proxy projects V20 only as its independent exact base-and-coun
   }
 }));
 
+test("device-list proxy projects V20 anchor states only with zero selector counters", async () => withEnvironment(async () => {
+  const base = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v20_raw_selector_match_count: 0,
+    discovery_v20_qualified_selector_match_count: 0
+  };
+  const req = request();
+  req.query = {};
+  for (const state of [
+    "ANCHOR_TRAVERSAL_INCOMPLETE",
+    "ANCHOR_PARENT_ABSENT",
+    "ANCHOR_STRICT_PROOF_ABSENT",
+    "ANCHOR_STRICT_PROOF_AMBIGUOUS"
+  ]) {
+    const inboxNavigation = {
+      ...base,
+      discovery_v20_five_structural_chat_state: state
+    };
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ inboxNavigation })]
+        });
+      }
+    });
+    const validRes = responseRecorder();
+    await handler(req, validRes);
+    assert.deepEqual(validRes.body.devices[0].inbox_navigation, inboxNavigation);
+
+    const invalid = {
+      ...inboxNavigation,
+      discovery_v20_raw_selector_match_count: 1,
+      discovery_v20_qualified_selector_match_count: 1
+    };
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          ok: true,
+          server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ inboxNavigation: invalid })]
+        });
+      }
+    });
+    const invalidRes = responseRecorder();
+    await handler(req, invalidRes);
+    assert.equal(invalidRes.body.devices[0].inbox_navigation, null);
+  }
+}));
+
 test("device-list proxy allowlists the bounded official resume handoff projection", async () => withEnvironment(async () => {
   const officialResumeHandoff = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   globalThis.fetch = async () => ({

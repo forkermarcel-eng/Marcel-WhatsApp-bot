@@ -1006,6 +1006,43 @@ test("terminal Tinder discovery V20 is an independent exact base-and-counters br
   }
 });
 
+test("terminal Tinder discovery V20 anchor states require zero selector counters", () => {
+  const base = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v20_raw_selector_match_count: 0,
+    discovery_v20_qualified_selector_match_count: 0
+  };
+  for (const state of [
+    "ANCHOR_TRAVERSAL_INCOMPLETE",
+    "ANCHOR_PARENT_ABSENT",
+    "ANCHOR_STRICT_PROOF_ABSENT",
+    "ANCHOR_STRICT_PROOF_AMBIGUOUS"
+  ]) {
+    const diagnostic = {
+      ...base,
+      discovery_v20_five_structural_chat_state: state
+    };
+    assert.deepEqual(parseAndValidateHeartbeat(heartbeatRequest(
+      heartbeatPayload({ tinder_inbox_navigation: diagnostic })).req).tinder_inbox_navigation,
+    diagnostic);
+    for (const [rawCount, qualifiedCount] of [[1, 0], [1, 1], [0, 1]]) {
+      assert.throws(
+        () => parseAndValidateHeartbeat(heartbeatRequest(heartbeatPayload({
+          tinder_inbox_navigation: {
+            ...diagnostic,
+            discovery_v20_raw_selector_match_count: rawCount,
+            discovery_v20_qualified_selector_match_count: qualifiedCount
+          }
+        })).req),
+        error => error.code === "INVALID_DEVICE_STATE"
+      );
+    }
+  }
+});
+
 test("optional official resume handoff heartbeat diagnostic is exact, content-free, and observational", async () => {
   const diagnostic = { stage: "BLOCKED", reason: "OFFICIAL_FOREGROUND_NOT_OBSERVED" };
   const payload = heartbeatPayload({ tinder_official_resume_handoff: diagnostic });
@@ -3126,6 +3163,50 @@ test("admin status projects V20 only as its independent exact base-and-counters 
     { ...diagnostic, discovery_v16_state: "LABEL_MATCH_COUNT_REJECTED" },
     { ...diagnostic, stage: "INBOX_READY", reason: "NONE" }
   ]) {
+    const invalidPool = { async query() {
+      return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+        "CONNECTED", invalid)] };
+    } };
+    const invalidRes = responseRecorder();
+    await createAdminDeviceStatusHandler(invalidPool)(
+      { params: { deviceId: DEVICE_ID } }, invalidRes);
+    assert.equal(invalidRes.body.device.inbox_navigation, null);
+  }
+});
+
+test("admin status projects V20 anchor states only with zero selector counters", async () => {
+  const base = {
+    stage: "BLOCKED",
+    reason: "DISCOVERY_STRUCTURE_REJECTED",
+    visible_conversation_count: 0,
+    observed_event_count: 3,
+    discovery_v20_raw_selector_match_count: 0,
+    discovery_v20_qualified_selector_match_count: 0
+  };
+  for (const state of [
+    "ANCHOR_TRAVERSAL_INCOMPLETE",
+    "ANCHOR_PARENT_ABSENT",
+    "ANCHOR_STRICT_PROOF_ABSENT",
+    "ANCHOR_STRICT_PROOF_AMBIGUOUS"
+  ]) {
+    const diagnostic = {
+      ...base,
+      discovery_v20_five_structural_chat_state: state
+    };
+    const validPool = { async query() {
+      return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
+        "CONNECTED", diagnostic)] };
+    } };
+    const validRes = responseRecorder();
+    await createAdminDeviceStatusHandler(validPool)(
+      { params: { deviceId: DEVICE_ID } }, validRes);
+    assert.deepEqual(validRes.body.device.inbox_navigation, diagnostic);
+
+    const invalid = {
+      ...diagnostic,
+      discovery_v20_raw_selector_match_count: 1,
+      discovery_v20_qualified_selector_match_count: 1
+    };
     const invalidPool = { async query() {
       return { rows: [statusRow(new Date(), T4_RESUME_DEVICE_CAPABILITIES,
         "CONNECTED", invalid)] };

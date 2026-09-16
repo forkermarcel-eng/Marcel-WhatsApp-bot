@@ -168,6 +168,10 @@ test("Tinder Inbox diagnostics surface V20 as a separate bounded base-and-counte
   assert.match(page, /const DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = new Set\(/);
   for (const state of [
     "BASE_STRUCTURE_REJECTED",
+    "ANCHOR_TRAVERSAL_INCOMPLETE",
+    "ANCHOR_PARENT_ABSENT",
+    "ANCHOR_STRICT_PROOF_ABSENT",
+    "ANCHOR_STRICT_PROOF_AMBIGUOUS",
     "LABEL_MATCH_COUNT_REJECTED",
     "TARGET_PARENT_REJECTED",
     "TARGET_ACTION_REJECTED",
@@ -179,6 +183,9 @@ test("Tinder Inbox diagnostics surface V20 as a separate bounded base-and-counte
   assert.match(page, /discovery_v20_qualified_selector_match_count/);
   assert.match(page, /const discoveryV20 = fieldNames === discoveryV20Fields/);
   assert.match(page, /DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES\.has\(/);
+  assert.match(page, /const DISCOVERY_V20_ANCHOR_ZERO_COUNT_STATES = new Set\(/);
+  assert.match(page, /DISCOVERY_V20_ANCHOR_ZERO_COUNT_STATES\.has\(state\)/);
+  assert.match(page, /return rawCount === 0 && qualifiedCount === 0;/);
   assert.match(page, /function discoveryV20CountsMatchState\(state, rawCount, qualifiedCount\)/);
   assert.match(page, /discoveryV20CountsMatchState\(value\.discovery_v20_five_structural_chat_state,/);
   assert.doesNotMatch(page, /DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = new Set\(\[\s*"NOT_EVALUATED"/);

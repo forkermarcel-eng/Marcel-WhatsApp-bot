@@ -104,10 +104,20 @@ const DISCOVERY_V19_SINGLETON_WRAPPER_SHAPE_STATES = new Set([
 ]);
 const DISCOVERY_V20_FIVE_STRUCTURAL_CHAT_STATES = new Set([
   "BASE_STRUCTURE_REJECTED",
+  "ANCHOR_TRAVERSAL_INCOMPLETE",
+  "ANCHOR_PARENT_ABSENT",
+  "ANCHOR_STRICT_PROOF_ABSENT",
+  "ANCHOR_STRICT_PROOF_AMBIGUOUS",
   "LABEL_MATCH_COUNT_REJECTED",
   "TARGET_PARENT_REJECTED",
   "TARGET_ACTION_REJECTED",
   "STRICT_FIVE_STRUCTURAL_CHAT_LABEL_INBOX_CANDIDATE"
+]);
+const DISCOVERY_V20_ANCHOR_ZERO_COUNT_STATE_SET = new Set([
+  "ANCHOR_TRAVERSAL_INCOMPLETE",
+  "ANCHOR_PARENT_ABSENT",
+  "ANCHOR_STRICT_PROOF_ABSENT",
+  "ANCHOR_STRICT_PROOF_AMBIGUOUS"
 ]);
 const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "device_id", "display_name", "enrollment_state", "device_status", "enrolled_at",
@@ -122,6 +132,9 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
 
 function v20CountsMatchState(state, rawCount, qualifiedCount) {
   if (qualifiedCount > rawCount) return false;
+  if (DISCOVERY_V20_ANCHOR_ZERO_COUNT_STATE_SET.has(state)) {
+    return rawCount === 0 && qualifiedCount === 0;
+  }
   if (state === "LABEL_MATCH_COUNT_REJECTED") return rawCount !== 1;
   if (state === "TARGET_PARENT_REJECTED") return rawCount === 1 && qualifiedCount === 0;
   if (state === "TARGET_ACTION_REJECTED"

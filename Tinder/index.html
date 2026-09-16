@@ -1057,6 +1057,9 @@
        <p class="enrollment-message" id="resumedForegroundChatReturnDiagnostic" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="passiveInboxObservationDiagnostic" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
      </section>
 
      <section class="enrollment-panel capture-mapping-panel" id="captureMappingPanel" hidden aria-labelledby="captureMappingHeading">
@@ -1209,6 +1212,7 @@
       lastAcceptedOfficialResumeSchemaDiagnosticStatus: document.getElementById("lastAcceptedOfficialResumeSchemaDiagnosticStatus"),
       resumedForegroundChatReturnStatus: document.getElementById("resumedForegroundChatReturnStatus"),
       resumedForegroundChatReturnDiagnostic: document.getElementById("resumedForegroundChatReturnDiagnostic"),
+      passiveInboxObservationDiagnostic: document.getElementById("passiveInboxObservationDiagnostic"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
        unboundConversationList: document.getElementById("unboundConversationList"),
@@ -1436,6 +1440,17 @@
      "READINESS_EXPIRED", "LIFECYCLE_RESET", "PERMIT_OR_STAGE_INVALID",
      "FOREGROUND_PROOF_INVALID", "HEADER_ACTION_REJECTED", "HEADER_CLICK_UNOBSERVED",
      "FRESH_INBOX_REJECTED", "RECEIPT_REJECTED", "RETURN_TIMEOUT"
+   ]);
+   const PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_STAGES = new Set([
+     "ARMED", "PENDING_HEARTBEAT", "DELIVERED", "BLOCKED"
+   ]);
+   const PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS = new Set([
+     "NONE", "REQUEST_GATE_REJECTED", "SCHEDULE_FAILED", "LIFECYCLE_RESET",
+     "RUNTIME_GATE_LOST", "SETTLE_FOREIGN_OR_EMPTY", "SETTLE_NON_INBOX",
+     "SETTLE_SENSITIVE", "SETTLE_PARTIAL_OR_UNKNOWN", "LOCAL_CONTEXT_REJECTED",
+     "RUNTIME_WITNESS_REJECTED", "LEASE_REJECTED", "VALIDATION_BUDGET",
+     "VALIDATION_DRIFT", "HEARTBEAT_EXPIRED", "HEARTBEAT_GATE_LOST",
+     "HEARTBEAT_LEASE_LOST"
    ]);
     const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
       "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
@@ -3393,6 +3408,36 @@
        `V10_STAGE: ${diagnostic.stage} / V10_REASON: ${diagnostic.reason}`;
    }
 
+   function passiveInboxObservationDiagnosticIsSafe(value) {
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|")
+         === ["reason", "settle_sample_count", "stage", "validation_count"].join("|")
+       && PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_STAGES.has(value.stage)
+       && PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS.has(value.reason)
+       && Number.isSafeInteger(value.settle_sample_count)
+       && value.settle_sample_count >= 0 && value.settle_sample_count <= 8
+       && Number.isSafeInteger(value.validation_count)
+       && value.validation_count >= 0 && value.validation_count <= 8
+       && ((value.stage === "BLOCKED" && value.reason !== "NONE")
+         || (value.stage !== "BLOCKED" && value.reason === "NONE"));
+   }
+
+   function renderPassiveInboxObservationDiagnostic(device) {
+     const diagnostic = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.tinder_passive_inbox_observation_diagnostic
+       : null;
+     elements.passiveInboxObservationDiagnostic.className = "enrollment-message";
+     if (!passiveInboxObservationDiagnosticIsSafe(diagnostic)) {
+       elements.passiveInboxObservationDiagnostic.textContent =
+         "Nicht verfuegbar: keine aktuelle passive Inbox-Beobachtung im akzeptierten Heartbeat.";
+       return;
+     }
+     elements.passiveInboxObservationDiagnostic.textContent =
+       `PASSIVE_INBOX_STAGE: ${diagnostic.stage} / PASSIVE_INBOX_REASON: ${diagnostic.reason}`
+       + ` / SETTLE_SAMPLES: ${diagnostic.settle_sample_count}`
+       + ` / VALIDATIONS: ${diagnostic.validation_count}`;
+   }
+
    function pendingUnboundConversationTranscriptIsSafe(transcript) {
      const receivedAt = new Date(transcript?.received_at || "");
      return hasExactConversationFields(transcript, [
@@ -3504,6 +3549,7 @@
      renderLastAcceptedOfficialResumeSchemaDiagnosticStatus(null);
      renderResumedForegroundChatReturnStatus(null);
      renderResumedForegroundChatReturnDiagnostic(null);
+     renderPassiveInboxObservationDiagnostic(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
      elements.bridgeSub.textContent = "Kein eindeutiger Gerätestatus";
@@ -3637,6 +3683,7 @@
        renderLastAcceptedOfficialResumeSchemaDiagnosticStatus(device);
        renderResumedForegroundChatReturnStatus(device);
        renderResumedForegroundChatReturnDiagnostic(device);
+       renderPassiveInboxObservationDiagnostic(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();
        const bridgeStatus = String(device?.bridge_service_state || "UNKNOWN").toUpperCase();

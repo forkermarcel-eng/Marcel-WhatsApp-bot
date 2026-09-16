@@ -306,3 +306,29 @@ test("Tinder technical diagnostics render only the bounded V10 lifecycle sibling
     "tinder_resumed_foreground_chat_return_diagnostic.text"
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
+
+test("Tinder technical diagnostics render only the bounded passive Inbox observation", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="passiveInboxObservationDiagnostic"/);
+  assert.match(page, /function passiveInboxObservationDiagnosticIsSafe\(value\)/);
+  assert.match(page, /PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_STAGES\.has\(value\.stage\)/);
+  assert.match(page, /PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS\.has\(value\.reason\)/);
+  assert.match(page, /value\.settle_sample_count >= 0 && value\.settle_sample_count <= 8/);
+  assert.match(page, /value\.validation_count >= 0 && value\.validation_count <= 8/);
+  assert.match(page, /value\.stage === "BLOCKED" && value\.reason !== "NONE"/);
+  assert.match(page, /renderPassiveInboxObservationDiagnostic\(device\);/);
+  assert.match(page, /renderPassiveInboxObservationDiagnostic\(null\);/);
+  assert.match(page, /textContent =\s*`PASSIVE_INBOX_STAGE:/);
+  for (const forbidden of [
+    "tinder_passive_inbox_observation_diagnostic.permit",
+    "tinder_passive_inbox_observation_diagnostic.command",
+    "tinder_passive_inbox_observation_diagnostic.nonce",
+    "tinder_passive_inbox_observation_diagnostic.snapshot",
+    "tinder_passive_inbox_observation_diagnostic.row",
+    "tinder_passive_inbox_observation_diagnostic.identity",
+    "tinder_passive_inbox_observation_diagnostic.source",
+    "tinder_passive_inbox_observation_diagnostic.binding",
+    "tinder_passive_inbox_observation_diagnostic.capture",
+    "tinder_passive_inbox_observation_diagnostic.header",
+    "tinder_passive_inbox_observation_diagnostic.text"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});

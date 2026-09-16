@@ -1330,6 +1330,65 @@ test("optional V10 return lifecycle diagnostic is exact, content-free, and canno
   }
 });
 
+test("optional passive Inbox observation diagnostic is exact, content-free, and cannot select a command", async () => {
+  const diagnostic = {
+    stage: "PENDING_HEARTBEAT",
+    reason: "NONE",
+    settle_sample_count: 2,
+    validation_count: 3
+  };
+  const payload = heartbeatPayload({
+    capabilities: T1_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED",
+    tinder_passive_inbox_observation_diagnostic: diagnostic
+  });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(
+    parseAndValidateHeartbeat(request.req).tinder_passive_inbox_observation_diagnostic,
+    diagnostic
+  );
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  assert.deepEqual(response.commands, []);
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_passive_inbox_observation_diagnostic: diagnostic
+  });
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  const serialized = JSON.stringify({ response, update: update?.params });
+  for (const forbidden of ["PENDING_HEARTBEAT", "settle_sample_count", "validation_count"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+
+  for (const invalidDiagnostic of [
+    null,
+    {},
+    { ...diagnostic, stage: "IDLE" },
+    { ...diagnostic, reason: "SETTLE_NON_INBOX" },
+    { ...diagnostic, settle_sample_count: 9 },
+    { ...diagnostic, validation_count: 2.5 },
+    { ...diagnostic, extra: "forbidden" },
+    { ...diagnostic, text: "forbidden" }
+  ]) {
+    const invalid = heartbeatPayload({
+      capabilities: T1_DEVICE_CAPABILITIES,
+      tinder_state: "CONNECTED",
+      tinder_passive_inbox_observation_diagnostic: invalidDiagnostic
+    });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
 test("V10 accepts the bounded Initial-Chat-shell rejection without adding authority", () => {
   const diagnostic = { stage: "BLOCKED", reason: "INITIAL_SHELL_REJECTED" };
   const payload = heartbeatPayload({
@@ -2872,7 +2931,8 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     inboxNavigation = null, officialResumeHandoff = null,
     resumedForegroundChatReturn = null, resumedForegroundChatReturnDiagnostic = null,
     officialResumeSchemaEvidence = null,
-    lastAcceptedOfficialResumeSchemaDiagnostic = null) {
+    lastAcceptedOfficialResumeSchemaDiagnostic = null,
+    passiveInboxObservationDiagnostic = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
@@ -2885,7 +2945,8 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     last_accepted_official_resume_schema_diagnostic:
       lastAcceptedOfficialResumeSchemaDiagnostic,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
-    tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic
+    tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
+    tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic
   };
 }
 
@@ -3430,6 +3491,57 @@ test("admin status suppresses malformed or offline V10 lifecycle diagnostic", as
     const res = responseRecorder();
     await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
     assert.equal(res.body.device.tinder_resumed_foreground_chat_return_diagnostic, null);
+  }
+});
+
+test("admin status projects only the bounded online passive Inbox observation diagnostic", async () => {
+  const diagnostic = {
+    stage: "BLOCKED",
+    reason: "SETTLE_PARTIAL_OR_UNKNOWN",
+    settle_sample_count: 2,
+    validation_count: 3
+  };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      const row = statusRow(new Date(), CAPABILITIES, "CONNECTED");
+      row.tinder_passive_inbox_observation_diagnostic = diagnostic;
+      return { rows: [row] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.tinder_passive_inbox_observation_diagnostic, diagnostic);
+  assert.match(sql, /tinder_passive_inbox_observation_diagnostic/);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body.device).includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed or offline passive Inbox observation diagnostic", async () => {
+  const valid = {
+    stage: "BLOCKED",
+    reason: "HEARTBEAT_EXPIRED",
+    settle_sample_count: 2,
+    validation_count: 3
+  };
+  for (const [acceptedAt, diagnostic] of [
+    [new Date(), { ...valid, raw: "forbidden" }],
+    [new Date(), { ...valid, settle_sample_count: 9 }],
+    [new Date(), { ...valid, stage: "ARMED" }],
+    [new Date(Date.now() - 91_000), valid]
+  ]) {
+    const pool = {
+      async query() {
+        const row = statusRow(acceptedAt, CAPABILITIES, "CONNECTED");
+        row.tinder_passive_inbox_observation_diagnostic = diagnostic;
+        return { rows: [row] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.tinder_passive_inbox_observation_diagnostic, null);
   }
 });
 

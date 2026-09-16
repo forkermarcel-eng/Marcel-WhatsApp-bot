@@ -65,6 +65,9 @@ import {
 import {
   boundedTinderResumedForegroundChatReturnDiagnostic
 } from "./tinder-resumed-foreground-chat-return-diagnostic-contract.js";
+import {
+  boundedTinderPassiveInboxObservationDiagnostic
+} from "./tinder-passive-inbox-observation-diagnostic-contract.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
@@ -704,6 +707,11 @@ export function isBoundedTinderResumedForegroundChatReturnDiagnostic(value) {
   return boundedTinderResumedForegroundChatReturnDiagnostic(value) !== null;
 }
 
+/** Passive V8 lifecycle evidence is observational only and cannot affect issuance or delivery. */
+export function isBoundedTinderPassiveInboxObservationDiagnostic(value) {
+  return boundedTinderPassiveInboxObservationDiagnostic(value) !== null;
+}
+
 export function isExactTinderVerifiedChatReturnReadiness(value) {
   return exactKeys(value, TINDER_VERIFIED_CHAT_RETURN_READINESS_FIELDS)
     && typeof value.ready === "boolean";
@@ -819,6 +827,14 @@ function heartbeatAuditDetails(heartbeat) {
     : null;
   if (resumedForegroundReturnDiagnostic !== null) {
     details.tinder_resumed_foreground_chat_return_diagnostic = resumedForegroundReturnDiagnostic;
+  }
+  const passiveInboxObservationDiagnostic = Object.hasOwn(heartbeat,
+    "tinder_passive_inbox_observation_diagnostic")
+    ? boundedTinderPassiveInboxObservationDiagnostic(
+      heartbeat.tinder_passive_inbox_observation_diagnostic)
+    : null;
+  if (passiveInboxObservationDiagnostic !== null) {
+    details.tinder_passive_inbox_observation_diagnostic = passiveInboxObservationDiagnostic;
   }
   return details;
 }
@@ -1098,6 +1114,11 @@ export function parseAndValidateHeartbeat(req) {
       && !isBoundedTinderResumedForegroundChatReturnDiagnostic(
         body.tinder_resumed_foreground_chat_return_diagnostic)) {
     throw invalidHeartbeat("Heartbeat resumed foreground chat return diagnostic is invalid");
+  }
+  if (Object.hasOwn(body, "tinder_passive_inbox_observation_diagnostic")
+      && !isBoundedTinderPassiveInboxObservationDiagnostic(
+        body.tinder_passive_inbox_observation_diagnostic)) {
+    throw invalidHeartbeat("Heartbeat passive Inbox observation diagnostic is invalid");
   }
   if (body.tinder_verified_chat_return?.ready === true
       && body.tinder_resumed_foreground_chat_return?.ready === true) {

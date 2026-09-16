@@ -91,6 +91,7 @@ function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
       lastAcceptedOfficialResumeSchemaDiagnostic,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
+    tinder_passive_inbox_observation_diagnostic: null,
     ...extra
   };
 }
@@ -224,7 +225,8 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
     "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
-    "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence", "tinder_resumed_foreground_chat_return",
+    "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence",
+    "tinder_passive_inbox_observation_diagnostic", "tinder_resumed_foreground_chat_return",
     "tinder_resumed_foreground_chat_return_diagnostic", "tinder_state"
   ]);
 }));
@@ -972,6 +974,67 @@ test("device-list proxy suppresses malformed or offline V10 lifecycle diagnostic
     await handler(req, res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.devices[0].tinder_resumed_foreground_chat_return_diagnostic, null);
+  }
+}));
+
+test("device-list proxy allowlists only the bounded passive Inbox observation diagnostic", async () => withEnvironment(async () => {
+  const diagnostic = {
+    stage: "PENDING_HEARTBEAT",
+    reason: "NONE",
+    settle_sample_count: 2,
+    validation_count: 3
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ extra: {
+          tinder_passive_inbox_observation_diagnostic: diagnostic
+        } })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].tinder_passive_inbox_observation_diagnostic, diagnostic);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy suppresses malformed or offline passive Inbox observation diagnostic", async () => withEnvironment(async () => {
+  const valid = {
+    stage: "BLOCKED",
+    reason: "HEARTBEAT_EXPIRED",
+    settle_sample_count: 2,
+    validation_count: 3
+  };
+  for (const extra of [
+    { tinder_passive_inbox_observation_diagnostic: { ...valid, extra: "forbidden" } },
+    { tinder_passive_inbox_observation_diagnostic: { ...valid, validation_count: 2.5 } },
+    { tinder_passive_inbox_observation_diagnostic: { ...valid, stage: "ARMED" } },
+    { tinder_passive_inbox_observation_diagnostic: valid, device_status: "OFFLINE" }
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ extra })] });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].tinder_passive_inbox_observation_diagnostic, null);
   }
 }));
 

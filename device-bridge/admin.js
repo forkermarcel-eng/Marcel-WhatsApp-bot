@@ -27,6 +27,9 @@ import {
 import {
   boundedTinderResumedForegroundChatReturnDiagnostic
 } from "./tinder-resumed-foreground-chat-return-diagnostic-contract.js";
+import {
+  boundedTinderPassiveInboxObservationDiagnostic
+} from "./tinder-passive-inbox-observation-diagnostic-contract.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
 import {
@@ -344,6 +347,11 @@ export function normalizeAdminResumedForegroundChatReturnDiagnostic(value) {
   return boundedTinderResumedForegroundChatReturnDiagnostic(value);
 }
 
+/** Passive V8 evidence is visible only as current, bounded online diagnostics. */
+export function normalizeAdminPassiveInboxObservationDiagnostic(value) {
+  return boundedTinderPassiveInboxObservationDiagnostic(value);
+}
+
 function statusRow(row, now) {
   const deviceStatus = deriveDeviceStatus(row.last_accepted_heartbeat_at, now);
   const officialResumeHandoff = deviceStatus === "ONLINE"
@@ -398,6 +406,10 @@ function statusRow(row, now) {
     tinder_resumed_foreground_chat_return_diagnostic: deviceStatus === "ONLINE"
       ? normalizeAdminResumedForegroundChatReturnDiagnostic(
         row.tinder_resumed_foreground_chat_return_diagnostic)
+      : null,
+    tinder_passive_inbox_observation_diagnostic: deviceStatus === "ONLINE"
+      ? normalizeAdminPassiveInboxObservationDiagnostic(
+        row.tinder_passive_inbox_observation_diagnostic)
       : null
   };
 }
@@ -414,7 +426,9 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return'
     AS tinder_resumed_foreground_chat_return,
   latest_heartbeat.details -> 'tinder_resumed_foreground_chat_return_diagnostic'
-    AS tinder_resumed_foreground_chat_return_diagnostic`;
+    AS tinder_resumed_foreground_chat_return_diagnostic,
+  latest_heartbeat.details -> 'tinder_passive_inbox_observation_diagnostic'
+    AS tinder_passive_inbox_observation_diagnostic`;
 
 const STATUS_FROM = `FROM device_bridge_devices d
   LEFT JOIN LATERAL (

@@ -57,6 +57,9 @@ import {
   boundedTinderUnboundInboxSweepDiagnostic
 } from "./tinder-unbound-inbox-sweep-diagnostic-contract.js";
 import {
+  boundedTinderUnboundInboxSweepStartDisposition
+} from "./tinder-unbound-inbox-sweep-start-disposition-contract.js";
+import {
   boundedTinderOfficialResumeHandoffDiagnostic
 } from "./tinder-official-resume-handoff-diagnostic-contract.js";
 import {
@@ -90,7 +93,7 @@ const TINDER_HUMAN_ARMED_CONVERSATION_REFERENCE_KIND = "tinder_human_armed_conve
 const HEARTBEAT_FAILURE_STAGE_PROPERTY = "deviceBridgeHeartbeatFailureStage";
 const HEARTBEAT_FAILURE_STAGES = new Set([
   "BEGIN", "DEVICE_LOCK", "REQUEST_REPLAY", "V8_FOUNDATION", "V8_RUNTIME_FOUNDATION", "V9_FOUNDATION", "V10_FOUNDATION",
-  "SCHEMA_EVIDENCE_AUTHORIZATION", "SCHEMA_EVIDENCE_AUDIT", "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_EXPIRY",
+  "SCHEMA_EVIDENCE_AUTHORIZATION", "SCHEMA_EVIDENCE_AUDIT", "DEVICE_UPDATE", "HEARTBEAT_AUDIT", "V8_START", "V8_START_DISPOSITION_AUDIT", "V8_EXPIRY",
   "V9_EXPIRY", "V10_EXPIRY", "V8_GATE_RECOVERY", "COMMAND_SELECTION", "COMMIT", "ROLLBACK"
 ]);
 
@@ -859,16 +862,25 @@ async function maybeStartUnboundInboxConversationSweepFromFreshObservation(clien
   verifiedChatReturnPermitActive, resumedForegroundChatReturnPermitActive,
   verifiedChatReturnFoundationCanonical, resumedForegroundChatReturnFoundationCanonical
 }) {
-  if (!isFreshReviewedInboxObservation(heartbeat)
-      || !isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities)
-      // V9 is serial with V8. Its terminal state is determined under this
-      // same device lock before V8 can consume a fresh Inbox observation.
-      // The observation audit remains immutable, but it cannot mint an
-      // undeliverable overlapping V8 child.
-      || verifiedChatReturnPermitActive === true
-      || resumedForegroundChatReturnPermitActive === true
-      || unboundInboxConversationSweepFoundationReady !== true) {
-    return;
+  // A regular heartbeat has no start attempt to report.  In particular, do
+  // not fabricate a disposition before Android has supplied a new signed,
+  // fresh local Inbox observation.
+  if (!isFreshReviewedInboxObservation(heartbeat)) return null;
+  if (!isTinderUnboundInboxConversationSweepCapable(heartbeat.capabilities)) {
+    return Object.freeze({ status: "BLOCKED_CAPABILITY" });
+  }
+  // V9/V10 are serial with V8. Their terminal state is determined under this
+  // same device lock before V8 can consume a fresh Inbox observation. The
+  // immutable observation remains consumed, but the bounded disposition
+  // makes the fail-closed gate observable without exposing its authority.
+  if (verifiedChatReturnPermitActive === true) {
+    return Object.freeze({ status: "BLOCKED_V9_ACTIVE" });
+  }
+  if (resumedForegroundChatReturnPermitActive === true) {
+    return Object.freeze({ status: "BLOCKED_V10_ACTIVE" });
+  }
+  if (unboundInboxConversationSweepFoundationReady !== true) {
+    return Object.freeze({ status: "BLOCKED_FOUNDATION" });
   }
   // Dynamic import avoids a static heartbeat -> service -> heartbeat cycle;
   // it is evaluated only after this module and the signed transaction exist.
@@ -884,12 +896,39 @@ async function maybeStartUnboundInboxConversationSweepFromFreshObservation(clien
       resumedForegroundChatReturnFoundationCanonical
     }
   );
-  await service.startUnboundInboxConversationSweepFromFreshInboxObservation(client, {
+  const result = await service.startUnboundInboxConversationSweepFromFreshInboxObservation(client, {
     deviceId,
     heartbeatSequence: heartbeat.sequence,
     inboxNavigation: heartbeat.tinder_inbox_navigation,
     observationNonce: heartbeat.tinder_inbox_navigation.observation_nonce
   });
+  const disposition = boundedTinderUnboundInboxSweepStartDisposition(
+    result && typeof result === "object"
+      ? Object.fromEntries(Object.entries(result).map(([key, value]) => [
+        key === "reasonCode" ? "reason_code" : key,
+        value
+      ]))
+      : result
+  );
+  if (disposition === null) {
+    throw new Error("Unbound Inbox sweep start returned an invalid bounded disposition.");
+  }
+  return disposition;
+}
+
+async function recordUnboundInboxSweepStartDisposition(client, { auth, disposition }) {
+  const bounded = boundedTinderUnboundInboxSweepStartDisposition(disposition);
+  if (bounded === null) {
+    throw new Error("Unbound Inbox sweep start disposition is invalid.");
+  }
+  await client.query(
+    `INSERT INTO device_bridge_audit_events
+     (event_type, request_id, device_id, key_id, result_code, http_status, details)
+     VALUES ('TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED',$1,$2,$3,'SUCCEEDED',200,$4::jsonb)`,
+    [auth.requestId, auth.deviceId, auth.keyId, JSON.stringify({
+      tinder_unbound_inbox_sweep_start_disposition: bounded
+    })]
+  );
 }
 
 // An expired V8 child is terminalized before delivery is selected.  The
@@ -1946,7 +1985,7 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
       // even when a current V9 authority blocks V8. A later V8 must originate
       // from a new independently reviewed local Inbox observation.
       failureStage = "V8_START";
-      await maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
+      const v8StartDisposition = await maybeStartUnboundInboxConversationSweepFromFreshObservation(client, {
         pool, deviceId: auth.deviceId, heartbeat, now,
         unboundInboxConversationSweepFoundationReady,
         verifiedChatReturnPermitActive: v9ReturnRuntime.active,
@@ -1954,6 +1993,13 @@ export async function processHeartbeatTransaction(pool, auth, heartbeat, now = n
         verifiedChatReturnFoundationCanonical,
         resumedForegroundChatReturnFoundationCanonical
       });
+      if (v8StartDisposition !== null) {
+        failureStage = "V8_START_DISPOSITION_AUDIT";
+        await recordUnboundInboxSweepStartDisposition(client, {
+          auth,
+          disposition: v8StartDisposition
+        });
+      }
     }
     let commands = [];
     if (!v8SweepRuntime.childExpired && !v9ReturnRuntime.permitExpired

@@ -30,6 +30,9 @@ import {
 import {
   boundedTinderPassiveInboxObservationDiagnostic
 } from "./tinder-passive-inbox-observation-diagnostic-contract.js";
+import {
+  boundedTinderUnboundInboxSweepStartDisposition
+} from "./tinder-unbound-inbox-sweep-start-disposition-contract.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
 import { runDeviceBridgeAckReadOnlyDiagnosis } from "./ack-readonly-diagnosis.js";
 import {
@@ -352,6 +355,15 @@ export function normalizeAdminPassiveInboxObservationDiagnostic(value) {
   return boundedTinderPassiveInboxObservationDiagnostic(value);
 }
 
+/**
+ * The V8 start disposition is a historical, content-free audit fact only.
+ * It is never a permit, command, identity, source, local Inbox proof, or
+ * authorization for a later attempt.
+ */
+export function normalizeAdminUnboundInboxSweepStartDisposition(value) {
+  return boundedTinderUnboundInboxSweepStartDisposition(value);
+}
+
 function statusRow(row, now) {
   const deviceStatus = deriveDeviceStatus(row.last_accepted_heartbeat_at, now);
   const officialResumeHandoff = deviceStatus === "ONLINE"
@@ -379,6 +391,11 @@ function statusRow(row, now) {
     deviceStatus === "ONLINE"
       ? normalizeAdminPassiveInboxObservationDiagnostic(
         row.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume)
+      : null;
+  const lastAcceptedUnboundInboxSweepStartDispositionAfterLatestV2Resume =
+    deviceStatus === "ONLINE"
+      ? normalizeAdminUnboundInboxSweepStartDisposition(
+        row.last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume)
       : null;
   return {
     device_id: row.device_id,
@@ -423,7 +440,9 @@ function statusRow(row, now) {
         row.tinder_passive_inbox_observation_diagnostic)
       : null,
     last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
-      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume
+      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume,
+    last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:
+      lastAcceptedUnboundInboxSweepStartDispositionAfterLatestV2Resume
   };
 }
 
@@ -444,7 +463,10 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
     AS tinder_passive_inbox_observation_diagnostic,
   last_passive_inbox_observation
     .last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
-    AS last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume`;
+    AS last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+  last_unbound_inbox_sweep_start_disposition
+    .last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume
+    AS last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume`;
 
 const STATUS_FROM = `FROM device_bridge_devices d
   LEFT JOIN LATERAL (
@@ -519,7 +541,25 @@ const STATUS_FROM = `FROM device_bridge_devices d
        AND evidence_heartbeat.details ? 'tinder_passive_inbox_observation_diagnostic'
      ORDER BY evidence_heartbeat.created_at DESC, evidence_heartbeat.audit_event_id DESC
      LIMIT 1
-  ) last_passive_inbox_observation ON true`;
+  ) last_passive_inbox_observation ON true
+  LEFT JOIN LATERAL (
+    -- The start disposition is a separate append-only audit after a new
+    -- fresh observation was accepted.  It is fenced only by the newest
+    -- terminal V2 Resume time; it is intentionally not presented as a
+    -- correlation handle or authority for any later attempt.
+    SELECT start_audit.details -> 'tinder_unbound_inbox_sweep_start_disposition'
+      AS last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume
+      FROM device_bridge_audit_events start_audit
+     WHERE latest_v2_resume.dispatched_at IS NOT NULL
+       AND start_audit.device_id=d.device_id
+       AND start_audit.event_type='TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED'
+       AND start_audit.result_code='SUCCEEDED'
+       AND start_audit.http_status=200
+       AND start_audit.created_at>=latest_v2_resume.dispatched_at
+       AND start_audit.details ? 'tinder_unbound_inbox_sweep_start_disposition'
+     ORDER BY start_audit.created_at DESC, start_audit.audit_event_id DESC
+     LIMIT 1
+  ) last_unbound_inbox_sweep_start_disposition ON true`;
 
 export function createAdminDeviceListHandler(pool) {
   return async function adminDeviceListHandler(req, res) {

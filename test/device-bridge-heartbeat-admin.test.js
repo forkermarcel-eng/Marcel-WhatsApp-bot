@@ -35,7 +35,8 @@ import {
   canonicalCommand,
   createAdminCommandHandler,
   createAdminDeviceListHandler,
-  createAdminDeviceStatusHandler
+  createAdminDeviceStatusHandler,
+  normalizeAdminUnboundInboxSweepStartDisposition
 } from "../device-bridge/admin.js";
 import {
   TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_CLASS_FAMILIES,
@@ -584,6 +585,9 @@ test("valid signed heartbeat reaches handler and returns Protocol V1 response", 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.protocol_version, 1);
   assert.equal(fake.state.commits, 1);
+  assert.equal(fake.calls.some(call => call.sql.includes(
+    "TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED"
+  )), false);
 });
 
 test("heartbeat validation preserves T0 and accepts only the exact T1 state profile", () => {
@@ -1501,6 +1505,14 @@ test("a fresh reviewed Inbox observation is atomically consumed and can issue on
   assert.ok(heartbeatAuditIndex >= 0 && parentWriteIndex > heartbeatAuditIndex);
   const heartbeatAudit = fake.calls[heartbeatAuditIndex];
   assert.equal(JSON.parse(heartbeatAudit.params[3]).tinder_inbox_navigation.observation_nonce, observationNonce);
+  const startDispositionAudits = fake.calls.filter(call => call.sql.includes(
+    "TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED"
+  ));
+  assert.equal(startDispositionAudits.length, 1);
+  assert.deepEqual(JSON.parse(startDispositionAudits[0].params[3]), {
+    tinder_unbound_inbox_sweep_start_disposition: { status: "QUEUED" }
+  });
+  assert.equal(JSON.stringify(startDispositionAudits[0].params).includes(observationNonce), false);
   assert.equal(JSON.stringify(response).includes(observationNonce), false);
 
   const sameSequence = heartbeatPool({
@@ -1537,6 +1549,13 @@ test("a fresh reviewed Inbox observation is atomically consumed and can issue on
   );
   assert.equal(replayResponse.commands.some(command => command.type === "READ_TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_SLOT"), false);
   assert.equal(replay.state.createdSweeps.length, 0);
+  const replayDispositionAudits = replay.calls.filter(call => call.sql.includes(
+    "TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED"
+  ));
+  assert.equal(replayDispositionAudits.length, 1);
+  assert.deepEqual(JSON.parse(replayDispositionAudits[0].params[3]), {
+    tinder_unbound_inbox_sweep_start_disposition: { status: "INERT" }
+  });
 });
 
 test("a fresh reviewed Inbox observation is consumed but cannot mint V8 beside an active V9 return", async () => {
@@ -1590,7 +1609,68 @@ test("a fresh reviewed Inbox observation is consumed but cannot mint V8 beside a
   assert.equal(fake.state.sweepAudits.length, 0);
   const heartbeatAudit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
   assert.equal(JSON.parse(heartbeatAudit.params[3]).tinder_inbox_navigation.observation_nonce, observationNonce);
+  const startDispositionAudits = fake.calls.filter(call => call.sql.includes(
+    "TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED"
+  ));
+  assert.equal(startDispositionAudits.length, 1);
+  assert.deepEqual(JSON.parse(startDispositionAudits[0].params[3]), {
+    tinder_unbound_inbox_sweep_start_disposition: { status: "BLOCKED_V9_ACTIVE" }
+  });
+  assert.equal(JSON.stringify(startDispositionAudits[0].params).includes(observationNonce), false);
   assert.equal(JSON.stringify(response).includes(observationNonce), false);
+});
+
+test("a fresh reviewed Inbox observation records only a bounded service runtime gate", async () => {
+  const capabilities = T4_RESUME_ATTESTATION_POST_CHAT_UNBOUND_INBOX_SWEEP_DEVICE_CAPABILITIES;
+  const payload = heartbeatPayload({
+    capabilities,
+    tinder_state: "CONNECTED",
+    tinder_inbox_navigation: {
+      stage: "INBOX_READY",
+      reason: "NONE",
+      visible_conversation_count: 2,
+      observed_event_count: 3,
+      observation_kind: "FRESH_REVIEWED_INBOX_V1",
+      observation_nonce: "2bfa798e-85ce-4c2e-830e-df8465c58f70"
+    }
+  });
+  const request = heartbeatRequest(payload, {
+    requestId: "3bfa798e-85ce-4c2e-830e-df8465c58f70"
+  });
+  const fake = heartbeatPool({
+    request,
+    unboundInboxSweepFoundation: true,
+    sweepRuntime: {
+      device_id: DEVICE_ID,
+      enrollment_state: "ACTIVE",
+      revoked_at: null,
+      last_heartbeat_sequence: payload.sequence,
+      last_accepted_heartbeat_at: NOW,
+      bridge_service_state: "RUNNING",
+      tinder_state: "DISCONNECTED",
+      automation_state: "STOPPED",
+      capabilities
+    }
+  });
+
+  await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "3bfa798e-85ce-4c2e-830e-df8465c58f70", contentSha256: request.hash },
+    payload,
+    NOW,
+    { inspectUnboundInboxConversationSweepFoundation: CANONICAL_V8_FOUNDATION }
+  );
+
+  const audits = fake.calls.filter(call => call.sql.includes(
+    "TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED"
+  ));
+  assert.equal(audits.length, 1);
+  assert.deepEqual(JSON.parse(audits[0].params[3]), {
+    tinder_unbound_inbox_sweep_start_disposition: {
+      status: "DEVICE_NOT_READY",
+      reason_code: "TINDER_NOT_CONNECTED"
+    }
+  });
 });
 
 test("a fresh reviewed Inbox observation cannot mint V8 beside a partial V9 catalog", async () => {
@@ -2953,6 +3033,22 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
   };
 }
 
+test("admin only projects an exact bounded historical V8 start disposition", () => {
+  const disposition = {
+    status: "PERMIT_CONFLICT",
+    reason_code: "RESUMED_FOREGROUND_CHAT_RETURN_PERMIT_ACTIVE"
+  };
+  assert.deepEqual(normalizeAdminUnboundInboxSweepStartDisposition(disposition), disposition);
+  for (const malformed of [
+    { ...disposition, command_id: "forbidden" },
+    { status: "QUEUED", observation_nonce: "forbidden" },
+    { status: "BLOCKED_V9_ACTIVE", raw: "forbidden" },
+    { status: "PERMIT_CONFLICT", reason_code: "INBOX_NOT_READY" }
+  ]) {
+    assert.equal(normalizeAdminUnboundInboxSweepStartDisposition(malformed), null);
+  }
+});
+
 test("admin list and status expose separated states without sensitive key data", async () => {
   const pool = { async query(sql) { return { rows: [statusRow()] }; } };
   const listRes = responseRecorder();
@@ -3612,6 +3708,65 @@ test("admin status suppresses malformed or offline historical passive Inbox evid
     await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
     assert.equal(
       res.body.device.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+      null
+    );
+  }
+});
+
+test("admin status retains only a bounded V8 start disposition after the newest V2 Resume", async () => {
+  const historical = {
+    status: "PERMIT_CONFLICT",
+    reason_code: "RESUMED_FOREGROUND_CHAT_RETURN_PERMIT_ACTIVE"
+  };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      const row = statusRow(new Date(), CAPABILITIES, "CONNECTED");
+      row.last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume =
+        historical;
+      return { rows: [row] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(
+    res.body.device.last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume,
+    historical
+  );
+  assert.match(sql, /TINDER_UNBOUND_INBOX_SWEEP_START_DISPOSITION_RECORDED/);
+  assert.match(sql, /start_audit\.created_at>=latest_v2_resume\.dispatched_at/i);
+  assert.match(sql, /start_audit\.details \? 'tinder_unbound_inbox_sweep_start_disposition'/i);
+  const serialized = JSON.stringify(
+    res.body.device.last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume
+  );
+  for (const forbidden of ["permit", "command", "nonce", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed or offline historical V8 start disposition", async () => {
+  const valid = {
+    status: "PERMIT_CONFLICT",
+    reason_code: "RESUMED_FOREGROUND_CHAT_RETURN_PERMIT_ACTIVE"
+  };
+  for (const [acceptedAt, historical] of [
+    [new Date(), { ...valid, command_id: "forbidden" }],
+    [new Date(), { status: "SWEEP_NOT_AVAILABLE", reason_code: "SWEEP_ACTIVE" }],
+    [new Date(Date.now() - 91_000), valid]
+  ]) {
+    const pool = {
+      async query() {
+        const row = statusRow(acceptedAt, CAPABILITIES, "CONNECTED");
+        row.last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume =
+          historical;
+        return { rows: [row] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(
+      res.body.device.last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume,
       null
     );
   }

@@ -224,7 +224,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
   assert.deepEqual(Object.keys(res.body.devices[0]).sort(), [
     "app_build", "app_version", "automation_state", "bridge_service_state", "configuration_revision",
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
-    "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
+    "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume", "last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
     "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence",
     "tinder_passive_inbox_observation_diagnostic", "tinder_resumed_foreground_chat_return",
     "tinder_resumed_foreground_chat_return_diagnostic", "tinder_state"
@@ -1107,6 +1107,74 @@ test("device-list proxy suppresses malformed or offline historical passive Inbox
     assert.equal(
       res.body.devices[0]
         .last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
+      null
+    );
+  }
+}));
+
+test("device-list proxy allowlists only a bounded historical V8 start disposition", async () => withEnvironment(async () => {
+  const disposition = {
+    status: "PERMIT_CONFLICT",
+    reason_code: "RESUMED_FOREGROUND_CHAT_RETURN_PERMIT_ACTIVE"
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ extra: {
+          last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:
+            disposition
+        } })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(
+    res.body.devices[0]
+      .last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume,
+    disposition
+  );
+  for (const forbidden of ["command", "nonce", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy suppresses malformed or offline historical V8 start disposition", async () => withEnvironment(async () => {
+  const valid = {
+    status: "PERMIT_CONFLICT",
+    reason_code: "RESUMED_FOREGROUND_CHAT_RETURN_PERMIT_ACTIVE"
+  };
+  for (const extra of [
+    { last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:
+      { ...valid, command_id: "forbidden" } },
+    { last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:
+      { status: "SWEEP_NOT_AVAILABLE", reason_code: "SWEEP_ACTIVE" } },
+    { last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume: valid,
+      device_status: "OFFLINE" }
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ extra })] });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(
+      res.body.devices[0]
+        .last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume,
       null
     );
   }

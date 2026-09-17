@@ -11,6 +11,9 @@ import {
 import {
   boundedTinderPassiveInboxObservationDiagnostic
 } from "../../device-bridge/tinder-passive-inbox-observation-diagnostic-contract.js";
+import {
+  boundedTinderUnboundInboxSweepStartDisposition
+} from "../../device-bridge/tinder-unbound-inbox-sweep-start-disposition-contract.js";
 
 const ALLOWED_COMMANDS = new Set(["PING", "REQUEST_STATUS", "CONNECT_TINDER", "DISCONNECT_TINDER"]);
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -154,7 +157,8 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "tinder_resumed_foreground_chat_return",
   "tinder_resumed_foreground_chat_return_diagnostic",
   "tinder_passive_inbox_observation_diagnostic",
-  "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume"
+  "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume",
+  "last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume"
 ]);
 
 function v20CountsMatchState(state, rawCount, qualifiedCount) {
@@ -472,6 +476,16 @@ function sanitizePublicDeviceStatus(value) {
         value.last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
       )
       : null;
+  const hasLastAcceptedUnboundInboxSweepStartDispositionAfterLatestV2Resume =
+    Object.hasOwn(value,
+      "last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume");
+  const lastAcceptedUnboundInboxSweepStartDispositionAfterLatestV2Resume =
+    String(value.device_status || "").toUpperCase() === "ONLINE"
+      && hasLastAcceptedUnboundInboxSweepStartDispositionAfterLatestV2Resume
+      ? boundedTinderUnboundInboxSweepStartDisposition(
+        value.last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume
+      )
+      : null;
   return Object.freeze({
     ...Object.fromEntries(LEGACY_DEVICE_STATUS_FIELDS.map(field => [field, value[field]])),
     // This is a bounded derived compatibility bit, not the raw capability
@@ -487,7 +501,9 @@ function sanitizePublicDeviceStatus(value) {
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
     tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic,
     last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
-      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume
+      lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume,
+    last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:
+      lastAcceptedUnboundInboxSweepStartDispositionAfterLatestV2Resume
   });
 }
 

@@ -94,6 +94,30 @@ test("passive Inbox heartbeat diagnostic accepts only the fixed lost-gate vocabu
   }), null);
 });
 
+test("passive Inbox heartbeat diagnostic accepts only the three fixed delivery-expiry phases", () => {
+  const expiryReasons = [
+    "HEARTBEAT_EXPIRED_PRE_PAYLOAD",
+    "HEARTBEAT_EXPIRED_PAYLOAD_BUILT",
+    "HEARTBEAT_EXPIRED_TRANSPORT_ATTEMPTED"
+  ];
+  assert.deepEqual(
+    TINDER_PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS
+      .filter(reason => reason.startsWith("HEARTBEAT_EXPIRED_")),
+    expiryReasons
+  );
+  for (const reason of expiryReasons) {
+    assert.deepEqual(boundedTinderPassiveInboxObservationDiagnostic({
+      stage: "BLOCKED", reason, settle_sample_count: 0, validation_count: 0
+    }), Object.freeze({
+      stage: "BLOCKED", reason, settle_sample_count: 0, validation_count: 0
+    }));
+  }
+  assert.equal(boundedTinderPassiveInboxObservationDiagnostic({
+    stage: "BLOCKED", reason: "HEARTBEAT_EXPIRED_UNBOUNDED", settle_sample_count: 0,
+    validation_count: 0
+  }), null);
+});
+
 // Most heartbeat fixtures model the pre-V8 canonical predecessor and do not
 // emulate the catalog inspector's complete V6 query set.  Keep that explicit:
 // callers exercising V8/drift pass their own exact inspector result below.

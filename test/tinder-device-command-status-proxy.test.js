@@ -979,8 +979,8 @@ test("device-list proxy suppresses malformed or offline V10 lifecycle diagnostic
 
 test("device-list proxy allowlists only the bounded passive Inbox observation diagnostic", async () => withEnvironment(async () => {
   const diagnostic = {
-    stage: "PENDING_HEARTBEAT",
-    reason: "NONE",
+    stage: "BLOCKED",
+    reason: "HEARTBEAT_EXPIRED_TRANSPORT_ATTEMPTED",
     settle_sample_count: 2,
     validation_count: 3
   };

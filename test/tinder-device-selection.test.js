@@ -334,6 +334,11 @@ test("Tinder technical diagnostics render only the bounded passive Inbox observa
   assert.match(page, /function passiveInboxObservationDiagnosticIsSafe\(value\)/);
   assert.match(page, /PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_STAGES\.has\(value\.stage\)/);
   assert.match(page, /PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS\.has\(value\.reason\)/);
+  for (const reason of [
+    "HEARTBEAT_EXPIRED_PRE_PAYLOAD",
+    "HEARTBEAT_EXPIRED_PAYLOAD_BUILT",
+    "HEARTBEAT_EXPIRED_TRANSPORT_ATTEMPTED"
+  ]) assert.match(page, new RegExp(reason));
   assert.match(page, /value\.settle_sample_count >= 0 && value\.settle_sample_count <= 8/);
   assert.match(page, /value\.validation_count >= 0 && value\.validation_count <= 8/);
   assert.match(page, /value\.stage === "BLOCKED" && value\.reason !== "NONE"/);

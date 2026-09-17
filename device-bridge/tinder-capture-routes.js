@@ -3,7 +3,8 @@ import {
   createPgTinderCaptureRepository,
   createTinderCaptureStore,
   TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT,
-  TINDER_PENDING_HUMAN_MAPPING_LIMIT
+  TINDER_PENDING_HUMAN_MAPPING_LIMIT,
+  TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT
 } from "../services/tinder-capture-store.js";
 import {
   createPgTinderConversationProductReadRepository,
@@ -143,6 +144,8 @@ const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_ACKNOWLEDGEMENT_STATES = new Set([
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TRANSCRIPT_LIMIT = 8;
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_MESSAGE_LIMIT = 100;
 const TINDER_UNBOUND_INBOX_CONVERSATION_SWEEP_DASHBOARD_TEXT_LIMIT = 4096;
+const TINDER_PENDING_READ_CHANNEL_DASHBOARD_MESSAGE_LIMIT = 100;
+const TINDER_PENDING_READ_CHANNEL_DASHBOARD_TEXT_LIMIT = 4096;
 const PUBLIC_HUMAN_ARMED_BINDING_ERROR_STATUSES = new Set([
   HUMAN_ARMED_CONVERSATION_STATUS.UNSAFE_CAPTURE,
   HUMAN_ARMED_CONVERSATION_STATUS.PENDING_CAPTURE_REQUIRED,
@@ -737,6 +740,72 @@ function normalizePendingUnboundInboxConversationSweepTranscriptRecords(rows) {
 }
 
 /**
+ * Schema-free read-channel adapter.  It projects only a bounded PENDING
+ * transcript already stored by the signed visible-chat capture foundation.
+ * It deliberately omits capture/device/thread/contact/name/fingerprint data
+ * so viewing a newly read chat cannot make or imply an identity decision.
+ */
+function normalizePendingReadChannelConversationRecords(rows) {
+  if (!Array.isArray(rows) || rows.length > TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT) {
+    const error = new Error("Invalid pending read-channel conversation records.");
+    error.statusCode = 500;
+    error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
+    throw error;
+  }
+  return Object.freeze(rows.map((row) => {
+    const mappingStatus = String(row?.mappingStatus ?? row?.mapping_status ?? "").trim().toUpperCase();
+    const humanReviewStatus = String(row?.humanReviewStatus ?? row?.human_review_status ?? "").trim().toUpperCase();
+    const receivedAt = new Date(row?.receivedAt ?? row?.received_at);
+    const rawMessages = row?.messages ?? row?.visible_messages;
+    if (mappingStatus !== "NEEDS_HUMAN_MAPPING" || humanReviewStatus !== "PENDING"
+        || Number.isNaN(receivedAt.valueOf()) || !Array.isArray(rawMessages)
+        || rawMessages.length < 1 || rawMessages.length > TINDER_PENDING_READ_CHANNEL_DASHBOARD_MESSAGE_LIMIT) {
+      const error = new Error("Invalid pending read-channel conversation record.");
+      error.statusCode = 500;
+      error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
+      throw error;
+    }
+    const messages = rawMessages.map((message, index) => {
+      if (!plainObject(message)) {
+        const error = new Error("Invalid pending read-channel conversation record.");
+        error.statusCode = 500;
+        error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
+        throw error;
+      }
+      const hasCamelOrder = Object.hasOwn(message, "visibleOrder");
+      const hasSnakeOrder = Object.hasOwn(message, "visible_order");
+      const allowed = new Set([
+        "visibleOrder", "visible_order", "direction", "text", "sourceClassName", "source_class_name"
+      ]);
+      const visibleOrder = Number(message.visibleOrder ?? message.visible_order);
+      const direction = String(message.direction || "").trim().toUpperCase();
+      const text = typeof message.text === "string" ? message.text : "";
+      if (hasCamelOrder === hasSnakeOrder
+          || Object.keys(message).some((key) => !allowed.has(key))
+          || visibleOrder !== index + 1
+          || !["INCOMING", "OUTGOING"].includes(direction)
+          || !text || text.length > TINDER_PENDING_READ_CHANNEL_DASHBOARD_TEXT_LIMIT
+          || /[\u0000-\u001f\u007f]/.test(text)) {
+        const error = new Error("Invalid pending read-channel conversation record.");
+        error.statusCode = 500;
+        error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
+        throw error;
+      }
+      return Object.freeze({
+        direction: direction === "INCOMING" ? "INBOUND" : "OUTBOUND",
+        text
+      });
+    });
+    return Object.freeze({
+      received_at: receivedAt.toISOString(),
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: Object.freeze(messages)
+    });
+  }));
+}
+
+/**
  * A dashboard user may only request the bounded V4 sync for the capture they
  * already selected in the existing capture context. The server alone derives
  * the device target, and the sync service re-locks/rechecks the confirmed
@@ -1208,6 +1277,43 @@ function createTinderDashboardPendingCaptureListHandler(pool, {
   };
 }
 
+function createTinderDashboardPendingReadConversationListHandler(pool, {
+  createRepository = createPgTinderCaptureRepository
+} = {}) {
+  const repository = createRepository(pool);
+  return async function tinderDashboardPendingReadConversationListHandler(req, res) {
+    try {
+      if (typeof repository.findPendingReadChannelConversations !== "function") {
+        const error = new Error("Pending read-channel conversation reader is unavailable.");
+        error.statusCode = 503;
+        error.code = "TINDER_PENDING_READ_CONVERSATIONS_NOT_READY";
+        throw error;
+      }
+      const conversations = normalizePendingReadChannelConversationRecords(
+        await repository.findPendingReadChannelConversations({
+          deviceId: normalizeDeviceId(req.params.deviceId)
+        })
+      );
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({ ok: true, conversations });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)) {
+        const notReady = foundationNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder pending read-channel conversation list failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_PENDING_READ_CONVERSATIONS_FAILED",
+        error: status === 500
+          ? "Tinder read conversations could not be loaded."
+          : safeMessage(error, "Tinder read conversations could not be loaded.")
+      });
+    }
+  };
+}
+
 function createTinderDashboardDraftEligibleCaptureListHandler(pool, {
   createRepository = createPgTinderCaptureRepository
 } = {}) {
@@ -1504,6 +1610,7 @@ function registerTinderCaptureRoutes({
   requireDeviceBridgeReady
 }) {
   const listPendingCaptures = createTinderDashboardPendingCaptureListHandler(pool);
+  const listPendingReadConversations = createTinderDashboardPendingReadConversationListHandler(pool);
   const listDraftEligibleCaptures = createTinderDashboardDraftEligibleCaptureListHandler(pool);
   const listLatestConfirmedConversations = createTinderDashboardLatestConfirmedConversationListHandler(pool);
   const readLatestConfirmedConversation = createTinderDashboardLatestConfirmedConversationReadHandler(pool);
@@ -1532,6 +1639,10 @@ function registerTinderCaptureRoutes({
   };
 
   app.get("/dashboard-api/tinder/captures/pending", dashboard(listPendingCaptures));
+  app.get(
+    "/dashboard-api/tinder/devices/:deviceId/pending-read-conversations",
+    dashboard(listPendingReadConversations)
+  );
   app.get("/dashboard-api/tinder/captures/draft-eligible", dashboard(listDraftEligibleCaptures));
   app.get("/dashboard-api/tinder/conversations/latest-confirmed", dashboard(listLatestConfirmedConversations));
   app.get("/dashboard-api/tinder/conversations/:captureId", dashboard(readLatestConfirmedConversation));
@@ -1578,6 +1689,7 @@ export {
   createTinderDashboardLatestConfirmedConversationListHandler,
   createTinderDashboardLatestConfirmedConversationReadHandler,
   createTinderDashboardPendingCaptureListHandler,
+  createTinderDashboardPendingReadConversationListHandler,
   createTinderDashboardMappingHandler,
   createTinderDashboardConversationBindingHandler,
   createTinderDashboardVisibleChatSyncQueueHandler,
@@ -1601,6 +1713,7 @@ export {
   createTinderDashboardHumanBindingOfficialAppResumeQueueHandler,
   boundedUnboundInboxConversationSweepStatus,
   normalizePendingUnboundInboxConversationSweepTranscriptRecords,
+  normalizePendingReadChannelConversationRecords,
   normalizeDraftEligibleCaptureRecords,
   normalizeHumanArmedBindingRecords,
   normalizePendingCaptureRecords,

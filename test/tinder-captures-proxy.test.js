@@ -1058,6 +1058,64 @@ test("V8 pending transcript projection remains device-scoped, bounded, and strip
   assert.equal(JSON.stringify(injected.body).includes("a565e8a7-ef60-42d0-b19d-26e7904390fa"), false);
 }));
 
+test("pending read-channel conversations proxy only the bounded PENDING projection", async () => withEnvironment(async () => {
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({
+      ok: true,
+      conversations: [{
+        received_at: "2026-09-12T12:00:00.000Z",
+        mapping_status: "NEEDS_HUMAN_MAPPING",
+        human_review_status: "PENDING",
+        messages: [
+          { direction: "INBOUND", text: "bounded pending text" },
+          { direction: "OUTBOUND", text: "bounded reply text" }
+        ]
+      }]
+    });
+  };
+  const res = responseRecorder();
+  await handler(request({
+    query: { deviceId: DEVICE_ID, view: "pending-read-conversations" }
+  }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(call.url,
+    `https://shared-backend.example/dashboard-api/tinder/devices/${DEVICE_ID}/pending-read-conversations`);
+  assert.equal(call.options.method, "GET");
+  assert.equal(Object.hasOwn(call.options, "body"), false);
+  assert.deepEqual(res.body, {
+    ok: true,
+    conversations: [{
+      received_at: "2026-09-12T12:00:00.000Z",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: [
+        { direction: "INBOUND", text: "bounded pending text" },
+        { direction: "OUTBOUND", text: "bounded reply text" }
+      ]
+    }]
+  });
+
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    conversations: [{
+      received_at: "2026-09-12T12:00:00.000Z",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: [{ direction: "INBOUND", text: "bounded pending text" }],
+      capture_id: CAPTURE_ID
+    }]
+  });
+  const injected = responseRecorder();
+  await handler(request({
+    query: { deviceId: DEVICE_ID, view: "pending-read-conversations" }
+  }), injected);
+  assert.equal(injected.statusCode, 502);
+  assert.equal(JSON.stringify(injected.body).includes(CAPTURE_ID), false);
+}));
+
 test("human-armed binding GET keeps the UUID as a bounded browser handle and strips raw server fields", async () => withEnvironment(async () => {
   const bindingId = "832d0663-8bb1-4947-ae8a-14a6d9de8924";
   let call;

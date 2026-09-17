@@ -17,6 +17,7 @@ import {
   createTinderDashboardHumanArmedVisibleChatSyncQueueHandler,
   createTinderDashboardDraftEligibleCaptureListHandler,
   createTinderDashboardPendingCaptureListHandler,
+  createTinderDashboardPendingReadConversationListHandler,
   createTinderDashboardMappingHandler,
   createTinderDashboardUnboundInboxConversationSweepStatusHandler,
   createTinderDashboardUnboundInboxConversationSweepTranscriptListHandler,
@@ -343,6 +344,54 @@ test("V8 pending transcript dashboard projection is bounded and omits all correl
     "d565e8a7-ef60-42d0-b19d-26e7904390fa",
     "contact_id", "binding_id", "slot_ordinal", "transcript_fingerprint"
   ]) assert.equal(rendered.includes(forbidden), false);
+});
+
+test("pending read-channel dashboard projection is bounded, device-scoped, and exposes no identity correlation", async () => {
+  let requestedDeviceId = null;
+  const handler = createTinderDashboardPendingReadConversationListHandler({}, {
+    createRepository() {
+      return {
+        async findPendingReadChannelConversations({ deviceId }) {
+          requestedDeviceId = deviceId;
+          return [{
+            received_at: "2026-09-12T12:00:00.000Z",
+            mapping_status: "NEEDS_HUMAN_MAPPING",
+            human_review_status: "PENDING",
+            visible_messages: [
+              { visibleOrder: 1, direction: "INCOMING", text: "bounded pending text", sourceClassName: null },
+              { visibleOrder: 2, direction: "OUTGOING", text: "bounded reply text", sourceClassName: "safe.class" }
+            ],
+            capture_id: CAPTURE_ID,
+            device_id: DEVICE_ID,
+            visible_name: "must not reach the dashboard",
+            runtime_thread_fingerprint: "a".repeat(64),
+            provenance: { source: "android_visible_chat" }
+          }];
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  res.setHeader = () => {};
+  await handler({ params: { deviceId: DEVICE_ID } }, res);
+
+  assert.equal(requestedDeviceId, DEVICE_ID);
+  assert.deepEqual(res.body, {
+    ok: true,
+    conversations: [{
+      received_at: "2026-09-12T12:00:00.000Z",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: [
+        { direction: "INBOUND", text: "bounded pending text" },
+        { direction: "OUTBOUND", text: "bounded reply text" }
+      ]
+    }]
+  });
+  const rendered = JSON.stringify(res.body);
+  for (const forbidden of [CAPTURE_ID, DEVICE_ID, "must not reach the dashboard", "runtime_thread_fingerprint", "provenance", "safe.class"]) {
+    assert.equal(rendered.includes(forbidden), false);
+  }
 });
 
 test("dashboard capture read exposes only mapping context, not visible message text or fingerprint", async () => {
@@ -770,6 +819,9 @@ test("capture discovery routes remain protected and are registered before the ca
   assert.ok(captureIndex > pendingIndex);
   assert.ok(draftEligibleIndex >= 0);
   assert.ok(captureIndex > draftEligibleIndex);
+  assert.ok(registrations.find(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/pending-read-conversations"
+  ));
 
   const bindingRoute = registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/conversation-binding"

@@ -5,6 +5,7 @@ import {
   TINDER_CAPTURE_REVIEW_STATUS,
   TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT,
   TINDER_PENDING_HUMAN_MAPPING_LIMIT,
+  TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT,
   TinderCaptureValidationError,
   createPgTinderCaptureRepository,
   createTinderCaptureStore,
@@ -493,6 +494,25 @@ test("a later safe capture reuses only a complete prior human-confirmed mapping 
   assert.equal(JSON.stringify(repository.reusableMappingRequests).includes("Sandry"), false);
 });
 
+test("the passive read adapter never resolves a contact from a runtime fingerprint alone", async () => {
+  const repository = fixtureRepository({ reusableMapping: confirmedReusableMapping() });
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    allowLegacyFingerprintMapping: false
+  });
+
+  const stored = await store.storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  });
+
+  assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING);
+  assert.equal(stored.humanReviewStatus, TINDER_CAPTURE_REVIEW_STATUS.PENDING);
+  assert.equal(stored.resolvedContactId, null);
+  assert.equal(repository.reusableMappingRequests.length, 0);
+});
+
 test("a reuse candidate for another device or runtime thread fails closed to pending human mapping", async () => {
   for (const candidate of [
     confirmedReusableMapping({ deviceId: "f880455d-325c-4f35-9914-823dcb0e0d18" }),
@@ -799,6 +819,33 @@ test("the PostgreSQL pending reader selects only bounded redacted mapping contex
   assert.match(call.sql, /LIMIT \$1/i);
   assert.doesNotMatch(call.sql, /visible_messages|runtime_thread_fingerprint|capture_fingerprint|provenance/i);
   assert.doesNotMatch(call.sql, /SELECT\s+\*/i);
+});
+
+test("the pending read-channel reader is device-scoped, bounded, and selects no identity fields", async () => {
+  let call;
+  const repository = createPgTinderCaptureRepository({
+    async connect() { throw new Error("not used"); },
+    async query(sql, values = []) {
+      call = { sql, values };
+      return { rows: [] };
+    }
+  });
+
+  assert.deepEqual(await repository.findPendingReadChannelConversations({ deviceId: DEVICE_ID }), []);
+  assert.deepEqual(call.values, [DEVICE_ID, TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT]);
+  assert.match(call.sql, /device_id\s*=\s*\$1/i);
+  assert.match(call.sql, /capture_safety_status\s*=\s*'SAFE'/i);
+  assert.match(call.sql, /source_package\s*=\s*'com\.tinder'/i);
+  assert.match(call.sql, /mapping_status\s*=\s*'NEEDS_HUMAN_MAPPING'/i);
+  assert.match(call.sql, /human_review_status\s*=\s*'PENDING'/i);
+  assert.match(call.sql, /resolved_contact_id\s+IS\s+NULL/i);
+  assert.match(call.sql, /LIMIT \$2/i);
+  // A runtime fingerprint is not a durable Tinder identity.  Collapsing the dashboard's
+  // unknown/PENDING rows by it could hide a distinct same-name conversation, so this read
+  // intentionally lists bounded safe captures rather than inferring a per-thread latest row.
+  assert.doesNotMatch(call.sql, /runtime_thread_fingerprint/i);
+  const projection = call.sql.slice(0, call.sql.indexOf("FROM tinder_visible_chat_captures"));
+  assert.doesNotMatch(projection, /capture_id|device_id|visible_thread_metadata|runtime_thread_fingerprint|capture_fingerprint|provenance/i);
 });
 
 test("the PostgreSQL draft-eligible reader selects only the latest resolved confirmed capture without any existing draft", async () => {

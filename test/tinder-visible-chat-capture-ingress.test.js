@@ -5,6 +5,7 @@ import { DeviceBridgeProtocolError, T1_DEVICE_CAPABILITIES } from "../device-bri
 import {
   createAuthenticatedCaptureStore,
   createTinderCaptureIngressHandler,
+  createTinderPassiveReadCaptureIngressHandler,
   normalizeCaptureRecord,
   parseSignedCaptureRequest
 } from "../device-bridge/tinder-visible-chat-capture-ingress.js";
@@ -30,6 +31,17 @@ function safeCapture() {
     },
     visibleMessages: [{ visibleOrder: 1, direction: "INCOMING", text: "Hallo" }],
     safetyStatus: "SAFE"
+  };
+}
+
+function safeCaptureV2() {
+  const capture = safeCapture();
+  return {
+    ...capture,
+    captureMetadata: {
+      ...capture.captureMetadata,
+      schemaVersion: "tinder-visible-chat-v2"
+    }
   };
 }
 
@@ -115,6 +127,39 @@ test("capture ingress binds the authenticated URL device and server-owned proven
   });
   assert.equal(Object.hasOwn(res.body.capture, "visible_messages"), false);
   assert.equal(Object.hasOwn(res.body.capture, "thread_fingerprint"), false);
+});
+
+test("passive read ingress accepts only signed V2 captures and disables legacy fingerprint resolution", async () => {
+  let received;
+  const handler = createTinderPassiveReadCaptureIngressHandler({}, {
+    now: () => NOW,
+    async verifyRequest() {
+      return { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e", contentSha256: "c".repeat(64) };
+    },
+    createAuthenticatedStore(_pool, auth, options) {
+      assert.equal(auth.deviceId, DEVICE_ID);
+      assert.equal(options.requireRuntimeGates, false);
+      assert.equal(options.requireAutomationStopped, true);
+      assert.equal(options.allowLegacyFingerprintMapping, false);
+      return {
+        async storeSafeCapture(input) {
+          received = input;
+          return storedCapture();
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler(rawRequest({ protocol_version: 1, capture: safeCaptureV2() }), res);
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(received.capture.captureMetadata.schemaVersion, "tinder-visible-chat-v2");
+  assert.deepEqual(received.provenance, { source: "android_visible_chat", protocolVersion: 1 });
+
+  const rejected = responseRecorder();
+  await handler(rawRequest(), rejected);
+  assert.equal(rejected.statusCode, 400);
+  assert.equal(rejected.body.error.code, "INVALID_TINDER_CAPTURE_REQUEST");
 });
 
 test("capture ingress is fail closed when the standalone T2 capture storage schema is absent", async () => {
@@ -246,6 +291,112 @@ test("capture ingress fails closed before replay or persistence when the T1 gate
   assert.equal(calls.includes("ROLLBACK"), true);
 });
 
+test("passive read storage keeps signed active-device admission but does not wait for heartbeat projection", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, values = []) {
+      calls.push({ sql, values });
+      if (/SELECT d\.device_id/.test(sql)) {
+        return {
+          rows: [{
+            device_id: DEVICE_ID,
+            enrollment_state: "ACTIVE",
+            revoked_at: null,
+            key_revoked_at: null,
+            last_accepted_heartbeat_at: new Date("2020-01-01T00:00:00.000Z"),
+            bridge_service_state: "STOPPED",
+            tinder_state: "DISCONNECTED",
+            automation_state: "STOPPED",
+            capabilities: T1_DEVICE_CAPABILITIES
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    release() {}
+  };
+  const store = createAuthenticatedCaptureStore({ async connect() { return client; } }, {
+    deviceId: DEVICE_ID,
+    keyId: KEY_ID,
+    requestId: "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e",
+    contentSha256: "c".repeat(64)
+  }, {
+    now: () => NOW,
+    requireRuntimeGates: false,
+    requireAutomationStopped: true,
+    allowLegacyFingerprintMapping: false,
+    createRepository() { return {}; },
+    createStore(transactionRepository, options) {
+      assert.equal(options.allowLegacyFingerprintMapping, false);
+      return {
+        async storeSafeCapture() {
+          return transactionRepository.withTransaction(async () => storedCapture());
+        }
+      };
+    }
+  });
+
+  const stored = await store.storeSafeCapture({});
+  assert.equal(stored.capture_id, CAPTURE_ID);
+  assert.equal(calls.some(({ sql }) => /device_bridge_request_nonces/.test(sql)), true);
+  assert.equal(calls.some(({ sql }) => /COMMIT/.test(sql)), true);
+});
+
+test("passive read storage still blocks a non-stopped automation state without waiting for heartbeat projection", async () => {
+  const calls = [];
+  const client = {
+    async query(sql) {
+      calls.push(sql);
+      if (/SELECT d\.device_id/.test(sql)) {
+        return {
+          rows: [{
+            device_id: DEVICE_ID,
+            enrollment_state: "ACTIVE",
+            revoked_at: null,
+            key_revoked_at: null,
+            last_accepted_heartbeat_at: new Date("2020-01-01T00:00:00.000Z"),
+            bridge_service_state: "STOPPED",
+            tinder_state: "DISCONNECTED",
+            automation_state: "RUNNING",
+            capabilities: T1_DEVICE_CAPABILITIES
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    release() {}
+  };
+  const store = createAuthenticatedCaptureStore({ async connect() { return client; } }, {
+    deviceId: DEVICE_ID,
+    keyId: KEY_ID,
+    requestId: "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e",
+    contentSha256: "c".repeat(64)
+  }, {
+    now: () => NOW,
+    requireRuntimeGates: false,
+    requireAutomationStopped: true,
+    allowLegacyFingerprintMapping: false,
+    createRepository() { return {}; },
+    createStore(transactionRepository) {
+      return {
+        async storeSafeCapture() {
+          return transactionRepository.withTransaction(async () => {
+            throw new Error("must not persist");
+          });
+        }
+      };
+    }
+  });
+
+  await assert.rejects(
+    () => store.storeSafeCapture({}),
+    (error) => error instanceof DeviceBridgeProtocolError && error.code === "AUTOMATION_STATE_UNSAFE"
+  );
+  assert.equal(calls.some((sql) => /device_bridge_request_nonces/.test(sql)), false);
+  assert.equal(calls.some((sql) => /COMMIT/.test(sql)), false);
+  assert.equal(calls.includes("ROLLBACK"), true);
+});
+
 test("capture record presentation never exposes raw messages or technical fingerprint", () => {
   const presented = normalizeCaptureRecord({
     ...storedCapture(),
@@ -277,6 +428,7 @@ test("T2 ingress remains separate from WhatsApp message persistence", () => {
 test("T2 registration remains signed-ingress-only with no dashboard or mapping route", () => {
   const source = readFileSync(new URL("../device-bridge/tinder-visible-chat-capture-ingress.js", import.meta.url), "utf8");
   assert.match(source, /app\.post\(\s*`\/device-bridge\/v1\/devices\/:deviceId\$\{TINDER_CAPTURE_PATH_SUFFIX\}`/);
+  assert.match(source, /app\.post\(\s*`\/device-bridge\/v1\/devices\/:deviceId\$\{TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX\}`/);
   assert.doesNotMatch(source, /app\.get\(/);
   assert.doesNotMatch(source, /dashboard-api/);
   assert.doesNotMatch(source, /tinder-human-mapping|tinder-identity-resolution/);

@@ -34,6 +34,10 @@ const TINDER_CAPTURE_REVIEW_STATUS = Object.freeze({
   REJECTED: "REJECTED"
 });
 const TINDER_PENDING_HUMAN_MAPPING_LIMIT = 25;
+// The autonomous read panel is intentionally smaller than the historic
+// mapping queue. It provides a bounded, device-scoped transcript projection
+// without introducing a second transcript table or a V8 dependency.
+const TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT = 8;
 // Dashboard discovery stays deliberately bounded. The selector only exposes
 // a capture ID and its visible thread label; draft creation remains a separate
 // explicit T4 action after the existing detail screen has reloaded the capture.
@@ -484,7 +488,13 @@ function consumedHumanBindingContact(result, expectedContactId) {
 function createTinderCaptureStore(repository, {
   createCaptureId = () => crypto.randomUUID(),
   now = () => new Date(),
-  humanBindingPermitGateway = null
+  humanBindingPermitGateway = null,
+  // The legacy T2 path may continue a prior human-confirmed mapping through
+  // its runtime fingerprint.  The autonomous read adapter deliberately opts
+  // out: a new passive observation is PENDING unless an independent opaque
+  // conversation binding proves the same conversation.  This is an ingress
+  // policy switch, not a schema or mapping-rule change.
+  allowLegacyFingerprintMapping = true
 } = {}) {
   for (const method of [
     "withTransaction",
@@ -503,6 +513,9 @@ function createTinderCaptureStore(repository, {
     typeof repository.findReusableConfirmedConversationBinding === "function"
       ? repository.findReusableConfirmedConversationBinding.bind(repository)
       : async () => null;
+  if (typeof allowLegacyFingerprintMapping !== "boolean") {
+    throw new TypeError("allowLegacyFingerprintMapping must be a boolean");
+  }
 
   async function storeSafeCapture({ deviceId, capture, provenance } = {}) {
     const normalizedDeviceId = normalizeDeviceId(deviceId);
@@ -571,7 +584,7 @@ function createTinderCaptureStore(repository, {
             threadBindingEvidence: normalizedCapture.visibleThreadMetadata.threadBindingEvidence ?? null
           }
         );
-      const reusableMapping = humanBindingAuthorization
+      const reusableMapping = humanBindingAuthorization || !allowLegacyFingerprintMapping
         ? null
         : normalizeReusableConfirmedMapping(
           await repository.findReusableConfirmedMapping(transaction, {
@@ -860,6 +873,26 @@ function createPgTinderCaptureRepository(pool) {
       return result.rows;
     },
 
+    async findPendingReadChannelConversations({ deviceId }) {
+      const result = await pool.query(
+        `SELECT mapping_status,
+                human_review_status,
+                visible_messages,
+                received_at
+          FROM tinder_visible_chat_captures
+         WHERE device_id = $1
+            AND capture_safety_status = 'SAFE'
+            AND source_package = 'com.tinder'
+            AND mapping_status = 'NEEDS_HUMAN_MAPPING'
+            AND human_review_status = 'PENDING'
+            AND resolved_contact_id IS NULL
+          ORDER BY received_at DESC, capture_id DESC
+          LIMIT $2`,
+        [deviceId, TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT]
+      );
+      return result.rows;
+    },
+
     /**
      * Bounded discovery projection for the first explicit T4 draft. This is
      * intentionally not a draft creator and does not return capture content,
@@ -914,6 +947,7 @@ export {
   TINDER_CAPTURE_REVIEW_STATUS,
   TINDER_DRAFT_ELIGIBLE_CAPTURE_LIMIT,
   TINDER_PENDING_HUMAN_MAPPING_LIMIT,
+  TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT,
   TINDER_CAPTURE_SCHEMA_VERSION,
   TINDER_SOURCE_PACKAGE,
   TinderCaptureValidationError,

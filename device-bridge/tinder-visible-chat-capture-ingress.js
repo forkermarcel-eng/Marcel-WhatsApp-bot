@@ -29,6 +29,11 @@ Until it is explicitly applied, the ingress fails closed.
 ================================================== */
 
 const TINDER_CAPTURE_PATH_SUFFIX = "/tinder-visible-chat-captures";
+// The passive read channel is a separate signed ingress policy.  It keeps
+// the historical manual-capture route intact while allowing a locally-safe
+// read to reach the existing PENDING capture foundation without waiting for
+// a server-projected heartbeat, V8 child, or return receipt.
+const TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX = "/tinder-passive-read-captures";
 const TINDER_CAPTURE_FOUNDATION_ERROR_CODES = new Set(["42P01", "42703", "23502"]);
 
 function plainObject(value) {
@@ -124,7 +129,7 @@ function normalizeCaptureRecord(row) {
   });
 }
 
-async function assertCaptureDeviceGates(client, auth, now) {
+async function assertCaptureDeviceIdentity(client, auth) {
   const result = await client.query(
     `SELECT d.device_id, d.enrollment_state, d.revoked_at,
             d.last_accepted_heartbeat_at, d.bridge_service_state,
@@ -149,6 +154,11 @@ async function assertCaptureDeviceGates(client, auth, now) {
   if (!isTinderManualGateCapable(row.capabilities)) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual gate");
   }
+  return row;
+}
+
+async function assertCaptureDeviceGates(client, auth, now) {
+  const row = await assertCaptureDeviceIdentity(client, auth);
   if (deriveDeviceStatus(row.last_accepted_heartbeat_at, now) !== "ONLINE") {
     throw new DeviceBridgeProtocolError(409, "DEVICE_OFFLINE", "Device must be online for a Tinder capture");
   }
@@ -158,7 +168,15 @@ async function assertCaptureDeviceGates(client, auth, now) {
   if (row.tinder_state !== "CONNECTED") {
     throw new DeviceBridgeProtocolError(409, "TINDER_GATE_NOT_CONNECTED", "Tinder manual gate must be connected for a capture");
   }
-  if (row.automation_state !== "STOPPED") {
+  assertCaptureAutomationStopped(row);
+}
+
+/**
+ * Unlike heartbeat and runtime projection, this remains a server-side safety boundary for every
+ * capture route. A local passive reader must never race a known non-stopped automation state.
+ */
+function assertCaptureAutomationStopped(row) {
+  if (row?.automation_state !== "STOPPED") {
     throw new DeviceBridgeProtocolError(409, "AUTOMATION_STATE_UNSAFE", "Automation must be stopped for a Tinder capture");
   }
 }
@@ -168,8 +186,15 @@ function createAuthenticatedCaptureStore(pool, auth, {
   createRepository = createPgTinderCaptureRepository,
   createStore = createTinderCaptureStore,
   createHumanArmedRepository = createPgTinderHumanArmedConversationBindingRepository,
-  createHumanArmedService = createTinderHumanArmedConversationBindingService
+  createHumanArmedService = createTinderHumanArmedConversationBindingService,
+  requireRuntimeGates = true,
+  requireAutomationStopped = true,
+  allowLegacyFingerprintMapping = true
 } = {}) {
+  if (typeof requireRuntimeGates !== "boolean" || typeof requireAutomationStopped !== "boolean" ||
+      typeof allowLegacyFingerprintMapping !== "boolean") {
+    throw new TypeError("Capture ingress policy flags must be booleans");
+  }
   const repository = createRepository(pool);
   let humanArmedService = null;
   const currentHumanArmedService = () => {
@@ -188,7 +213,16 @@ function createAuthenticatedCaptureStore(pool, auth, {
       try {
         const transactionNow = now();
         await client.query("BEGIN");
-        await assertCaptureDeviceGates(client, auth, transactionNow);
+        if (requireRuntimeGates) {
+          await assertCaptureDeviceGates(client, auth, transactionNow);
+        } else {
+          // The device's signed identity and declared manual-gate capability
+          // remain mandatory.  Current Bridge/Tinder/screen safety is checked
+          // locally by the read channel; asynchronous heartbeat projection is
+          // deliberately not a synchronous read dependency.
+          const device = await assertCaptureDeviceIdentity(client, auth);
+          if (requireAutomationStopped) assertCaptureAutomationStopped(device);
+        }
         await registerAuthenticatedRequestReplay(client, auth, transactionNow);
         const result = await work(client);
         await client.query("COMMIT");
@@ -208,8 +242,20 @@ function createAuthenticatedCaptureStore(pool, auth, {
         currentHumanArmedService().authorizeIncomingCapturePermit(...args),
       consumeAuthorizedIncomingPermit: (...args) =>
         currentHumanArmedService().consumeAuthorizedIncomingPermit(...args)
-    })
+    }),
+    allowLegacyFingerprintMapping
   });
+}
+
+function assertPassiveReadCapture(capture) {
+  const metadata = capture?.captureMetadata ?? capture?.capture_metadata;
+  if (!plainObject(metadata)
+      || metadata.schemaVersion !== "tinder-visible-chat-v2"
+      || Object.hasOwn(metadata, "humanBindingPermit")
+      || Object.hasOwn(metadata, "human_binding_permit")) {
+    throw invalidCaptureRequest("Passive Tinder reads require exactly a V2 capture without a human-binding permit");
+  }
+  return capture;
 }
 
 function createTinderCaptureIngressHandler(pool, {
@@ -248,6 +294,54 @@ function createTinderCaptureIngressHandler(pool, {
   };
 }
 
+/**
+ * A narrowly scoped, device-signed adapter for the autonomous read channel.
+ * It never accepts V3 human-binding permits, never resolves a contact from a
+ * runtime fingerprint, and has no command/permit/receipt input.  The stored
+ * V2 capture is therefore either independently bound through opaque evidence
+ * or remains PENDING for a later human decision.
+ */
+function createTinderPassiveReadCaptureIngressHandler(pool, {
+  now = () => new Date(),
+  verifyRequest = verifyAuthenticatedDeviceRequest,
+  createAuthenticatedStore = createAuthenticatedCaptureStore
+} = {}) {
+  return async function tinderPassiveReadCaptureIngressHandler(req, res) {
+    try {
+      const auth = await verifyRequest({ req, pool, urlDeviceId: req.params.deviceId });
+      const capture = assertPassiveReadCapture(parseSignedCaptureRequest(req));
+      const store = createAuthenticatedStore(pool, auth, {
+        now,
+        requireRuntimeGates: false,
+        requireAutomationStopped: true,
+        allowLegacyFingerprintMapping: false
+      });
+      const stored = await store.storeSafeCapture({
+        deviceId: auth.deviceId,
+        capture,
+        provenance: { source: "android_visible_chat", protocolVersion: DEVICE_BRIDGE_PROTOCOL.version }
+      });
+      const record = normalizeCaptureRecord(stored);
+      return res.status(201).json({
+        ok: true,
+        protocol_version: DEVICE_BRIDGE_PROTOCOL.version,
+        server_time: now().toISOString(),
+        capture: record
+      });
+    } catch (error) {
+      const mapped = isFoundationNotReadyError(error) ? foundationNotReadyError()
+        : error instanceof TinderCaptureValidationError
+          ? new DeviceBridgeProtocolError(400, error.code, safeMessage(error))
+          : error;
+      const status = mapped instanceof DeviceBridgeProtocolError ? mapped.status : 500;
+      if (!(mapped instanceof DeviceBridgeProtocolError)) {
+        console.error("Tinder passive read capture ingress failed.");
+      }
+      return res.status(status).json(protocolErrorBody(mapped, req.get("x-marcel-request-id")));
+    }
+  };
+}
+
 
 function registerTinderVisibleChatCaptureIngress({ app, pool }) {
   if (!app || typeof app.post !== "function") {
@@ -257,12 +351,18 @@ function registerTinderVisibleChatCaptureIngress({ app, pool }) {
     `/device-bridge/v1/devices/:deviceId${TINDER_CAPTURE_PATH_SUFFIX}`,
     createTinderCaptureIngressHandler(pool)
   );
+  app.post(
+    `/device-bridge/v1/devices/:deviceId${TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX}`,
+    createTinderPassiveReadCaptureIngressHandler(pool)
+  );
 }
 
 export {
   TINDER_CAPTURE_PATH_SUFFIX,
+  TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX,
   createAuthenticatedCaptureStore,
   createTinderCaptureIngressHandler,
+  createTinderPassiveReadCaptureIngressHandler,
   normalizeCaptureRecord,
   parseSignedCaptureRequest,
   registerTinderVisibleChatCaptureIngress

@@ -3538,17 +3538,17 @@
        + ` / VALIDATIONS: ${diagnostic.validation_count}`;
    }
 
-   function pendingUnboundConversationTranscriptIsSafe(transcript) {
-     const receivedAt = new Date(transcript?.received_at || "");
-     return hasExactConversationFields(transcript, [
+   function pendingReadConversationIsSafe(conversation) {
+     const receivedAt = new Date(conversation?.received_at || "");
+     return hasExactConversationFields(conversation, [
        "received_at", "mapping_status", "human_review_status", "messages"
      ]) && !Number.isNaN(receivedAt.valueOf())
-       && transcript.mapping_status === "NEEDS_HUMAN_MAPPING"
-       && transcript.human_review_status === "PENDING"
-       && Array.isArray(transcript.messages)
-       && transcript.messages.length >= 1
-       && transcript.messages.length <= UNBOUND_CONVERSATION_MESSAGE_LIMIT
-       && transcript.messages.every((message) =>
+       && conversation.mapping_status === "NEEDS_HUMAN_MAPPING"
+       && conversation.human_review_status === "PENDING"
+       && Array.isArray(conversation.messages)
+       && conversation.messages.length >= 1
+       && conversation.messages.length <= UNBOUND_CONVERSATION_MESSAGE_LIMIT
+       && conversation.messages.every((message) =>
          hasExactConversationFields(message, ["direction", "text"])
          && ["INBOUND", "OUTBOUND"].includes(message.direction)
          && typeof message.text === "string"
@@ -3558,7 +3558,7 @@
        );
    }
 
-   function setPendingUnboundConversationUnavailable(message) {
+   function setPendingReadConversationUnavailable(message) {
      elements.unboundConversationList.replaceChildren();
      const unavailable = document.createElement("div");
      unavailable.className = "pending-capture-empty";
@@ -3567,9 +3567,9 @@
      elements.unboundConversationMessage.textContent = message;
    }
 
-   function renderPendingUnboundConversations(transcripts) {
+   function renderPendingReadConversations(conversations) {
      elements.unboundConversationList.replaceChildren();
-     if (transcripts.length === 0) {
+     if (conversations.length === 0) {
        const empty = document.createElement("div");
        empty.className = "pending-capture-empty";
        empty.textContent = "Keine neuen, noch unzugeordneten Conversations liegen derzeit vor.";
@@ -3578,7 +3578,7 @@
        return;
      }
 
-     for (const transcript of transcripts) {
+     for (const conversation of conversations) {
        const item = document.createElement("article");
        item.className = "pending-capture-item";
        const disclosure = document.createElement("details");
@@ -3598,7 +3598,7 @@
        const readOnlyCopy = document.createElement("p");
        readOnlyCopy.className = "unbound-conversation-read-copy";
        readOnlyCopy.textContent = "Read-only Nachrichtenansicht. Sie ordnet keine Person zu, erstellt keinen Entwurf und versendet nichts.";
-       const messages = transcript.messages.map((message) => Object.freeze({
+       const messages = conversation.messages.map((message) => Object.freeze({
          direction: message.direction === "INBOUND" ? "INCOMING" : "OUTGOING",
          text: message.text
        }));
@@ -3607,36 +3607,36 @@
        elements.unboundConversationList.append(item);
      }
      elements.unboundConversationMessage.textContent =
-       `${transcripts.length} neue Conversation${transcripts.length === 1 ? "" : "s"} wartet ohne automatische Zuordnung auf eine spaetere menschliche Entscheidung.`;
+       `${conversations.length} neue Conversation${conversations.length === 1 ? "" : "s"} wartet ohne automatische Zuordnung auf eine spaetere menschliche Entscheidung.`;
    }
 
-   let pendingUnboundConversationRequestGeneration = 0;
-   async function loadPendingUnboundConversations() {
-     const generation = ++pendingUnboundConversationRequestGeneration;
+   let pendingReadConversationRequestGeneration = 0;
+   async function loadPendingReadConversations() {
+     const generation = ++pendingReadConversationRequestGeneration;
      const deviceId = String(selectedDevice?.device_id || "");
      if (!UUID_V4.test(deviceId)) {
-       setPendingUnboundConversationUnavailable(
+       setPendingReadConversationUnavailable(
          "Neue Conversations werden nach Auswahl eines eindeutigen aktiven Android-Geraets geladen."
        );
        return;
      }
      try {
        const data = await requestJson(
-         `/api/tinder/captures?deviceId=${encodeURIComponent(deviceId)}&view=unbound-inbox-conversation-sweep-transcripts`
+         `/api/tinder/captures?deviceId=${encodeURIComponent(deviceId)}&view=pending-read-conversations`
        );
-       if (generation !== pendingUnboundConversationRequestGeneration
+       if (generation !== pendingReadConversationRequestGeneration
            || String(selectedDevice?.device_id || "") !== deviceId) return;
-       const transcripts = Array.isArray(data?.transcripts) ? data.transcripts : null;
-       if (data?.ok !== true || !transcripts
-           || transcripts.length > UNBOUND_CONVERSATION_TRANSCRIPT_LIMIT
-           || transcripts.some((transcript) => !pendingUnboundConversationTranscriptIsSafe(transcript))) {
+       const conversations = Array.isArray(data?.conversations) ? data.conversations : null;
+       if (data?.ok !== true || !conversations
+           || conversations.length > UNBOUND_CONVERSATION_TRANSCRIPT_LIMIT
+           || conversations.some((conversation) => !pendingReadConversationIsSafe(conversation))) {
          throw new Error("Invalid pending Conversation response.");
        }
-       renderPendingUnboundConversations(transcripts);
+       renderPendingReadConversations(conversations);
      } catch {
-       if (generation !== pendingUnboundConversationRequestGeneration
+       if (generation !== pendingReadConversationRequestGeneration
            || String(selectedDevice?.device_id || "") !== deviceId) return;
-       setPendingUnboundConversationUnavailable(
+       setPendingReadConversationUnavailable(
          "Neue, noch unzugeordnete Conversations koennen derzeit nicht sicher geladen werden."
        );
      }
@@ -3748,7 +3748,7 @@
          selectedDevice = device;
          renderDeviceSelection(devices);
          renderDeviceStatus({ devices: [device] });
-         void loadPendingUnboundConversations();
+         void loadPendingReadConversations();
        });
        return button;
      }));
@@ -3858,7 +3858,7 @@
     // for the presentation-only bootstrap affordance. Re-rendering the
     // binding cards keeps the UI disabled without replaying any command.
     selectedDevice = null;
-    void loadPendingUnboundConversations();
+    void loadPendingReadConversations();
      setDot(elements.deviceDot, "bad");
      elements.deviceValue.textContent = "Nicht verfügbar";
      elements.deviceSub.textContent = error?.message || "Device-Bridge-Status konnte nicht geladen werden";
@@ -3969,7 +3969,7 @@
      try {
        const data = await requestJson("/api/tinder/device-status");
        renderDeviceStatus(data);
-       await loadPendingUnboundConversations();
+       await loadPendingReadConversations();
        return data;
      } catch (error) {
        renderDeviceStatusError(error);

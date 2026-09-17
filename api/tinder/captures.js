@@ -87,11 +87,13 @@ const OFFICIAL_APP_RESUME_OPERATION = "resume-official-app";
 const HUMAN_ARMED_OFFICIAL_APP_RESUME_OPERATION = "human-armed-official-app-resume";
 const UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW = "unbound-inbox-conversation-sweep-status";
 const UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW = "unbound-inbox-conversation-sweep-transcripts";
+const PENDING_READ_CHANNEL_CONVERSATIONS_VIEW = "pending-read-conversations";
 const LATEST_CONFIRMED_CONVERSATION_LIMIT = 25;
 const CONVERSATION_MESSAGE_LIMIT = 100;
 const CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
 const CONVERSATION_MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING", "UNKNOWN"]);
 const UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_LIMIT = 8;
+const PENDING_READ_CHANNEL_CONVERSATION_LIMIT = 8;
 const UNBOUND_INBOX_CONVERSATION_SWEEP_MESSAGE_DIRECTIONS = new Set(["INBOUND", "OUTBOUND"]);
 const PUBLIC_VISIBLE_CHAT_SYNC_COMMAND_TYPE = "SYNC_TINDER_VISIBLE_CHAT";
 const PUBLIC_UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VALUES = new Set([
@@ -473,6 +475,10 @@ function captureRequestFromQuery(req) {
   if (exactKeys(query, ["deviceId", "view"]) && validCaptureId(query.deviceId)
       && query.view === UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW) {
     return Object.freeze({ type: "unbound_inbox_conversation_sweep_transcripts", deviceId: query.deviceId });
+  }
+  if (exactKeys(query, ["deviceId", "view"]) && validCaptureId(query.deviceId)
+      && query.view === PENDING_READ_CHANNEL_CONVERSATIONS_VIEW) {
+    return Object.freeze({ type: "pending_read_conversations", deviceId: query.deviceId });
   }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === HUMAN_ARM_OPERATION) {
@@ -936,6 +942,42 @@ function normalizePublicUnboundInboxConversationSweepTranscripts(value) {
   return transcripts.some(transcript => transcript === null) ? null : Object.freeze(transcripts);
 }
 
+// The architecture-cut read adapter is intentionally independent from V8.
+// It accepts the same bounded, content-only projection but never carries a
+// sweep, command, capture, device, or identity correlation into the browser.
+function normalizePublicPendingReadChannelConversation(value) {
+  if (!exactKeys(value, ["received_at", "mapping_status", "human_review_status", "messages"])
+      || value.mapping_status !== "NEEDS_HUMAN_MAPPING"
+      || value.human_review_status !== "PENDING"
+      || !Array.isArray(value.messages)
+      || value.messages.length < 1 || value.messages.length > CONVERSATION_MESSAGE_LIMIT) {
+    return null;
+  }
+  const receivedAt = normalizePublicTimestamp(value.received_at);
+  if (!receivedAt) return null;
+  const messages = value.messages.map((message) => {
+    if (!exactKeys(message, ["direction", "text"])
+        || !UNBOUND_INBOX_CONVERSATION_SWEEP_MESSAGE_DIRECTIONS.has(message.direction)
+        || !validBoundedText(message.text, CONVERSATION_MESSAGE_TEXT_LIMIT)) {
+      return null;
+    }
+    return Object.freeze({ direction: message.direction, text: message.text });
+  });
+  if (messages.some((message) => message === null)) return null;
+  return Object.freeze({
+    received_at: receivedAt,
+    mapping_status: "NEEDS_HUMAN_MAPPING",
+    human_review_status: "PENDING",
+    messages: Object.freeze(messages)
+  });
+}
+
+function normalizePublicPendingReadChannelConversations(value) {
+  if (!Array.isArray(value) || value.length > PENDING_READ_CHANNEL_CONVERSATION_LIMIT) return null;
+  const conversations = value.map(normalizePublicPendingReadChannelConversation);
+  return conversations.some((conversation) => conversation === null) ? null : Object.freeze(conversations);
+}
+
 // This public result deliberately contains only a command type, terminal
 // queue state, and bounded reason.  In particular it must not turn the
 // opaque device command handle or binding facts into dashboard data.
@@ -1210,6 +1252,30 @@ async function forwardUnboundInboxConversationSweepTranscriptRead(res, configura
     return res.status(status).json({ ok: false, error: "Inbox-Sweep-Verl\u00e4ufe konnten nicht geladen werden." });
   } catch {
     console.error("Verbindung zum Tinder-Inbox-Sweep-Verlauf fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardPendingReadChannelConversationRead(res, configuration, deviceId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/devices/${encodeURIComponent(deviceId)}/pending-read-conversations`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    const conversations = normalizePublicPendingReadChannelConversations(data?.conversations);
+    if (response.ok && data?.ok === true && conversations) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({ ok: true, conversations });
+    }
+    if (response.status === 401) {
+      return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+    }
+    const status = [400, 404, 503].includes(response.status) ? response.status : 502;
+    return res.status(status).json({ ok: false, error: "Neue Tinder-Conversations konnten nicht sicher geladen werden." });
+  } catch {
+    console.error("Verbindung zum Tinder-Read-Conversation-Backend fehlgeschlagen.");
     return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
   }
 }
@@ -1832,6 +1898,9 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "unbound_inbox_conversation_sweep_transcripts") {
     return forwardUnboundInboxConversationSweepTranscriptRead(res, configuration, captureRequest.deviceId);
   }
+  if (req.method === "GET" && captureRequest.type === "pending_read_conversations") {
+    return forwardPendingReadChannelConversationRead(res, configuration, captureRequest.deviceId);
+  }
   if (req.method === "GET") {
     return forwardCaptureRead(res, configuration, captureRequest.captureId);
   }
@@ -1898,6 +1967,7 @@ export {
   HUMAN_ARMED_OFFICIAL_APP_RESUME_OPERATION,
   UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW,
   UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW,
+  PENDING_READ_CHANNEL_CONVERSATIONS_VIEW,
   CONVERSATION_MESSAGE_LIMIT,
   CONVERSATION_MESSAGE_TEXT_LIMIT,
   LATEST_CONFIRMED_CONVERSATION_LIMIT,
@@ -1933,6 +2003,8 @@ export {
   normalizePublicUnboundInboxConversationSweepStatus,
   normalizePublicUnboundInboxConversationSweepTranscript,
   normalizePublicUnboundInboxConversationSweepTranscripts,
+  normalizePublicPendingReadChannelConversation,
+  normalizePublicPendingReadChannelConversations,
   normalizePublicLocalConversationAttestationResult,
   normalizePublicOfficialAppResumeResult,
   validEmptyOfficialAppResumeBody,

@@ -359,3 +359,32 @@ test("Tinder technical diagnostics render only the bounded passive Inbox observa
     "tinder_passive_inbox_observation_diagnostic.text"
   ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
 });
+
+test("Tinder technical diagnostics render the separate bounded passive Inbox lifecycle companion", () => {
+  assert.match(page, /<summary>Technik &amp; Diagnose<\/summary>[\s\S]*id="passiveInboxObservationLifecycle"/);
+  assert.match(page, /function passiveInboxObservationLifecycleIsSafe\(value\)/);
+  assert.match(page, /PASSIVE_INBOX_OBSERVATION_LIFECYCLE_STAGES\.has\(value\.stage\)/);
+  assert.match(page, /PASSIVE_INBOX_OBSERVATION_LIFECYCLE_LAST_CALLBACKS\.has\(value\.last_callback\)/);
+  assert.match(page, /PASSIVE_INBOX_OBSERVATION_LIFECYCLE_CALLBACKS_SEEN\.has\(value\.callbacks_seen\)/);
+  assert.match(page, /PASSIVE_INBOX_OBSERVATION_LIFECYCLE_WIRINGS\.has\(value\.wiring\)/);
+  assert.match(page, /PASSIVE_INBOX_OBSERVATION_LIFECYCLE_ACTIVE_EDGES\.has\(value\.active_edge\)/);
+  assert.match(page, /"SETTLE_ENTERED"/);
+  assert.match(page, /"ON_SERVICE_CONNECTED"/);
+  assert.match(page, /"CREATE", "CONNECTED", "UNBIND", "REBIND", "DESTROYED"/);
+  assert.match(page, /renderPassiveInboxObservationLifecycle\(device\);/);
+  assert.match(page, /renderPassiveInboxObservationLifecycle\(null\);/);
+  assert.match(page, /textContent =\s*`PASSIVE_INBOX_LIFECYCLE_STAGE:/);
+  for (const forbidden of [
+    "tinder_passive_inbox_observation_lifecycle.permit",
+    "tinder_passive_inbox_observation_lifecycle.command",
+    "tinder_passive_inbox_observation_lifecycle.nonce",
+    "tinder_passive_inbox_observation_lifecycle.snapshot",
+    "tinder_passive_inbox_observation_lifecycle.row",
+    "tinder_passive_inbox_observation_lifecycle.identity",
+    "tinder_passive_inbox_observation_lifecycle.source",
+    "tinder_passive_inbox_observation_lifecycle.binding",
+    "tinder_passive_inbox_observation_lifecycle.capture",
+    "tinder_passive_inbox_observation_lifecycle.header",
+    "tinder_passive_inbox_observation_lifecycle.text"
+  ]) assert.doesNotMatch(page, new RegExp(forbidden.replaceAll(".", "\\."), "i"));
+});

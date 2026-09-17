@@ -71,6 +71,9 @@ import {
 import {
   boundedTinderPassiveInboxObservationDiagnostic
 } from "./tinder-passive-inbox-observation-diagnostic-contract.js";
+import {
+  boundedTinderPassiveInboxObservationLifecycle
+} from "./tinder-passive-inbox-observation-lifecycle-contract.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
@@ -839,6 +842,16 @@ function heartbeatAuditDetails(heartbeat) {
   if (passiveInboxObservationDiagnostic !== null) {
     details.tinder_passive_inbox_observation_diagnostic = passiveInboxObservationDiagnostic;
   }
+  const passiveInboxObservationLifecycle = Object.hasOwn(heartbeat,
+    "tinder_passive_inbox_observation_lifecycle")
+    ? boundedTinderPassiveInboxObservationLifecycle(
+      heartbeat.tinder_passive_inbox_observation_lifecycle)
+    : null;
+  if (passiveInboxObservationLifecycle !== null) {
+    // The companion status is observational only. It cannot affect command
+    // selection, permit state, Inbox authority, or any reader/capture path.
+    details.tinder_passive_inbox_observation_lifecycle = passiveInboxObservationLifecycle;
+  }
   return details;
 }
 
@@ -1158,6 +1171,11 @@ export function parseAndValidateHeartbeat(req) {
       && !isBoundedTinderPassiveInboxObservationDiagnostic(
         body.tinder_passive_inbox_observation_diagnostic)) {
     throw invalidHeartbeat("Heartbeat passive Inbox observation diagnostic is invalid");
+  }
+  if (Object.hasOwn(body, "tinder_passive_inbox_observation_lifecycle")
+      && !boundedTinderPassiveInboxObservationLifecycle(
+        body.tinder_passive_inbox_observation_lifecycle)) {
+    throw invalidHeartbeat("Heartbeat passive Inbox observation lifecycle is invalid");
   }
   if (body.tinder_verified_chat_return?.ready === true
       && body.tinder_resumed_foreground_chat_return?.ready === true) {

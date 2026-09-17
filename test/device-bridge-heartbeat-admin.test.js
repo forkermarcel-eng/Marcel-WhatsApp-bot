@@ -47,6 +47,9 @@ import {
   TINDER_PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS,
   boundedTinderPassiveInboxObservationDiagnostic
 } from "../device-bridge/tinder-passive-inbox-observation-diagnostic-contract.js";
+import {
+  boundedTinderPassiveInboxObservationLifecycle
+} from "../device-bridge/tinder-passive-inbox-observation-lifecycle-contract.js";
 
 const heartbeatSource = fs.readFileSync(
   new URL("../device-bridge/heartbeat.js", import.meta.url),
@@ -116,6 +119,39 @@ test("passive Inbox heartbeat diagnostic accepts only the three fixed delivery-e
     stage: "BLOCKED", reason: "HEARTBEAT_EXPIRED_UNBOUNDED", settle_sample_count: 0,
     validation_count: 0
   }), null);
+});
+
+test("passive Inbox companion lifecycle accepts only the exact finite, canonical shape", () => {
+  const lifecycle = {
+    stage: "SETTLE_ENTERED",
+    reason: "NONE",
+    settle_sample_count: 1,
+    validation_count: 0,
+    last_callback: "ON_SERVICE_CONNECTED",
+    callbacks_seen: "CREATE|CONNECTED",
+    wiring: "READY",
+    active_edge: "ACTIVE"
+  };
+  assert.deepEqual(boundedTinderPassiveInboxObservationLifecycle(lifecycle), Object.freeze(lifecycle));
+  for (const malformed of [
+    { ...lifecycle, stage: "BLOCKED" },
+    { ...lifecycle, reason: "SETTLE_NON_INBOX" },
+    { ...lifecycle, callbacks_seen: "CONNECTED|CREATE" },
+    { ...lifecycle, callbacks_seen: "CREATE|UNKNOWN" },
+    { ...lifecycle, last_callback: "ON_FUTURE_CALLBACK" },
+    { ...lifecycle, wiring: "UNKNOWN" },
+    { ...lifecycle, active_edge: "UNKNOWN" },
+    { ...lifecycle, extra: "forbidden" },
+    { ...lifecycle, settle_sample_count: 9 },
+    { ...lifecycle, validation_count: 1.5 },
+    { ...lifecycle, stage: "TERMINAL", reason: "NONE" },
+    { ...lifecycle, stage: "TERMINAL", reason: "SETTLE_NON_INBOX" }
+  ]) {
+    const expected = malformed.stage === "TERMINAL" && malformed.reason === "SETTLE_NON_INBOX"
+      ? malformed
+      : null;
+    assert.deepEqual(boundedTinderPassiveInboxObservationLifecycle(malformed), expected);
+  }
 });
 
 // Most heartbeat fixtures model the pre-V8 canonical predecessor and do not
@@ -1442,6 +1478,74 @@ test("optional passive Inbox observation diagnostic is exact, content-free, and 
       capabilities: T1_DEVICE_CAPABILITIES,
       tinder_state: "CONNECTED",
       tinder_passive_inbox_observation_diagnostic: invalidDiagnostic
+    });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
+test("optional passive Inbox lifecycle companion is exact, content-free, and preserves the terminal diagnostic", async () => {
+  const terminalDiagnostic = {
+    stage: "BLOCKED",
+    reason: "SETTLE_NON_INBOX",
+    settle_sample_count: 1,
+    validation_count: 0
+  };
+  const lifecycle = {
+    stage: "TERMINAL",
+    reason: "SETTLE_NON_INBOX",
+    settle_sample_count: 1,
+    validation_count: 0,
+    last_callback: "ON_SERVICE_CONNECTED",
+    callbacks_seen: "CREATE|CONNECTED",
+    wiring: "READY",
+    active_edge: "ACTIVE"
+  };
+  const payload = heartbeatPayload({
+    capabilities: T1_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED",
+    tinder_passive_inbox_observation_diagnostic: terminalDiagnostic,
+    tinder_passive_inbox_observation_lifecycle: lifecycle
+  });
+  const request = heartbeatRequest(payload);
+  const parsed = parseAndValidateHeartbeat(request.req);
+  assert.deepEqual(parsed.tinder_passive_inbox_observation_diagnostic, terminalDiagnostic);
+  assert.deepEqual(parsed.tinder_passive_inbox_observation_lifecycle, lifecycle);
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  assert.deepEqual(response.commands, []);
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_passive_inbox_observation_diagnostic: terminalDiagnostic,
+    tinder_passive_inbox_observation_lifecycle: lifecycle
+  });
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  const serialized = JSON.stringify({ response, update: update?.params });
+  for (const forbidden of ["SETTLE_NON_INBOX", "last_callback", "callbacks_seen", "wiring", "active_edge"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+
+  for (const invalidLifecycle of [
+    null,
+    {},
+    { ...lifecycle, stage: "BLOCKED" },
+    { ...lifecycle, reason: "NONE" },
+    { ...lifecycle, callbacks_seen: "CONNECTED|CREATE" },
+    { ...lifecycle, raw_tree: "forbidden" }
+  ]) {
+    const invalid = heartbeatPayload({
+      capabilities: T1_DEVICE_CAPABILITIES,
+      tinder_state: "CONNECTED",
+      tinder_passive_inbox_observation_lifecycle: invalidLifecycle
     });
     assert.throws(
       () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
@@ -3070,7 +3174,8 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     officialResumeSchemaEvidence = null,
     lastAcceptedOfficialResumeSchemaDiagnostic = null,
     passiveInboxObservationDiagnostic = null,
-    lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume = null) {
+    lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume = null,
+    passiveInboxObservationLifecycle = null) {
   return {
     device_id: DEVICE_ID, display_name: "ZTE Blade A35e", enrollment_state: "ACTIVE",
     created_at: NOW,
@@ -3085,6 +3190,7 @@ function statusRow(lastAccepted = null, capabilities = CAPABILITIES, tinderState
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
     tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic,
+    tinder_passive_inbox_observation_lifecycle: passiveInboxObservationLifecycle,
     last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
       lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume
   };
@@ -3698,6 +3804,69 @@ test("admin status suppresses malformed or offline passive Inbox observation dia
     const res = responseRecorder();
     await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
     assert.equal(res.body.device.tinder_passive_inbox_observation_diagnostic, null);
+  }
+});
+
+test("admin status projects only the current bounded passive Inbox lifecycle companion", async () => {
+  const lifecycle = {
+    stage: "SETTLE_ENTERED",
+    reason: "NONE",
+    settle_sample_count: 1,
+    validation_count: 0,
+    last_callback: "ON_SERVICE_CONNECTED",
+    callbacks_seen: "CREATE|CONNECTED",
+    wiring: "READY",
+    active_edge: "ACTIVE"
+  };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      const row = statusRow(new Date(), CAPABILITIES, "CONNECTED");
+      row.tinder_passive_inbox_observation_lifecycle = lifecycle;
+      return { rows: [row] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.tinder_passive_inbox_observation_lifecycle, lifecycle);
+  assert.equal(res.body.device.tinder_passive_inbox_observation_diagnostic, null);
+  assert.match(sql, /latest_heartbeat\.details -> 'tinder_passive_inbox_observation_lifecycle'/);
+  const statusColumns = sql.slice(sql.indexOf("SELECT"), sql.indexOf("FROM device_bridge_devices"));
+  assert.doesNotMatch(statusColumns,
+    /last_accepted_passive_inbox_observation_lifecycle|last_passive_inbox_observation_lifecycle/i);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body.device).includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed or offline passive Inbox lifecycle companion", async () => {
+  const valid = {
+    stage: "ARMED",
+    reason: "NONE",
+    settle_sample_count: 0,
+    validation_count: 0,
+    last_callback: "ON_SERVICE_CONNECTED",
+    callbacks_seen: "CREATE|CONNECTED",
+    wiring: "READY",
+    active_edge: "ACTIVE"
+  };
+  for (const [acceptedAt, lifecycle] of [
+    [new Date(), { ...valid, callbacks_seen: "CONNECTED|CREATE" }],
+    [new Date(), { ...valid, stage: "TERMINAL", reason: "NONE" }],
+    [new Date(), { ...valid, raw: "forbidden" }],
+    [new Date(Date.now() - 91_000), valid]
+  ]) {
+    const pool = {
+      async query() {
+        const row = statusRow(acceptedAt, CAPABILITIES, "CONNECTED");
+        row.tinder_passive_inbox_observation_lifecycle = lifecycle;
+        return { rows: [row] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.tinder_passive_inbox_observation_lifecycle, null);
   }
 });
 

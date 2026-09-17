@@ -31,6 +31,9 @@ import {
   boundedTinderPassiveInboxObservationDiagnostic
 } from "./tinder-passive-inbox-observation-diagnostic-contract.js";
 import {
+  boundedTinderPassiveInboxObservationLifecycle
+} from "./tinder-passive-inbox-observation-lifecycle-contract.js";
+import {
   boundedTinderUnboundInboxSweepStartDisposition
 } from "./tinder-unbound-inbox-sweep-start-disposition-contract.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
@@ -355,6 +358,11 @@ export function normalizeAdminPassiveInboxObservationDiagnostic(value) {
   return boundedTinderPassiveInboxObservationDiagnostic(value);
 }
 
+/** The companion passive lifecycle is likewise current, bounded, and online-only. */
+export function normalizeAdminPassiveInboxObservationLifecycle(value) {
+  return boundedTinderPassiveInboxObservationLifecycle(value);
+}
+
 /**
  * The V8 start disposition is a historical, content-free audit fact only.
  * It is never a permit, command, identity, source, local Inbox proof, or
@@ -439,6 +447,13 @@ function statusRow(row, now) {
       ? normalizeAdminPassiveInboxObservationDiagnostic(
         row.tinder_passive_inbox_observation_diagnostic)
       : null,
+    // This is the current accepted heartbeat's companion lifecycle only. It
+    // intentionally has no temporal/audit backfill and cannot authorize any
+    // command, reader, capture, or transition.
+    tinder_passive_inbox_observation_lifecycle: deviceStatus === "ONLINE"
+      ? normalizeAdminPassiveInboxObservationLifecycle(
+        row.tinder_passive_inbox_observation_lifecycle)
+      : null,
     last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
       lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume,
     last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:
@@ -461,6 +476,8 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
     AS tinder_resumed_foreground_chat_return_diagnostic,
   latest_heartbeat.details -> 'tinder_passive_inbox_observation_diagnostic'
     AS tinder_passive_inbox_observation_diagnostic,
+  latest_heartbeat.details -> 'tinder_passive_inbox_observation_lifecycle'
+    AS tinder_passive_inbox_observation_lifecycle,
   last_passive_inbox_observation
     .last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
     AS last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,

@@ -1060,6 +1060,9 @@
        <p class="enrollment-message" id="passiveInboxObservationDiagnostic" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="passiveInboxObservationLifecycle" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
        <p class="enrollment-message" id="lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
@@ -1216,6 +1219,7 @@
       resumedForegroundChatReturnStatus: document.getElementById("resumedForegroundChatReturnStatus"),
       resumedForegroundChatReturnDiagnostic: document.getElementById("resumedForegroundChatReturnDiagnostic"),
       passiveInboxObservationDiagnostic: document.getElementById("passiveInboxObservationDiagnostic"),
+      passiveInboxObservationLifecycle: document.getElementById("passiveInboxObservationLifecycle"),
       lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume:
         document.getElementById("lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
@@ -1468,6 +1472,26 @@
      "HEARTBEAT_GATE_OFFICIAL_RESUME_WINDOW_BUSY",
      "HEARTBEAT_LEASE_LOST"
    ]);
+   const PASSIVE_INBOX_OBSERVATION_LIFECYCLE_STAGES = new Set([
+     "ARMED", "SETTLE_ENTERED", "TERMINAL"
+   ]);
+   const PASSIVE_INBOX_OBSERVATION_LIFECYCLE_LAST_CALLBACKS = new Set([
+     "NOT_OBSERVED", "ON_CREATE", "ON_SERVICE_CONNECTED", "ON_UNBIND", "ON_REBIND",
+     "ON_DESTROY"
+   ]);
+   const PASSIVE_INBOX_OBSERVATION_LIFECYCLE_WIRINGS = new Set([
+     "NOT_STARTED", "INITIALIZING", "READY", "FAILED", "CLEARED"
+   ]);
+   const PASSIVE_INBOX_OBSERVATION_LIFECYCLE_ACTIVE_EDGES = new Set([
+     "ACTIVE", "INACTIVE"
+   ]);
+   const PASSIVE_INBOX_OBSERVATION_LIFECYCLE_CALLBACKS_SEEN = (() => {
+     const parts = ["CREATE", "CONNECTED", "UNBIND", "REBIND", "DESTROYED"];
+     return new Set(Array.from({ length: 1 << parts.length }, (_, mask) => {
+       const selected = parts.filter((_, index) => (mask & (1 << index)) !== 0);
+       return selected.length === 0 ? "NONE" : selected.join("|");
+     }));
+   })();
     const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
       "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
     ]);
@@ -3454,6 +3478,46 @@
        + ` / VALIDATIONS: ${diagnostic.validation_count}`;
    }
 
+   function passiveInboxObservationLifecycleIsSafe(value) {
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|")
+         === ["active_edge", "callbacks_seen", "last_callback", "reason", "settle_sample_count",
+           "stage", "validation_count", "wiring"].join("|")
+       && PASSIVE_INBOX_OBSERVATION_LIFECYCLE_STAGES.has(value.stage)
+       && PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS.has(value.reason)
+       && Number.isSafeInteger(value.settle_sample_count)
+       && value.settle_sample_count >= 0 && value.settle_sample_count <= 8
+       && Number.isSafeInteger(value.validation_count)
+       && value.validation_count >= 0 && value.validation_count <= 8
+       && PASSIVE_INBOX_OBSERVATION_LIFECYCLE_LAST_CALLBACKS.has(value.last_callback)
+       && PASSIVE_INBOX_OBSERVATION_LIFECYCLE_CALLBACKS_SEEN.has(value.callbacks_seen)
+       && PASSIVE_INBOX_OBSERVATION_LIFECYCLE_WIRINGS.has(value.wiring)
+       && PASSIVE_INBOX_OBSERVATION_LIFECYCLE_ACTIVE_EDGES.has(value.active_edge)
+       && ((value.stage === "TERMINAL" && value.reason !== "NONE")
+         || (value.stage !== "TERMINAL" && value.reason === "NONE"));
+   }
+
+   function renderPassiveInboxObservationLifecycle(device) {
+     const lifecycle = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.tinder_passive_inbox_observation_lifecycle
+       : null;
+     elements.passiveInboxObservationLifecycle.className = "enrollment-message";
+     if (!passiveInboxObservationLifecycleIsSafe(lifecycle)) {
+       elements.passiveInboxObservationLifecycle.textContent =
+         "Nicht verfuegbar: kein aktueller passiver Inbox-Lebenszyklus im akzeptierten Heartbeat.";
+       return;
+     }
+     elements.passiveInboxObservationLifecycle.textContent =
+       `PASSIVE_INBOX_LIFECYCLE_STAGE: ${lifecycle.stage}`
+       + ` / REASON: ${lifecycle.reason}`
+       + ` / LAST_CALLBACK: ${lifecycle.last_callback}`
+       + ` / CALLBACKS_SEEN: ${lifecycle.callbacks_seen}`
+       + ` / WIRING: ${lifecycle.wiring}`
+       + ` / ACTIVE_EDGE: ${lifecycle.active_edge}`
+       + ` / SETTLE_SAMPLES: ${lifecycle.settle_sample_count}`
+       + ` / VALIDATIONS: ${lifecycle.validation_count}`;
+   }
+
    function renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(device) {
      // This is deliberately a separately labelled, temporal audit projection.
      // It never replaces the current passive observation or grants any action.
@@ -3586,6 +3650,7 @@
      renderResumedForegroundChatReturnStatus(null);
      renderResumedForegroundChatReturnDiagnostic(null);
      renderPassiveInboxObservationDiagnostic(null);
+     renderPassiveInboxObservationLifecycle(null);
      renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
@@ -3721,6 +3786,7 @@
        renderResumedForegroundChatReturnStatus(device);
        renderResumedForegroundChatReturnDiagnostic(device);
        renderPassiveInboxObservationDiagnostic(device);
+       renderPassiveInboxObservationLifecycle(device);
        renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();

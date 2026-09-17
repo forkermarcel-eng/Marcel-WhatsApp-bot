@@ -92,6 +92,7 @@ function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
     tinder_resumed_foreground_chat_return: resumedForegroundChatReturn,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
     tinder_passive_inbox_observation_diagnostic: null,
+    tinder_passive_inbox_observation_lifecycle: null,
     ...extra
   };
 }
@@ -226,7 +227,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
     "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume", "last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
     "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence",
-    "tinder_passive_inbox_observation_diagnostic", "tinder_resumed_foreground_chat_return",
+    "tinder_passive_inbox_observation_diagnostic", "tinder_passive_inbox_observation_lifecycle", "tinder_resumed_foreground_chat_return",
     "tinder_resumed_foreground_chat_return_diagnostic", "tinder_state"
   ]);
 }));
@@ -1035,6 +1036,76 @@ test("device-list proxy suppresses malformed or offline passive Inbox observatio
     await handler(req, res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.devices[0].tinder_passive_inbox_observation_diagnostic, null);
+  }
+}));
+
+test("device-list proxy allowlists only the current bounded passive Inbox lifecycle companion", async () => withEnvironment(async () => {
+  const lifecycle = {
+    stage: "SETTLE_ENTERED",
+    reason: "NONE",
+    settle_sample_count: 1,
+    validation_count: 0,
+    last_callback: "ON_SERVICE_CONNECTED",
+    callbacks_seen: "CREATE|CONNECTED",
+    wiring: "READY",
+    active_edge: "ACTIVE"
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({
+        ok: true,
+        server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ extra: {
+          tinder_passive_inbox_observation_lifecycle: lifecycle
+        } })]
+      });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].tinder_passive_inbox_observation_lifecycle, lifecycle);
+  assert.equal(res.body.devices[0].tinder_passive_inbox_observation_diagnostic, null);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy suppresses malformed or offline passive Inbox lifecycle companion", async () => withEnvironment(async () => {
+  const valid = {
+    stage: "ARMED",
+    reason: "NONE",
+    settle_sample_count: 0,
+    validation_count: 0,
+    last_callback: "ON_SERVICE_CONNECTED",
+    callbacks_seen: "CREATE|CONNECTED",
+    wiring: "READY",
+    active_edge: "ACTIVE"
+  };
+  for (const extra of [
+    { tinder_passive_inbox_observation_lifecycle: { ...valid, callbacks_seen: "CONNECTED|CREATE" } },
+    { tinder_passive_inbox_observation_lifecycle: { ...valid, stage: "TERMINAL", reason: "NONE" } },
+    { tinder_passive_inbox_observation_lifecycle: { ...valid, raw_tree: "forbidden" } },
+    { tinder_passive_inbox_observation_lifecycle: valid, device_status: "OFFLINE" }
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ extra })] });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].tinder_passive_inbox_observation_lifecycle, null);
   }
 }));
 

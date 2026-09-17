@@ -43,6 +43,10 @@ import {
   TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_ROLE_COUNTS,
   TINDER_OFFICIAL_RESUME_SCHEMA_EVIDENCE_VIEW_ID_STATES
 } from "../device-bridge/tinder-official-resume-schema-evidence-contract.js";
+import {
+  TINDER_PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS,
+  boundedTinderPassiveInboxObservationDiagnostic
+} from "../device-bridge/tinder-passive-inbox-observation-diagnostic-contract.js";
 
 const heartbeatSource = fs.readFileSync(
   new URL("../device-bridge/heartbeat.js", import.meta.url),
@@ -60,6 +64,35 @@ const REQUEST_ID = "d2675347-0888-4548-9feb-ae4d71a972cf";
 const LOCAL_ATTESTATION_COMMAND_ID = "4dbf2bd9-3d7c-4925-89de-fc0dc62a2fe1";
 const INSTALLATION_ID = "c7cb0b92-ad3c-4ec6-88dc-d149ef536c3d";
 const CAPABILITIES = T0_DEVICE_CAPABILITIES;
+
+test("passive Inbox heartbeat diagnostic accepts only the fixed lost-gate vocabulary", () => {
+  const gateReasons = TINDER_PASSIVE_INBOX_OBSERVATION_DIAGNOSTIC_REASONS
+    .filter(reason => reason.startsWith("HEARTBEAT_GATE_"));
+  assert.deepEqual(gateReasons, [
+    "HEARTBEAT_GATE_LOST",
+    "HEARTBEAT_GATE_ENROLLMENT_INACTIVE",
+    "HEARTBEAT_GATE_LIFECYCLE_NOT_RUNNING",
+    "HEARTBEAT_GATE_MANUAL_DISCONNECTED",
+    "HEARTBEAT_GATE_HUMAN_BINDING_BUSY",
+    "HEARTBEAT_GATE_LOCAL_ATTESTATION_BUSY",
+    "HEARTBEAT_GATE_VISIBLE_CHAT_SYNC_BUSY",
+    "HEARTBEAT_GATE_UNBOUND_SWEEP_BUSY",
+    "HEARTBEAT_GATE_LOCAL_ATTESTATION_RETURN_BUSY",
+    "HEARTBEAT_GATE_RESUMED_FOREGROUND_RETURN_BUSY",
+    "HEARTBEAT_GATE_OFFICIAL_RESUME_WINDOW_BUSY"
+  ]);
+  for (const reason of gateReasons) {
+    assert.deepEqual(boundedTinderPassiveInboxObservationDiagnostic({
+      stage: "BLOCKED", reason, settle_sample_count: 1, validation_count: 0
+    }), Object.freeze({
+      stage: "BLOCKED", reason, settle_sample_count: 1, validation_count: 0
+    }));
+  }
+  assert.equal(boundedTinderPassiveInboxObservationDiagnostic({
+    stage: "BLOCKED", reason: "HEARTBEAT_GATE_UNRECOGNIZED", settle_sample_count: 1,
+    validation_count: 0
+  }), null);
+});
 
 // Most heartbeat fixtures model the pre-V8 canonical predecessor and do not
 // emulate the catalog inspector's complete V6 query set.  Keep that explicit:

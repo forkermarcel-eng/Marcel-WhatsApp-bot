@@ -74,6 +74,9 @@ import {
 import {
   boundedTinderPassiveInboxObservationLifecycle
 } from "./tinder-passive-inbox-observation-lifecycle-contract.js";
+import {
+  boundedTinderPassiveReadChannelDiagnostic
+} from "./tinder-passive-read-channel-diagnostic-contract.js";
 
 const TINDER_OFFICIAL_APP_RESUME_COMMAND_TYPE = "RESUME_OFFICIAL_TINDER_APP";
 const TINDER_LOCAL_CONVERSATION_ATTESTATION_COMMAND_TYPE = "STAGE_TINDER_LOCAL_CONVERSATION_ATTESTATION";
@@ -718,6 +721,15 @@ export function isBoundedTinderPassiveInboxObservationDiagnostic(value) {
   return boundedTinderPassiveInboxObservationDiagnostic(value) !== null;
 }
 
+/**
+ * The direct-read diagnostic is intentionally a current, bounded observation
+ * only. Its acceptance never influences a command, permit, reader, capture,
+ * ingress, or state transition.
+ */
+export function isBoundedTinderPassiveReadChannelDiagnostic(value) {
+  return boundedTinderPassiveReadChannelDiagnostic(value) !== null;
+}
+
 export function isExactTinderVerifiedChatReturnReadiness(value) {
   return exactKeys(value, TINDER_VERIFIED_CHAT_RETURN_READINESS_FIELDS)
     && typeof value.ready === "boolean";
@@ -851,6 +863,17 @@ function heartbeatAuditDetails(heartbeat) {
     // The companion status is observational only. It cannot affect command
     // selection, permit state, Inbox authority, or any reader/capture path.
     details.tinder_passive_inbox_observation_lifecycle = passiveInboxObservationLifecycle;
+  }
+  const passiveReadChannelDiagnostic = Object.hasOwn(heartbeat,
+    "tinder_passive_read_channel_diagnostic")
+    ? boundedTinderPassiveReadChannelDiagnostic(
+      heartbeat.tinder_passive_read_channel_diagnostic)
+    : null;
+  if (passiveReadChannelDiagnostic !== null) {
+    // Keep this explicit allowlist separate from the older Inbox diagnostics.
+    // It is an observation of the short Architecture-Cut path, not an input
+    // to any old orchestration or an authority for a new action.
+    details.tinder_passive_read_channel_diagnostic = passiveReadChannelDiagnostic;
   }
   return details;
 }
@@ -1176,6 +1199,11 @@ export function parseAndValidateHeartbeat(req) {
       && !boundedTinderPassiveInboxObservationLifecycle(
         body.tinder_passive_inbox_observation_lifecycle)) {
     throw invalidHeartbeat("Heartbeat passive Inbox observation lifecycle is invalid");
+  }
+  if (Object.hasOwn(body, "tinder_passive_read_channel_diagnostic")
+      && !isBoundedTinderPassiveReadChannelDiagnostic(
+        body.tinder_passive_read_channel_diagnostic)) {
+    throw invalidHeartbeat("Heartbeat passive read channel diagnostic is invalid");
   }
   if (body.tinder_verified_chat_return?.ready === true
       && body.tinder_resumed_foreground_chat_return?.ready === true) {

@@ -93,6 +93,7 @@ function deviceStatus({ inboxNavigation = null, officialResumeHandoff = null,
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
     tinder_passive_inbox_observation_diagnostic: null,
     tinder_passive_inbox_observation_lifecycle: null,
+    tinder_passive_read_channel_diagnostic: null,
     ...extra
   };
 }
@@ -227,7 +228,7 @@ test("device-list proxy allowlists the bounded inbox navigation projection", asy
     "device_id", "device_status", "display_name", "enrolled_at", "enrollment_state",
     "inbox_navigation", "last_accepted_official_resume_schema_diagnostic", "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume", "last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume", "last_heartbeat_accepted_at", "official_resume_handoff", "tinder_local_conversation_attestation_post_chat_capable",
     "tinder_manual_gate_capable", "tinder_official_resume_schema_evidence",
-    "tinder_passive_inbox_observation_diagnostic", "tinder_passive_inbox_observation_lifecycle", "tinder_resumed_foreground_chat_return",
+    "tinder_passive_inbox_observation_diagnostic", "tinder_passive_inbox_observation_lifecycle", "tinder_passive_read_channel_diagnostic", "tinder_resumed_foreground_chat_return",
     "tinder_resumed_foreground_chat_return_diagnostic", "tinder_state"
   ]);
 }));
@@ -1106,6 +1107,76 @@ test("device-list proxy suppresses malformed or offline passive Inbox lifecycle 
     await handler(req, res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.devices[0].tinder_passive_inbox_observation_lifecycle, null);
+  }
+}));
+
+test("device-list proxy allowlists only the bounded one-shot direct read diagnostic", async () => withEnvironment(async () => {
+  const diagnostic = {
+    direct_read_state: "BLOCKED",
+    direct_read_reason: "INBOX_UNVERIFIED",
+    processed_conversation_count: 0,
+    visible_conversation_count: 0,
+    reader_state: "NOT_REACHED",
+    reader_result: "NOT_REACHED",
+    segment_count: 0,
+    message_count: 0,
+    overlap_count: 0,
+    assembly_result: "NOT_REACHED"
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ extra: {
+          tinder_passive_read_channel_diagnostic: diagnostic
+        } })] });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].tinder_passive_read_channel_diagnostic, diagnostic);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(JSON.stringify(res.body).includes(forbidden), false);
+  }
+}));
+
+test("device-list proxy suppresses malformed or offline direct read diagnostic", async () => withEnvironment(async () => {
+  const valid = {
+    direct_read_state: "BLOCKED",
+    direct_read_reason: "INBOX_UNVERIFIED",
+    processed_conversation_count: 0,
+    visible_conversation_count: 0,
+    reader_state: "NOT_REACHED",
+    reader_result: "NOT_REACHED",
+    segment_count: 0,
+    message_count: 0,
+    overlap_count: 0,
+    assembly_result: "NOT_REACHED"
+  };
+  for (const extra of [
+    { tinder_passive_read_channel_diagnostic: { ...valid, message_text: "forbidden" } },
+    { tinder_passive_read_channel_diagnostic: { ...valid, direct_read_state: "IDLE" } },
+    { tinder_passive_read_channel_diagnostic: { ...valid, overlap_count: 101 } },
+    { tinder_passive_read_channel_diagnostic: valid, device_status: "OFFLINE" }
+  ]) {
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z",
+          devices: [deviceStatus({ extra })] });
+      }
+    });
+    const req = request();
+    req.query = {};
+    const res = responseRecorder();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.devices[0].tinder_passive_read_channel_diagnostic, null);
   }
 }));
 

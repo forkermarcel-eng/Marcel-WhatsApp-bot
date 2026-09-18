@@ -1063,6 +1063,9 @@
        <p class="enrollment-message" id="passiveInboxObservationLifecycle" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
+       <p class="enrollment-message" id="passiveReadChannelDiagnostic" role="status" aria-live="polite">
+         Nicht verfuegbar.
+       </p>
        <p class="enrollment-message" id="lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume" role="status" aria-live="polite">
          Nicht verfuegbar.
        </p>
@@ -1220,6 +1223,7 @@
       resumedForegroundChatReturnDiagnostic: document.getElementById("resumedForegroundChatReturnDiagnostic"),
       passiveInboxObservationDiagnostic: document.getElementById("passiveInboxObservationDiagnostic"),
       passiveInboxObservationLifecycle: document.getElementById("passiveInboxObservationLifecycle"),
+      passiveReadChannelDiagnostic: document.getElementById("passiveReadChannelDiagnostic"),
       lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume:
         document.getElementById("lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
@@ -1492,6 +1496,35 @@
        return selected.length === 0 ? "NONE" : selected.join("|");
      }));
    })();
+   const PASSIVE_READ_CHANNEL_STATES = new Set([
+     "IDLE", "AWAITING_FOREGROUND", "AWAITING_INBOX", "AWAITING_ROW_OPEN",
+     "AWAITING_ROW_ACTION_CONFIRMATION", "AWAITING_CONVERSATION_VERIFICATION", "READING",
+     "AWAITING_TRANSCRIPT_SUBMISSION", "AWAITING_HEADER_BACK", "AWAITING_NEXT_INBOX",
+     "COMPLETE", "BLOCKED"
+   ]);
+   const PASSIVE_READ_CHANNEL_REASONS = new Set([
+     "NONE", "NO_ELIGIBLE_CONVERSATIONS", "MAXIMUM_CONVERSATIONS_REACHED", "CHANNEL_TIMEOUT",
+     "STAGE_TIMEOUT", "TIME_UNAVAILABLE", "FOREGROUND_UNSAFE", "AUTH_OR_REVIEW_DETECTED",
+     "INBOX_UNVERIFIED", "INBOX_SNAPSHOT_STALE", "ROW_NOT_ELIGIBLE", "ROW_ACTION_REJECTED",
+     "ROW_ACTION_UNVERIFIED", "CONVERSATION_TRANSITION_DIVERGED", "CONVERSATION_UNVERIFIED",
+     "READ_STOPPED", "SUBMISSION_REJECTED", "SUBMISSION_OUTCOME_UNKNOWN", "HEADER_BACK_UNVERIFIED",
+     "HEADER_BACK_ACTION_REJECTED", "INBOX_RETURN_DIVERGED", "VISIBLE_INBOX_EXHAUSTED",
+     "INVALID_TRANSITION"
+   ]);
+   const PASSIVE_READ_CHANNEL_READER_STATES = new Set([
+     "NOT_REACHED", "IDLE", "READY_TO_SCROLL", "WAITING_FOR_VIEWPORT", "COMPLETE", "BLOCKED"
+   ]);
+   const PASSIVE_READ_CHANNEL_READER_RESULTS = new Set([
+     "NOT_REACHED", "READY_TO_SCROLL", "WAITING_FOR_VIEWPORT", "COMPLETE",
+     "BLOCKED_RUNTIME_GATE", "BLOCKED_VIEWPORT", "BLOCKED_SCREEN_CHANGED",
+     "BLOCKED_SCROLL_TARGET", "BLOCKED_SCROLL_ACTION", "BLOCKED_ASSEMBLY",
+     "BLOCKED_TIMEOUT", "BLOCKED_SEGMENT_LIMIT", "BLOCKED_INVALID_STATE"
+   ]);
+   const PASSIVE_READ_CHANNEL_ASSEMBLY_RESULTS = new Set([
+     "NOT_REACHED", "ACCEPTED", "BLOCKED_INVALID_CAPTURE", "BLOCKED_LAYOUT_CHANGED",
+     "BLOCKED_NO_PROGRESS", "BLOCKED_NO_OVERLAP", "BLOCKED_AMBIGUOUS_OVERLAP",
+     "BLOCKED_MESSAGE_LIMIT"
+   ]);
     const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
       "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
     ]);
@@ -3518,6 +3551,56 @@
        + ` / VALIDATIONS: ${lifecycle.validation_count}`;
    }
 
+   function passiveReadChannelDiagnosticIsSafe(value) {
+     const terminal = value?.direct_read_state === "COMPLETE"
+       || value?.direct_read_state === "BLOCKED";
+     return value && typeof value === "object" && !Array.isArray(value)
+       && Object.keys(value).sort().join("|") === [
+         "assembly_result", "direct_read_reason", "direct_read_state", "message_count",
+         "overlap_count", "processed_conversation_count", "reader_result", "reader_state", "segment_count",
+         "visible_conversation_count"
+       ].join("|")
+       && terminal
+       && PASSIVE_READ_CHANNEL_STATES.has(value.direct_read_state)
+       && PASSIVE_READ_CHANNEL_REASONS.has(value.direct_read_reason)
+       && value.direct_read_reason !== "NONE"
+       && Number.isSafeInteger(value.processed_conversation_count)
+       && value.processed_conversation_count >= 0 && value.processed_conversation_count <= 24
+       && Number.isSafeInteger(value.visible_conversation_count)
+       && value.visible_conversation_count >= 0 && value.visible_conversation_count <= 64
+       && PASSIVE_READ_CHANNEL_READER_STATES.has(value.reader_state)
+       && PASSIVE_READ_CHANNEL_READER_RESULTS.has(value.reader_result)
+       && Number.isSafeInteger(value.segment_count)
+       && value.segment_count >= 0 && value.segment_count <= 8
+       && Number.isSafeInteger(value.message_count)
+       && value.message_count >= 0 && value.message_count <= 100
+       && Number.isSafeInteger(value.overlap_count)
+       && value.overlap_count >= 0 && value.overlap_count <= 100
+       && PASSIVE_READ_CHANNEL_ASSEMBLY_RESULTS.has(value.assembly_result);
+   }
+
+   function renderPassiveReadChannelDiagnostic(device) {
+     const diagnostic = String(device?.device_status || "").toUpperCase() === "ONLINE"
+       ? device?.tinder_passive_read_channel_diagnostic
+       : null;
+     elements.passiveReadChannelDiagnostic.className = "enrollment-message";
+     if (!passiveReadChannelDiagnosticIsSafe(diagnostic)) {
+       elements.passiveReadChannelDiagnostic.textContent =
+         "Nicht verfuegbar: keine letzte akzeptierte direkte Tinder-Read-Beobachtung bei aktuellem Online-Geraet.";
+       return;
+     }
+     elements.passiveReadChannelDiagnostic.textContent =
+       `DIRECT_READ_STATE: ${diagnostic.direct_read_state}`
+       + ` / DIRECT_READ_REASON: ${diagnostic.direct_read_reason}`
+       + ` / PROCESSED: ${diagnostic.processed_conversation_count}`
+       + ` / VISIBLE: ${diagnostic.visible_conversation_count}`
+       + ` / READER: ${diagnostic.reader_state}/${diagnostic.reader_result}`
+       + ` / SEGMENTS: ${diagnostic.segment_count}`
+       + ` / MESSAGES: ${diagnostic.message_count}`
+       + ` / OVERLAPS: ${diagnostic.overlap_count}`
+       + ` / ASSEMBLY: ${diagnostic.assembly_result}`;
+   }
+
    function renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(device) {
      // This is deliberately a separately labelled, temporal audit projection.
      // It never replaces the current passive observation or grants any action.
@@ -3651,6 +3734,7 @@
      renderResumedForegroundChatReturnDiagnostic(null);
      renderPassiveInboxObservationDiagnostic(null);
      renderPassiveInboxObservationLifecycle(null);
+     renderPassiveReadChannelDiagnostic(null);
      renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(null);
      setDot(elements.bridgeDot, "info");
      elements.bridgeValue.textContent = value;
@@ -3787,6 +3871,7 @@
        renderResumedForegroundChatReturnDiagnostic(device);
        renderPassiveInboxObservationDiagnostic(device);
        renderPassiveInboxObservationLifecycle(device);
+       renderPassiveReadChannelDiagnostic(device);
        renderLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume(device);
        const previousDeviceId = selectedDevice?.device_id;
        const deviceStatus = String(device?.device_status || "UNKNOWN").toUpperCase();

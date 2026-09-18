@@ -34,6 +34,9 @@ import {
   boundedTinderPassiveInboxObservationLifecycle
 } from "./tinder-passive-inbox-observation-lifecycle-contract.js";
 import {
+  boundedTinderPassiveReadChannelDiagnostic
+} from "./tinder-passive-read-channel-diagnostic-contract.js";
+import {
   boundedTinderUnboundInboxSweepStartDisposition
 } from "./tinder-unbound-inbox-sweep-start-disposition-contract.js";
 import { runDeviceBridgeT1ReadOnlyPreflight } from "./t1-readonly-preflight.js";
@@ -364,6 +367,14 @@ export function normalizeAdminPassiveInboxObservationLifecycle(value) {
 }
 
 /**
+ * Bounded one-shot Architecture-Cut reader observation. It is selected from
+ * the latest accepted diagnostic heartbeat, but exposed only while online.
+ */
+export function normalizeAdminPassiveReadChannelDiagnostic(value) {
+  return boundedTinderPassiveReadChannelDiagnostic(value);
+}
+
+/**
  * The V8 start disposition is a historical, content-free audit fact only.
  * It is never a permit, command, identity, source, local Inbox proof, or
  * authorization for a later attempt.
@@ -454,6 +465,14 @@ function statusRow(row, now) {
       ? normalizeAdminPassiveInboxObservationLifecycle(
         row.tinder_passive_inbox_observation_lifecycle)
       : null,
+    // Android emits this bounded direct-read diagnostic only once. Recover
+    // the newest accepted diagnostic audit row while the device is currently
+    // online; an ordinary later heartbeat must not erase the one-shot
+    // observation, and an offline device must not expose it.
+    tinder_passive_read_channel_diagnostic: deviceStatus === "ONLINE"
+      ? normalizeAdminPassiveReadChannelDiagnostic(
+        row.tinder_passive_read_channel_diagnostic)
+      : null,
     last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
       lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume,
     last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:
@@ -478,6 +497,7 @@ const STATUS_COLUMNS = `d.device_id, d.display_name, d.enrollment_state, d.creat
     AS tinder_passive_inbox_observation_diagnostic,
   latest_heartbeat.details -> 'tinder_passive_inbox_observation_lifecycle'
     AS tinder_passive_inbox_observation_lifecycle,
+  last_passive_read_channel_diagnostic.tinder_passive_read_channel_diagnostic,
   last_passive_inbox_observation
     .last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume
     AS last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume,
@@ -494,6 +514,21 @@ const STATUS_FROM = `FROM device_bridge_devices d
      ORDER BY e.created_at DESC, e.audit_event_id DESC
      LIMIT 1
   ) latest_heartbeat ON true
+  LEFT JOIN LATERAL (
+    -- The direct Architecture-Cut reader reports a bounded diagnostic once.
+    -- Select only its latest accepted heartbeat audit fact; no identity,
+    -- content, command, permit, capture, or raw audit document is exposed.
+    SELECT evidence_heartbeat.details -> 'tinder_passive_read_channel_diagnostic'
+      AS tinder_passive_read_channel_diagnostic
+      FROM device_bridge_audit_events evidence_heartbeat
+     WHERE evidence_heartbeat.device_id=d.device_id
+       AND evidence_heartbeat.event_type='HEARTBEAT_ACCEPTED'
+       AND evidence_heartbeat.result_code='SUCCEEDED'
+       AND evidence_heartbeat.http_status=200
+       AND evidence_heartbeat.details ? 'tinder_passive_read_channel_diagnostic'
+     ORDER BY evidence_heartbeat.created_at DESC, evidence_heartbeat.audit_event_id DESC
+     LIMIT 1
+  ) last_passive_read_channel_diagnostic ON true
   LEFT JOIN LATERAL (
     -- Schema evidence is emitted at most once. Recover only an exact,
     -- already accepted terminal V2 Resume pair and label it historical; it

@@ -50,6 +50,9 @@ import {
 import {
   boundedTinderPassiveInboxObservationLifecycle
 } from "../device-bridge/tinder-passive-inbox-observation-lifecycle-contract.js";
+import {
+  boundedTinderPassiveReadChannelDiagnostic
+} from "../device-bridge/tinder-passive-read-channel-diagnostic-contract.js";
 
 const heartbeatSource = fs.readFileSync(
   new URL("../device-bridge/heartbeat.js", import.meta.url),
@@ -1478,6 +1481,81 @@ test("optional passive Inbox observation diagnostic is exact, content-free, and 
       capabilities: T1_DEVICE_CAPABILITIES,
       tinder_state: "CONNECTED",
       tinder_passive_inbox_observation_diagnostic: invalidDiagnostic
+    });
+    assert.throws(
+      () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
+      error => error.code === "INVALID_DEVICE_STATE"
+    );
+  }
+});
+
+test("one-shot direct read diagnostic has an exact bounded heartbeat and audit projection", async () => {
+  const diagnostic = {
+    direct_read_state: "BLOCKED",
+    direct_read_reason: "INBOX_UNVERIFIED",
+    processed_conversation_count: 0,
+    visible_conversation_count: 0,
+    reader_state: "NOT_REACHED",
+    reader_result: "NOT_REACHED",
+    segment_count: 0,
+    message_count: 1,
+    overlap_count: 2,
+    assembly_result: "ACCEPTED"
+  };
+  const bounded = boundedTinderPassiveReadChannelDiagnostic(diagnostic);
+  assert.deepEqual(bounded, Object.freeze(diagnostic));
+  assert.deepEqual(Object.keys(bounded).sort(), [
+    "assembly_result", "direct_read_reason", "direct_read_state", "message_count",
+    "overlap_count", "processed_conversation_count", "reader_result", "reader_state",
+    "segment_count", "visible_conversation_count"
+  ]);
+  const payload = heartbeatPayload({
+    capabilities: T1_DEVICE_CAPABILITIES,
+    tinder_state: "CONNECTED",
+    tinder_passive_read_channel_diagnostic: diagnostic
+  });
+  const request = heartbeatRequest(payload);
+  assert.deepEqual(
+    parseAndValidateHeartbeat(request.req).tinder_passive_read_channel_diagnostic,
+    diagnostic
+  );
+
+  const fake = heartbeatPool({ request });
+  const response = await processHeartbeatTransaction(
+    fake.pool,
+    { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: REQUEST_ID, contentSha256: request.hash },
+    payload,
+    NOW
+  );
+  assert.deepEqual(response.commands, []);
+  const audit = fake.calls.find(call => call.sql.includes("INSERT INTO device_bridge_audit_events"));
+  assert.deepEqual(JSON.parse(audit.params[3]), {
+    sequence: 1,
+    tinder_passive_read_channel_diagnostic: diagnostic
+  });
+  const update = fake.calls.find(call => call.sql.includes("UPDATE device_bridge_devices"));
+  const serialized = JSON.stringify({ response, update: update?.params });
+  for (const forbidden of [
+    "direct_read_state", "direct_read_reason", "message_count", "assembly_result"
+  ]) assert.equal(serialized.includes(forbidden), false);
+
+  for (const malformed of [
+    { ...diagnostic, direct_read_state: "READING", direct_read_reason: "NONE" },
+    { ...diagnostic, direct_read_state: "FUTURE" },
+    { ...diagnostic, direct_read_reason: "raw exception" },
+    { ...diagnostic, direct_read_state: "BLOCKED", direct_read_reason: "NONE" },
+    { ...diagnostic, processed_conversation_count: 25 },
+    { ...diagnostic, visible_conversation_count: 65 },
+    { ...diagnostic, segment_count: 9 },
+    { ...diagnostic, overlap_count: 101 },
+    { ...diagnostic, raw_tree: "forbidden" },
+    { ...diagnostic, visible_name: "forbidden" }
+  ]) {
+    assert.equal(boundedTinderPassiveReadChannelDiagnostic(malformed), null);
+    const invalid = heartbeatPayload({
+      capabilities: T1_DEVICE_CAPABILITIES,
+      tinder_state: "CONNECTED",
+      tinder_passive_read_channel_diagnostic: malformed
     });
     assert.throws(
       () => parseAndValidateHeartbeat(heartbeatRequest(invalid).req),
@@ -3867,6 +3945,72 @@ test("admin status suppresses malformed or offline passive Inbox lifecycle compa
     const res = responseRecorder();
     await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
     assert.equal(res.body.device.tinder_passive_inbox_observation_lifecycle, null);
+  }
+});
+
+test("admin status retains only the latest accepted bounded direct-read observation while online", async () => {
+  const diagnostic = {
+    direct_read_state: "BLOCKED",
+    direct_read_reason: "INBOX_UNVERIFIED",
+    processed_conversation_count: 0,
+    visible_conversation_count: 0,
+    reader_state: "NOT_REACHED",
+    reader_result: "NOT_REACHED",
+    segment_count: 0,
+    message_count: 0,
+    overlap_count: 0,
+    assembly_result: "NOT_REACHED"
+  };
+  let sql = "";
+  const pool = {
+    async query(query) {
+      sql = query;
+      const row = statusRow(new Date(), CAPABILITIES, "CONNECTED");
+      row.tinder_passive_read_channel_diagnostic = diagnostic;
+      return { rows: [row] };
+    }
+  };
+  const res = responseRecorder();
+  await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+  assert.deepEqual(res.body.device.tinder_passive_read_channel_diagnostic, diagnostic);
+  assert.match(sql, /last_passive_read_channel_diagnostic/i);
+  assert.match(sql, /details \? 'tinder_passive_read_channel_diagnostic'/i);
+  assert.match(sql, /ORDER BY evidence_heartbeat\.created_at DESC, evidence_heartbeat\.audit_event_id DESC/i);
+  const serialized = JSON.stringify(res.body.device.tinder_passive_read_channel_diagnostic);
+  for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("admin status suppresses malformed or offline direct-read observation", async () => {
+  const valid = {
+    direct_read_state: "BLOCKED",
+    direct_read_reason: "INBOX_UNVERIFIED",
+    processed_conversation_count: 0,
+    visible_conversation_count: 0,
+    reader_state: "NOT_REACHED",
+    reader_result: "NOT_REACHED",
+    segment_count: 0,
+    message_count: 0,
+    overlap_count: 0,
+    assembly_result: "NOT_REACHED"
+  };
+  for (const [acceptedAt, diagnostic] of [
+    [new Date(), { ...valid, raw_tree: "forbidden" }],
+    [new Date(), { ...valid, direct_read_state: "IDLE", direct_read_reason: "INBOX_UNVERIFIED" }],
+    [new Date(), { ...valid, overlap_count: 101 }],
+    [new Date(Date.now() - 91_000), valid]
+  ]) {
+    const pool = {
+      async query() {
+        const row = statusRow(acceptedAt, CAPABILITIES, "CONNECTED");
+        row.tinder_passive_read_channel_diagnostic = diagnostic;
+        return { rows: [row] };
+      }
+    };
+    const res = responseRecorder();
+    await createAdminDeviceStatusHandler(pool)({ params: { deviceId: DEVICE_ID } }, res);
+    assert.equal(res.body.device.tinder_passive_read_channel_diagnostic, null);
   }
 });
 

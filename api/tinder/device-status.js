@@ -15,6 +15,9 @@ import {
   boundedTinderPassiveInboxObservationLifecycle
 } from "../../device-bridge/tinder-passive-inbox-observation-lifecycle-contract.js";
 import {
+  boundedTinderPassiveReadChannelDiagnostic
+} from "../../device-bridge/tinder-passive-read-channel-diagnostic-contract.js";
+import {
   boundedTinderUnboundInboxSweepStartDisposition
 } from "../../device-bridge/tinder-unbound-inbox-sweep-start-disposition-contract.js";
 
@@ -161,6 +164,7 @@ const LEGACY_DEVICE_STATUS_FIELDS = Object.freeze([
   "tinder_resumed_foreground_chat_return_diagnostic",
   "tinder_passive_inbox_observation_diagnostic",
   "tinder_passive_inbox_observation_lifecycle",
+  "tinder_passive_read_channel_diagnostic",
   "last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume",
   "last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume"
 ]);
@@ -400,6 +404,10 @@ function normalizePublicPassiveInboxObservationLifecycle(value) {
   return boundedTinderPassiveInboxObservationLifecycle(value);
 }
 
+function normalizePublicPassiveReadChannelDiagnostic(value) {
+  return boundedTinderPassiveReadChannelDiagnostic(value);
+}
+
 /**
  * Preserve the pre-existing device-status fields without changing their
  * validation semantics, while explicitly allowlisting the new optional
@@ -484,6 +492,18 @@ function sanitizePublicDeviceStatus(value) {
         value.tinder_passive_inbox_observation_lifecycle
       )
       : null;
+  const hasPassiveReadChannelDiagnostic = Object.hasOwn(
+    value, "tinder_passive_read_channel_diagnostic"
+  );
+  // Admin selects the latest accepted one-shot observation; retain it only
+  // while the device is currently online and revalidate its exact grammar.
+  const passiveReadChannelDiagnostic =
+    String(value.device_status || "").toUpperCase() === "ONLINE"
+      && hasPassiveReadChannelDiagnostic
+      ? normalizePublicPassiveReadChannelDiagnostic(
+        value.tinder_passive_read_channel_diagnostic
+      )
+      : null;
   // This separately labelled temporal record is historical accepted evidence,
   // not a current diagnostic or an authority for any command or permit.
   const hasLastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume =
@@ -521,6 +541,7 @@ function sanitizePublicDeviceStatus(value) {
     tinder_resumed_foreground_chat_return_diagnostic: resumedForegroundChatReturnDiagnostic,
     tinder_passive_inbox_observation_diagnostic: passiveInboxObservationDiagnostic,
     tinder_passive_inbox_observation_lifecycle: passiveInboxObservationLifecycle,
+    tinder_passive_read_channel_diagnostic: passiveReadChannelDiagnostic,
     last_accepted_passive_inbox_observation_diagnostic_after_latest_v2_resume:
       lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume,
     last_accepted_unbound_inbox_sweep_start_disposition_after_latest_v2_resume:

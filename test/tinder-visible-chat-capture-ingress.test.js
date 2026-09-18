@@ -154,7 +154,11 @@ test("passive read ingress accepts only signed V2 captures and disables legacy f
 
   assert.equal(res.statusCode, 201);
   assert.equal(received.capture.captureMetadata.schemaVersion, "tinder-visible-chat-v2");
-  assert.deepEqual(received.provenance, { source: "android_visible_chat", protocolVersion: 1 });
+  assert.deepEqual(received.provenance, {
+    source: "android_visible_chat",
+    protocolVersion: 1,
+    readChannel: "PASSIVE_READ"
+  });
 
   const rejected = responseRecorder();
   await handler(rawRequest(), rejected);

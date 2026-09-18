@@ -357,9 +357,18 @@ function normalizeProvenance(provenance) {
     throw new TinderCaptureValidationError("Die Protocol-Version ist ungültig.", "INVALID_CAPTURE_PROVENANCE");
   }
 
+  // The passive direct-read ingress has one server-owned channel marker. It is neither a
+  // person nor a thread fact; it only isolates the new bounded dashboard adapter from legacy
+  // capture shapes that predate this direct channel.
+  const readChannel = provenance?.readChannel ?? provenance?.read_channel ?? null;
+  if (readChannel !== null && readChannel !== "PASSIVE_READ") {
+    throw new TinderCaptureValidationError("Der Read-Channel ist ungültig.", "INVALID_CAPTURE_PROVENANCE");
+  }
+
   return Object.freeze({
     source,
-    ...(protocolVersion === null ? {} : { protocolVersion: Number(protocolVersion) })
+    ...(protocolVersion === null ? {} : { protocolVersion: Number(protocolVersion) }),
+    ...(readChannel === null ? {} : { readChannel: "PASSIVE_READ" })
   });
 }
 
@@ -886,6 +895,7 @@ function createPgTinderCaptureRepository(pool) {
             AND mapping_status = 'NEEDS_HUMAN_MAPPING'
             AND human_review_status = 'PENDING'
             AND resolved_contact_id IS NULL
+            AND provenance ->> 'readChannel' = 'PASSIVE_READ'
           ORDER BY received_at DESC, capture_id DESC
           LIMIT $2`,
         [deviceId, TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT]

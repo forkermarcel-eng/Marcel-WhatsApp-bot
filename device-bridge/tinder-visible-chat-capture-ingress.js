@@ -319,7 +319,11 @@ function createTinderPassiveReadCaptureIngressHandler(pool, {
       const stored = await store.storeSafeCapture({
         deviceId: auth.deviceId,
         capture,
-        provenance: { source: "android_visible_chat", protocolVersion: DEVICE_BRIDGE_PROTOCOL.version }
+        provenance: {
+          source: "android_visible_chat",
+          protocolVersion: DEVICE_BRIDGE_PROTOCOL.version,
+          readChannel: "PASSIVE_READ"
+        }
       });
       const record = normalizeCaptureRecord(stored);
       return res.status(201).json({

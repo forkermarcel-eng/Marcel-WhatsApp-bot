@@ -513,6 +513,32 @@ test("the passive read adapter never resolves a contact from a runtime fingerpri
   assert.equal(repository.reusableMappingRequests.length, 0);
 });
 
+test("the passive read adapter persists only its fixed internal channel marker", async () => {
+  const repository = fixtureRepository();
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    allowLegacyFingerprintMapping: false
+  });
+
+  const stored = await store.storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: {
+      source: "android_visible_chat",
+      protocolVersion: 1,
+      readChannel: "PASSIVE_READ"
+    }
+  });
+
+  assert.deepEqual(stored.provenance, {
+    source: "android_visible_chat",
+    protocolVersion: 1,
+    readChannel: "PASSIVE_READ"
+  });
+  assert.equal(stored.mappingStatus, TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING);
+  assert.equal(stored.resolvedContactId, null);
+});
+
 test("a reuse candidate for another device or runtime thread fails closed to pending human mapping", async () => {
   for (const candidate of [
     confirmedReusableMapping({ deviceId: "f880455d-325c-4f35-9914-823dcb0e0d18" }),
@@ -839,6 +865,7 @@ test("the pending read-channel reader is device-scoped, bounded, and selects no 
   assert.match(call.sql, /mapping_status\s*=\s*'NEEDS_HUMAN_MAPPING'/i);
   assert.match(call.sql, /human_review_status\s*=\s*'PENDING'/i);
   assert.match(call.sql, /resolved_contact_id\s+IS\s+NULL/i);
+  assert.match(call.sql, /provenance\s*->>\s*'readChannel'\s*=\s*'PASSIVE_READ'/i);
   assert.match(call.sql, /LIMIT \$2/i);
   // A runtime fingerprint is not a durable Tinder identity.  Collapsing the dashboard's
   // unknown/PENDING rows by it could hide a distinct same-name conversation, so this read

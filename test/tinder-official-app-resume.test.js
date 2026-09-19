@@ -160,16 +160,14 @@ test("official-app resume rejects extra targeting input before a transaction", a
   assert.equal(repository.state.commands.length, 0);
 });
 
-test("official-app resume conflicts with an active V3 or V4 permit before command creation", async () => {
+test("official-app resume coexists with an active legacy V3 permit but still blocks V4", async () => {
   const v3Repository = fixtureRepository({ activeHumanArmed: true });
   assert.deepEqual(await service(v3Repository).queueOfficialAppResume({
     deviceId: DEVICE_ID,
     sourceCaptureId: CAPTURE_ID
-  }), {
-    status: TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_CONFLICT,
-    reasonCode: TINDER_OFFICIAL_APP_RESUME_REASON.HUMAN_ARMED_PERMIT_ACTIVE
-  });
-  assert.equal(v3Repository.state.commands.length, 0);
+  }), { status: TINDER_OFFICIAL_APP_RESUME_STATUS.QUEUED });
+  assert.equal(v3Repository.state.commands.length, 1);
+  assert.equal(v3Repository.state.calls.some(call => call.type === "human-armed"), false);
 
   const v4Repository = fixtureRepository({ activeVisibleChatSync: true });
   assert.deepEqual(await service(v4Repository).queueOfficialAppResume({

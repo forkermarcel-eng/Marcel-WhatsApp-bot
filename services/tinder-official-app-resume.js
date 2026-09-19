@@ -231,7 +231,6 @@ function requireRepository(repository) {
     "withTransaction",
     "getDeviceRuntimeForUpdate",
     "expireOfficialAppResumePermits",
-    "findActiveHumanArmedPermitForDevice",
     "findActiveVisibleChatSyncPermitForDevice",
     "findActiveOfficialAppResumePermitForDevice",
     "findActiveLocalConversationAttestationPermitForDevice",
@@ -296,15 +295,12 @@ export function createTinderOfficialAppResumeService(repository, {
       deviceId,
       expiredAt: currentTime.toISOString()
     });
-    if (strictBoolean(await repository.findActiveHumanArmedPermitForDevice(transaction, {
-      deviceId,
-      now: currentTime.toISOString()
-    }), "findActiveHumanArmedPermitForDevice")) {
-      return Object.freeze({
-        status: TINDER_OFFICIAL_APP_RESUME_STATUS.PERMIT_CONFLICT,
-        reasonCode: TINDER_OFFICIAL_APP_RESUME_REASON.HUMAN_ARMED_PERMIT_ACTIVE
-      });
-    }
+    // A historical V3 human-arm permit is an independent, capture-only
+    // authority.  It must neither be consumed nor reset here, but it also
+    // cannot make an empty-payload V2 launcher command target, read, or
+    // ingest a chat.  Keeping it out of this short read-channel handoff
+    // removes the legacy synchronous dependency while preserving both
+    // permit records and their own fail-closed consumption contracts.
     if (strictBoolean(await repository.findActiveVisibleChatSyncPermitForDevice(transaction, {
       deviceId,
       now: currentTime.toISOString()
@@ -534,23 +530,6 @@ export function createPgTinderOfficialAppResumeRepository(pool) {
             WHERE device_id=$1
               AND permit_state='ISSUED'
               AND expires_at>$2
-         ) AS active`,
-        [deviceId, currentTime]
-      );
-      return result.rows[0]?.active === true;
-    },
-
-    async findActiveHumanArmedPermitForDevice(client, { deviceId, now: currentTime }) {
-      const result = await client.query(
-        `SELECT EXISTS (
-           SELECT 1
-             FROM contact_human_armed_conversation_binding_permits permit
-             JOIN device_bridge_commands command
-               ON command.command_id=permit.command_id
-            WHERE permit.device_id=$1
-              AND permit.permit_state='ISSUED'
-              AND permit.expires_at>$2
-              AND command.command_type='ARM_TINDER_CONVERSATION_BINDING'
          ) AS active`,
         [deviceId, currentTime]
       );

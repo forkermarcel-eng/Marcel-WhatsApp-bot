@@ -515,21 +515,6 @@ const STATUS_FROM = `FROM device_bridge_devices d
      LIMIT 1
   ) latest_heartbeat ON true
   LEFT JOIN LATERAL (
-    -- The direct Architecture-Cut reader reports a bounded diagnostic once.
-    -- Select only its latest accepted heartbeat audit fact; no identity,
-    -- content, command, permit, capture, or raw audit document is exposed.
-    SELECT evidence_heartbeat.details -> 'tinder_passive_read_channel_diagnostic'
-      AS tinder_passive_read_channel_diagnostic
-      FROM device_bridge_audit_events evidence_heartbeat
-     WHERE evidence_heartbeat.device_id=d.device_id
-       AND evidence_heartbeat.event_type='HEARTBEAT_ACCEPTED'
-       AND evidence_heartbeat.result_code='SUCCEEDED'
-       AND evidence_heartbeat.http_status=200
-       AND evidence_heartbeat.details ? 'tinder_passive_read_channel_diagnostic'
-     ORDER BY evidence_heartbeat.created_at DESC, evidence_heartbeat.audit_event_id DESC
-     LIMIT 1
-  ) last_passive_read_channel_diagnostic ON true
-  LEFT JOIN LATERAL (
     -- Schema evidence is emitted at most once. Recover only an exact,
     -- already accepted terminal V2 Resume pair and label it historical; it
     -- never replaces the newest heartbeat's live evidence.
@@ -577,6 +562,25 @@ const STATUS_FROM = `FROM device_bridge_devices d
      ORDER BY resume_permit.dispatched_at DESC, resume_permit.created_at DESC
      LIMIT 1
   ) latest_v2_resume ON true
+  LEFT JOIN LATERAL (
+    -- The direct Architecture-Cut reader reports a bounded diagnostic once.
+    -- Fence it at the latest successfully dispatched V2 Resume so a historic
+    -- terminal value cannot be mistaken for the current direct read. This is
+    -- display-only: no timestamp, command, permit, identity, or raw audit
+    -- document is projected, and no command/read path observes this query.
+    SELECT evidence_heartbeat.details -> 'tinder_passive_read_channel_diagnostic'
+      AS tinder_passive_read_channel_diagnostic
+      FROM device_bridge_audit_events evidence_heartbeat
+     WHERE latest_v2_resume.dispatched_at IS NOT NULL
+       AND evidence_heartbeat.device_id=d.device_id
+       AND evidence_heartbeat.event_type='HEARTBEAT_ACCEPTED'
+       AND evidence_heartbeat.result_code='SUCCEEDED'
+       AND evidence_heartbeat.http_status=200
+       AND evidence_heartbeat.created_at>=latest_v2_resume.dispatched_at
+       AND evidence_heartbeat.details ? 'tinder_passive_read_channel_diagnostic'
+     ORDER BY evidence_heartbeat.created_at DESC, evidence_heartbeat.audit_event_id DESC
+     LIMIT 1
+  ) last_passive_read_channel_diagnostic ON true
   LEFT JOIN LATERAL (
     -- A one-shot Android diagnostic may be followed by an ordinary heartbeat.
     -- Recover only an already accepted bounded value, without exposing audit

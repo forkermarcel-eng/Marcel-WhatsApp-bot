@@ -3973,7 +3973,7 @@ test("admin status suppresses malformed or offline passive Inbox lifecycle compa
   }
 });
 
-test("admin status retains only the latest accepted bounded direct-read observation while online", async () => {
+test("admin status retains only a bounded direct-read observation after the latest V2 Resume", async () => {
   const diagnostic = {
     direct_read_state: "BLOCKED",
     direct_read_reason: "INBOX_UNVERIFIED",
@@ -4000,6 +4000,10 @@ test("admin status retains only the latest accepted bounded direct-read observat
   assert.deepEqual(res.body.device.tinder_passive_read_channel_diagnostic, diagnostic);
   assert.match(sql, /last_passive_read_channel_diagnostic/i);
   assert.match(sql, /details \? 'tinder_passive_read_channel_diagnostic'/i);
+  assert.match(sql, /latest_v2_resume\.dispatched_at IS NOT NULL/i);
+  assert.match(sql, /evidence_heartbeat\.created_at>=latest_v2_resume\.dispatched_at/i);
+  assert.ok(sql.indexOf("latest_v2_resume ON true")
+    < sql.indexOf("last_passive_read_channel_diagnostic ON true"));
   assert.match(sql, /ORDER BY evidence_heartbeat\.created_at DESC, evidence_heartbeat\.audit_event_id DESC/i);
   const serialized = JSON.stringify(res.body.device.tinder_passive_read_channel_diagnostic);
   for (const forbidden of ["permit", "command", "identity", "source", "binding", "capture", "header", "text"]) {

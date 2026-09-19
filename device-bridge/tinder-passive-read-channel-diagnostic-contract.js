@@ -62,10 +62,25 @@ export const TINDER_PASSIVE_READ_CHANNEL_ASSEMBLY_RESULTS = Object.freeze([
   "BLOCKED_MESSAGE_LIMIT"
 ]);
 
-const FIELDS = Object.freeze([
+/**
+ * Content-free explanation of the already-terminal direct Inbox inspection.  It remains a
+ * passive diagnostic field, never an action or authorization input.
+ */
+export const TINDER_PASSIVE_READ_CHANNEL_INBOX_INSPECTION_OUTCOMES = Object.freeze([
+  "NOT_REACHED",
+  "SAFE_CHAT_TAB_TARGET_MISSING",
+  "CHAT_TAB_ACTION_REJECTED",
+  "INBOX_SETTLING_EXPIRED",
+  "INBOX_SEMANTIC_PROJECTION_REJECTED"
+]);
+
+const LEGACY_FIELDS = Object.freeze([
   "direct_read_state", "direct_read_reason", "processed_conversation_count", "visible_conversation_count",
   "reader_state", "reader_result", "segment_count", "message_count", "overlap_count",
   "assembly_result"
+]);
+const EXTENDED_FIELDS = Object.freeze([
+  ...LEGACY_FIELDS, "inbox_inspection_outcome"
 ]);
 const MAXIMUM_PROCESSED_CONVERSATIONS = 24;
 const MAXIMUM_VISIBLE_CONVERSATIONS = 64;
@@ -76,14 +91,15 @@ const reasons = new Set(TINDER_PASSIVE_READ_CHANNEL_DIAGNOSTIC_REASONS);
 const readerStates = new Set(TINDER_PASSIVE_READ_CHANNEL_READER_STATES);
 const readerResults = new Set(TINDER_PASSIVE_READ_CHANNEL_READER_RESULTS);
 const assemblyResults = new Set(TINDER_PASSIVE_READ_CHANNEL_ASSEMBLY_RESULTS);
+const inboxInspectionOutcomes = new Set(TINDER_PASSIVE_READ_CHANNEL_INBOX_INSPECTION_OUTCOMES);
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function exactKeys(value) {
+function exactKeys(value, fields) {
   return plainObject(value)
-    && Object.keys(value).sort().join("|") === [...FIELDS].sort().join("|");
+    && Object.keys(value).sort().join("|") === [...fields].sort().join("|");
 }
 
 function bounded(value, maximum) {
@@ -97,7 +113,11 @@ function bounded(value, maximum) {
 export function boundedTinderPassiveReadChannelDiagnostic(value) {
   const terminal = value?.direct_read_state === "COMPLETE"
     || value?.direct_read_state === "BLOCKED";
-  if (!exactKeys(value)
+  const legacy = exactKeys(value, LEGACY_FIELDS);
+  const extended = exactKeys(value, EXTENDED_FIELDS);
+  const inboxTerminal = value?.direct_read_reason === "INBOX_UNVERIFIED";
+  const concreteInboxOutcome = value?.inbox_inspection_outcome !== "NOT_REACHED";
+  if ((!legacy && !extended)
       || !terminal
       || !states.has(value.direct_read_state)
       || !reasons.has(value.direct_read_reason)
@@ -109,10 +129,12 @@ export function boundedTinderPassiveReadChannelDiagnostic(value) {
       || !bounded(value.segment_count, MAXIMUM_SEGMENTS)
       || !bounded(value.message_count, MAXIMUM_MESSAGES)
       || !bounded(value.overlap_count, MAXIMUM_MESSAGES)
-      || !assemblyResults.has(value.assembly_result)) {
+      || !assemblyResults.has(value.assembly_result)
+      || (extended && (!inboxInspectionOutcomes.has(value.inbox_inspection_outcome)
+        || inboxTerminal !== concreteInboxOutcome))) {
     return null;
   }
-  return Object.freeze({
+  const boundedValue = {
     direct_read_state: value.direct_read_state,
     direct_read_reason: value.direct_read_reason,
     processed_conversation_count: value.processed_conversation_count,
@@ -123,5 +145,9 @@ export function boundedTinderPassiveReadChannelDiagnostic(value) {
     message_count: value.message_count,
     overlap_count: value.overlap_count,
     assembly_result: value.assembly_result
-  });
+  };
+  // Keep existing Android/audit rows valid and do not fabricate an outcome where none was
+  // observed.  The extended shape is an explicit, one-shot status observation only.
+  if (extended) boundedValue.inbox_inspection_outcome = value.inbox_inspection_outcome;
+  return Object.freeze(boundedValue);
 }

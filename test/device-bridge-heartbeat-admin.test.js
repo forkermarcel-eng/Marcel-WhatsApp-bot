@@ -1564,6 +1564,31 @@ test("one-shot direct read diagnostic has an exact bounded heartbeat and audit p
   }
 });
 
+test("extended direct Inbox inspection outcome is bounded, causal, and remains status-only", async () => {
+  const diagnostic = {
+    direct_read_state: "BLOCKED",
+    direct_read_reason: "INBOX_UNVERIFIED",
+    inbox_inspection_outcome: "INBOX_SEMANTIC_PROJECTION_REJECTED",
+    processed_conversation_count: 0,
+    visible_conversation_count: 0,
+    reader_state: "NOT_REACHED",
+    reader_result: "NOT_REACHED",
+    segment_count: 0,
+    message_count: 0,
+    overlap_count: 0,
+    assembly_result: "NOT_REACHED"
+  };
+  assert.deepEqual(boundedTinderPassiveReadChannelDiagnostic(diagnostic), Object.freeze(diagnostic));
+  for (const malformed of [
+    { ...diagnostic, inbox_inspection_outcome: "FUTURE" },
+    { ...diagnostic, inbox_inspection_outcome: "NOT_REACHED" },
+    { ...diagnostic, direct_read_reason: "READ_STOPPED" },
+    { ...diagnostic, raw_tree: "forbidden" }
+  ]) {
+    assert.equal(boundedTinderPassiveReadChannelDiagnostic(malformed), null);
+  }
+});
+
 test("optional passive Inbox lifecycle companion is exact, content-free, and preserves the terminal diagnostic", async () => {
   const terminalDiagnostic = {
     stage: "BLOCKED",

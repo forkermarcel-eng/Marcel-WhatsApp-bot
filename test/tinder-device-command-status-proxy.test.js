@@ -1144,6 +1144,39 @@ test("device-list proxy allowlists only the bounded one-shot direct read diagnos
   }
 }));
 
+test("device-list proxy allows only the bounded extended Inbox inspection outcome", async () => withEnvironment(async () => {
+  const diagnostic = {
+    direct_read_state: "BLOCKED",
+    direct_read_reason: "INBOX_UNVERIFIED",
+    inbox_inspection_outcome: "INBOX_SETTLING_EXPIRED",
+    processed_conversation_count: 0,
+    visible_conversation_count: 0,
+    reader_state: "NOT_REACHED",
+    reader_result: "NOT_REACHED",
+    segment_count: 0,
+    message_count: 0,
+    overlap_count: 0,
+    assembly_result: "NOT_REACHED"
+  };
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({ ok: true, server_time: "2026-09-02T12:00:04.000Z",
+        devices: [deviceStatus({ extra: {
+          tinder_passive_read_channel_diagnostic: diagnostic
+        } })] });
+    }
+  });
+  const req = request();
+  req.query = {};
+  const res = responseRecorder();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.devices[0].tinder_passive_read_channel_diagnostic, diagnostic);
+  assert.equal(JSON.stringify(res.body).includes("permit"), false);
+}));
+
 test("device-list proxy suppresses malformed or offline direct read diagnostic", async () => withEnvironment(async () => {
   const valid = {
     direct_read_state: "BLOCKED",

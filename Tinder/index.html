@@ -1525,6 +1525,10 @@
      "BLOCKED_NO_PROGRESS", "BLOCKED_NO_OVERLAP", "BLOCKED_AMBIGUOUS_OVERLAP",
      "BLOCKED_MESSAGE_LIMIT"
    ]);
+   const PASSIVE_READ_CHANNEL_INBOX_INSPECTION_OUTCOMES = new Set([
+     "NOT_REACHED", "SAFE_CHAT_TAB_TARGET_MISSING", "CHAT_TAB_ACTION_REJECTED",
+     "INBOX_SETTLING_EXPIRED", "INBOX_SEMANTIC_PROJECTION_REJECTED"
+   ]);
     const OFFICIAL_APP_RESUME_OBSERVATION_STATUSES = new Set([
       "NOT_REQUESTED", "PENDING", "DISPATCHED", "CANCELLED", "EXPIRED"
     ]);
@@ -3554,12 +3558,23 @@
    function passiveReadChannelDiagnosticIsSafe(value) {
      const terminal = value?.direct_read_state === "COMPLETE"
        || value?.direct_read_state === "BLOCKED";
+     const keys = value && typeof value === "object" && !Array.isArray(value)
+       ? Object.keys(value).sort().join("|") : "";
+     const legacyKeys = [
+       "assembly_result", "direct_read_reason", "direct_read_state", "message_count",
+       "overlap_count", "processed_conversation_count", "reader_result", "reader_state",
+       "segment_count", "visible_conversation_count"
+     ].join("|");
+     const extendedKeys = [
+       "assembly_result", "direct_read_reason", "direct_read_state", "inbox_inspection_outcome",
+       "message_count", "overlap_count", "processed_conversation_count", "reader_result",
+       "reader_state", "segment_count", "visible_conversation_count"
+     ].join("|");
+     const extended = keys === extendedKeys;
+     const inboxTerminal = value?.direct_read_reason === "INBOX_UNVERIFIED";
+     const concreteInboxOutcome = value?.inbox_inspection_outcome !== "NOT_REACHED";
      return value && typeof value === "object" && !Array.isArray(value)
-       && Object.keys(value).sort().join("|") === [
-         "assembly_result", "direct_read_reason", "direct_read_state", "message_count",
-         "overlap_count", "processed_conversation_count", "reader_result", "reader_state", "segment_count",
-         "visible_conversation_count"
-       ].join("|")
+       && (keys === legacyKeys || extended)
        && terminal
        && PASSIVE_READ_CHANNEL_STATES.has(value.direct_read_state)
        && PASSIVE_READ_CHANNEL_REASONS.has(value.direct_read_reason)
@@ -3576,7 +3591,9 @@
        && value.message_count >= 0 && value.message_count <= 100
        && Number.isSafeInteger(value.overlap_count)
        && value.overlap_count >= 0 && value.overlap_count <= 100
-       && PASSIVE_READ_CHANNEL_ASSEMBLY_RESULTS.has(value.assembly_result);
+       && PASSIVE_READ_CHANNEL_ASSEMBLY_RESULTS.has(value.assembly_result)
+       && (!extended || (PASSIVE_READ_CHANNEL_INBOX_INSPECTION_OUTCOMES.has(
+         value.inbox_inspection_outcome) && inboxTerminal === concreteInboxOutcome));
    }
 
    function renderPassiveReadChannelDiagnostic(device) {
@@ -3592,6 +3609,8 @@
      elements.passiveReadChannelDiagnostic.textContent =
        `DIRECT_READ_STATE: ${diagnostic.direct_read_state}`
        + ` / DIRECT_READ_REASON: ${diagnostic.direct_read_reason}`
+       + (Object.hasOwn(diagnostic, "inbox_inspection_outcome")
+         ? ` / INBOX_INSPECTION_OUTCOME: ${diagnostic.inbox_inspection_outcome}` : "")
        + ` / PROCESSED: ${diagnostic.processed_conversation_count}`
        + ` / VISIBLE: ${diagnostic.visible_conversation_count}`
        + ` / READER: ${diagnostic.reader_state}/${diagnostic.reader_result}`

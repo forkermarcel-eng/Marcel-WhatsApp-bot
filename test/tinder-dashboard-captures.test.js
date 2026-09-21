@@ -394,6 +394,49 @@ test("pending read-channel dashboard projection is bounded, device-scoped, and e
   }
 });
 
+test("pending read-channel projection drops one malformed historical record without hiding a later safe record", async () => {
+  const handler = createTinderDashboardPendingReadConversationListHandler({}, {
+    createRepository() {
+      return {
+        async findPendingReadChannelConversations() {
+          return [
+            {
+              received_at: "2026-09-12T12:00:00.000Z",
+              mapping_status: "NEEDS_HUMAN_MAPPING",
+              human_review_status: "PENDING",
+              visible_messages: [
+                { visibleOrder: 2, direction: "INCOMING", text: "malformed record", sourceClassName: null }
+              ]
+            },
+            {
+              received_at: "2026-09-12T12:01:00.000Z",
+              mapping_status: "NEEDS_HUMAN_MAPPING",
+              human_review_status: "PENDING",
+              visible_messages: [
+                { visibleOrder: 1, direction: "INCOMING", text: "safe record", sourceClassName: null }
+              ]
+            }
+          ];
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  res.setHeader = () => {};
+  await handler({ params: { deviceId: DEVICE_ID } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    ok: true,
+    conversations: [{
+      received_at: "2026-09-12T12:01:00.000Z",
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      messages: [{ direction: "INBOUND", text: "safe record" }]
+    }]
+  });
+});
+
 test("dashboard capture read exposes only mapping context, not visible message text or fingerprint", async () => {
   const handler = createTinderDashboardCaptureReadHandler({}, {
     createRepository() { return {}; },

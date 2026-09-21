@@ -745,14 +745,7 @@ function normalizePendingUnboundInboxConversationSweepTranscriptRecords(rows) {
  * It deliberately omits capture/device/thread/contact/name/fingerprint data
  * so viewing a newly read chat cannot make or imply an identity decision.
  */
-function normalizePendingReadChannelConversationRecords(rows) {
-  if (!Array.isArray(rows) || rows.length > TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT) {
-    const error = new Error("Invalid pending read-channel conversation records.");
-    error.statusCode = 500;
-    error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
-    throw error;
-  }
-  return Object.freeze(rows.map((row) => {
+function normalizePendingReadChannelConversationRecord(row) {
     const mappingStatus = String(row?.mappingStatus ?? row?.mapping_status ?? "").trim().toUpperCase();
     const humanReviewStatus = String(row?.humanReviewStatus ?? row?.human_review_status ?? "").trim().toUpperCase();
     const receivedAt = new Date(row?.receivedAt ?? row?.received_at);
@@ -760,17 +753,16 @@ function normalizePendingReadChannelConversationRecords(rows) {
     if (mappingStatus !== "NEEDS_HUMAN_MAPPING" || humanReviewStatus !== "PENDING"
         || Number.isNaN(receivedAt.valueOf()) || !Array.isArray(rawMessages)
         || rawMessages.length < 1 || rawMessages.length > TINDER_PENDING_READ_CHANNEL_DASHBOARD_MESSAGE_LIMIT) {
-      const error = new Error("Invalid pending read-channel conversation record.");
-      error.statusCode = 500;
-      error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
-      throw error;
+      // One historical or otherwise malformed record must remain fail-closed for that record,
+      // but it must not hide later independently validated passive reads from the bounded
+      // dashboard projection. No data is repaired, reclassified, or exposed here.
+      return null;
     }
-    const messages = rawMessages.map((message, index) => {
+    const messages = [];
+    for (let index = 0; index < rawMessages.length; index += 1) {
+      const message = rawMessages[index];
       if (!plainObject(message)) {
-        const error = new Error("Invalid pending read-channel conversation record.");
-        error.statusCode = 500;
-        error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
-        throw error;
+        return null;
       }
       const hasCamelOrder = Object.hasOwn(message, "visibleOrder");
       const hasSnakeOrder = Object.hasOwn(message, "visible_order");
@@ -786,23 +778,31 @@ function normalizePendingReadChannelConversationRecords(rows) {
           || !["INCOMING", "OUTGOING"].includes(direction)
           || !text || text.length > TINDER_PENDING_READ_CHANNEL_DASHBOARD_TEXT_LIMIT
           || /[\u0000-\u001f\u007f]/.test(text)) {
-        const error = new Error("Invalid pending read-channel conversation record.");
-        error.statusCode = 500;
-        error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
-        throw error;
+        return null;
       }
-      return Object.freeze({
+      messages.push(Object.freeze({
         direction: direction === "INCOMING" ? "INBOUND" : "OUTBOUND",
         text
-      });
-    });
+      }));
+    }
     return Object.freeze({
       received_at: receivedAt.toISOString(),
       mapping_status: "NEEDS_HUMAN_MAPPING",
       human_review_status: "PENDING",
       messages: Object.freeze(messages)
     });
-  }));
+}
+
+function normalizePendingReadChannelConversationRecords(rows) {
+  if (!Array.isArray(rows) || rows.length > TINDER_PENDING_READ_CHANNEL_CONVERSATION_LIMIT) {
+    const error = new Error("Invalid pending read-channel conversation records.");
+    error.statusCode = 500;
+    error.code = "INVALID_TINDER_PENDING_READ_CONVERSATIONS";
+    throw error;
+  }
+  // The database query remains bounded. Filtering a malformed record is deliberately local to
+  // this read-only public projection: it cannot turn that record into a visible conversation.
+  return Object.freeze(rows.map(normalizePendingReadChannelConversationRecord).filter(Boolean));
 }
 
 /**

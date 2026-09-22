@@ -489,19 +489,11 @@ test("capture persistence distinguishes a new row from an idempotent duplicate w
   assert.equal(repository.rows.length, 1);
 });
 
-test("a newly persisted passive capture projects once into the product conversation layer while an idempotent duplicate does not", async () => {
+test("the explicitly enabled duplicate-only proof reprojects one exact immutable passive V2 capture idempotently", async () => {
   const repository = fixtureRepository();
-  const projections = [];
-  const projector = {
-    async projectCapture(transaction, capture) {
-      projections.push({ transaction, capture });
-      return { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
-    }
-  };
-  const store = createTinderCaptureStore(repository, {
+  const historicalStore = createTinderCaptureStore(repository, {
     createCaptureId: () => CAPTURE_ID,
     now: () => new Date("2026-09-04T18:01:00.000Z"),
-    productConversationProjector: projector,
     allowLegacyFingerprintMapping: false
   });
   const input = {
@@ -509,17 +501,258 @@ test("a newly persisted passive capture projects once into the product conversat
     capture: safeCaptureV2({ includeEvidence: false }),
     provenance: { source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ" }
   };
+  const existing = await historicalStore.storeSafeCapture(input);
+  const projections = [];
+  let emptyProofSlot = true;
+  const projector = {
+    async hasEmptyDeviceSlotForDuplicateReprojectionProof(_transaction, { deviceId }) {
+      return deviceId === DEVICE_ID && emptyProofSlot;
+    },
+    async projectCapture(transaction, capture) {
+      projections.push({ transaction, capture });
+      if (projections.length === 1) emptyProofSlot = false;
+      return projections.length === 1
+        ? { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" }
+        : { disposition: "IDEMPOTENT_DUPLICATE", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
+    }
+  };
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z"),
+    productConversationProjector: projector,
+    allowLegacyFingerprintMapping: false,
+    reprojectExistingDuplicate: true,
+    verifyExistingDuplicateReprojection: true,
+    requireExistingDuplicate: true
+  });
 
-  const created = await store.storeSafeCaptureWithDisposition(input);
   const duplicate = await store.storeSafeCaptureWithDisposition(input);
 
-  assert.equal(created.captureDisposition, "CREATED");
-  assert.deepEqual(created.productConversation, { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" });
   assert.equal(duplicate.captureDisposition, "IDEMPOTENT_DUPLICATE");
-  assert.equal(duplicate.productConversation, null);
-  assert.equal(projections.length, 1);
-  assert.equal(projections[0].capture, created.capture);
+  assert.equal(duplicate.capture, existing);
+  assert.deepEqual(duplicate.productConversation, { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" });
+  assert.equal(projections.length, 2);
+  assert.equal(projections[0].capture, existing);
+  assert.equal(projections[1].capture, existing);
   assert.deepEqual(projections[0].transaction, {});
+  assert.deepEqual(projections[1].transaction, {});
+  assert.equal(repository.rows.length, 1);
+});
+
+test("the duplicate-only proof cannot project a second distinct historical capture for its device", async () => {
+  const repository = fixtureRepository();
+  const historicalCaptureIds = [
+    CAPTURE_ID,
+    "b565e8a7-ef60-42d0-b19d-26e7904390fa"
+  ];
+  const historicalStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => historicalCaptureIds.shift(),
+    now: () => new Date("2026-09-04T18:01:00.000Z"),
+    allowLegacyFingerprintMapping: false
+  });
+  const firstInput = {
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: { source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ" }
+  };
+  const secondInput = {
+    ...firstInput,
+    capture: {
+      ...firstInput.capture,
+      captureMetadata: {
+        ...firstInput.capture.captureMetadata,
+        captureFingerprint: "f".repeat(64)
+      }
+    }
+  };
+  await historicalStore.storeSafeCapture(firstInput);
+  await historicalStore.storeSafeCapture(secondInput);
+
+  let emptyProofSlot = true;
+  let projections = 0;
+  const proofStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+    allowLegacyFingerprintMapping: false,
+    reprojectExistingDuplicate: true,
+    verifyExistingDuplicateReprojection: true,
+    requireExistingDuplicate: true,
+    productConversationProjector: {
+      async hasEmptyDeviceSlotForDuplicateReprojectionProof(_transaction, { deviceId }) {
+        return deviceId === DEVICE_ID && emptyProofSlot;
+      },
+      async projectCapture() {
+        projections += 1;
+        if (projections === 1) {
+          emptyProofSlot = false;
+          return { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
+        }
+        return { disposition: "IDEMPOTENT_DUPLICATE", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
+      }
+    }
+  });
+
+  await proofStore.storeSafeCaptureWithDisposition(firstInput);
+  await assert.rejects(
+    () => proofStore.storeSafeCaptureWithDisposition(secondInput),
+    error => error instanceof TinderCaptureValidationError
+      && error.code === "TINDER_PRODUCT_CONVERSATION_REPROJECTION_ALREADY_USED"
+  );
+  assert.equal(projections, 2, "second proof must fail before projection");
+  assert.equal(repository.rows.length, 2);
+});
+
+test("a failed same-transaction idempotence check rolls back the proof projection", async () => {
+  const repository = fixtureRepository();
+  const historicalStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z"),
+    allowLegacyFingerprintMapping: false
+  });
+  const input = {
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: { source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ" }
+  };
+  await historicalStore.storeSafeCapture(input);
+
+  const projectionState = { linked: false };
+  repository.withTransaction = async (work) => {
+    const prior = projectionState.linked;
+    try {
+      return await work({});
+    } catch (error) {
+      projectionState.linked = prior;
+      throw error;
+    }
+  };
+  const proofStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+    allowLegacyFingerprintMapping: false,
+    reprojectExistingDuplicate: true,
+    verifyExistingDuplicateReprojection: true,
+    requireExistingDuplicate: true,
+    productConversationProjector: {
+      async hasEmptyDeviceSlotForDuplicateReprojectionProof() { return true; },
+      async projectCapture() {
+        projectionState.linked = true;
+        return { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => proofStore.storeSafeCaptureWithDisposition(input),
+    error => error instanceof TinderCaptureValidationError
+      && error.code === "TINDER_PRODUCT_CONVERSATION_REPROJECTION_NOT_IDEMPOTENT"
+  );
+  assert.equal(projectionState.linked, false);
+  assert.equal(repository.rows.length, 1);
+});
+
+test("the normal passive duplicate path never projects historical evidence", async () => {
+  const repository = fixtureRepository();
+  const historicalStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z")
+  });
+  const existing = await historicalStore.storeSafeCapture({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  });
+  const projections = [];
+  const passiveStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+    productConversationProjector: {
+      async projectCapture(_transaction, capture) {
+        projections.push(capture);
+        return { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
+      }
+    },
+    allowLegacyFingerprintMapping: false
+  });
+
+  const duplicate = await passiveStore.storeSafeCaptureWithDisposition({
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: {
+      source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ"
+    }
+  });
+
+  assert.equal(duplicate.captureDisposition, "IDEMPOTENT_DUPLICATE");
+  assert.equal(duplicate.capture, existing);
+  assert.equal(duplicate.productConversation, null);
+  assert.equal(projections.length, 0);
+  assert.equal(repository.rows.length, 1);
+});
+
+test("a duplicate-only proof rolls back before creating a new capture when no exact predecessor exists", async () => {
+  const repository = fixtureRepository();
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z"),
+    allowLegacyFingerprintMapping: false,
+    reprojectExistingDuplicate: true,
+    requireExistingDuplicate: true
+  });
+
+  await assert.rejects(
+    () => store.storeSafeCaptureWithDisposition({
+      deviceId: DEVICE_ID,
+      capture: safeCaptureV2({ includeEvidence: false }),
+      provenance: {
+        source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ"
+      }
+    }),
+    (error) => error instanceof TinderCaptureValidationError
+      && error.code === "IDEMPOTENT_DUPLICATE_REQUIRED"
+  );
+  assert.equal(repository.rows.length, 0);
+});
+
+test("a duplicate-only proof rejects an exact but ineligible historical row without projecting it", async () => {
+  const repository = fixtureRepository();
+  const historicalStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z"),
+    allowLegacyFingerprintMapping: false
+  });
+  const input = {
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    // The absent PASSIVE_READ marker makes this existing row ineligible for
+    // the transition proof, even though its immutable fingerprints match.
+    provenance: { source: "android_visible_chat", protocolVersion: 1 }
+  };
+  await historicalStore.storeSafeCapture(input);
+  let projections = 0;
+  const proofStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+    productConversationProjector: {
+      async projectCapture() {
+        projections += 1;
+        return { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
+      }
+    },
+    allowLegacyFingerprintMapping: false,
+    reprojectExistingDuplicate: true,
+    verifyExistingDuplicateReprojection: true,
+    requireExistingDuplicate: true
+  });
+
+  await assert.rejects(
+    () => proofStore.storeSafeCaptureWithDisposition({
+      ...input,
+      provenance: {
+        source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ"
+      }
+    }),
+    (error) => error instanceof TinderCaptureValidationError
+      && error.code === "IDEMPOTENT_DUPLICATE_REPROJECTION_INELIGIBLE"
+  );
+  assert.equal(projections, 0);
+  assert.equal(repository.rows.length, 1);
 });
 
 test("a later safe capture reuses only a complete prior human-confirmed mapping for its exact device thread", async () => {

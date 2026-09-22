@@ -38,6 +38,11 @@ const TINDER_CAPTURE_PATH_SUFFIX = "/tinder-visible-chat-captures";
 // read to reach the existing PENDING capture foundation without waiting for
 // a server-projected heartbeat, V8 child, or return receipt.
 const TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX = "/tinder-passive-read-captures";
+// This is a narrowly scoped transition endpoint, not a second reader. It
+// accepts the same signed passive V2 envelope but rolls back if the exact
+// viewport is not already immutable capture evidence. Its only permitted
+// mutation is one product-conversation projection of that existing row.
+const TINDER_PASSIVE_READ_DUPLICATE_REPROJECTION_PROOF_PATH_SUFFIX = "/tinder-passive-read-duplicate-reprojection-proofs";
 const TINDER_CAPTURE_FOUNDATION_ERROR_CODES = new Set(["42P01", "42703", "23502"]);
 
 function plainObject(value) {
@@ -68,6 +73,17 @@ function isFoundationNotReadyError(error) {
 
 function safeMessage(error) {
   return error?.message || "Tinder capture could not be processed";
+}
+
+function captureValidationProtocolError(error) {
+  const status = new Set([
+    "IDEMPOTENT_DUPLICATE_REQUIRED",
+    "IDEMPOTENT_DUPLICATE_REPROJECTION_INELIGIBLE",
+    "TINDER_PRODUCT_CONVERSATION_REPROJECTION_ALREADY_USED",
+    "TINDER_PRODUCT_CONVERSATION_REPROJECTION_NOT_READY",
+    "TINDER_PRODUCT_CONVERSATION_REPROJECTION_NOT_IDEMPOTENT"
+  ]).has(error?.code) ? 409 : 400;
+  return new DeviceBridgeProtocolError(status, error.code, safeMessage(error));
 }
 
 function parseSignedCaptureRequest(req) {
@@ -161,6 +177,24 @@ async function assertCaptureDeviceIdentity(client, auth) {
   return row;
 }
 
+/**
+ * The one-time proof must return no capture metadata: its existing opaque
+ * capture identifier is used only by the immediately waiting Android method
+ * and is discarded there. In particular it does not echo a display value,
+ * timestamp, device identifier, revision, mapping state, or any transcript
+ * material.
+ */
+function normalizeDuplicateReprojectionProofReceipt(row) {
+  const captureId = String(row?.captureId ?? row?.capture_id ?? "").trim();
+  if (!isUuidV4(captureId)) {
+    throw new TinderCaptureValidationError(
+      "Die Tinder-Re-Projection hat keine gültige bestehende Capture-ID.",
+      "INVALID_TINDER_CAPTURE_RECORD"
+    );
+  }
+  return Object.freeze({ capture_id: captureId });
+}
+
 async function assertCaptureDeviceGates(client, auth, now) {
   const row = await assertCaptureDeviceIdentity(client, auth);
   if (deriveDeviceStatus(row.last_accepted_heartbeat_at, now) !== "ONLINE") {
@@ -197,11 +231,17 @@ function createAuthenticatedCaptureStore(pool, auth, {
   requireLegacyDeviceRuntimeAdmission = true,
   requireAutomationStopped = true,
   allowLegacyFingerprintMapping = true,
-  projectProductConversations = false
+  projectProductConversations = false,
+  reprojectExistingDuplicate = false,
+  verifyExistingDuplicateReprojection = false,
+  requireExistingDuplicate = false
 } = {}) {
   if (typeof requireRuntimeGates !== "boolean" || typeof requireLegacyDeviceRuntimeAdmission !== "boolean" ||
       typeof requireAutomationStopped !== "boolean" ||
-      typeof allowLegacyFingerprintMapping !== "boolean" || typeof projectProductConversations !== "boolean") {
+      typeof allowLegacyFingerprintMapping !== "boolean" || typeof projectProductConversations !== "boolean" ||
+      typeof reprojectExistingDuplicate !== "boolean"
+      || typeof verifyExistingDuplicateReprojection !== "boolean"
+      || typeof requireExistingDuplicate !== "boolean") {
     throw new TypeError("Capture ingress policy flags must be booleans");
   }
   if (typeof createProductConversationRepository !== "function"
@@ -264,7 +304,10 @@ function createAuthenticatedCaptureStore(pool, auth, {
         currentHumanArmedService().consumeAuthorizedIncomingPermit(...args)
     }),
     allowLegacyFingerprintMapping,
-    productConversationProjector
+    productConversationProjector,
+    reprojectExistingDuplicate,
+    verifyExistingDuplicateReprojection,
+    requireExistingDuplicate
   });
 }
 
@@ -304,7 +347,7 @@ function createTinderCaptureIngressHandler(pool, {
     } catch (error) {
       const mapped = isFoundationNotReadyError(error) ? foundationNotReadyError()
         : error instanceof TinderCaptureValidationError
-          ? new DeviceBridgeProtocolError(400, error.code, safeMessage(error))
+          ? captureValidationProtocolError(error)
           : error;
       const status = mapped instanceof DeviceBridgeProtocolError ? mapped.status : 500;
       if (!(mapped instanceof DeviceBridgeProtocolError)) {
@@ -322,12 +365,21 @@ function createTinderCaptureIngressHandler(pool, {
  * V2 capture is therefore either independently bound through opaque evidence
  * or remains PENDING for a later human decision.
  */
-function createTinderPassiveReadCaptureIngressHandler(pool, {
+function createTinderPassiveReadIngressHandler(pool, {
   now = () => new Date(),
   verifyRequest = verifyAuthenticatedDeviceRequest,
-  createAuthenticatedStore = createAuthenticatedCaptureStore
+  createAuthenticatedStore = createAuthenticatedCaptureStore,
+  requireExistingDuplicate = false,
+  verifyExistingDuplicateReprojection = false
 } = {}) {
-  return async function tinderPassiveReadCaptureIngressHandler(req, res) {
+  if (typeof requireExistingDuplicate !== "boolean"
+      || typeof verifyExistingDuplicateReprojection !== "boolean") {
+    throw new TypeError("passive read proof policy flags must be booleans");
+  }
+  if (verifyExistingDuplicateReprojection && !requireExistingDuplicate) {
+    throw new TypeError("duplicate reprojection verification requires duplicate-only mode");
+  }
+  return async function tinderPassiveReadIngressHandler(req, res) {
     try {
       const auth = await verifyRequest({ req, pool, urlDeviceId: req.params.deviceId });
       const capture = assertPassiveReadCapture(parseSignedCaptureRequest(req));
@@ -341,7 +393,10 @@ function createTinderPassiveReadCaptureIngressHandler(pool, {
         requireLegacyDeviceRuntimeAdmission: false,
         requireAutomationStopped: false,
         allowLegacyFingerprintMapping: false,
-        projectProductConversations: true
+        projectProductConversations: true,
+        reprojectExistingDuplicate: requireExistingDuplicate,
+        verifyExistingDuplicateReprojection,
+        requireExistingDuplicate
       });
       const result = await store.storeSafeCaptureWithDisposition({
         deviceId: auth.deviceId,
@@ -358,25 +413,45 @@ function createTinderPassiveReadCaptureIngressHandler(pool, {
        * Android.  The only product projection lives in the server transaction;
        * this signed response remains the pre-existing bounded capture receipt.
        */
-      const record = normalizeCaptureRecord(stored);
+      const record = requireExistingDuplicate
+        ? normalizeDuplicateReprojectionProofReceipt(stored)
+        : normalizeCaptureRecord(stored);
       return res.status(201).json({
         ok: true,
         protocol_version: DEVICE_BRIDGE_PROTOCOL.version,
-        server_time: now().toISOString(),
-        capture: record
+        capture: record,
+        ...(requireExistingDuplicate ? {} : { server_time: now().toISOString() })
       });
     } catch (error) {
       const mapped = isFoundationNotReadyError(error) ? foundationNotReadyError()
         : error instanceof TinderCaptureValidationError
-          ? new DeviceBridgeProtocolError(400, error.code, safeMessage(error))
+          ? captureValidationProtocolError(error)
           : error;
       const status = mapped instanceof DeviceBridgeProtocolError ? mapped.status : 500;
       if (!(mapped instanceof DeviceBridgeProtocolError)) {
-        console.error("Tinder passive read capture ingress failed.");
+        console.error("Tinder passive read ingress failed.");
       }
       return res.status(status).json(protocolErrorBody(mapped, req.get("x-marcel-request-id")));
     }
   };
+}
+
+function createTinderPassiveReadCaptureIngressHandler(pool, options = {}) {
+  return createTinderPassiveReadIngressHandler(pool, options);
+}
+
+/**
+ * A single-use migration proof transport.  It never accepts a new capture:
+ * a fingerprint miss rolls back the signed request transaction, including its
+ * nonce.  An exact existing passive V2 duplicate is projected and immediately
+ * reprojected in the same transaction to prove the capture-link invariant.
+ */
+function createTinderPassiveReadDuplicateReprojectionProofIngressHandler(pool, options = {}) {
+  return createTinderPassiveReadIngressHandler(pool, {
+    ...options,
+    requireExistingDuplicate: true,
+    verifyExistingDuplicateReprojection: true
+  });
 }
 
 function registerTinderVisibleChatCaptureIngress({ app, pool }) {
@@ -404,14 +479,32 @@ function registerTinderPassiveReadCaptureIngress({ app, pool, middleware = [] })
   );
 }
 
+function registerTinderPassiveReadDuplicateReprojectionProofIngress({ app, pool, middleware = [] }) {
+  if (!app || typeof app.post !== "function") {
+    throw new TypeError("app.post must be a function");
+  }
+  const chain = Array.isArray(middleware) ? middleware : [middleware];
+  if (!chain.every(handler => typeof handler === "function")) {
+    throw new TypeError("passive read proof middleware must be a function or an array of functions");
+  }
+  app.post(
+    `/device-bridge/v1/devices/:deviceId${TINDER_PASSIVE_READ_DUPLICATE_REPROJECTION_PROOF_PATH_SUFFIX}`,
+    ...chain,
+    createTinderPassiveReadDuplicateReprojectionProofIngressHandler(pool)
+  );
+}
+
 export {
   TINDER_CAPTURE_PATH_SUFFIX,
   TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX,
+  TINDER_PASSIVE_READ_DUPLICATE_REPROJECTION_PROOF_PATH_SUFFIX,
   createAuthenticatedCaptureStore,
   createTinderCaptureIngressHandler,
   createTinderPassiveReadCaptureIngressHandler,
+  createTinderPassiveReadDuplicateReprojectionProofIngressHandler,
   normalizeCaptureRecord,
   parseSignedCaptureRequest,
   registerTinderPassiveReadCaptureIngress,
+  registerTinderPassiveReadDuplicateReprojectionProofIngress,
   registerTinderVisibleChatCaptureIngress
 };

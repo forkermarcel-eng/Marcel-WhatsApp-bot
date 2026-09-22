@@ -384,6 +384,53 @@ function normalizedStatus(value) {
   return typeof value === "string" ? value.trim().toUpperCase() : "";
 }
 
+/**
+ * A live passive V2 retry may reproject only its own pre-product immutable
+ * evidence.  This deliberately excludes legacy/manual, resolved, conflicted,
+ * unsafe, cross-device, and unmarked historical rows.  It is a narrow
+ * migration bridge for an exact duplicate observed again by the passive
+ * reader; it is not a bulk selector or an identity mapper.
+ */
+function isUnassignedPassiveV2Duplicate(existing, deviceId) {
+  if (!plainObject(existing)
+      || sourceValue(existing, "deviceId", "device_id") !== deviceId
+      || sourceValue(existing, "schemaVersion", "capture_schema_version")
+        !== TINDER_CAPTURE_SCHEMA_VERSION_V2
+      || sourceValue(existing, "sourcePackage", "source_package") !== TINDER_SOURCE_PACKAGE
+      || captureSafetyStatus(existing) !== "SAFE"
+      || normalizedStatus(sourceValue(existing, "mappingStatus", "mapping_status"))
+        !== TINDER_CAPTURE_MAPPING_STATUS.NEEDS_HUMAN_MAPPING
+      || normalizedStatus(sourceValue(existing, "humanReviewStatus", "human_review_status"))
+        !== TINDER_CAPTURE_REVIEW_STATUS.PENDING
+      || sourceValue(existing, "resolvedContactId", "resolved_contact_id") != null) {
+    return false;
+  }
+  const provenance = sourceValue(existing, "provenance", "provenance");
+  return plainObject(provenance)
+    && provenance.source === "android_visible_chat"
+    && Number(provenance.protocolVersion ?? provenance.protocol_version) === 1
+    && (provenance.readChannel ?? provenance.read_channel) === "PASSIVE_READ";
+}
+
+function productConversationId(result) {
+  return normalizedUuidV4(result?.conversationId ?? result?.conversation_id);
+}
+
+function requireCreatedThenIdempotentReprojection(first, repeated) {
+  const firstConversationId = productConversationId(first);
+  const repeatedConversationId = productConversationId(repeated);
+  if (first?.disposition !== "CREATED"
+      || firstConversationId === null
+      || repeated?.disposition !== "IDEMPOTENT_DUPLICATE"
+      || repeatedConversationId !== firstConversationId) {
+    throw new TinderCaptureValidationError(
+      "Die einmalige Tinder-Re-Projection ist nicht idempotent.",
+      "TINDER_PRODUCT_CONVERSATION_REPROJECTION_NOT_IDEMPOTENT"
+    );
+  }
+  return first;
+}
+
 function normalizedUuidV4(value) {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
   return UUID_V4.test(normalized) ? normalized : null;
@@ -508,7 +555,20 @@ function createTinderCaptureStore(repository, {
   // out: a new passive observation is PENDING unless an independent opaque
   // conversation binding proves the same conversation.  This is an ingress
   // policy switch, not a schema or mapping-rule change.
-  allowLegacyFingerprintMapping = true
+  allowLegacyFingerprintMapping = true,
+  // Reprojection of a previously persisted capture is deliberately opt-in.
+  // The normal passive reader projects new evidence in its creation
+  // transaction; it must not turn any later duplicate into a historical
+  // backfill.  The one-off migration proof supplies this flag only after an
+  // exact duplicate has been freshly observed.
+  reprojectExistingDuplicate = false,
+  // The one-off proof invokes the same projector a second time in the same
+  // transaction and requires the capture-link idempotency result.  This is a
+  // local transaction assertion, not a second ingress or a persistent gate.
+  verifyExistingDuplicateReprojection = false,
+  // A duplicate-only ingress must roll back rather than insert a new capture
+  // when the freshly observed viewport has no exact immutable predecessor.
+  requireExistingDuplicate = false
 } = {}) {
   for (const method of [
     "withTransaction",
@@ -527,8 +587,17 @@ function createTinderCaptureStore(repository, {
     typeof repository.findReusableConfirmedConversationBinding === "function"
       ? repository.findReusableConfirmedConversationBinding.bind(repository)
       : async () => null;
-  if (typeof allowLegacyFingerprintMapping !== "boolean") {
-    throw new TypeError("allowLegacyFingerprintMapping must be a boolean");
+  if (typeof allowLegacyFingerprintMapping !== "boolean"
+      || typeof reprojectExistingDuplicate !== "boolean"
+      || typeof verifyExistingDuplicateReprojection !== "boolean"
+      || typeof requireExistingDuplicate !== "boolean") {
+    throw new TypeError("capture ingress policy flags must be booleans");
+  }
+  if (verifyExistingDuplicateReprojection && !reprojectExistingDuplicate) {
+    throw new TypeError("verifyExistingDuplicateReprojection requires reprojectExistingDuplicate");
+  }
+  if (requireExistingDuplicate && !reprojectExistingDuplicate) {
+    throw new TypeError("requireExistingDuplicate requires reprojectExistingDuplicate");
   }
   if (productConversationProjector !== null
       && typeof productConversationProjector?.projectCapture !== "function") {
@@ -584,11 +653,58 @@ function createTinderCaptureStore(repository, {
             "HUMAN_BINDING_CAPTURE_NOT_FRESH"
           );
         }
+        /*
+         * The normal passive reader never turns a duplicate into a historical
+         * backfill: fresh captures were already projected at creation time.
+         * A separately authorized duplicate-only transition may re-enter the
+         * projector with this exact stored, safe, unassigned passive V2 row.
+         * It neither alters the capture nor selects any other historical row.
+         */
+        let productConversation = null;
+        const eligibleDuplicate = isUnassignedPassiveV2Duplicate(existing, normalizedDeviceId);
+        if (requireExistingDuplicate && !eligibleDuplicate) {
+          throw new TinderCaptureValidationError(
+            "Das bestehende Tinder-Capture ist für die einmalige Re-Projection nicht zulässig.",
+            "IDEMPOTENT_DUPLICATE_REPROJECTION_INELIGIBLE"
+          );
+        }
+        if (reprojectExistingDuplicate
+            && productConversationProjector !== null
+            && eligibleDuplicate) {
+          if (verifyExistingDuplicateReprojection
+              && (typeof productConversationProjector
+                    .hasEmptyDeviceSlotForDuplicateReprojectionProof !== "function"
+                  || !(await productConversationProjector
+                    .hasEmptyDeviceSlotForDuplicateReprojectionProof(transaction,
+                      { deviceId: normalizedDeviceId })))) {
+            throw new TinderCaptureValidationError(
+              "Die einmalige Tinder-Re-Projection wurde bereits verbraucht oder ist nicht bereit.",
+              "TINDER_PRODUCT_CONVERSATION_REPROJECTION_ALREADY_USED"
+            );
+          }
+          productConversation = await productConversationProjector.projectCapture(transaction, existing);
+          if (verifyExistingDuplicateReprojection) {
+            const repeated = await productConversationProjector.projectCapture(transaction, existing);
+            productConversation = requireCreatedThenIdempotentReprojection(productConversation, repeated);
+          }
+        } else if (requireExistingDuplicate) {
+          throw new TinderCaptureValidationError(
+            "Die Tinder-Conversation-Foundation ist für die einmalige Re-Projection nicht bereit.",
+            "TINDER_PRODUCT_CONVERSATION_REPROJECTION_NOT_READY"
+          );
+        }
         return Object.freeze({
           capture: existing,
           captureDisposition: "IDEMPOTENT_DUPLICATE",
-          productConversation: null
+          productConversation
         });
+      }
+
+      if (requireExistingDuplicate) {
+        throw new TinderCaptureValidationError(
+          "Für diesen einmaligen Proof ist kein identisches bestehendes Tinder-Capture vorhanden.",
+          "IDEMPOTENT_DUPLICATE_REQUIRED"
+        );
       }
 
       // V1/V2 may reuse only separately verified source evidence. V3 is the

@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { DeviceBridgeProtocolError, T1_DEVICE_CAPABILITIES } from "../device-bridge/protocol-v1.js";
+import { TinderCaptureValidationError } from "../services/tinder-capture-store.js";
 import {
   createAuthenticatedCaptureStore,
   createTinderCaptureIngressHandler,
   createTinderPassiveReadCaptureIngressHandler,
+  createTinderPassiveReadDuplicateReprojectionProofIngressHandler,
   normalizeCaptureRecord,
   parseSignedCaptureRequest,
-  registerTinderPassiveReadCaptureIngress
+  registerTinderPassiveReadCaptureIngress,
+  registerTinderPassiveReadDuplicateReprojectionProofIngress
 } from "../device-bridge/tinder-visible-chat-capture-ingress.js";
 import {
   assertDeviceBridgeAuthReplaySchemaReady,
@@ -179,6 +182,132 @@ test("passive read ingress accepts only signed V2 captures and disables legacy f
   await handler(rawRequest(), rejected);
   assert.equal(rejected.statusCode, 400);
   assert.equal(rejected.body.error.code, "INVALID_TINDER_CAPTURE_REQUEST");
+});
+
+test("duplicate-only reprojection proof is passive V2, returns no product identifier, and enables only its in-transaction proof policy", async () => {
+  let received;
+  const handler = createTinderPassiveReadDuplicateReprojectionProofIngressHandler({}, {
+    now: () => NOW,
+    async verifyRequest() {
+      return { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e", contentSha256: "c".repeat(64) };
+    },
+    createAuthenticatedStore(_pool, auth, options) {
+      assert.equal(auth.deviceId, DEVICE_ID);
+      assert.equal(options.requireRuntimeGates, false);
+      assert.equal(options.requireLegacyDeviceRuntimeAdmission, false);
+      assert.equal(options.requireAutomationStopped, false);
+      assert.equal(options.allowLegacyFingerprintMapping, false);
+      assert.equal(options.projectProductConversations, true);
+      assert.equal(options.requireExistingDuplicate, true);
+      assert.equal(options.reprojectExistingDuplicate, true);
+      assert.equal(options.verifyExistingDuplicateReprojection, true);
+      return {
+        async storeSafeCaptureWithDisposition(input) {
+          received = input;
+          return {
+            capture: storedCapture(),
+            captureDisposition: "IDEMPOTENT_DUPLICATE",
+            productConversation: {
+              disposition: "CREATED",
+              conversationId: "d180455d-325c-4f35-9914-823dcb0e0d18"
+            }
+          };
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler(rawRequest({ protocol_version: 1, capture: safeCaptureV2() }), res);
+
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(received.provenance, {
+    source: "android_visible_chat",
+    protocolVersion: 1,
+    readChannel: "PASSIVE_READ"
+  });
+  assert.equal(JSON.stringify(res.body).includes("d180455d-325c-4f35-9914-823dcb0e0d18"), false);
+  assert.equal(Object.hasOwn(res.body, "product_conversation"), false);
+  assert.deepEqual(res.body.capture, { capture_id: CAPTURE_ID });
+  assert.equal(JSON.stringify(res.body).includes("Sandry"), false);
+  assert.equal(Object.hasOwn(res.body, "server_time"), false);
+});
+
+test("duplicate-only reprojection proof reports an exact-miss fail-closed without a capture result", async () => {
+  const handler = createTinderPassiveReadDuplicateReprojectionProofIngressHandler({}, {
+    async verifyRequest() {
+      return { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e", contentSha256: "c".repeat(64) };
+    },
+    createAuthenticatedStore() {
+      return {
+        async storeSafeCaptureWithDisposition() {
+          throw new TinderCaptureValidationError(
+            "exact duplicate required",
+            "IDEMPOTENT_DUPLICATE_REQUIRED"
+          );
+        }
+      };
+    }
+  });
+  const res = responseRecorder();
+  await handler(rawRequest({ protocol_version: 1, capture: safeCaptureV2() }), res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.error.code, "IDEMPOTENT_DUPLICATE_REQUIRED");
+  assert.equal(Object.hasOwn(res.body, "capture"), false);
+});
+
+test("duplicate-only proof rolls back its replay nonce and creates no capture on an exact-miss", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, values = []) {
+      calls.push({ sql: String(sql), values });
+      return { rows: [] };
+    },
+    release() {}
+  };
+  const repository = {
+    async nextCaptureRevision() { return 1; },
+    async findCaptureByFingerprint() { return null; },
+    async insertCapture() { throw new Error("must not insert"); },
+    async findReusableConfirmedMapping() { return null; },
+    async findCaptureById() { return null; },
+    async findPendingHumanMappingCaptures() { return []; }
+  };
+  const store = createAuthenticatedCaptureStore({
+    query() {},
+    async connect() { return client; }
+  }, {
+    deviceId: DEVICE_ID,
+    keyId: KEY_ID,
+    requestId: "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e",
+    contentSha256: "c".repeat(64)
+  }, {
+    now: () => NOW,
+    requireRuntimeGates: false,
+    requireLegacyDeviceRuntimeAdmission: false,
+    requireAutomationStopped: false,
+    allowLegacyFingerprintMapping: false,
+    projectProductConversations: true,
+    reprojectExistingDuplicate: true,
+    verifyExistingDuplicateReprojection: true,
+    requireExistingDuplicate: true,
+    createRepository: () => repository
+  });
+
+  await assert.rejects(
+    () => store.storeSafeCaptureWithDisposition({
+      deviceId: DEVICE_ID,
+      capture: safeCaptureV2(),
+      provenance: {
+        source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ"
+      }
+    }),
+    (error) => error instanceof TinderCaptureValidationError
+      && error.code === "IDEMPOTENT_DUPLICATE_REQUIRED"
+  );
+  assert.equal(calls.some(({ sql }) => /device_bridge_request_nonces/.test(sql)), true);
+  assert.equal(calls.some(({ sql }) => /tinder_visible_chat_captures/.test(sql)), false);
+  assert.equal(calls.some(({ sql }) => /COMMIT/.test(sql)), false);
+  assert.equal(calls.some(({ sql }) => /ROLLBACK/.test(sql)), true);
 });
 
 test("authenticated capture store wires the additive product projector only when explicitly enabled", () => {
@@ -556,7 +685,7 @@ test("passive read foundation middleware is independent of global bridge readine
   assert.equal(JSON.stringify(response.body).includes("legacy command constraint drift"), false);
 });
 
-test("passive route registration accepts only server-provided middleware before its handler", () => {
+test("passive and duplicate-only proof route registration accept only server-provided middleware before their handlers", () => {
   const routes = [];
   const middleware = () => {};
   registerTinderPassiveReadCaptureIngress({
@@ -568,8 +697,20 @@ test("passive route registration accepts only server-provided middleware before 
   assert.match(routes[0][0], /tinder-passive-read-captures$/);
   assert.equal(routes[0][1], middleware);
   assert.equal(typeof routes[0][2], "function");
+  registerTinderPassiveReadDuplicateReprojectionProofIngress({
+    app: { post(...args) { routes.push(args); } },
+    pool: {},
+    middleware
+  });
+  assert.match(routes[1][0], /tinder-passive-read-duplicate-reprojection-proofs$/);
+  assert.equal(routes[1][1], middleware);
+  assert.equal(typeof routes[1][2], "function");
   assert.throws(
     () => registerTinderPassiveReadCaptureIngress({ app: { post() {} }, pool: {}, middleware: [middleware, "invalid"] }),
+    /middleware must be a function/
+  );
+  assert.throws(
+    () => registerTinderPassiveReadDuplicateReprojectionProofIngress({ app: { post() {} }, pool: {}, middleware: [middleware, "invalid"] }),
     /middleware must be a function/
   );
 });

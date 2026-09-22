@@ -332,6 +332,23 @@ export function createTinderProductConversationService(repository, {
     throw new TypeError("minimumOrderedOverlap must be a bounded positive integer");
   }
 
+  /**
+   * The transition proof is explicitly one-time, device-scoped, and only
+   * available while this product foundation has no durable Conversation for
+   * that device. The PostgreSQL adapter serializes proof attempts on the
+   * existing device row before it reads the total; no proof-state row or
+   * schema is introduced. Other product projections never call this method.
+   */
+  async function hasEmptyDeviceSlotForDuplicateReprojectionProof(transaction, { deviceId } = {}) {
+    if (await repository.isReady(transaction) !== true
+        || typeof repository.hasEmptyDeviceSlotForDuplicateReprojectionProof !== "function") {
+      return false;
+    }
+    return (await repository.hasEmptyDeviceSlotForDuplicateReprojectionProof(transaction, {
+      deviceId: uuid(deviceId, "device id")
+    })) === true;
+  }
+
   async function projectCapture(transaction, inputCapture) {
     const capture = normalizeCaptureForProjection(inputCapture);
     if (await repository.isReady(transaction) !== true) {
@@ -440,7 +457,7 @@ export function createTinderProductConversationService(repository, {
     return Object.freeze({ disposition: TINDER_PRODUCT_CONVERSATION_DISPOSITION.CREATED, conversationId });
   }
 
-  return Object.freeze({ projectCapture });
+  return Object.freeze({ projectCapture, hasEmptyDeviceSlotForDuplicateReprojectionProof });
 }
 
 /** PostgreSQL adapter. It is inert until the additive product schema exists. */
@@ -474,6 +491,29 @@ export function createPgTinderProductConversationRepository(pool) {
         [captureId, deviceId]
       );
       return result.rows[0] || null;
+    },
+
+    /**
+     * No durable claim is written here. The existing device row makes
+     * concurrent proof requests serialize; the count then makes every later
+     * proof fail closed after the first proof creates its Conversation.
+     */
+    async hasEmptyDeviceSlotForDuplicateReprojectionProof(client, { deviceId }) {
+      const device = await client.query(
+        `SELECT device_id
+           FROM device_bridge_devices
+          WHERE device_id = $1
+          FOR UPDATE`,
+        [deviceId]
+      );
+      if (device.rows.length !== 1) return false;
+      const existing = await client.query(
+        `SELECT count(*)::integer AS total
+           FROM tinder_thread_conversations
+          WHERE device_id = $1`,
+        [deviceId]
+      );
+      return Number(existing.rows[0]?.total) === 0;
     },
 
     async findCandidates(client, { deviceId, runtimeThreadFingerprint }) {

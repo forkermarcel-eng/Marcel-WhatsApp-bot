@@ -17,6 +17,7 @@ import {
 import { registerDeviceBridgeBlock3Routes } from "./device-bridge/block3-routes.js";
 import {
   registerTinderPassiveReadCaptureIngress,
+  registerTinderPassiveReadDuplicateReprojectionProofIngress,
   registerTinderVisibleChatCaptureIngress
 } from "./device-bridge/tinder-visible-chat-capture-ingress.js";
 import { registerTinderVisibleChatSyncIngress } from "./device-bridge/tinder-visible-chat-sync-ingress.js";
@@ -71,6 +72,14 @@ app.use("/device-bridge/v1", deviceBridgeRawBodyErrorMiddleware);
 // Device Bridge command traffic.  Register this exact path before global
 // command/ACK readiness and validate only its auth/replay + T2 foundation.
 registerTinderPassiveReadCaptureIngress({
+  app,
+  pool,
+  middleware: [
+    deviceBridgeRequestShapeMiddleware,
+    createTinderPassiveReadIngressFoundationMiddleware(pool)
+  ]
+});
+registerTinderPassiveReadDuplicateReprojectionProofIngress({
   app,
   pool,
   middleware: [

@@ -11,6 +11,7 @@
     "migrate:tinder-visible-chat-capture": "node scripts/migrate-tinder-visible-chat-capture.js --apply",
     "preflight:tinder-product-conversations": "node scripts/preflight-tinder-product-conversations.js",
     "migrate:tinder-product-conversations": "node scripts/migrate-tinder-product-conversations.js --apply",
+    "verify:tinder-duplicate-reprojection-proof": "node scripts/verify-tinder-duplicate-reprojection-proof.js",
     "preflight:tinder-visible-chat-sync": "node scripts/preflight-tinder-visible-chat-sync.js",
     "migrate:tinder-visible-chat-sync": "node scripts/migrate-tinder-visible-chat-sync.js --apply",
     "preflight:tinder-official-app-resume-permit-v2": "node scripts/preflight-tinder-official-app-resume-permit-v2.js",

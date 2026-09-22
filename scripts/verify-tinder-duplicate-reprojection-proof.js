@@ -47,10 +47,12 @@ SELECT
   (SELECT count(*)::integer
      FROM tinder_visible_chat_captures capture
     WHERE capture.device_id = (
-      SELECT min(device_id)
+      SELECT device_id
         FROM tinder_thread_conversations
        WHERE identity_binding_state = 'UNASSIGNED'
          AND resolved_contact_id IS NULL
+       ORDER BY conversation_id::text ASC
+       LIMIT 1
     )
       AND capture.capture_schema_version = 'tinder-visible-chat-v2'
       AND capture.source_platform = 'tinder'
@@ -73,10 +75,12 @@ SELECT
   (SELECT count(*)::integer
      FROM tinder_visible_chat_captures capture
     WHERE capture.device_id = (
-      SELECT min(device_id)
+      SELECT device_id
         FROM tinder_thread_conversations
        WHERE identity_binding_state = 'UNASSIGNED'
          AND resolved_contact_id IS NULL
+       ORDER BY conversation_id::text ASC
+       LIMIT 1
     )
       AND capture.capture_schema_version = 'tinder-visible-chat-v2'
       AND capture.source_platform = 'tinder'

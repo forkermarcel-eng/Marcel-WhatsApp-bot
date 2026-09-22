@@ -76,6 +76,11 @@ test("duplicate reprojection proof postcheck is read-only, bounded, and reports 
   assert.match(sql, /^\s*SELECT\b/i);
   assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|LOCK)\b/i);
   assert.doesNotMatch(sql, /(?:visible_name|display_name|runtime_thread_fingerprint|capture_id\s+AS|device_id\s+AS)/i);
+  assert.doesNotMatch(sql, /\bmin\s*\(\s*device_id\s*\)/i);
+  assert.match(
+    sql,
+    /SELECT\s+device_id\s+FROM\s+tinder_thread_conversations\s+WHERE\s+identity_binding_state\s*=\s*'UNASSIGNED'\s+AND\s+resolved_contact_id\s+IS\s+NULL\s+ORDER\s+BY\s+conversation_id::text\s+ASC\s+LIMIT\s+1/i
+  );
   assert.equal(fixture.output.lines.length, 1);
   assert.match(fixture.output.lines[0], /proof_conversation_id=/);
 });

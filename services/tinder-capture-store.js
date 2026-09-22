@@ -21,6 +21,15 @@ const TINDER_HUMAN_ARMED_PERMIT = Object.freeze({
   field: "humanBindingPermit",
   commandField: "command_id"
 });
+// A signed V2 reader may truthfully assert that it observed the oldest
+// history boundary. This is not a new capture schema or identity fact; it is
+// consumed only to advance the existing Conversation history_state.
+const TINDER_CAPTURE_HISTORY_COMPLETE_FIELD = "historyComplete";
+// A current probe may hand its opaque capture fingerprint to the immediately
+// following full V2 read. This is a RAM-only continuity reference; it is
+// validated at ingress but intentionally never copied into the immutable
+// capture record or any dashboard surface.
+const TINDER_CAPTURE_PREDECESSOR_CAPTURE_FINGERPRINT_FIELD = "predecessorCaptureFingerprint";
 
 const TINDER_CAPTURE_MAPPING_STATUS = Object.freeze({
   NEEDS_HUMAN_MAPPING: "NEEDS_HUMAN_MAPPING",
@@ -258,6 +267,64 @@ function normalizeHumanArmedBindingPermit(captureMetadata, schemaVersion) {
   return commandId;
 }
 
+function normalizeHistoryComplete(captureMetadata, schemaVersion) {
+  const hasHistoryComplete = Object.hasOwn(captureMetadata, TINDER_CAPTURE_HISTORY_COMPLETE_FIELD);
+  // Snake-case is not a second wire contract. The Android V2 serializer uses
+  // the exact camel-case field, while persisted rows never need this transient
+  // source fact again.
+  if (Object.hasOwn(captureMetadata, "history_complete")) {
+    throw new TinderCaptureValidationError(
+      "The chat-history completion flag is invalid.",
+      "INVALID_TINDER_HISTORY_COMPLETE"
+    );
+  }
+  if (schemaVersion !== TINDER_CAPTURE_SCHEMA_VERSION_V2) {
+    if (hasHistoryComplete) {
+      throw new TinderCaptureValidationError(
+        "The chat-history completion flag requires capture schema V2.",
+        "INVALID_TINDER_HISTORY_COMPLETE"
+      );
+    }
+    return false;
+  }
+  if (!hasHistoryComplete) return false;
+  if (typeof captureMetadata[TINDER_CAPTURE_HISTORY_COMPLETE_FIELD] !== "boolean") {
+    throw new TinderCaptureValidationError(
+      "The chat-history completion flag is invalid.",
+      "INVALID_TINDER_HISTORY_COMPLETE"
+    );
+  }
+  return captureMetadata[TINDER_CAPTURE_HISTORY_COMPLETE_FIELD] === true;
+}
+
+function normalizePredecessorCaptureFingerprint(captureMetadata, schemaVersion) {
+  const hasPredecessor = Object.hasOwn(
+    captureMetadata,
+    TINDER_CAPTURE_PREDECESSOR_CAPTURE_FINGERPRINT_FIELD
+  );
+  if (Object.hasOwn(captureMetadata, "predecessor_capture_fingerprint")) {
+    throw new TinderCaptureValidationError(
+      "The predecessor capture fingerprint is invalid.",
+      "INVALID_TINDER_PREDECESSOR_CAPTURE_FINGERPRINT"
+    );
+  }
+  if (schemaVersion !== TINDER_CAPTURE_SCHEMA_VERSION_V2) {
+    if (hasPredecessor) {
+      throw new TinderCaptureValidationError(
+        "The predecessor capture fingerprint requires capture schema V2.",
+        "INVALID_TINDER_PREDECESSOR_CAPTURE_FINGERPRINT"
+      );
+    }
+    return null;
+  }
+  if (!hasPredecessor) return null;
+  return exactLowercaseHash(
+    captureMetadata[TINDER_CAPTURE_PREDECESSOR_CAPTURE_FINGERPRINT_FIELD],
+    "The predecessor capture fingerprint",
+    "INVALID_TINDER_PREDECESSOR_CAPTURE_FINGERPRINT"
+  );
+}
+
 /**
  * Validates the trusted T2 wire shape before it can be persisted.  It accepts
  * no contact identifier and does not infer one from display data.
@@ -305,6 +372,11 @@ function validateSafeVisibleChatCapture(capture) {
     captureMetadata,
     schemaVersion
   );
+  const historyComplete = normalizeHistoryComplete(captureMetadata, schemaVersion);
+  const predecessorCaptureFingerprint = normalizePredecessorCaptureFingerprint(
+    captureMetadata,
+    schemaVersion
+  );
 
   return Object.freeze({
     schemaVersion,
@@ -334,6 +406,8 @@ function validateSafeVisibleChatCapture(capture) {
     }),
     visibleMessages: normalizeVisibleMessages(visibleMessages),
     safetyStatus: "SAFE",
+    historyComplete,
+    ...(predecessorCaptureFingerprint === null ? {} : { predecessorCaptureFingerprint }),
     ...(humanBindingPermitCommandId === null ? {} : { humanBindingPermitCommandId })
   });
 }
@@ -693,6 +767,18 @@ function createTinderCaptureStore(repository, {
             "TINDER_PRODUCT_CONVERSATION_REPROJECTION_NOT_READY"
           );
         }
+        if (!reprojectExistingDuplicate
+            && productConversationProjector !== null
+            && normalizedCapture.schemaVersion === TINDER_CAPTURE_SCHEMA_VERSION_V2
+            && typeof productConversationProjector.lookupCaptureProjection === "function") {
+          // This is a read-only lookup for an already immutable exact
+          // duplicate. It cannot project an unlinked historical capture or
+          // create another Conversation.
+          productConversation = await productConversationProjector.lookupCaptureProjection(
+            transaction,
+            existing
+          );
+        }
         return Object.freeze({
           capture: existing,
           captureDisposition: "IDEMPOTENT_DUPLICATE",
@@ -774,9 +860,24 @@ function createTinderCaptureStore(repository, {
 
       const persisted = await repository.insertCapture(transaction, record);
       const storedCapture = persisted || record;
+      // `historyComplete` is a signed, one-transaction source fact. Immutable
+      // capture rows intentionally receive no new column; the projector
+      // persists only the existing Conversation history_state.
+      const projectionCapture = Object.freeze({
+        ...storedCapture,
+        schemaVersion: normalizedCapture.schemaVersion,
+        // The revision was assigned after the per-thread transaction lock and
+        // belongs to this newly inserted capture. Keep it transient so the
+        // product projector can accept only its exact N-1 predecessor.
+        captureRevision,
+        historyComplete: normalizedCapture.historyComplete,
+        ...(normalizedCapture.predecessorCaptureFingerprint === undefined
+          ? {}
+          : { predecessorCaptureFingerprint: normalizedCapture.predecessorCaptureFingerprint })
+      });
       const productConversation = productConversationProjector === null
         ? null
-        : await productConversationProjector.projectCapture(transaction, storedCapture);
+        : await productConversationProjector.projectCapture(transaction, projectionCapture);
       if (humanBindingAuthorization) {
         const gateway = requireHumanBindingPermitGateway(humanBindingPermitGateway);
         const consumed = await gateway.consumeAuthorizedIncomingPermit(transaction, {

@@ -44,6 +44,13 @@ const TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX = "/tinder-passive-read-captures";
 // mutation is one product-conversation projection of that existing row.
 const TINDER_PASSIVE_READ_DUPLICATE_REPROJECTION_PROOF_PATH_SUFFIX = "/tinder-passive-read-duplicate-reprojection-proofs";
 const TINDER_CAPTURE_FOUNDATION_ERROR_CODES = new Set(["42P01", "42703", "23502"]);
+const TINDER_PRODUCT_CONVERSATION_DISPOSITIONS = new Set([
+  "CREATED", "UPDATED", "IDEMPOTENT_DUPLICATE", "NOT_READY"
+]);
+const TINDER_PRODUCT_CONVERSATION_HISTORY_STATES = new Set(["PARTIAL", "COMPLETE"]);
+const TINDER_PRODUCT_CONVERSATION_READ_DISPOSITIONS = new Set([
+  "FULL_READ_REQUIRED", "UNCHANGED", "DELTA_ACCEPTED"
+]);
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -175,6 +182,88 @@ async function assertCaptureDeviceIdentity(client, auth) {
     throw new DeviceBridgeProtocolError(409, "DEVICE_CAPABILITY_UNSUPPORTED", "Device does not support the Tinder manual gate");
   }
   return row;
+}
+
+/**
+ * Passive V2 receives only a fixed, identifier-free product outcome. It is a
+ * planning result for the next bounded local read, never a permission or a
+ * synchronous gate for navigation, reader, ingress, or header-back.
+ */
+function normalizePassiveReadProductConversationOutcome(value) {
+  if (!plainObject(value)) {
+    return Object.freeze({
+      disposition: "NOT_READY",
+      history_state: null,
+      read_disposition: "FULL_READ_REQUIRED"
+    });
+  }
+  const disposition = String(value.disposition || "").trim().toUpperCase();
+  if (!TINDER_PRODUCT_CONVERSATION_DISPOSITIONS.has(disposition)) {
+    throw new DeviceBridgeProtocolError(
+      500,
+      "INVALID_TINDER_PRODUCT_CONVERSATION_OUTCOME",
+      "Tinder product conversation outcome is invalid"
+    );
+  }
+  if (disposition === "NOT_READY") {
+    const suppliedHistoryState = value.historyState ?? value.history_state ?? null;
+    const suppliedReadDisposition = value.readDisposition ?? value.read_disposition ?? null;
+    if (suppliedHistoryState !== null
+        || (suppliedReadDisposition !== null
+          && String(suppliedReadDisposition).trim().toUpperCase() !== "FULL_READ_REQUIRED")) {
+      throw new DeviceBridgeProtocolError(
+        500,
+        "INVALID_TINDER_PRODUCT_CONVERSATION_OUTCOME",
+        "Tinder product conversation outcome is invalid"
+      );
+    }
+    return Object.freeze({
+      disposition,
+      history_state: null,
+      read_disposition: "FULL_READ_REQUIRED"
+    });
+  }
+  const historyState = String(value.historyState ?? value.history_state ?? "").trim().toUpperCase();
+  const readDisposition = String(value.readDisposition ?? value.read_disposition ?? "").trim().toUpperCase();
+  if (!TINDER_PRODUCT_CONVERSATION_HISTORY_STATES.has(historyState)
+      || !TINDER_PRODUCT_CONVERSATION_READ_DISPOSITIONS.has(readDisposition)) {
+    throw new DeviceBridgeProtocolError(
+      500,
+      "INVALID_TINDER_PRODUCT_CONVERSATION_OUTCOME",
+      "Tinder product conversation outcome is invalid"
+    );
+  }
+  const invalid = () => {
+    throw new DeviceBridgeProtocolError(
+      500,
+      "INVALID_TINDER_PRODUCT_CONVERSATION_OUTCOME",
+      "Tinder product conversation outcome is invalid"
+    );
+  };
+  if (disposition === "IDEMPOTENT_DUPLICATE") {
+    // An immutable capture already linked to this device Conversation can
+    // never authorize another full history read. Its historical state stays
+    // visible, but the action planning result is always a skip.
+    if (readDisposition !== "UNCHANGED") invalid();
+  } else if (disposition === "CREATED") {
+    // A fresh Conversation must always drive its first full read. Even a
+    // capture that already reaches the oldest boundary cannot claim that the
+    // initial product history was previously synchronized.
+    if (readDisposition !== "FULL_READ_REQUIRED") invalid();
+  } else if (disposition === "UPDATED") {
+    // Only a durable complete Conversation can safely identify an unchanged
+    // viewport or an overlap-proven delta. A partial state remains a full-read
+    // request even when the server response is otherwise well-formed.
+    if (historyState !== "COMPLETE"
+        && readDisposition !== "FULL_READ_REQUIRED") invalid();
+  } else {
+    invalid();
+  }
+  return Object.freeze({
+    disposition,
+    history_state: historyState,
+    read_disposition: readDisposition
+  });
 }
 
 /**
@@ -409,9 +498,10 @@ function createTinderPassiveReadIngressHandler(pool, {
       });
       const stored = result.capture;
       /*
-       * No product conversation identifier or message content is returned to
-       * Android.  The only product projection lives in the server transaction;
-       * this signed response remains the pre-existing bounded capture receipt.
+       * No product Conversation identifier or message content is returned to
+       * Android. The fixed outcome is sufficient to choose a later bounded
+       * full read, unchanged skip, or overlap-proven delta without becoming a
+       * new permission, receipt, or read-path gate.
        */
       const record = requireExistingDuplicate
         ? normalizeDuplicateReprojectionProofReceipt(stored)
@@ -420,7 +510,14 @@ function createTinderPassiveReadIngressHandler(pool, {
         ok: true,
         protocol_version: DEVICE_BRIDGE_PROTOCOL.version,
         capture: record,
-        ...(requireExistingDuplicate ? {} : { server_time: now().toISOString() })
+        ...(requireExistingDuplicate
+          ? {}
+          : {
+            server_time: now().toISOString(),
+            product_conversation: normalizePassiveReadProductConversationOutcome(
+              result.productConversation
+            )
+          })
       });
     } catch (error) {
       const mapped = isFoundationNotReadyError(error) ? foundationNotReadyError()
@@ -503,6 +600,7 @@ export {
   createTinderPassiveReadCaptureIngressHandler,
   createTinderPassiveReadDuplicateReprojectionProofIngressHandler,
   normalizeCaptureRecord,
+  normalizePassiveReadProductConversationOutcome,
   parseSignedCaptureRequest,
   registerTinderPassiveReadCaptureIngress,
   registerTinderPassiveReadDuplicateReprojectionProofIngress,

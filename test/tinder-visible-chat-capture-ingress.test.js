@@ -9,6 +9,7 @@ import {
   createTinderPassiveReadCaptureIngressHandler,
   createTinderPassiveReadDuplicateReprojectionProofIngressHandler,
   normalizeCaptureRecord,
+  normalizePassiveReadProductConversationOutcome,
   parseSignedCaptureRequest,
   registerTinderPassiveReadCaptureIngress,
   registerTinderPassiveReadDuplicateReprojectionProofIngress
@@ -159,7 +160,12 @@ test("passive read ingress accepts only signed V2 captures and disables legacy f
           return {
             capture: storedCapture(),
             captureDisposition: "CREATED",
-            productConversation: { disposition: "CREATED", conversationId: productConversationId }
+            productConversation: {
+              disposition: "CREATED",
+              conversationId: productConversationId,
+              historyState: "PARTIAL",
+              readDisposition: "FULL_READ_REQUIRED"
+            }
           };
         }
       };
@@ -176,12 +182,90 @@ test("passive read ingress accepts only signed V2 captures and disables legacy f
     readChannel: "PASSIVE_READ"
   });
   assert.equal(JSON.stringify(res.body).includes(productConversationId), false);
-  assert.equal(Object.hasOwn(res.body, "product_conversation"), false);
+  assert.deepEqual(res.body.product_conversation, {
+    disposition: "CREATED",
+    history_state: "PARTIAL",
+    read_disposition: "FULL_READ_REQUIRED"
+  });
+  assert.equal(JSON.stringify(res.body.product_conversation).includes("conversationId"), false);
 
   const rejected = responseRecorder();
   await handler(rawRequest(), rejected);
   assert.equal(rejected.statusCode, 400);
   assert.equal(rejected.body.error.code, "INVALID_TINDER_CAPTURE_REQUEST");
+});
+
+test("passive product outcomes reject incoherent full-read and skip combinations", () => {
+  assert.deepEqual(
+    normalizePassiveReadProductConversationOutcome({
+      disposition: "IDEMPOTENT_DUPLICATE",
+      historyState: "PARTIAL",
+      readDisposition: "UNCHANGED"
+    }),
+    {
+      disposition: "IDEMPOTENT_DUPLICATE",
+      history_state: "PARTIAL",
+      read_disposition: "UNCHANGED"
+    }
+  );
+  assert.deepEqual(
+    normalizePassiveReadProductConversationOutcome({
+      disposition: "NOT_READY"
+    }),
+    {
+      disposition: "NOT_READY",
+      history_state: null,
+      read_disposition: "FULL_READ_REQUIRED"
+    }
+  );
+  // A direct full-reader fallback can create its first Conversation after it
+  // has already reached the oldest boundary. It remains a full-read result;
+  // only CREATED + UNCHANGED/DELTA would be incoherent.
+  assert.deepEqual(
+    normalizePassiveReadProductConversationOutcome({
+      disposition: "CREATED",
+      historyState: "COMPLETE",
+      readDisposition: "FULL_READ_REQUIRED"
+    }),
+    {
+      disposition: "CREATED",
+      history_state: "COMPLETE",
+      read_disposition: "FULL_READ_REQUIRED"
+    }
+  );
+
+  for (const malformed of [
+    {
+      disposition: "CREATED",
+      historyState: "COMPLETE",
+      readDisposition: "UNCHANGED"
+    },
+    {
+      disposition: "UPDATED",
+      historyState: "PARTIAL",
+      readDisposition: "DELTA_ACCEPTED"
+    },
+    {
+      disposition: "IDEMPOTENT_DUPLICATE",
+      historyState: "PARTIAL",
+      readDisposition: "FULL_READ_REQUIRED"
+    },
+    {
+      disposition: "NOT_READY",
+      historyState: "PARTIAL",
+      readDisposition: "FULL_READ_REQUIRED"
+    },
+    {
+      disposition: "NOT_READY",
+      readDisposition: "UNCHANGED"
+    }
+  ]) {
+    assert.throws(
+      () => normalizePassiveReadProductConversationOutcome(malformed),
+      error => error instanceof DeviceBridgeProtocolError
+        && error.code === "INVALID_TINDER_PRODUCT_CONVERSATION_OUTCOME"
+    );
+  }
 });
 
 test("duplicate-only reprojection proof is passive V2, returns no product identifier, and enables only its in-transaction proof policy", async () => {

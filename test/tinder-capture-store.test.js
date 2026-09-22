@@ -197,6 +197,117 @@ test("V2 retains only the exact opaque thread evidence and remains pending", asy
   assert.equal(JSON.stringify(stored).includes("tinder_profile"), false);
 });
 
+test("V2 accepts only an exact optional historyComplete boolean and forwards it only to projection", async () => {
+  const complete = safeCaptureV2({ includeEvidence: false });
+  complete.captureMetadata.historyComplete = true;
+  assert.equal(validateSafeVisibleChatCapture(complete).historyComplete, true);
+
+  for (const invalidCapture of [
+    {
+      ...safeCaptureV2({ includeEvidence: false }),
+      captureMetadata: { ...safeCaptureV2({ includeEvidence: false }).captureMetadata, historyComplete: "true" }
+    },
+    {
+      ...safeCapture(),
+      captureMetadata: { ...safeCapture().captureMetadata, historyComplete: true }
+    },
+    {
+      ...safeCaptureV2({ includeEvidence: false }),
+      captureMetadata: { ...safeCaptureV2({ includeEvidence: false }).captureMetadata, history_complete: true }
+    }
+  ]) {
+    assert.throws(
+      () => validateSafeVisibleChatCapture(invalidCapture),
+      error => error instanceof TinderCaptureValidationError && error.code === "INVALID_TINDER_HISTORY_COMPLETE"
+    );
+  }
+
+  const repository = fixtureRepository();
+  let projected = null;
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    productConversationProjector: {
+      async projectCapture(_transaction, capture) {
+        projected = capture;
+        return { disposition: "CREATED", historyState: "COMPLETE", readDisposition: "FULL_READ_REQUIRED" };
+      }
+    },
+    allowLegacyFingerprintMapping: false
+  });
+  await store.storeSafeCaptureWithDisposition({
+    deviceId: DEVICE_ID,
+    capture: complete,
+    provenance: { source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ" }
+  });
+
+  assert.equal(projected.historyComplete, true);
+  assert.equal(Object.hasOwn(repository.rows[0], "historyComplete"), false);
+});
+
+test("V2 predecessor capture continuity is exact, transient, and never persisted", async () => {
+  const predecessorCaptureFingerprint = "d".repeat(64);
+  const valid = safeCaptureV2({ includeEvidence: false });
+  valid.captureMetadata.predecessorCaptureFingerprint = predecessorCaptureFingerprint;
+  assert.equal(
+    validateSafeVisibleChatCapture(valid).predecessorCaptureFingerprint,
+    predecessorCaptureFingerprint
+  );
+
+  for (const invalidCapture of [
+    {
+      ...safeCaptureV2({ includeEvidence: false }),
+      captureMetadata: {
+        ...safeCaptureV2({ includeEvidence: false }).captureMetadata,
+        predecessorCaptureFingerprint: "D".repeat(64)
+      }
+    },
+    {
+      ...safeCapture(),
+      captureMetadata: {
+        ...safeCapture().captureMetadata,
+        predecessorCaptureFingerprint
+      }
+    },
+    {
+      ...safeCaptureV2({ includeEvidence: false }),
+      captureMetadata: {
+        ...safeCaptureV2({ includeEvidence: false }).captureMetadata,
+        predecessor_capture_fingerprint: predecessorCaptureFingerprint
+      }
+    }
+  ]) {
+    assert.throws(
+      () => validateSafeVisibleChatCapture(invalidCapture),
+      error => error instanceof TinderCaptureValidationError
+        && error.code === "INVALID_TINDER_PREDECESSOR_CAPTURE_FINGERPRINT"
+    );
+  }
+
+  const repository = fixtureRepository();
+  let projected = null;
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    productConversationProjector: {
+      async projectCapture(_transaction, capture) {
+        projected = capture;
+        return { disposition: "CREATED", historyState: "PARTIAL", readDisposition: "FULL_READ_REQUIRED" };
+      }
+    },
+    allowLegacyFingerprintMapping: false
+  });
+  await store.storeSafeCaptureWithDisposition({
+    deviceId: DEVICE_ID,
+    capture: valid,
+    provenance: { source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ" }
+  });
+
+  assert.equal(projected.predecessorCaptureFingerprint, predecessorCaptureFingerprint);
+  assert.equal(projected.schemaVersion, "tinder-visible-chat-v2");
+  assert.equal(projected.captureRevision, 1);
+  assert.equal(Object.hasOwn(repository.rows[0], "predecessorCaptureFingerprint"), false);
+  assert.equal(JSON.stringify(repository.rows[0]).includes(predecessorCaptureFingerprint), false);
+});
+
 test("V3 resolves only through a same-transaction human-armed permit and never persists it", async () => {
   const repository = fixtureRepository();
   const calls = [];
@@ -684,6 +795,51 @@ test("the normal passive duplicate path never projects historical evidence", asy
   assert.equal(duplicate.capture, existing);
   assert.equal(duplicate.productConversation, null);
   assert.equal(projections.length, 0);
+  assert.equal(repository.rows.length, 1);
+});
+
+test("the normal passive duplicate path returns an existing product state without reprojection", async () => {
+  const repository = fixtureRepository();
+  const historicalStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z")
+  });
+  const input = {
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: { source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ" }
+  };
+  const existing = await historicalStore.storeSafeCapture(input);
+  let lookups = 0;
+  const passiveStore = createTinderCaptureStore(repository, {
+    createCaptureId: () => "b565e8a7-ef60-42d0-b19d-26e7904390fa",
+    productConversationProjector: {
+      async projectCapture() { assert.fail("normal duplicate must not reproject historical evidence"); },
+      async lookupCaptureProjection(transaction, capture) {
+        lookups += 1;
+        assert.deepEqual(transaction, {});
+        assert.equal(capture, existing);
+        return {
+          disposition: "IDEMPOTENT_DUPLICATE",
+          conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa",
+          historyState: "COMPLETE",
+          readDisposition: "UNCHANGED"
+        };
+      }
+    },
+    allowLegacyFingerprintMapping: false
+  });
+
+  const duplicate = await passiveStore.storeSafeCaptureWithDisposition(input);
+
+  assert.equal(duplicate.captureDisposition, "IDEMPOTENT_DUPLICATE");
+  assert.equal(lookups, 1);
+  assert.deepEqual(duplicate.productConversation, {
+    disposition: "IDEMPOTENT_DUPLICATE",
+    conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa",
+    historyState: "COMPLETE",
+    readDisposition: "UNCHANGED"
+  });
   assert.equal(repository.rows.length, 1);
 });
 

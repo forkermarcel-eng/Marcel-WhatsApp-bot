@@ -46,11 +46,22 @@ export const TINDER_PRODUCT_CONVERSATION_DISPOSITION = Object.freeze({
   NOT_READY: "NOT_READY"
 });
 
+// This is a bounded product planning hint for the passive reader. It never
+// grants an action and is deliberately derived only from the durable product
+// Conversation plus the currently submitted, signed viewport.
+export const TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION = Object.freeze({
+  FULL_READ_REQUIRED: "FULL_READ_REQUIRED",
+  UNCHANGED: "UNCHANGED",
+  DELTA_ACCEPTED: "DELTA_ACCEPTED"
+});
+
 export const TINDER_PRODUCT_CONVERSATION_MINIMUM_ORDERED_OVERLAP = 2;
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 const MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING", "UNKNOWN"]);
+const TINDER_PASSIVE_READ_CAPTURE_SCHEMA_VERSION = "tinder-visible-chat-v2";
+const TINDER_PASSIVE_READ_CHANNEL = "PASSIVE_READ";
 
 export class TinderProductConversationError extends Error {
   constructor(message, code = "INVALID_TINDER_PRODUCT_CONVERSATION") {
@@ -92,6 +103,14 @@ function timestamp(value, field) {
 function positiveContactId(value) {
   const normalized = Number(value);
   return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
+function positiveCaptureRevision(value, field = "capture revision") {
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized < 1) {
+    invalid(`Invalid Tinder product ${field}.`, "INVALID_TINDER_PRODUCT_CONVERSATION_RECORD");
+  }
+  return normalized;
 }
 
 function normalizedDirection(value) {
@@ -244,6 +263,17 @@ function normalizeCaptureForProjection(value) {
   const metadata = sourceValue(value, "visibleThreadMetadata", "visible_thread_metadata");
   const fingerprint = sourceValue(value, "runtimeThreadFingerprint", "runtime_thread_fingerprint")
     ?? sourceValue(metadata, "threadFingerprint", "thread_fingerprint");
+  const historyComplete = sourceValue(value, "historyComplete", "history_complete");
+  const predecessorCaptureFingerprint = sourceValue(
+    value,
+    "predecessorCaptureFingerprint",
+    "predecessor_capture_fingerprint"
+  );
+  const captureRevision = sourceValue(value, "captureRevision", "capture_revision");
+  if (historyComplete !== undefined && typeof historyComplete !== "boolean") {
+    invalid("Invalid Tinder product history completion.", "INVALID_TINDER_PRODUCT_CONVERSATION_RECORD");
+  }
+  const provenance = sourceValue(value, "provenance", "provenance");
   return Object.freeze({
     captureId: uuid(sourceValue(value, "captureId", "capture_id"), "capture id"),
     deviceId: uuid(sourceValue(value, "deviceId", "device_id"), "device id"),
@@ -253,8 +283,172 @@ function normalizeCaptureForProjection(value) {
     receivedAt: timestamp(sourceValue(value, "receivedAt", "received_at"), "receipt time"),
     mappingStatus: String(sourceValue(value, "mappingStatus", "mapping_status") || "").trim().toUpperCase(),
     humanReviewStatus: String(sourceValue(value, "humanReviewStatus", "human_review_status") || "").trim().toUpperCase(),
-    resolvedContactId: positiveContactId(sourceValue(value, "resolvedContactId", "resolved_contact_id"))
+    resolvedContactId: positiveContactId(sourceValue(value, "resolvedContactId", "resolved_contact_id")),
+    // This fact is transient on the immutable capture transaction. The
+    // durable result is stored only in the existing Conversation history_state
+    // column, so no capture schema or new persistence surface is needed.
+    historyComplete: historyComplete === true,
+    // This is a one-transaction continuity hint from the immediately prior
+    // passive V2 viewport. It is deliberately not a capture field and is
+    // never loaded from durable capture rows unless a current request carries
+    // it into the projector.
+    predecessorCaptureFingerprint: predecessorCaptureFingerprint === undefined
+      || predecessorCaptureFingerprint === null
+      ? null
+      : hash(predecessorCaptureFingerprint, "predecessor capture fingerprint"),
+    // Capture revisions are already allocated under the device/thread
+    // transaction lock. They are only required for the transient immediate
+    // predecessor edge; ordinary product correlation remains revision-free.
+    captureRevision: captureRevision === undefined || captureRevision === null
+      ? null
+      : positiveCaptureRevision(captureRevision),
+    schemaVersion: String(
+      sourceValue(value, "schemaVersion", "schema_version")
+        ?? value.captureSchemaVersion
+        ?? value.capture_schema_version
+        ?? ""
+    ).trim(),
+    provenanceReadChannel: plainObject(provenance)
+      ? String(sourceValue(provenance, "readChannel", "read_channel") || "").trim()
+      : ""
   });
+}
+
+function normalizedHistoryState(value, field = "history state") {
+  const state = String(value || "").trim().toUpperCase();
+  if (!Object.values(TINDER_PRODUCT_CONVERSATION_HISTORY_STATE).includes(state)) {
+    invalid(`Invalid Tinder product ${field}.`, "INVALID_TINDER_PRODUCT_CONVERSATION_RECORD");
+  }
+  return state;
+}
+
+function linkedConversationHistoryState(link) {
+  return normalizedHistoryState(sourceValue(link, "historyState", "history_state"), "linked history state");
+}
+
+function historyStateAfter(existingHistoryState, capture) {
+  return existingHistoryState === TINDER_PRODUCT_CONVERSATION_HISTORY_STATE.COMPLETE
+      || capture.historyComplete
+    ? TINDER_PRODUCT_CONVERSATION_HISTORY_STATE.COMPLETE
+    : TINDER_PRODUCT_CONVERSATION_HISTORY_STATE.PARTIAL;
+}
+
+function readDispositionForExistingHistory(existingHistoryState, relation) {
+  // A new or still-partial Conversation never permits the controller to skip
+  // the bounded read. Once durable history is COMPLETE, an entirely contained
+  // viewport is unchanged and an overlap-proven append is a safe delta. Every
+  // other shape remains a full-read request rather than a heuristic merge.
+  if (existingHistoryState !== TINDER_PRODUCT_CONVERSATION_HISTORY_STATE.COMPLETE) {
+    return TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION.FULL_READ_REQUIRED;
+  }
+  if (relation === "RIGHT_CONTAINED") {
+    return TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION.UNCHANGED;
+  }
+  if (relation === "APPEND_RIGHT") {
+    return TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION.DELTA_ACCEPTED;
+  }
+  return TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION.FULL_READ_REQUIRED;
+}
+
+function projectionResult(disposition, conversationId, historyState, readDisposition) {
+  const normalizedDisposition = String(disposition || "").trim().toUpperCase();
+  if (!Object.values(TINDER_PRODUCT_CONVERSATION_DISPOSITION).includes(normalizedDisposition)) {
+    invalid("Invalid Tinder product disposition.", "INVALID_TINDER_PRODUCT_CONVERSATION_RECORD");
+  }
+  const normalizedReadDisposition = String(readDisposition || "").trim().toUpperCase();
+  if (!Object.values(TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION).includes(normalizedReadDisposition)) {
+    invalid("Invalid Tinder product read disposition.", "INVALID_TINDER_PRODUCT_CONVERSATION_RECORD");
+  }
+  return Object.freeze({
+    disposition: normalizedDisposition,
+    conversationId: conversationId === null ? null : uuid(conversationId, "conversation id"),
+    historyState: historyState === null ? null : normalizedHistoryState(historyState),
+    readDisposition: normalizedReadDisposition
+  });
+}
+
+function notReadyProjectionResult() {
+  return projectionResult(
+    TINDER_PRODUCT_CONVERSATION_DISPOSITION.NOT_READY,
+    null,
+    null,
+    TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION.FULL_READ_REQUIRED
+  );
+}
+
+function linkedProjectionResult(link) {
+  const historyState = linkedConversationHistoryState(link);
+  return projectionResult(
+    TINDER_PRODUCT_CONVERSATION_DISPOSITION.IDEMPOTENT_DUPLICATE,
+    sourceValue(link, "conversationId", "conversation_id"),
+    historyState,
+    // The capture is already immutable and linked to this exact product
+    // Conversation. A retry is never evidence that another full history read
+    // is needed, including while the durable Conversation remains PARTIAL.
+    TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION.UNCHANGED
+  );
+}
+
+function assertPassiveV2ContinuitySource(capture) {
+  if (capture.predecessorCaptureFingerprint === null) return;
+  if (capture.schemaVersion !== TINDER_PASSIVE_READ_CAPTURE_SCHEMA_VERSION
+      || capture.provenanceReadChannel !== TINDER_PASSIVE_READ_CHANNEL
+      || capture.mappingStatus !== "NEEDS_HUMAN_MAPPING"
+      || capture.humanReviewStatus !== "PENDING"
+      || capture.resolvedContactId !== null
+      || capture.captureRevision === null
+      || capture.captureRevision < 2) {
+    invalid(
+      "Tinder product predecessor continuity is not an unassigned passive V2 observation.",
+      "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID"
+    );
+  }
+}
+
+function normalizePredecessorContinuityCandidate(value, expectedFingerprint, expectedRevision) {
+  if (!plainObject(value)) {
+    invalid("Tinder product predecessor continuity candidate is invalid.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
+  }
+  const predecessorCaptureFingerprint = hash(
+    sourceValue(value, "predecessorCaptureFingerprint", "predecessor_capture_fingerprint"),
+    "predecessor continuity capture fingerprint"
+  );
+  if (predecessorCaptureFingerprint !== expectedFingerprint) {
+    invalid("Tinder product predecessor continuity fingerprint conflicts.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
+  }
+  const candidate = Object.freeze({
+    conversationId: uuid(sourceValue(value, "conversationId", "conversation_id"), "continuity conversation id"),
+    deviceId: uuid(sourceValue(value, "deviceId", "device_id"), "continuity device id"),
+    runtimeThreadFingerprint: hash(
+      sourceValue(value, "runtimeThreadFingerprint", "runtime_thread_fingerprint"),
+      "continuity thread fingerprint"
+    ),
+    correlationState: String(sourceValue(value, "correlationState", "correlation_state") || "").trim().toUpperCase(),
+    identityBindingState: String(sourceValue(value, "identityBindingState", "identity_binding_state") || "").trim().toUpperCase(),
+    resolvedContactId: positiveContactId(sourceValue(value, "resolvedContactId", "resolved_contact_id")),
+    historyState: normalizedHistoryState(
+      sourceValue(value, "historyState", "history_state"),
+      "continuity history state"
+    ),
+    predecessorCapture: normalizeCaptureForProjection(
+      sourceValue(value, "predecessorCapture", "predecessor_capture")
+    )
+  });
+  if (!Object.values(TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE).includes(candidate.correlationState)
+      || candidate.identityBindingState !== TINDER_PRODUCT_CONVERSATION_IDENTITY_STATE.UNASSIGNED
+      || candidate.resolvedContactId !== null
+      || candidate.historyState !== TINDER_PRODUCT_CONVERSATION_HISTORY_STATE.PARTIAL
+      || candidate.predecessorCapture.deviceId !== candidate.deviceId
+      || candidate.predecessorCapture.runtimeThreadFingerprint !== candidate.runtimeThreadFingerprint
+      || candidate.predecessorCapture.schemaVersion !== TINDER_PASSIVE_READ_CAPTURE_SCHEMA_VERSION
+      || candidate.predecessorCapture.provenanceReadChannel !== TINDER_PASSIVE_READ_CHANNEL
+      || candidate.predecessorCapture.mappingStatus !== "NEEDS_HUMAN_MAPPING"
+      || candidate.predecessorCapture.humanReviewStatus !== "PENDING"
+      || candidate.predecessorCapture.resolvedContactId !== null
+      || candidate.predecessorCapture.captureRevision !== expectedRevision) {
+    invalid("Tinder product predecessor continuity candidate is not eligible.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
+  }
+  return candidate;
 }
 
 function captureIdentity(capture) {
@@ -349,10 +543,92 @@ export function createTinderProductConversationService(repository, {
     })) === true;
   }
 
+  async function linkCaptureToExistingConversation(transaction, capture, candidate, relation) {
+    const identity = conversationIdentityAfter(candidate, capture);
+    const correlationState = candidate.correlationState === TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.AMBIGUOUS
+      ? TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.AMBIGUOUS
+      : TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.CORRELATED;
+    const historyState = historyStateAfter(candidate.historyState, capture);
+    const readDisposition = readDispositionForExistingHistory(candidate.historyState, relation);
+    const linked = await repository.linkCapture(transaction, {
+      conversationId: candidate.conversationId,
+      captureId: capture.captureId,
+      linkMethod: TINDER_PRODUCT_CONVERSATION_LINK_METHOD.ORDERED_MESSAGE_OVERLAP,
+      linkedAt: timestamp(now(), "link time")
+    });
+    if (!linked) {
+      invalid("Tinder product capture link was rejected.", "TINDER_PRODUCT_CONVERSATION_LINK_REJECTED");
+    }
+    const linkedConversationId = linked.conversationId ?? linked.conversation_id;
+    if (linkedConversationId !== candidate.conversationId) {
+      const existing = await repository.findCaptureLink(transaction, {
+        captureId: capture.captureId,
+        deviceId: capture.deviceId
+      });
+      if (!existing?.conversationId && !existing?.conversation_id) {
+        invalid("Tinder product capture link conflicts without a durable link.", "TINDER_PRODUCT_CONVERSATION_LINK_CONFLICT");
+      }
+      return linkedProjectionResult(existing);
+    }
+    await repository.updateConversation(transaction, {
+      conversationId: candidate.conversationId,
+      correlationState,
+      identityBindingState: identity.state,
+      resolvedContactId: identity.contactId,
+      historyState,
+      lastObservedAt: capture.capturedAt,
+      lastHistoryAt: capture.capturedAt,
+      updatedAt: timestamp(now(), "update time")
+    });
+    return projectionResult(
+      TINDER_PRODUCT_CONVERSATION_DISPOSITION.UPDATED,
+      candidate.conversationId,
+      historyState,
+      readDisposition
+    );
+  }
+
+  async function linkCaptureByImmediatePredecessor(transaction, capture) {
+    if (typeof repository.findPredecessorContinuityCandidates !== "function") {
+      invalid("Tinder product predecessor continuity repository is unavailable.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
+    }
+    const candidates = await repository.findPredecessorContinuityCandidates(transaction, {
+      deviceId: capture.deviceId,
+      runtimeThreadFingerprint: capture.runtimeThreadFingerprint,
+      predecessorCaptureFingerprint: capture.predecessorCaptureFingerprint,
+      predecessorCaptureRevision: capture.captureRevision - 1
+    });
+    if (!Array.isArray(candidates) || candidates.length !== 1) {
+      invalid("Tinder product predecessor continuity is missing or ambiguous.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
+    }
+    const candidate = normalizePredecessorContinuityCandidate(
+      candidates[0],
+      capture.predecessorCaptureFingerprint,
+      capture.captureRevision - 1
+    );
+    if (candidate.deviceId !== capture.deviceId
+        || candidate.runtimeThreadFingerprint !== capture.runtimeThreadFingerprint) {
+      invalid("Tinder product predecessor continuity scope conflicts.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
+    }
+    // This is deliberately a weaker, direct edge proof only after the
+    // normal two-message candidate matcher found no match. It cannot join a
+    // wholly unrelated viewport: one ordered message still has to survive
+    // between the exact preceding observation and this full read.
+    const overlap = orderedDirectionalOverlap(
+      candidate.predecessorCapture.visibleMessages,
+      capture.visibleMessages
+    );
+    if (overlap.count < 1) {
+      invalid("Tinder product predecessor continuity has no ordered overlap.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
+    }
+    return linkCaptureToExistingConversation(transaction, capture, candidate, overlap.relation);
+  }
+
   async function projectCapture(transaction, inputCapture) {
     const capture = normalizeCaptureForProjection(inputCapture);
+    assertPassiveV2ContinuitySource(capture);
     if (await repository.isReady(transaction) !== true) {
-      return Object.freeze({ disposition: TINDER_PRODUCT_CONVERSATION_DISPOSITION.NOT_READY, conversationId: null });
+      return notReadyProjectionResult();
     }
 
     // A capture-link idempotency lookup is meaningful only within the same
@@ -363,10 +639,7 @@ export function createTinderProductConversationService(repository, {
       deviceId: capture.deviceId
     });
     if (existingLink?.conversationId || existingLink?.conversation_id) {
-      return Object.freeze({
-        disposition: TINDER_PRODUCT_CONVERSATION_DISPOSITION.IDEMPOTENT_DUPLICATE,
-        conversationId: uuid(existingLink.conversationId ?? existingLink.conversation_id, "conversation id")
-      });
+      return linkedProjectionResult(existingLink);
     }
 
     const candidates = (await repository.findCandidates(transaction, {
@@ -387,45 +660,24 @@ export function createTinderProductConversationService(repository, {
       // The overlap test above guarantees the edge-aware merge. Keep this
       // defensive check so a future matcher cannot silently weaken it.
       if (!merged.merged) invalid("Tinder product correlation cannot merge history.", "TINDER_PRODUCT_CONVERSATION_CORRELATION_INVALID");
-      const identity = conversationIdentityAfter(match.candidate, capture);
-      const correlationState = match.candidate.correlationState === TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.AMBIGUOUS
-        ? TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.AMBIGUOUS
-        : TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.CORRELATED;
-      const linked = await repository.linkCapture(transaction, {
-        conversationId: match.candidate.conversationId,
-        captureId: capture.captureId,
-        linkMethod: TINDER_PRODUCT_CONVERSATION_LINK_METHOD.ORDERED_MESSAGE_OVERLAP,
-        linkedAt: timestamp(now(), "link time")
-      });
-      if (!linked) {
-        invalid("Tinder product capture link was rejected.", "TINDER_PRODUCT_CONVERSATION_LINK_REJECTED");
+      return linkCaptureToExistingConversation(transaction, capture, match.candidate, merged.relation);
+    }
+
+    if (capture.predecessorCaptureFingerprint !== null) {
+      // A direct predecessor never resolves an ambiguous ordinary matcher.
+      // If normal >=2 overlap saw multiple candidates, fall closed instead of
+      // letting this RAM-only hint manufacture another Conversation.
+      if (matches.length !== 0) {
+        invalid("Tinder product predecessor continuity conflicts with ordinary candidates.", "TINDER_PRODUCT_CONVERSATION_CONTINUITY_INVALID");
       }
-      const linkedConversationId = linked.conversationId ?? linked.conversation_id;
-      if (linkedConversationId !== match.candidate.conversationId) {
-        return Object.freeze({
-          disposition: TINDER_PRODUCT_CONVERSATION_DISPOSITION.IDEMPOTENT_DUPLICATE,
-          conversationId: uuid(linkedConversationId, "conversation id")
-        });
-      }
-      await repository.updateConversation(transaction, {
-        conversationId: match.candidate.conversationId,
-        correlationState,
-        identityBindingState: identity.state,
-        resolvedContactId: identity.contactId,
-        lastObservedAt: observedAt,
-        lastHistoryAt: observedAt,
-        updatedAt: timestamp(now(), "update time")
-      });
-      return Object.freeze({
-        disposition: TINDER_PRODUCT_CONVERSATION_DISPOSITION.UPDATED,
-        conversationId: match.candidate.conversationId
-      });
+      return linkCaptureByImmediatePredecessor(transaction, capture);
     }
 
     const identity = captureIdentity(capture);
     const correlationState = matches.length > 1
       ? TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.AMBIGUOUS
       : TINDER_PRODUCT_CONVERSATION_CORRELATION_STATE.PROVISIONAL;
+    const historyState = historyStateAfter(null, capture);
     const conversationId = uuid(createConversationId(), "conversation id");
     await repository.createConversation(transaction, {
       conversationId,
@@ -434,7 +686,7 @@ export function createTinderProductConversationService(repository, {
       identityBindingState: identity.state,
       resolvedContactId: identity.contactId,
       correlationState,
-      historyState: TINDER_PRODUCT_CONVERSATION_HISTORY_STATE.PARTIAL,
+      historyState,
       firstObservedAt: observedAt,
       lastObservedAt: observedAt,
       lastHistoryAt: observedAt,
@@ -454,10 +706,37 @@ export function createTinderProductConversationService(repository, {
     if (linkedConversationId !== conversationId) {
       invalid("Tinder product capture link conflicts with its new conversation.", "TINDER_PRODUCT_CONVERSATION_LINK_CONFLICT");
     }
-    return Object.freeze({ disposition: TINDER_PRODUCT_CONVERSATION_DISPOSITION.CREATED, conversationId });
+    return projectionResult(
+      TINDER_PRODUCT_CONVERSATION_DISPOSITION.CREATED,
+      conversationId,
+      historyState,
+      TINDER_PRODUCT_CONVERSATION_READ_DISPOSITION.FULL_READ_REQUIRED
+    );
   }
 
-  return Object.freeze({ projectCapture, hasEmptyDeviceSlotForDuplicateReprojectionProof });
+  /**
+   * Looks up only an already-linked durable Conversation for an immutable
+   * duplicate. It deliberately never projects an unlinked historical capture:
+   * normal passive retries therefore expose a bounded state without becoming a
+   * backfill or a second mutation path.
+   */
+  async function lookupCaptureProjection(transaction, inputCapture) {
+    const capture = normalizeCaptureForProjection(inputCapture);
+    if (await repository.isReady(transaction) !== true) return notReadyProjectionResult();
+    const existingLink = await repository.findCaptureLink(transaction, {
+      captureId: capture.captureId,
+      deviceId: capture.deviceId
+    });
+    return existingLink?.conversationId || existingLink?.conversation_id
+      ? linkedProjectionResult(existingLink)
+      : notReadyProjectionResult();
+  }
+
+  return Object.freeze({
+    projectCapture,
+    lookupCaptureProjection,
+    hasEmptyDeviceSlotForDuplicateReprojectionProof
+  });
 }
 
 /** PostgreSQL adapter. It is inert until the additive product schema exists. */
@@ -478,7 +757,8 @@ export function createPgTinderProductConversationRepository(pool) {
 
     async findCaptureLink(client, { captureId, deviceId }) {
       const result = await client.query(
-        `SELECT link.conversation_id
+        `SELECT link.conversation_id,
+                conversation.history_state
            FROM tinder_thread_conversation_capture_links link
            JOIN tinder_thread_conversations conversation
              ON conversation.conversation_id = link.conversation_id
@@ -573,6 +853,103 @@ export function createPgTinderProductConversationRepository(pool) {
       return [...grouped.values()];
     },
 
+    /**
+     * Resolves only the exact, immediately preceding passive V2 capture that
+     * is already linked to one unassigned PARTIAL product Conversation. The
+     * caller has allocated the current revision under the device/thread
+     * transaction lock, so `predecessorCaptureRevision` must be exactly one
+     * less. This is intentionally narrower than candidate discovery: it is a
+     * transaction-local continuity edge, not historical correlation.
+     */
+    async findPredecessorContinuityCandidates(client, {
+      deviceId,
+      runtimeThreadFingerprint,
+      predecessorCaptureFingerprint,
+      predecessorCaptureRevision
+    }) {
+      const expectedRevision = positiveCaptureRevision(
+        predecessorCaptureRevision,
+        "predecessor capture revision"
+      );
+      const result = await client.query(
+        `SELECT conversation.conversation_id,
+                conversation.device_id,
+                conversation.runtime_thread_fingerprint_hint AS runtime_thread_fingerprint,
+                conversation.correlation_state,
+                conversation.identity_binding_state,
+                conversation.resolved_contact_id,
+                conversation.history_state,
+                predecessor.capture_fingerprint AS predecessor_capture_fingerprint,
+                predecessor.capture_id AS predecessor_capture_id,
+                predecessor.device_id AS predecessor_device_id,
+                predecessor.capture_revision AS predecessor_capture_revision,
+                predecessor.runtime_thread_fingerprint AS predecessor_runtime_thread_fingerprint,
+                predecessor.visible_messages AS predecessor_visible_messages,
+                predecessor.mapping_status AS predecessor_mapping_status,
+                predecessor.human_review_status AS predecessor_human_review_status,
+                predecessor.resolved_contact_id AS predecessor_resolved_contact_id,
+                predecessor.captured_at AS predecessor_captured_at,
+                predecessor.received_at AS predecessor_received_at,
+                predecessor.capture_schema_version AS predecessor_schema_version,
+                predecessor.provenance AS predecessor_provenance
+           FROM tinder_visible_chat_captures predecessor
+           JOIN tinder_thread_conversation_capture_links link
+             ON link.capture_id = predecessor.capture_id
+            AND link.device_id = predecessor.device_id
+           JOIN tinder_thread_conversations conversation
+             ON conversation.conversation_id = link.conversation_id
+            AND conversation.device_id = link.device_id
+          WHERE predecessor.device_id = $1
+            AND predecessor.runtime_thread_fingerprint = $2
+            AND predecessor.capture_fingerprint = $3
+            AND predecessor.capture_revision = $4
+            AND predecessor.capture_schema_version = $5
+            AND predecessor.source_package = 'com.tinder'
+            AND predecessor.capture_safety_status = 'SAFE'
+            AND predecessor.mapping_status = 'NEEDS_HUMAN_MAPPING'
+            AND predecessor.human_review_status = 'PENDING'
+            AND predecessor.resolved_contact_id IS NULL
+            AND predecessor.provenance ->> 'source' = 'android_visible_chat'
+            AND predecessor.provenance ->> 'readChannel' = $6
+            AND conversation.history_state = 'PARTIAL'
+            AND conversation.identity_binding_state = 'UNASSIGNED'
+            AND conversation.resolved_contact_id IS NULL
+          FOR UPDATE OF predecessor, conversation`,
+        [
+          deviceId,
+          runtimeThreadFingerprint,
+          predecessorCaptureFingerprint,
+          expectedRevision,
+          TINDER_PASSIVE_READ_CAPTURE_SCHEMA_VERSION,
+          TINDER_PASSIVE_READ_CHANNEL
+        ]
+      );
+      return result.rows.map(row => ({
+        conversation_id: row.conversation_id,
+        device_id: row.device_id,
+        runtime_thread_fingerprint: row.runtime_thread_fingerprint,
+        correlation_state: row.correlation_state,
+        identity_binding_state: row.identity_binding_state,
+        resolved_contact_id: row.resolved_contact_id,
+        history_state: row.history_state,
+        predecessor_capture_fingerprint: row.predecessor_capture_fingerprint,
+        predecessor_capture: {
+          capture_id: row.predecessor_capture_id,
+          device_id: row.predecessor_device_id,
+          capture_revision: row.predecessor_capture_revision,
+          runtime_thread_fingerprint: row.predecessor_runtime_thread_fingerprint,
+          visible_messages: row.predecessor_visible_messages,
+          mapping_status: row.predecessor_mapping_status,
+          human_review_status: row.predecessor_human_review_status,
+          resolved_contact_id: row.predecessor_resolved_contact_id,
+          captured_at: row.predecessor_captured_at,
+          received_at: row.predecessor_received_at,
+          schema_version: row.predecessor_schema_version,
+          provenance: row.predecessor_provenance
+        }
+      }));
+    },
+
     async createConversation(client, record) {
       await client.query(
         `INSERT INTO tinder_thread_conversations (
@@ -606,7 +983,8 @@ export function createPgTinderProductConversationRepository(pool) {
       );
       if (inserted.rows[0]) return inserted.rows[0];
       const existing = await client.query(
-        `SELECT link.conversation_id
+        `SELECT link.conversation_id,
+                conversation.history_state
            FROM tinder_thread_conversation_capture_links link
            JOIN tinder_thread_conversations conversation
              ON conversation.conversation_id = link.conversation_id
@@ -623,16 +1001,18 @@ export function createPgTinderProductConversationRepository(pool) {
     async updateConversation(client, record) {
       await client.query(
         `UPDATE tinder_thread_conversations
-            SET correlation_state = $2,
-                identity_binding_state = $3,
-                resolved_contact_id = $4,
-                last_observed_at = GREATEST(last_observed_at, $5::timestamptz),
-                last_history_at = GREATEST(last_history_at, $6::timestamptz),
-                updated_at = $7
-          WHERE conversation_id = $1`,
+             SET correlation_state = $2,
+                 identity_binding_state = $3,
+                 resolved_contact_id = $4,
+                 history_state = $5,
+                 last_observed_at = GREATEST(last_observed_at, $6::timestamptz),
+                 last_history_at = GREATEST(last_history_at, $7::timestamptz),
+                 updated_at = $8
+           WHERE conversation_id = $1`,
         [
           record.conversationId, record.correlationState, record.identityBindingState,
-          record.resolvedContactId, record.lastObservedAt, record.lastHistoryAt, record.updatedAt
+          record.resolvedContactId, record.historyState, record.lastObservedAt,
+          record.lastHistoryAt, record.updatedAt
         ]
       );
     }

@@ -16,6 +16,10 @@ import {
   createTinderCaptureStore
 } from "../services/tinder-capture-store.js";
 import {
+  createPgTinderProductConversationRepository,
+  createTinderProductConversationService
+} from "../services/tinder-product-conversation-store.js";
+import {
   createPgTinderHumanArmedConversationBindingRepository,
   createTinderHumanArmedConversationBindingService
 } from "../services/tinder-human-armed-conversation-binding.js";
@@ -185,17 +189,33 @@ function createAuthenticatedCaptureStore(pool, auth, {
   now = () => new Date(),
   createRepository = createPgTinderCaptureRepository,
   createStore = createTinderCaptureStore,
+  createProductConversationRepository = createPgTinderProductConversationRepository,
+  createProductConversationService = createTinderProductConversationService,
   createHumanArmedRepository = createPgTinderHumanArmedConversationBindingRepository,
   createHumanArmedService = createTinderHumanArmedConversationBindingService,
   requireRuntimeGates = true,
+  requireLegacyDeviceRuntimeAdmission = true,
   requireAutomationStopped = true,
-  allowLegacyFingerprintMapping = true
+  allowLegacyFingerprintMapping = true,
+  projectProductConversations = false
 } = {}) {
-  if (typeof requireRuntimeGates !== "boolean" || typeof requireAutomationStopped !== "boolean" ||
-      typeof allowLegacyFingerprintMapping !== "boolean") {
+  if (typeof requireRuntimeGates !== "boolean" || typeof requireLegacyDeviceRuntimeAdmission !== "boolean" ||
+      typeof requireAutomationStopped !== "boolean" ||
+      typeof allowLegacyFingerprintMapping !== "boolean" || typeof projectProductConversations !== "boolean") {
     throw new TypeError("Capture ingress policy flags must be booleans");
   }
+  if (typeof createProductConversationRepository !== "function"
+      || typeof createProductConversationService !== "function") {
+    throw new TypeError("Product conversation factories must be functions");
+  }
   const repository = createRepository(pool);
+  // This is intentionally opt-in for the autonomous V2 reader only.  The
+  // additive conversation schema may still be absent; in that case the
+  // projector reports NOT_READY inside the existing transaction and leaves
+  // immutable capture provenance safely persisted rather than blocking read.
+  const productConversationProjector = projectProductConversations
+    ? createProductConversationService(createProductConversationRepository(pool), { now })
+    : null;
   let humanArmedService = null;
   const currentHumanArmedService = () => {
     if (!humanArmedService) {
@@ -215,7 +235,7 @@ function createAuthenticatedCaptureStore(pool, auth, {
         await client.query("BEGIN");
         if (requireRuntimeGates) {
           await assertCaptureDeviceGates(client, auth, transactionNow);
-        } else {
+        } else if (requireLegacyDeviceRuntimeAdmission) {
           // The device's signed identity and declared manual-gate capability
           // remain mandatory.  Current Bridge/Tinder/screen safety is checked
           // locally by the read channel; asynchronous heartbeat projection is
@@ -243,7 +263,8 @@ function createAuthenticatedCaptureStore(pool, auth, {
       consumeAuthorizedIncomingPermit: (...args) =>
         currentHumanArmedService().consumeAuthorizedIncomingPermit(...args)
     }),
-    allowLegacyFingerprintMapping
+    allowLegacyFingerprintMapping,
+    productConversationProjector
   });
 }
 
@@ -313,10 +334,16 @@ function createTinderPassiveReadCaptureIngressHandler(pool, {
       const store = createAuthenticatedStore(pool, auth, {
         now,
         requireRuntimeGates: false,
-        requireAutomationStopped: true,
-        allowLegacyFingerprintMapping: false
+        // Signature verification already enforces the active device/key and
+        // this transaction records the request nonce.  Passive V2 reads must
+        // not synchronously inherit the legacy command-profile, manual-gate,
+        // or automation-state admission path.
+        requireLegacyDeviceRuntimeAdmission: false,
+        requireAutomationStopped: false,
+        allowLegacyFingerprintMapping: false,
+        projectProductConversations: true
       });
-      const stored = await store.storeSafeCapture({
+      const result = await store.storeSafeCaptureWithDisposition({
         deviceId: auth.deviceId,
         capture,
         provenance: {
@@ -325,6 +352,12 @@ function createTinderPassiveReadCaptureIngressHandler(pool, {
           readChannel: "PASSIVE_READ"
         }
       });
+      const stored = result.capture;
+      /*
+       * No product conversation identifier or message content is returned to
+       * Android.  The only product projection lives in the server transaction;
+       * this signed response remains the pre-existing bounded capture receipt.
+       */
       const record = normalizeCaptureRecord(stored);
       return res.status(201).json({
         ok: true,
@@ -346,7 +379,6 @@ function createTinderPassiveReadCaptureIngressHandler(pool, {
   };
 }
 
-
 function registerTinderVisibleChatCaptureIngress({ app, pool }) {
   if (!app || typeof app.post !== "function") {
     throw new TypeError("app.post must be a function");
@@ -355,8 +387,19 @@ function registerTinderVisibleChatCaptureIngress({ app, pool }) {
     `/device-bridge/v1/devices/:deviceId${TINDER_CAPTURE_PATH_SUFFIX}`,
     createTinderCaptureIngressHandler(pool)
   );
+}
+
+function registerTinderPassiveReadCaptureIngress({ app, pool, middleware = [] }) {
+  if (!app || typeof app.post !== "function") {
+    throw new TypeError("app.post must be a function");
+  }
+  const chain = Array.isArray(middleware) ? middleware : [middleware];
+  if (!chain.every(handler => typeof handler === "function")) {
+    throw new TypeError("passive read middleware must be a function or an array of functions");
+  }
   app.post(
     `/device-bridge/v1/devices/:deviceId${TINDER_PASSIVE_READ_CAPTURE_PATH_SUFFIX}`,
+    ...chain,
     createTinderPassiveReadCaptureIngressHandler(pool)
   );
 }
@@ -369,5 +412,6 @@ export {
   createTinderPassiveReadCaptureIngressHandler,
   normalizeCaptureRecord,
   parseSignedCaptureRequest,
+  registerTinderPassiveReadCaptureIngress,
   registerTinderVisibleChatCaptureIngress
 };

@@ -8,9 +8,13 @@ import {
 } from "../services/tinder-capture-store.js";
 import {
   createPgTinderConversationProductReadRepository,
+  createPgTinderReadableConversationProductReadRepository,
   createTinderConversationProductReadService,
+  createTinderReadableConversationProductReadService,
   normalizeTinderConversationProductDetail,
-  normalizeTinderConversationProductList
+  normalizeTinderConversationProductList,
+  normalizeTinderReadableConversationDetail,
+  normalizeTinderReadableConversationList
 } from "../services/tinder-conversation-product-read.js";
 import {
   TinderHumanMappingError,
@@ -312,6 +316,14 @@ function conversationProductReadNotReadyError() {
     statusCode: 503,
     code: "TINDER_CONVERSATION_PRODUCT_READ_NOT_READY",
     message: "Tinder conversation reader is not ready"
+  };
+}
+
+function readableConversationProductReadNotReadyError() {
+  return {
+    statusCode: 503,
+    code: "TINDER_READABLE_CONVERSATION_PRODUCT_READ_NOT_READY",
+    message: "Tinder readable conversation reader is not ready"
   };
 }
 
@@ -1417,6 +1429,85 @@ function createTinderDashboardLatestConfirmedConversationReadHandler(pool, {
   };
 }
 
+/**
+ * Product-facing architecture-cut reader. It reads only durable Conversation
+ * rows and their linked immutable capture history. Before the additive schema
+ * exists, this normal product route stays unavailable instead of exposing a
+ * technical capture as a Conversation. Identity remains informational and
+ * never gates a safe read.
+ */
+function createTinderDashboardReadableConversationListHandler(pool, {
+  createRepository = createPgTinderReadableConversationProductReadRepository,
+  createService = createTinderReadableConversationProductReadService
+} = {}) {
+  const conversationReader = createService(createRepository(pool));
+  return async function tinderDashboardReadableConversationListHandler(req, res) {
+    try {
+      const conversations = normalizeTinderReadableConversationList(
+        await conversationReader.listReadableConversations(normalizeDeviceId(req.params.deviceId))
+      );
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({ ok: true, conversations });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)
+          || error?.code === "TINDER_PRODUCT_CONVERSATION_PRODUCT_READ_NOT_READY") {
+        const notReady = readableConversationProductReadNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder dashboard readable conversation list failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_READABLE_CONVERSATION_LIST_FAILED",
+        error: status === 500
+          ? "Tinder conversations could not be loaded."
+          : safeMessage(error, "Tinder conversations could not be loaded.")
+      });
+    }
+  };
+}
+
+function createTinderDashboardReadableConversationReadHandler(pool, {
+  createRepository = createPgTinderReadableConversationProductReadRepository,
+  createService = createTinderReadableConversationProductReadService
+} = {}) {
+  const conversationReader = createService(createRepository(pool));
+  return async function tinderDashboardReadableConversationReadHandler(req, res) {
+    try {
+      const conversation = await conversationReader.getReadableConversation(
+        normalizeDeviceId(req.params.deviceId),
+        normalizeCaptureId(req.params.conversationHandle)
+      );
+      if (!conversation) {
+        const error = new Error("Tinder conversation was not found.");
+        error.statusCode = 404;
+        error.code = "TINDER_READABLE_CONVERSATION_NOT_FOUND";
+        throw error;
+      }
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.status(200).json({
+        ok: true,
+        conversation: normalizeTinderReadableConversationDetail(conversation)
+      });
+    } catch (error) {
+      if (isFoundationNotReadyError(error)
+          || error?.code === "TINDER_PRODUCT_CONVERSATION_PRODUCT_READ_NOT_READY") {
+        const notReady = readableConversationProductReadNotReadyError();
+        return res.status(notReady.statusCode).json({ ok: false, code: notReady.code, error: notReady.message });
+      }
+      const status = Number(error?.statusCode) || 500;
+      if (status === 500) console.error("Tinder dashboard readable conversation read failed.");
+      return res.status(status).json({
+        ok: false,
+        code: error?.code || "TINDER_READABLE_CONVERSATION_READ_FAILED",
+        error: status === 500
+          ? "Tinder conversation could not be loaded."
+          : safeMessage(error, "Tinder conversation could not be loaded.")
+      });
+    }
+  };
+}
+
 function createTinderDashboardMappingHandler(pool, {
   createRepository = createPgTinderHumanMappingRepository,
   createService = createTinderHumanMappingService
@@ -1614,6 +1705,8 @@ function registerTinderCaptureRoutes({
   const listDraftEligibleCaptures = createTinderDashboardDraftEligibleCaptureListHandler(pool);
   const listLatestConfirmedConversations = createTinderDashboardLatestConfirmedConversationListHandler(pool);
   const readLatestConfirmedConversation = createTinderDashboardLatestConfirmedConversationReadHandler(pool);
+  const listReadableConversations = createTinderDashboardReadableConversationListHandler(pool);
+  const readReadableConversation = createTinderDashboardReadableConversationReadHandler(pool);
   const readCapture = createTinderDashboardCaptureReadHandler(pool);
   const mapCapture = createTinderDashboardMappingHandler(pool);
   const bindCaptureConversation = createTinderDashboardConversationBindingHandler(pool);
@@ -1644,6 +1737,14 @@ function registerTinderCaptureRoutes({
     dashboard(listPendingReadConversations)
   );
   app.get("/dashboard-api/tinder/captures/draft-eligible", dashboard(listDraftEligibleCaptures));
+  app.get(
+    "/dashboard-api/tinder/devices/:deviceId/read-conversations",
+    dashboard(listReadableConversations)
+  );
+  app.get(
+    "/dashboard-api/tinder/devices/:deviceId/read-conversations/:conversationHandle",
+    dashboard(readReadableConversation)
+  );
   app.get("/dashboard-api/tinder/conversations/latest-confirmed", dashboard(listLatestConfirmedConversations));
   app.get("/dashboard-api/tinder/conversations/:captureId", dashboard(readLatestConfirmedConversation));
   app.get("/dashboard-api/tinder/human-armed-conversation-bindings", dashboard(listHumanArmedBindings));
@@ -1688,6 +1789,8 @@ export {
   createTinderDashboardDraftEligibleCaptureListHandler,
   createTinderDashboardLatestConfirmedConversationListHandler,
   createTinderDashboardLatestConfirmedConversationReadHandler,
+  createTinderDashboardReadableConversationListHandler,
+  createTinderDashboardReadableConversationReadHandler,
   createTinderDashboardPendingCaptureListHandler,
   createTinderDashboardPendingReadConversationListHandler,
   createTinderDashboardMappingHandler,

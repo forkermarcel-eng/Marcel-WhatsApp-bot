@@ -88,9 +88,20 @@ const HUMAN_ARMED_OFFICIAL_APP_RESUME_OPERATION = "human-armed-official-app-resu
 const UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW = "unbound-inbox-conversation-sweep-status";
 const UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW = "unbound-inbox-conversation-sweep-transcripts";
 const PENDING_READ_CHANNEL_CONVERSATIONS_VIEW = "pending-read-conversations";
+// Architecture-cut product reader. These routes project only durable Tinder
+// threads; captures stay technical provenance and never become a browser
+// Conversation handle.
+const READABLE_CONVERSATIONS_VIEW = "read-conversations";
+const READABLE_CONVERSATION_VIEW = "read-conversation";
 const LATEST_CONFIRMED_CONVERSATION_LIMIT = 25;
+const READABLE_CONVERSATION_LIMIT = 25;
 const CONVERSATION_MESSAGE_LIMIT = 100;
 const CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
+const READABLE_CONVERSATION_IDENTITY_STATES = new Set(["UNASSIGNED", "ASSIGNED"]);
+const READABLE_CONVERSATION_IDENTITY_REVIEWS = new Set(["PENDING", "CONFIRMED", "CONFLICT"]);
+const READABLE_CONVERSATION_HISTORY_SCOPES = new Set([
+  "AGGREGATED_PARTIAL", "AGGREGATED_COMPLETE"
+]);
 const CONVERSATION_MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING", "UNKNOWN"]);
 const UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPT_LIMIT = 8;
 const PENDING_READ_CHANNEL_CONVERSATION_LIMIT = 8;
@@ -479,6 +490,20 @@ function captureRequestFromQuery(req) {
   if (exactKeys(query, ["deviceId", "view"]) && validCaptureId(query.deviceId)
       && query.view === PENDING_READ_CHANNEL_CONVERSATIONS_VIEW) {
     return Object.freeze({ type: "pending_read_conversations", deviceId: query.deviceId });
+  }
+  if (exactKeys(query, ["deviceId", "view"]) && validCaptureId(query.deviceId)
+      && query.view === READABLE_CONVERSATIONS_VIEW) {
+    return Object.freeze({ type: "readable_conversations", deviceId: query.deviceId });
+  }
+  if (exactKeys(query, ["conversationHandle", "deviceId", "view"])
+      && validCaptureId(query.deviceId)
+      && validCaptureId(query.conversationHandle)
+      && query.view === READABLE_CONVERSATION_VIEW) {
+    return Object.freeze({
+      type: "readable_conversation",
+      deviceId: query.deviceId,
+      conversationHandle: query.conversationHandle
+    });
   }
   if (exactKeys(query, ["captureId", "operation"]) && validCaptureId(query.captureId)
       && query.operation === HUMAN_ARM_OPERATION) {
@@ -978,6 +1003,63 @@ function normalizePublicPendingReadChannelConversations(value) {
   return conversations.some((conversation) => conversation === null) ? null : Object.freeze(conversations);
 }
 
+/**
+ * Product-facing, device-scoped architecture-cut projection. It exposes only
+ * canonical durable Conversation handles and aggregated history. Public
+ * fields never contain a device, contact, fingerprint, revision, provenance,
+ * mapping record, or raw capture identifier.
+ */
+function normalizePublicReadableConversationListItem(value) {
+  if (!exactKeys(value, [
+    "conversation_handle", "visible_name", "observed_at", "identity_state", "identity_review", "history_scope"
+  ]) || !validCaptureId(value.conversation_handle)
+      || !validBoundedText(value.visible_name, 240)
+      || !READABLE_CONVERSATION_IDENTITY_STATES.has(value.identity_state)
+      || !READABLE_CONVERSATION_IDENTITY_REVIEWS.has(value.identity_review)
+      || !READABLE_CONVERSATION_HISTORY_SCOPES.has(value.history_scope)) {
+    return null;
+  }
+  const observedAt = normalizePublicTimestamp(value.observed_at);
+  if (!observedAt) return null;
+  return Object.freeze({
+    conversation_handle: value.conversation_handle,
+    visible_name: value.visible_name.trim(),
+    observed_at: observedAt,
+    identity_state: value.identity_state,
+    identity_review: value.identity_review,
+    history_scope: value.history_scope
+  });
+}
+
+function normalizePublicReadableConversationList(value) {
+  if (!Array.isArray(value) || value.length > READABLE_CONVERSATION_LIMIT) return null;
+  const conversations = value.map(normalizePublicReadableConversationListItem);
+  return conversations.some((conversation) => conversation === null)
+    ? null
+    : Object.freeze(conversations);
+}
+
+function normalizePublicReadableConversation(value, conversationHandle) {
+  if (!exactKeys(value, [
+    "conversation_handle", "visible_name", "observed_at", "identity_state", "identity_review", "history_scope", "messages"
+  ]) || value.conversation_handle !== conversationHandle
+      || !Array.isArray(value.messages)
+      || value.messages.length < 1 || value.messages.length > CONVERSATION_MESSAGE_LIMIT) {
+    return null;
+  }
+  const listItem = normalizePublicReadableConversationListItem({
+    conversation_handle: value.conversation_handle,
+    visible_name: value.visible_name,
+    observed_at: value.observed_at,
+    identity_state: value.identity_state,
+    identity_review: value.identity_review,
+    history_scope: value.history_scope
+  });
+  const messages = value.messages.map(normalizePublicConfirmedConversationMessage);
+  if (!listItem || messages.some((message) => message === null)) return null;
+  return Object.freeze({ ...listItem, messages: Object.freeze(messages) });
+}
+
 // This public result deliberately contains only a command type, terminal
 // queue state, and bounded reason.  In particular it must not turn the
 // opaque device command handle or binding facts into dashboard data.
@@ -1276,6 +1358,60 @@ async function forwardPendingReadChannelConversationRead(res, configuration, dev
     return res.status(status).json({ ok: false, error: "Neue Tinder-Conversations konnten nicht sicher geladen werden." });
   } catch {
     console.error("Verbindung zum Tinder-Read-Conversation-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+function readableConversationBackendError(res, response, { detail = false } = {}) {
+  if (response.status === 401) {
+    return res.status(502).json({ ok: false, error: "Dashboard-Backend konnte nicht autorisiert werden." });
+  }
+  const allowed = detail ? [400, 404, 409, 503] : [400, 409, 503];
+  const status = allowed.includes(response.status) ? response.status : 502;
+  return res.status(status).json({
+    ok: false,
+    error: detail ? "Tinder-Conversation konnte nicht geladen werden." : "Tinder-Conversations konnten nicht geladen werden."
+  });
+}
+
+async function forwardReadableConversationList(res, configuration, deviceId) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/devices/${encodeURIComponent(deviceId)}/read-conversations`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) return readableConversationBackendError(res, response);
+    const conversations = normalizePublicReadableConversationList(data?.conversations);
+    if (data?.ok !== true || !conversations) {
+      return res.status(502).json({ ok: false, error: "UngÃ¼ltige Conversation-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, conversations });
+  } catch {
+    console.error("Verbindung zum lesbaren Tinder-Conversation-Backend fehlgeschlagen.");
+    return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
+  }
+}
+
+async function forwardReadableConversationDetail(res, configuration, deviceId, conversationHandle) {
+  try {
+    const response = await fetch(
+      `${configuration.railwayBackendUrl}/dashboard-api/tinder/devices/${encodeURIComponent(deviceId)}/read-conversations/${encodeURIComponent(conversationHandle)}`,
+      { method: "GET", headers: backendHeaders(configuration), cache: "no-store" }
+    );
+    const data = await readJson(response, res);
+    if (!data) return;
+    if (!response.ok) return readableConversationBackendError(res, response, { detail: true });
+    const conversation = normalizePublicReadableConversation(data?.conversation, conversationHandle);
+    if (data?.ok !== true || !conversation) {
+      return res.status(502).json({ ok: false, error: "UngÃ¼ltige Conversation-Antwort vom Backend." });
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(200).json({ ok: true, conversation });
+  } catch {
+    console.error("Verbindung zum lesbaren Tinder-Conversation-Backend fehlgeschlagen.");
     return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
   }
 }
@@ -1901,6 +2037,17 @@ export default async function handler(req, res) {
   if (req.method === "GET" && captureRequest.type === "pending_read_conversations") {
     return forwardPendingReadChannelConversationRead(res, configuration, captureRequest.deviceId);
   }
+  if (req.method === "GET" && captureRequest.type === "readable_conversations") {
+    return forwardReadableConversationList(res, configuration, captureRequest.deviceId);
+  }
+  if (req.method === "GET" && captureRequest.type === "readable_conversation") {
+    return forwardReadableConversationDetail(
+      res,
+      configuration,
+      captureRequest.deviceId,
+      captureRequest.conversationHandle
+    );
+  }
   if (req.method === "GET") {
     return forwardCaptureRead(res, configuration, captureRequest.captureId);
   }
@@ -1968,9 +2115,12 @@ export {
   UNBOUND_INBOX_CONVERSATION_SWEEP_STATUS_VIEW,
   UNBOUND_INBOX_CONVERSATION_SWEEP_TRANSCRIPTS_VIEW,
   PENDING_READ_CHANNEL_CONVERSATIONS_VIEW,
+  READABLE_CONVERSATION_VIEW,
+  READABLE_CONVERSATIONS_VIEW,
   CONVERSATION_MESSAGE_LIMIT,
   CONVERSATION_MESSAGE_TEXT_LIMIT,
   LATEST_CONFIRMED_CONVERSATION_LIMIT,
+  READABLE_CONVERSATION_LIMIT,
   MAPPING_FIELDS,
   PENDING_CAPTURE_LIMIT,
   PENDING_CAPTURE_VIEW,
@@ -2005,6 +2155,9 @@ export {
   normalizePublicUnboundInboxConversationSweepTranscripts,
   normalizePublicPendingReadChannelConversation,
   normalizePublicPendingReadChannelConversations,
+  normalizePublicReadableConversation,
+  normalizePublicReadableConversationList,
+  normalizePublicReadableConversationListItem,
   normalizePublicLocalConversationAttestationResult,
   normalizePublicOfficialAppResumeResult,
   validEmptyOfficialAppResumeBody,

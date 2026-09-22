@@ -15,7 +15,10 @@ import {
   createDeviceEnrollmentHandler
 } from "./device-bridge/enrollment.js";
 import { registerDeviceBridgeBlock3Routes } from "./device-bridge/block3-routes.js";
-import { registerTinderVisibleChatCaptureIngress } from "./device-bridge/tinder-visible-chat-capture-ingress.js";
+import {
+  registerTinderPassiveReadCaptureIngress,
+  registerTinderVisibleChatCaptureIngress
+} from "./device-bridge/tinder-visible-chat-capture-ingress.js";
 import { registerTinderVisibleChatSyncIngress } from "./device-bridge/tinder-visible-chat-sync-ingress.js";
 import { registerTinderLocalConversationAttestationIngress } from "./device-bridge/tinder-local-conversation-attestation-ingress.js";
 import { registerTinderUnboundInboxConversationSweepTranscriptIngress } from "./device-bridge/tinder-unbound-inbox-conversation-sweep-ingress.js";
@@ -28,8 +31,10 @@ import { registerTinderManualSendRoutes } from "./device-bridge/tinder-manual-se
 import {
   deviceBridgeFoundationMiddleware,
   deviceBridgeRawBodyErrorMiddleware,
+  deviceBridgeRequestShapeMiddleware,
   requireDeviceBridgeReady
 } from "./device-bridge/readiness.js";
+import { createTinderPassiveReadIngressFoundationMiddleware } from "./device-bridge/tinder-passive-read-readiness.js";
 import { createContactMediaService } from "./services/contact-media.js";
 import { createContactIdentityService } from "./services/contact-identities.js";
 import {
@@ -46,6 +51,9 @@ const { Pool } = pg;
 
 const app = express();
 const port = process.env.PORT || 3000;
+const pool = new Pool({
+connectionString: process.env.DATABASE_URL
+});
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 RAW BODY
@@ -58,6 +66,18 @@ app.use(
   })
 );
 app.use("/device-bridge/v1", deviceBridgeRawBodyErrorMiddleware);
+
+// Passive V2 reads are signed, replay-protected capture ingestion rather than
+// Device Bridge command traffic.  Register this exact path before global
+// command/ACK readiness and validate only its auth/replay + T2 foundation.
+registerTinderPassiveReadCaptureIngress({
+  app,
+  pool,
+  middleware: [
+    deviceBridgeRequestShapeMiddleware,
+    createTinderPassiveReadIngressFoundationMiddleware(pool)
+  ]
+});
 app.use("/device-bridge/v1", deviceBridgeFoundationMiddleware);
 
 app.use(express.json({ limit: "2mb" }));
@@ -75,9 +95,6 @@ const openai = new OpenAI({
 apiKey: process.env.OPENAI_API_KEY
 });
 
-const pool = new Pool({
-connectionString: process.env.DATABASE_URL
-});
 const { listContactMedia } = createContactMediaService(pool);
 const {
   listContactIdentities,

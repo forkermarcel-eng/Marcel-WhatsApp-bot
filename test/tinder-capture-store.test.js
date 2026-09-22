@@ -471,6 +471,57 @@ test("an identical signed-capture fingerprint is idempotent within its device th
   assert.equal(first.captureRevision, 1);
 });
 
+test("capture persistence distinguishes a new row from an idempotent duplicate without changing the legacy capture result", async () => {
+  const repository = fixtureRepository();
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z")
+  });
+  const input = { deviceId: DEVICE_ID, capture: safeCapture(), provenance: { source: "android_visible_chat", protocolVersion: 1 } };
+
+  const created = await store.storeSafeCaptureWithDisposition(input);
+  const duplicate = await store.storeSafeCaptureWithDisposition(input);
+
+  assert.equal(created.captureDisposition, "CREATED");
+  assert.equal(duplicate.captureDisposition, "IDEMPOTENT_DUPLICATE");
+  assert.equal(created.capture.captureId, CAPTURE_ID);
+  assert.equal(duplicate.capture, created.capture);
+  assert.equal(repository.rows.length, 1);
+});
+
+test("a newly persisted passive capture projects once into the product conversation layer while an idempotent duplicate does not", async () => {
+  const repository = fixtureRepository();
+  const projections = [];
+  const projector = {
+    async projectCapture(transaction, capture) {
+      projections.push({ transaction, capture });
+      return { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" };
+    }
+  };
+  const store = createTinderCaptureStore(repository, {
+    createCaptureId: () => CAPTURE_ID,
+    now: () => new Date("2026-09-04T18:01:00.000Z"),
+    productConversationProjector: projector,
+    allowLegacyFingerprintMapping: false
+  });
+  const input = {
+    deviceId: DEVICE_ID,
+    capture: safeCaptureV2({ includeEvidence: false }),
+    provenance: { source: "android_visible_chat", protocolVersion: 1, readChannel: "PASSIVE_READ" }
+  };
+
+  const created = await store.storeSafeCaptureWithDisposition(input);
+  const duplicate = await store.storeSafeCaptureWithDisposition(input);
+
+  assert.equal(created.captureDisposition, "CREATED");
+  assert.deepEqual(created.productConversation, { disposition: "CREATED", conversationId: "d565e8a7-ef60-42d0-b19d-26e7904390fa" });
+  assert.equal(duplicate.captureDisposition, "IDEMPOTENT_DUPLICATE");
+  assert.equal(duplicate.productConversation, null);
+  assert.equal(projections.length, 1);
+  assert.equal(projections[0].capture, created.capture);
+  assert.deepEqual(projections[0].transaction, {});
+});
+
 test("a later safe capture reuses only a complete prior human-confirmed mapping for its exact device thread", async () => {
   const repository = fixtureRepository({ reusableMapping: confirmedReusableMapping() });
   const store = createTinderCaptureStore(repository, {

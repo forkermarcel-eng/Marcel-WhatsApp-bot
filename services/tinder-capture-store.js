@@ -498,6 +498,11 @@ function createTinderCaptureStore(repository, {
   createCaptureId = () => crypto.randomUUID(),
   now = () => new Date(),
   humanBindingPermitGateway = null,
+  // The product Conversation layer is optional until its explicit additive
+  // schema migration exists.  It projects only newly persisted evidence in
+  // the same transaction; immutable capture storage remains the source of
+  // truth and never depends on a person/contact assignment.
+  productConversationProjector = null,
   // The legacy T2 path may continue a prior human-confirmed mapping through
   // its runtime fingerprint.  The autonomous read adapter deliberately opts
   // out: a new passive observation is PENDING unless an independent opaque
@@ -525,8 +530,12 @@ function createTinderCaptureStore(repository, {
   if (typeof allowLegacyFingerprintMapping !== "boolean") {
     throw new TypeError("allowLegacyFingerprintMapping must be a boolean");
   }
+  if (productConversationProjector !== null
+      && typeof productConversationProjector?.projectCapture !== "function") {
+    throw new TypeError("productConversationProjector.projectCapture must be a function");
+  }
 
-  async function storeSafeCapture({ deviceId, capture, provenance } = {}) {
+  async function storeSafeCaptureWithDisposition({ deviceId, capture, provenance } = {}) {
     const normalizedDeviceId = normalizeDeviceId(deviceId);
     const normalizedCapture = validateSafeVisibleChatCapture(capture);
     const normalizedProvenance = normalizeProvenance(provenance);
@@ -575,7 +584,11 @@ function createTinderCaptureStore(repository, {
             "HUMAN_BINDING_CAPTURE_NOT_FRESH"
           );
         }
-        return existing;
+        return Object.freeze({
+          capture: existing,
+          captureDisposition: "IDEMPOTENT_DUPLICATE",
+          productConversation: null
+        });
       }
 
       // V1/V2 may reuse only separately verified source evidence. V3 is the
@@ -644,6 +657,10 @@ function createTinderCaptureStore(repository, {
       });
 
       const persisted = await repository.insertCapture(transaction, record);
+      const storedCapture = persisted || record;
+      const productConversation = productConversationProjector === null
+        ? null
+        : await productConversationProjector.projectCapture(transaction, storedCapture);
       if (humanBindingAuthorization) {
         const gateway = requireHumanBindingPermitGateway(humanBindingPermitGateway);
         const consumed = await gateway.consumeAuthorizedIncomingPermit(transaction, {
@@ -652,8 +669,16 @@ function createTinderCaptureStore(repository, {
         });
         consumedHumanBindingContact(consumed, humanBindingAuthorization.contactId);
       }
-      return persisted || record;
+      return Object.freeze({
+        capture: storedCapture,
+        captureDisposition: "CREATED",
+        productConversation
+      });
     });
+  }
+
+  async function storeSafeCapture(input) {
+    return (await storeSafeCaptureWithDisposition(input)).capture;
   }
 
   async function getCapture(captureId) {
@@ -671,7 +696,12 @@ function createTinderCaptureStore(repository, {
     return Object.freeze([...captures]);
   }
 
-  return Object.freeze({ getCapture, listPendingHumanMappingCaptures, storeSafeCapture });
+  return Object.freeze({
+    getCapture,
+    listPendingHumanMappingCaptures,
+    storeSafeCapture,
+    storeSafeCaptureWithDisposition
+  });
 }
 
 /**

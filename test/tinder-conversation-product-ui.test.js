@@ -12,37 +12,60 @@ function sourceBetween(start, end) {
   return page.slice(startIndex, endIndex);
 }
 
-test("Tinder confirmed conversation UI is a separate bounded selected-detail surface", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
+test("Tinder primary Conversation UI exposes durable aggregated threads and keeps capture audit explicit", () => {
+  const productCode = sourceBetween(
+    "function productConversationIsSafeForSelection",
+    "function confirmedConversationIsSafeForSelection"
+  );
+  const startupCode = sourceBetween(
+    'window.addEventListener("focus"',
+    "window.setInterval"
+  );
 
-  assert.match(page, /id="confirmedConversationList"/);
-  assert.match(page, /id="confirmedConversationDetail"/);
-  assert.match(page, /Bestätigte Conversations/);
-  assert.match(page, /Nachrichtenansicht/);
-  assert.match(conversationCode, /function loadLatestConfirmedConversationList\(\)/);
-  assert.match(conversationCode, /requestJson\("\/api\/tinder\/captures\?view=confirmed-conversations"\)/);
-  assert.match(conversationCode, /requestJson\(`\/api\/tinder\/captures\?captureId=\$\{encodeURIComponent\(captureId\)\}&view=confirmed-conversation`\)/);
-  assert.match(page, /void loadLatestConfirmedConversationList\(\)/);
-  assert.match(conversationCode, /conversations\.length > 25/);
-  assert.match(conversationCode, /conversation\.messages\.length > 100/);
-  assert.match(conversationCode, /message\.text\.trim\(\)/);
-  assert.match(conversationCode, /conversationDirectionLabel/);
+  assert.match(page, /id="productConversationList"/);
+  assert.match(page, /id="productConversationDetail"/);
+  assert.match(page, /id="legacyCaptureAuditPanel"/);
+  assert.match(page, /Historisches Capture- und Zuordnungs-Audit/);
+  assert.match(page, /Dauerhafte Tinder-Threads/);
+  assert.match(page, /Android Control · Tinder Read/);
+  assert.match(productCode, /function loadProductConversationList\(\)/);
+  assert.match(productCode, /view=read-conversations/);
+  assert.match(productCode, /conversationHandle=\$\{encodeURIComponent\(conversationHandle\)\}&view=read-conversation/);
+  assert.match(page, /void loadProductConversationList\(\)/);
+  assert.match(productCode, /PRODUCT_CONVERSATION_HISTORY_SCOPES/);
+  assert.match(page, /"AGGREGATED_PARTIAL", "AGGREGATED_COMPLETE"/);
+  assert.match(productCode, /conversations\.length > PRODUCT_CONVERSATION_LIMIT/);
+  assert.match(productCode, /conversation\.messages\.length > 0 && conversation\.messages\.length <= PRODUCT_CONVERSATION_MESSAGE_LIMIT/);
+  assert.match(productCode, /renderConversationMessages\(conversation\.messages, "conversation-messages"\)/);
+  assert.match(productCode, /productConversationIdentityLabel/);
+  assert.doesNotMatch(page, /id="confirmedConversationList"/);
+  assert.doesNotMatch(page, /void loadLatestConfirmedConversationList\(\)/);
+  assert.doesNotMatch(startupCode, /void loadPendingCaptureDiscovery\(|void loadOpenDraftReviewDiscovery\(|void loadDraftEligibleCaptureDiscovery\(|void loadHumanArmedBindingList\(/);
+  assert.match(page, /function loadLegacyCaptureAuditIfOpen\(\)/);
+  assert.match(page, /function loadLegacyCaptureAuditIfOpen\(\)[\s\S]*?void loadPendingCaptureDiscovery\([\s\S]*?void loadOpenDraftReviewDiscovery\([\s\S]*?void loadDraftEligibleCaptureDiscovery\([\s\S]*?void loadHumanArmedBindingList\(/);
+  assert.match(page, /legacyCaptureAuditPanel\.addEventListener\("toggle"/);
 });
 
-test("conversation messages render only visible name/time and direction/text, never technical fields, drafts, or sends", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
+test("product Conversation messages render only a readable name, identity state, explicit history scope, and direction/text", () => {
+  const productCode = sourceBetween(
+    "function productConversationIsSafeForSelection",
+    "function confirmedConversationIsSafeForSelection"
+  );
+  const messageCode = sourceBetween("function renderConversationMessages", "function visibleChatSyncStatusText");
+  const renderedAssignments = (productCode.match(/\w+\.textContent\s*=\s*[^;]+;/g) || []).join("\n");
 
-  assert.match(conversationCode, /name\.textContent = conversation\.visible_name\.trim\(\)/);
-  assert.match(conversationCode, /capturedAt\.textContent = `Erfasst am \$\{formatConversationCapturedAt\(conversation\.captured_at\)\}`/);
-  assert.match(conversationCode, /text\.textContent = message\.text\.trim\(\)/);
-  assert.doesNotMatch(conversationCode, /textContent\s*=\s*conversation\.capture_id/);
-  assert.doesNotMatch(conversationCode, /dataset\./);
-  assert.doesNotMatch(conversationCode, /device_id|thread_fingerprint|capture_fingerprint|resolved_contact_id|visible_order|provenance/i);
-  assert.doesNotMatch(conversationCode, /draft|SEND_TINDER_DRAFT|fetch\("\/api\/tinder\/(?:read|status|control)/i);
-  // The bounded launcher observation may name the terminal enum DISPATCHED;
-  // it must not introduce a separate dispatch path into this read surface.
-  assert.deepEqual(conversationCode.match(/\bdispatch\w*/gi), ["DISPATCHED"]);
-  assert.doesNotMatch(conversationCode, /window\.location(?:\.href)?\s*=/);
+  assert.match(productCode, /name\.textContent = conversation\.visible_name\.trim\(\)/);
+  assert.match(productCode, /renderConversationMessages\(conversation\.messages, "conversation-messages"\)/);
+  assert.match(messageCode, /text\.textContent = message\.text\.trim\(\)/);
+  assert.match(productCode, /Unzugeordnet.*PENDING/);
+  assert.match(productCode, /Zusammengeführter Verlauf/);
+  assert.doesNotMatch(productCode, /Technische Lese-Beobachtung|OBSERVATION_ONLY/);
+  assert.doesNotMatch(productCode, /textContent\s*=\s*conversation\.conversation_handle/);
+  assert.doesNotMatch(productCode, /dataset\./);
+  assert.doesNotMatch(renderedAssignments, /conversation_handle|device|thread|fingerprint|revision|resolved|mapping|review|provenance/i);
+  assert.doesNotMatch(productCode, /thread_fingerprint|capture_fingerprint|resolved_contact_id|visible_order|provenance|mapping_status|human_review_status/i);
+  assert.doesNotMatch(productCode, /draft|SEND_TINDER_DRAFT|operation=|method:\s*"POST"|JSON\.stringify|body:/i);
+  assert.doesNotMatch(productCode, /window\.location(?:\.href)?\s*=/);
 });
 
 test("selected detail has bounded one-shot official-app resume and visible-chat sync actions, without a navigation surface", () => {
@@ -206,7 +229,7 @@ test("conversation selection remains local and does not enter the existing captu
   assert.doesNotMatch(conversationCode, /pendingCaptureMappingUrl|captureIdFromLocation|new URLSearchParams\(window\.location/);
 });
 
-test("pending read-channel Conversations are a separate read-only PENDING surface without correlation or mapping controls", () => {
+test("legacy pending capture audit remains available but is no longer the primary Conversation loader", () => {
   const unboundCode = sourceBetween(
     "function pendingReadConversationIsSafe",
     "function setUnavailableDeviceDetails"
@@ -226,7 +249,7 @@ test("pending read-channel Conversations are a separate read-only PENDING surfac
   assert.match(unboundCode, /human_review_status === "PENDING"/);
   assert.match(unboundCode, /Read-only Nachrichtenansicht/);
   assert.match(unboundCode, /text: message\.text/);
-  assert.match(page, /await loadPendingReadConversations\(\)/);
+  assert.doesNotMatch(page, /(?:await|void) loadPendingReadConversations\(\)/);
 
   assert.doesNotMatch(panelMarkup, /<button|<input|<select|<form|href=|data-/i);
   assert.doesNotMatch(unboundCode, /transcript_id|sweep_id|command_id|binding_id|contact_id|capture_id|thread_fingerprint|capture_fingerprint|fingerprint|unbound-inbox-conversation-sweep/i);

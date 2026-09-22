@@ -7,8 +7,14 @@ import {
   createTinderCaptureIngressHandler,
   createTinderPassiveReadCaptureIngressHandler,
   normalizeCaptureRecord,
-  parseSignedCaptureRequest
+  parseSignedCaptureRequest,
+  registerTinderPassiveReadCaptureIngress
 } from "../device-bridge/tinder-visible-chat-capture-ingress.js";
+import {
+  assertDeviceBridgeAuthReplaySchemaReady,
+  assertTinderPassiveReadIngressSchemaReady,
+  createTinderPassiveReadIngressFoundationMiddleware
+} from "../device-bridge/tinder-passive-read-readiness.js";
 
 const DEVICE_ID = "e880455d-325c-4f35-9914-823dcb0e0d18";
 const KEY_ID = "a565e8a7-ef60-42d0-b19d-26e7904390fa";
@@ -131,6 +137,7 @@ test("capture ingress binds the authenticated URL device and server-owned proven
 
 test("passive read ingress accepts only signed V2 captures and disables legacy fingerprint resolution", async () => {
   let received;
+  const productConversationId = "d180455d-325c-4f35-9914-823dcb0e0d18";
   const handler = createTinderPassiveReadCaptureIngressHandler({}, {
     now: () => NOW,
     async verifyRequest() {
@@ -139,12 +146,18 @@ test("passive read ingress accepts only signed V2 captures and disables legacy f
     createAuthenticatedStore(_pool, auth, options) {
       assert.equal(auth.deviceId, DEVICE_ID);
       assert.equal(options.requireRuntimeGates, false);
-      assert.equal(options.requireAutomationStopped, true);
+      assert.equal(options.requireLegacyDeviceRuntimeAdmission, false);
+      assert.equal(options.requireAutomationStopped, false);
       assert.equal(options.allowLegacyFingerprintMapping, false);
+      assert.equal(options.projectProductConversations, true);
       return {
-        async storeSafeCapture(input) {
+        async storeSafeCaptureWithDisposition(input) {
           received = input;
-          return storedCapture();
+          return {
+            capture: storedCapture(),
+            captureDisposition: "CREATED",
+            productConversation: { disposition: "CREATED", conversationId: productConversationId }
+          };
         }
       };
     }
@@ -159,11 +172,59 @@ test("passive read ingress accepts only signed V2 captures and disables legacy f
     protocolVersion: 1,
     readChannel: "PASSIVE_READ"
   });
+  assert.equal(JSON.stringify(res.body).includes(productConversationId), false);
+  assert.equal(Object.hasOwn(res.body, "product_conversation"), false);
 
   const rejected = responseRecorder();
   await handler(rawRequest(), rejected);
   assert.equal(rejected.statusCode, 400);
   assert.equal(rejected.body.error.code, "INVALID_TINDER_CAPTURE_REQUEST");
+});
+
+test("authenticated capture store wires the additive product projector only when explicitly enabled", () => {
+  const projector = { async projectCapture() { return { disposition: "NOT_READY", conversationId: null }; } };
+  let receivedProductRepository = null;
+  let receivedOptions = null;
+  const captureRepository = {
+    withTransaction() {},
+    nextCaptureRevision() {},
+    insertCapture() {},
+    findCaptureByFingerprint() {},
+    findReusableConfirmedMapping() {},
+    findCaptureById() {},
+    findPendingHumanMappingCaptures() {}
+  };
+  const pool = { query() {}, connect() {} };
+  const auth = { deviceId: DEVICE_ID, keyId: KEY_ID, requestId: "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e", contentSha256: "c".repeat(64) };
+  const createStore = (_repository, options) => {
+    receivedOptions = options;
+    return { storeSafeCapture() {} };
+  };
+
+  createAuthenticatedCaptureStore(pool, auth, {
+    createRepository: () => captureRepository,
+    createStore,
+    createProductConversationRepository(received) {
+      receivedProductRepository = received;
+      return { ignored: true };
+    },
+    createProductConversationService() { return projector; },
+    projectProductConversations: true
+  });
+
+  assert.equal(receivedProductRepository, pool);
+  assert.equal(receivedOptions.productConversationProjector, projector);
+
+  receivedProductRepository = null;
+  receivedOptions = null;
+  createAuthenticatedCaptureStore(pool, auth, {
+    createRepository: () => captureRepository,
+    createStore,
+    createProductConversationRepository() { throw new Error("must remain inert"); },
+    projectProductConversations: false
+  });
+  assert.equal(receivedProductRepository, null);
+  assert.equal(receivedOptions.productConversationProjector, null);
 });
 
 test("capture ingress is fail closed when the standalone T2 capture storage schema is absent", async () => {
@@ -295,25 +356,13 @@ test("capture ingress fails closed before replay or persistence when the T1 gate
   assert.equal(calls.includes("ROLLBACK"), true);
 });
 
-test("passive read storage keeps signed active-device admission but does not wait for heartbeat projection", async () => {
+test("passive read storage uses signed request replay without legacy runtime admission", async () => {
   const calls = [];
   const client = {
     async query(sql, values = []) {
       calls.push({ sql, values });
       if (/SELECT d\.device_id/.test(sql)) {
-        return {
-          rows: [{
-            device_id: DEVICE_ID,
-            enrollment_state: "ACTIVE",
-            revoked_at: null,
-            key_revoked_at: null,
-            last_accepted_heartbeat_at: new Date("2020-01-01T00:00:00.000Z"),
-            bridge_service_state: "STOPPED",
-            tinder_state: "DISCONNECTED",
-            automation_state: "STOPPED",
-            capabilities: T1_DEVICE_CAPABILITIES
-          }]
-        };
+        throw new Error("passive ingress must not read legacy runtime admission");
       }
       return { rows: [] };
     },
@@ -327,7 +376,8 @@ test("passive read storage keeps signed active-device admission but does not wai
   }, {
     now: () => NOW,
     requireRuntimeGates: false,
-    requireAutomationStopped: true,
+    requireLegacyDeviceRuntimeAdmission: false,
+    requireAutomationStopped: false,
     allowLegacyFingerprintMapping: false,
     createRepository() { return {}; },
     createStore(transactionRepository, options) {
@@ -343,6 +393,7 @@ test("passive read storage keeps signed active-device admission but does not wai
   const stored = await store.storeSafeCapture({});
   assert.equal(stored.capture_id, CAPTURE_ID);
   assert.equal(calls.some(({ sql }) => /device_bridge_request_nonces/.test(sql)), true);
+  assert.equal(calls.some(({ sql }) => /SELECT d\.device_id/.test(sql)), false);
   assert.equal(calls.some(({ sql }) => /COMMIT/.test(sql)), true);
 });
 
@@ -399,6 +450,128 @@ test("passive read storage still blocks a non-stopped automation state without w
   assert.equal(calls.some((sql) => /device_bridge_request_nonces/.test(sql)), false);
   assert.equal(calls.some((sql) => /COMMIT/.test(sql)), false);
   assert.equal(calls.includes("ROLLBACK"), true);
+});
+
+function authReplayCatalogRows() {
+  return {
+    relations: [
+      { table_name: "device_bridge_devices", relkind: "r" },
+      { table_name: "device_bridge_keys", relkind: "r" },
+      { table_name: "device_bridge_request_nonces", relkind: "r" }
+    ],
+    columns: [
+      ["device_bridge_devices", "device_id", "uuid", true],
+      ["device_bridge_devices", "enrollment_state", "text", true],
+      ["device_bridge_devices", "revoked_at", "timestamp with time zone", false],
+      ["device_bridge_keys", "key_id", "uuid", true],
+      ["device_bridge_keys", "device_id", "uuid", true],
+      ["device_bridge_keys", "public_key_spki_der", "bytea", true],
+      ["device_bridge_keys", "revoked_at", "timestamp with time zone", false],
+      ["device_bridge_request_nonces", "auth_subject", "text", true],
+      ["device_bridge_request_nonces", "request_id", "uuid", true],
+      ["device_bridge_request_nonces", "content_sha256", "character(64)", true],
+      ["device_bridge_request_nonces", "accepted_at", "timestamp with time zone", true],
+      ["device_bridge_request_nonces", "expires_at", "timestamp with time zone", true]
+    ].map(([table_name, column_name, data_type, not_null]) => ({ table_name, column_name, data_type, not_null })),
+    constraints: [
+      { table_name: "device_bridge_devices", contype: "p", column_names: ["device_id"], reference_table: null, reference_column_names: [], convalidated: true, condeferrable: false, condeferred: false },
+      { table_name: "device_bridge_keys", contype: "p", column_names: ["key_id"], reference_table: null, reference_column_names: [], convalidated: true, condeferrable: false, condeferred: false },
+      { table_name: "device_bridge_keys", contype: "f", column_names: ["device_id"], reference_table: "device_bridge_devices", reference_column_names: ["device_id"], convalidated: true, condeferrable: false, condeferred: false },
+      { table_name: "device_bridge_request_nonces", contype: "p", column_names: ["auth_subject", "request_id"], reference_table: null, reference_column_names: [], convalidated: true, condeferrable: false, condeferred: false }
+    ]
+  };
+}
+
+function authReplayCatalogClient({ rows = authReplayCatalogRows() } = {}) {
+  const queries = [];
+  return {
+    queries,
+    async query(sql) {
+      queries.push(String(sql));
+      if (/SELECT c\.relname AS table_name, c\.relkind/.test(sql)) return { rows: rows.relations };
+      if (/format_type\(a\.atttypid, a\.atttypmod\) AS data_type/.test(sql)) return { rows: rows.columns };
+      if (/FROM pg_constraint c/.test(sql)) return { rows: rows.constraints };
+      throw new Error("Unexpected passive-read schema query");
+    }
+  };
+}
+
+test("passive read readiness inspects only signed auth/replay and the additive T2 capture base", async () => {
+  const client = authReplayCatalogClient();
+  let captureBaseCalls = 0;
+
+  assert.deepEqual(
+    await assertTinderPassiveReadIngressSchemaReady(client, {
+      async assertCaptureSchemaReady(received) {
+        captureBaseCalls += 1;
+        assert.equal(received, client);
+        return { state: "BASE_COMPATIBLE" };
+      }
+    }),
+    { state: "BASE_COMPATIBLE" }
+  );
+  assert.equal(captureBaseCalls, 1);
+  assert.equal(client.queries.some(sql => /device_bridge_commands|device_bridge_command_acks|device_bridge_audit_events/i.test(sql)), false);
+});
+
+test("passive read readiness fails closed when the replay uniqueness contract is absent", async () => {
+  const rows = authReplayCatalogRows();
+  rows.constraints = rows.constraints.filter(row => row.table_name !== "device_bridge_request_nonces");
+  await assert.rejects(
+    () => assertDeviceBridgeAuthReplaySchemaReady(authReplayCatalogClient({ rows })),
+    /authentication\/replay schema is not ready/
+  );
+});
+
+test("passive read readiness never imports the global V1 through V10 verifier", () => {
+  const source = readFileSync(new URL("../device-bridge/tinder-passive-read-readiness.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /verifyDeviceBridgeSchema|assertDeviceBridgeT1SchemaReady|assertDeviceBridgeAckSchemaReady/);
+  assert.match(source, /assertTinderVisibleChatCaptureBaseSchemaReady/);
+});
+
+test("passive read foundation middleware is independent of global bridge readiness and fails closed locally", async () => {
+  const client = { releaseCalls: 0, release() { this.releaseCalls += 1; } };
+  const middleware = createTinderPassiveReadIngressFoundationMiddleware({
+    async connect() { return client; }
+  }, {
+    async assertFoundationReady(received) {
+      assert.equal(received, client);
+      return { state: "BASE_COMPATIBLE" };
+    }
+  });
+  let continued = false;
+  await middleware({ get() { return "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e"; } }, {}, () => { continued = true; });
+  assert.equal(continued, true);
+  assert.equal(client.releaseCalls, 1);
+
+  const rejecting = createTinderPassiveReadIngressFoundationMiddleware({
+    async connect() { return { release() {} }; }
+  }, {
+    async assertFoundationReady() { throw new Error("legacy command constraint drift"); }
+  });
+  const response = responseRecorder();
+  await rejecting({ get() { return "d6fdcc0f-e5d1-4825-b749-b348a95dfe0e"; } }, response, () => assert.fail("must fail closed"));
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.error.code, "TINDER_PASSIVE_READ_FOUNDATION_NOT_READY");
+  assert.equal(JSON.stringify(response.body).includes("legacy command constraint drift"), false);
+});
+
+test("passive route registration accepts only server-provided middleware before its handler", () => {
+  const routes = [];
+  const middleware = () => {};
+  registerTinderPassiveReadCaptureIngress({
+    app: { post(...args) { routes.push(args); } },
+    pool: {},
+    middleware
+  });
+  assert.equal(routes.length, 1);
+  assert.match(routes[0][0], /tinder-passive-read-captures$/);
+  assert.equal(routes[0][1], middleware);
+  assert.equal(typeof routes[0][2], "function");
+  assert.throws(
+    () => registerTinderPassiveReadCaptureIngress({ app: { post() {} }, pool: {}, middleware: [middleware, "invalid"] }),
+    /middleware must be a function/
+  );
 });
 
 test("capture record presentation never exposes raw messages or technical fingerprint", () => {

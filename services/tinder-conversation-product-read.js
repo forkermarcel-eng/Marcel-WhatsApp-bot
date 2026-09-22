@@ -1,11 +1,22 @@
+import {
+  inspectTinderProductConversationSchema,
+  TINDER_PRODUCT_CONVERSATION_FOUNDATION_STATE
+} from "../device-bridge/tinder-product-conversation-schema.js";
+import {
+  aggregateTinderProductConversationHistory
+} from "./tinder-product-conversation-store.js";
+
 /**
  * Read-only product projection for the Tinder conversation screen.
  *
  * The legacy capture-detail reader intentionally remains a redacted mapping
- * context.  This module is a separate, narrowly-shaped reader for a capture
- * that has already reached both durable resolution gates.  It never returns
- * device, contact, fingerprint, revision, provenance, source-class, or raw
- * JSON metadata fields.
+ * context.  The legacy confirmed reader below remains narrowly shaped and
+ * requires both durable resolution gates. The separate architecture-cut
+ * reader is device-scoped and identity-independent: when the additive
+ * foundation is canonical it exposes a durable Tinder Conversation and its
+ * linked history; otherwise it provides only a clearly labelled observation.
+ * Neither reader returns device, contact, fingerprint, revision, provenance,
+ * source-class, or raw JSON metadata fields to the product surface.
  */
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TINDER_SOURCE_PACKAGE = "com.tinder";
@@ -15,6 +26,23 @@ const TINDER_CONVERSATION_SAFETY_STATUS = "SAFE";
 const TINDER_LATEST_CONFIRMED_CONVERSATION_LIMIT = 25;
 const TINDER_CONVERSATION_MESSAGE_LIMIT = 100;
 const TINDER_CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
+// Before the additive product schema exists, the read-only fallback exposes
+// capture observations only.  It is deliberately not a stable Conversation
+// identity or history.  Once the product schema is canonical, the same routes
+// return durable conversation ids and aggregated linked history.
+const TINDER_READABLE_CONVERSATION_LIMIT = 25;
+// Only durable, linked product Conversations may cross this reader.  A raw
+// capture is technical provenance and is deliberately not a browser-visible
+// Conversation handle.
+const TINDER_READABLE_CONVERSATION_HISTORY_SCOPE = "AGGREGATED_PARTIAL";
+const TINDER_READABLE_CONVERSATION_HISTORY_SCOPES = new Set([
+  "AGGREGATED_PARTIAL",
+  "AGGREGATED_COMPLETE"
+]);
+const TINDER_READABLE_IDENTITY_STATES = new Set(["UNASSIGNED", "ASSIGNED"]);
+const TINDER_READABLE_IDENTITY_REVIEWS = new Set(["PENDING", "CONFIRMED", "CONFLICT"]);
+const TINDER_CAPTURE_MAPPING_STATES = new Set(["NEEDS_HUMAN_MAPPING", "RESOLVED", "CONFLICT"]);
+const TINDER_CAPTURE_REVIEW_STATES = new Set(["PENDING", "CONFIRMED", "REJECTED"]);
 const MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING", "UNKNOWN"]);
 const VISIBLE_CHAT_SYNC_MESSAGE_DIRECTIONS = new Set(["INCOMING", "OUTGOING"]);
 const VISIBLE_CHAT_SYNC_LAYOUT_SCHEMA_VERSION = "tinder-zte-visible-chat-scroll-v1";
@@ -594,13 +622,270 @@ function createPgTinderConversationProductReadRepository(pool) {
   });
 }
 
+function normalizeTinderReadableConversationListItem(value) {
+  if (!exactKeys(value, [
+    "conversation_handle", "visible_name", "observed_at", "identity_state", "identity_review", "history_scope"
+  ])) {
+    invalid("Invalid readable Tinder conversation list projection.", "INVALID_TINDER_READABLE_CONVERSATION_PRODUCT_PROJECTION");
+  }
+  if (!TINDER_READABLE_IDENTITY_STATES.has(value.identity_state)
+      || !TINDER_READABLE_IDENTITY_REVIEWS.has(value.identity_review)
+      || !TINDER_READABLE_CONVERSATION_HISTORY_SCOPES.has(value.history_scope)) {
+    invalid("Invalid readable Tinder conversation list projection.", "INVALID_TINDER_READABLE_CONVERSATION_PRODUCT_PROJECTION");
+  }
+  return Object.freeze({
+    conversation_handle: normalizeCaptureId(value.conversation_handle),
+    visible_name: normalizeText(value.visible_name, "visible name", 240),
+    observed_at: normalizeCapturedAt(value.observed_at),
+    identity_state: value.identity_state,
+    identity_review: value.identity_review,
+    history_scope: value.history_scope
+  });
+}
+
+function normalizeTinderReadableConversationList(value) {
+  if (!Array.isArray(value) || value.length > TINDER_READABLE_CONVERSATION_LIMIT) {
+    invalid("Invalid readable Tinder conversation list projection.", "INVALID_TINDER_READABLE_CONVERSATION_PRODUCT_PROJECTION");
+  }
+  return Object.freeze(value.map(normalizeTinderReadableConversationListItem));
+}
+
+function normalizeTinderReadableConversationDetail(value) {
+  if (!exactKeys(value, [
+    "conversation_handle", "visible_name", "observed_at", "identity_state", "identity_review", "history_scope", "messages"
+  ]) || !Array.isArray(value.messages)
+      || value.messages.length === 0 || value.messages.length > TINDER_CONVERSATION_MESSAGE_LIMIT) {
+    invalid("Invalid readable Tinder conversation detail projection.", "INVALID_TINDER_READABLE_CONVERSATION_PRODUCT_PROJECTION");
+  }
+  return Object.freeze({
+    ...normalizeTinderReadableConversationListItem({
+      conversation_handle: value.conversation_handle,
+      visible_name: value.visible_name,
+      observed_at: value.observed_at,
+      identity_state: value.identity_state,
+      identity_review: value.identity_review,
+      history_scope: value.history_scope
+    }),
+    messages: Object.freeze(value.messages.map(normalizeTinderConversationProductMessage))
+  });
+}
+
+function createTinderReadableConversationProductReadService(repository) {
+  for (const method of [
+    "findReadableConversations",
+    "findReadableConversationByHandle"
+  ]) {
+    if (typeof repository?.[method] !== "function") {
+      throw new TypeError(`repository.${method} must be a function`);
+    }
+  }
+
+  async function listReadableConversations(deviceId) {
+    const normalizedDeviceId = normalizeCaptureId(deviceId);
+    const rows = await repository.findReadableConversations({ deviceId: normalizedDeviceId });
+    if (!Array.isArray(rows) || rows.length > TINDER_READABLE_CONVERSATION_LIMIT) {
+      invalid("Invalid readable Tinder conversation list.", "INVALID_TINDER_READABLE_CONVERSATION_LIST");
+    }
+    return normalizeTinderReadableConversationList(rows);
+  }
+
+  async function getReadableConversation(deviceId, conversationHandle) {
+    const normalizedDeviceId = normalizeCaptureId(deviceId);
+    const normalizedConversationHandle = normalizeCaptureId(conversationHandle);
+    const row = await repository.findReadableConversationByHandle({
+      deviceId: normalizedDeviceId,
+      conversationHandle: normalizedConversationHandle
+    });
+    if (row === null || row === undefined) return null;
+    return normalizeTinderReadableConversationDetail(row);
+  }
+
+  return Object.freeze({
+    getReadableConversation,
+    listReadableConversations
+  });
+}
+
+function durableReadableIdentity(row) {
+  if (!plainObject(row)) {
+    invalid("Invalid durable Tinder conversation record.", "INVALID_TINDER_READABLE_CONVERSATION_RECORD");
+  }
+  const identityBindingState = String(row.identity_binding_state || "").trim().toUpperCase();
+  const correlationState = String(row.correlation_state || "").trim().toUpperCase();
+  const historyState = String(row.history_state || "").trim().toUpperCase();
+  if (!["UNASSIGNED", "BOUND", "CONFLICT"].includes(identityBindingState)
+      || !["PROVISIONAL", "CORRELATED", "AMBIGUOUS"].includes(correlationState)
+      || !["PARTIAL", "COMPLETE"].includes(historyState)) {
+    invalid("Invalid durable Tinder conversation record.", "INVALID_TINDER_READABLE_CONVERSATION_RECORD");
+  }
+  const metadata = row.visible_thread_metadata;
+  if (!plainObject(metadata)) {
+    invalid("Invalid durable Tinder conversation record.", "INVALID_TINDER_READABLE_CONVERSATION_RECORD");
+  }
+  return Object.freeze({
+    conversation_handle: normalizeCaptureId(row.conversation_handle),
+    visible_name: normalizeText(metadata.visibleName ?? metadata.visible_name, "visible name", 240),
+    observed_at: normalizeCapturedAt(row.last_observed_at),
+    identity_state: identityBindingState === "BOUND" ? "ASSIGNED" : "UNASSIGNED",
+    identity_review: identityBindingState === "BOUND"
+      ? "CONFIRMED"
+      : identityBindingState === "CONFLICT" ? "CONFLICT" : "PENDING",
+    history_scope: historyState === "COMPLETE"
+      ? "AGGREGATED_COMPLETE"
+      : "AGGREGATED_PARTIAL"
+  });
+}
+
+function durableCaptureForAggregation(row) {
+  return Object.freeze({
+    capture_id: row.capture_id,
+    device_id: row.device_id,
+    runtime_thread_fingerprint: row.runtime_thread_fingerprint,
+    visible_messages: row.visible_messages,
+    mapping_status: row.mapping_status,
+    human_review_status: row.human_review_status,
+    resolved_contact_id: row.capture_resolved_contact_id,
+    captured_at: row.captured_at,
+    received_at: row.received_at
+  });
+}
+
+function durableReadableDetail(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  // The query is chronological so the final linked capture supplies only the
+  // current display label; it is never used as a correlation or identity key.
+  const identity = durableReadableIdentity(rows[rows.length - 1]);
+  const aggregate = aggregateTinderProductConversationHistory(rows.map(durableCaptureForAggregation));
+  if (aggregate.messages.length === 0) {
+    invalid("Durable Tinder conversation history is empty.", "INVALID_TINDER_READABLE_CONVERSATION_RECORD");
+  }
+  // A catalog value alone cannot prove completeness if a linked capture could
+  // not be placed by the required ordered overlap.  Preserve the durable
+  // thread, but surface it as partial until every linked segment is merged.
+  const historyScope = identity.history_scope === "AGGREGATED_COMPLETE"
+      && aggregate.unmergedCaptureCount === 0
+    ? "AGGREGATED_COMPLETE"
+    : "AGGREGATED_PARTIAL";
+  return Object.freeze({
+    ...identity,
+    history_scope: historyScope,
+    messages: Object.freeze(aggregate.messages.map(message => Object.freeze({
+      direction: message.direction,
+      text: message.text
+    })))
+  });
+}
+
+function productFoundationStateError() {
+  const error = new Error("Tinder product conversation foundation is incompatible.");
+  error.code = "TINDER_PRODUCT_CONVERSATION_PRODUCT_READ_NOT_READY";
+  error.statusCode = 503;
+  return error;
+}
+
+function createPgTinderReadableConversationProductReadRepository(pool, {
+  inspectProductSchema = inspectTinderProductConversationSchema
+} = {}) {
+  if (!pool || typeof pool.query !== "function") {
+    throw new TypeError("pool.query must be a function");
+  }
+  if (typeof inspectProductSchema !== "function") {
+    throw new TypeError("inspectProductSchema must be a function");
+  }
+
+  const durableConversationList = `
+    WITH latest_capture AS (
+      SELECT DISTINCT ON (link.conversation_id)
+             link.conversation_id,
+             capture.device_id,
+             capture.visible_thread_metadata
+        FROM tinder_thread_conversation_capture_links link
+        JOIN tinder_visible_chat_captures capture
+          ON capture.capture_id = link.capture_id
+       WHERE capture.capture_safety_status = 'SAFE'
+         AND capture.source_package = 'com.tinder'
+         AND jsonb_typeof(capture.visible_messages) = 'array'
+         AND jsonb_array_length(capture.visible_messages) > 0
+       ORDER BY link.conversation_id,
+                capture.captured_at DESC,
+                capture.received_at DESC,
+                capture.capture_id DESC
+    )
+    SELECT conversation.conversation_id AS conversation_handle,
+           conversation.identity_binding_state,
+           conversation.correlation_state,
+           conversation.history_state,
+           conversation.last_observed_at,
+           latest_capture.visible_thread_metadata
+      FROM tinder_thread_conversations conversation
+      JOIN latest_capture ON latest_capture.conversation_id = conversation.conversation_id
+     WHERE conversation.device_id = $1
+       AND latest_capture.device_id = conversation.device_id
+     ORDER BY conversation.last_observed_at DESC, conversation.conversation_id DESC
+     LIMIT $2`;
+
+  const durableConversationDetail = `
+    SELECT conversation.conversation_id AS conversation_handle,
+           conversation.identity_binding_state,
+           conversation.correlation_state,
+           conversation.history_state,
+           conversation.last_observed_at,
+           capture.capture_id,
+           capture.device_id,
+           capture.runtime_thread_fingerprint,
+           capture.visible_thread_metadata,
+           capture.visible_messages,
+           capture.mapping_status,
+           capture.human_review_status,
+           capture.resolved_contact_id AS capture_resolved_contact_id,
+           capture.captured_at,
+           capture.received_at
+      FROM tinder_thread_conversations conversation
+      JOIN tinder_thread_conversation_capture_links link
+        ON link.conversation_id = conversation.conversation_id
+      JOIN tinder_visible_chat_captures capture
+        ON capture.capture_id = link.capture_id
+     WHERE conversation.device_id = $1
+       AND conversation.conversation_id = $2
+       AND capture.device_id = conversation.device_id
+       AND capture.capture_safety_status = 'SAFE'
+       AND capture.source_package = 'com.tinder'
+       AND jsonb_typeof(capture.visible_messages) = 'array'
+       AND jsonb_array_length(capture.visible_messages) > 0
+     ORDER BY capture.captured_at ASC, capture.received_at ASC, capture.capture_id ASC`;
+
+  async function useDurableConversations() {
+    const inspection = await inspectProductSchema(pool);
+    if (inspection?.state === TINDER_PRODUCT_CONVERSATION_FOUNDATION_STATE.CANONICAL) return true;
+    throw productFoundationStateError();
+  }
+
+  return Object.freeze({
+    async findReadableConversations({ deviceId }) {
+      await useDurableConversations();
+      const result = await pool.query(durableConversationList, [deviceId, TINDER_READABLE_CONVERSATION_LIMIT]);
+      return result.rows.map(durableReadableIdentity);
+    },
+
+    async findReadableConversationByHandle({ deviceId, conversationHandle }) {
+      await useDurableConversations();
+      const result = await pool.query(durableConversationDetail, [deviceId, conversationHandle]);
+      return durableReadableDetail(result.rows);
+    }
+  });
+}
+
 export {
   TINDER_CONVERSATION_MESSAGE_LIMIT,
   TINDER_CONVERSATION_MESSAGE_TEXT_LIMIT,
   TINDER_LATEST_CONFIRMED_CONVERSATION_LIMIT,
+  TINDER_READABLE_CONVERSATION_LIMIT,
+  TINDER_READABLE_CONVERSATION_HISTORY_SCOPE,
   TinderConversationProductReadError,
   createPgTinderConversationProductReadRepository,
+  createPgTinderReadableConversationProductReadRepository,
   createTinderConversationProductReadService,
+  createTinderReadableConversationProductReadService,
   normalizeLatestConfirmedConversationDetail,
   normalizeLatestConfirmedConversationListItem,
   normalizeLatestConfirmedOfficialAppResume,
@@ -614,5 +899,8 @@ export {
   normalizeTinderConversationProductDetail,
   normalizeTinderConversationProductList,
   normalizeTinderConversationProductListItem,
-  normalizeTinderConversationProductMessage
+  normalizeTinderConversationProductMessage,
+  normalizeTinderReadableConversationDetail,
+  normalizeTinderReadableConversationList,
+  normalizeTinderReadableConversationListItem
 };

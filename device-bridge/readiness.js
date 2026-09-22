@@ -11,6 +11,31 @@ DEVICE BRIDGE T0 — PROTOCOL V1 READINESS
 
 let ready = false;
 
+function requestId(req) {
+  return typeof req?.get === "function" ? req.get("x-marcel-request-id") : undefined;
+}
+
+/**
+ * Structural checks shared by every signed Device Bridge route.
+ *
+ * This is intentionally separate from global schema readiness so a narrowly
+ * scoped signed ingress can retain the exact wire contract without inheriting
+ * unrelated command-schema readiness.
+ */
+export function deviceBridgeRequestShapeMiddleware(req, res, next) {
+  try {
+    if (req.originalUrl.includes("?")) {
+      throw new DeviceBridgeProtocolError(400, "INVALID_HEADER", "Signed device bridge routes do not accept query strings");
+    }
+    assertJsonUtf8ContentType(req.get("content-type"));
+    assertRawBody(req.body);
+    next();
+  } catch (error) {
+    const status = error instanceof DeviceBridgeProtocolError ? error.status : 500;
+    res.status(status).json(protocolErrorBody(error, requestId(req)));
+  }
+}
+
 export function markDeviceBridgeReady() {
   ready = true;
 }
@@ -39,7 +64,7 @@ export function deviceBridgeFoundationMiddleware(req, res, next) {
     next();
   } catch (error) {
     const status = error instanceof DeviceBridgeProtocolError ? error.status : 500;
-    res.status(status).json(protocolErrorBody(error, req.get("x-marcel-request-id")));
+    res.status(status).json(protocolErrorBody(error, requestId(req)));
   }
 }
 
@@ -48,5 +73,5 @@ export function deviceBridgeRawBodyErrorMiddleware(error, req, res, next) {
   const mapped = error.type === "entity.too.large"
     ? new DeviceBridgeProtocolError(400, "REQUEST_TOO_LARGE", "Device bridge request exceeds 64 KiB")
     : new DeviceBridgeProtocolError(400, "INVALID_BODY", "Device bridge request body is invalid");
-  res.status(mapped.status).json(protocolErrorBody(mapped, req.get("x-marcel-request-id")));
+  res.status(mapped.status).json(protocolErrorBody(mapped, requestId(req)));
 }

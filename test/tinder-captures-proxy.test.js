@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import handler, {
   normalizePublicConfirmedConversation,
+  normalizePublicReadableConversation,
+  normalizePublicReadableConversationList,
   normalizePublicVerifiedChatReturnObservation
 } from "../api/tinder/captures.js";
 
@@ -1112,6 +1114,69 @@ test("pending read-channel conversations proxy only the bounded PENDING projecti
   await handler(request({
     query: { deviceId: DEVICE_ID, view: "pending-read-conversations" }
   }), injected);
+  assert.equal(injected.statusCode, 502);
+  assert.equal(JSON.stringify(injected.body).includes(CAPTURE_ID), false);
+}));
+
+test("readable Conversations proxy newest safe device-scoped viewports without leaking capture audit fields", async () => withEnvironment(async () => {
+  const listItem = {
+    conversation_handle: CAPTURE_ID,
+    visible_name: "Nicht zugeordnet",
+    observed_at: "2026-09-22T12:30:00.000Z",
+    identity_state: "UNASSIGNED",
+    identity_review: "PENDING",
+    history_scope: "AGGREGATED_PARTIAL"
+  };
+  let call;
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({ ok: true, conversations: [listItem] });
+  };
+  const listResponse = responseRecorder();
+  await handler(request({
+    query: { deviceId: DEVICE_ID, view: "read-conversations" }
+  }), listResponse);
+  assert.equal(listResponse.statusCode, 200);
+  assert.equal(call.url,
+    `https://shared-backend.example/dashboard-api/tinder/devices/${DEVICE_ID}/read-conversations`);
+  assert.equal(call.options.method, "GET");
+  assert.equal(Object.hasOwn(call.options, "body"), false);
+  assert.deepEqual(listResponse.body, { ok: true, conversations: [listItem] });
+  assert.deepEqual(normalizePublicReadableConversationList([listItem]), [listItem]);
+
+  const detail = {
+    ...listItem,
+    messages: [{ direction: "INCOMING", text: "bounded safe message" }]
+  };
+  globalThis.fetch = async (url, options) => {
+    call = { url, options };
+    return backendResponse({ ok: true, conversation: detail });
+  };
+  const detailResponse = responseRecorder();
+  await handler(request({
+    query: { deviceId: DEVICE_ID, conversationHandle: CAPTURE_ID, view: "read-conversation" }
+  }), detailResponse);
+  assert.equal(detailResponse.statusCode, 200);
+  assert.equal(call.url,
+    `https://shared-backend.example/dashboard-api/tinder/devices/${DEVICE_ID}/read-conversations/${CAPTURE_ID}`);
+  assert.equal(call.options.method, "GET");
+  assert.deepEqual(detailResponse.body, { ok: true, conversation: detail });
+  assert.deepEqual(normalizePublicReadableConversation(detail, CAPTURE_ID), detail);
+
+  const rendered = JSON.stringify(detailResponse.body);
+  for (const forbidden of [
+    "capture_id", "device_id", "runtime_thread_fingerprint", "capture_fingerprint",
+    "capture_revision", "resolved_contact_id", "mapping_status", "human_review_status", "provenance"
+  ]) {
+    assert.equal(rendered.includes(forbidden), false, forbidden);
+  }
+
+  globalThis.fetch = async () => backendResponse({
+    ok: true,
+    conversations: [{ ...listItem, capture_id: CAPTURE_ID }]
+  });
+  const injected = responseRecorder();
+  await handler(request({ query: { deviceId: DEVICE_ID, view: "read-conversations" } }), injected);
   assert.equal(injected.statusCode, 502);
   assert.equal(JSON.stringify(injected.body).includes(CAPTURE_ID), false);
 }));

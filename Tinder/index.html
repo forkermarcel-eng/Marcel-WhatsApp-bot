@@ -832,7 +832,7 @@
  <div class="shell">
    <header>
      <div class="brand-wrap">
-       <div class="module-label"><h1 class="content-title">Tinder</h1><span>Android Device Bridge · kontrollierter T2/T3-Modus</span></div>
+       <div class="module-label"><h1 class="content-title">Tinder</h1><span>Android Control · Tinder Read</span></div>
      </div>
 
      <div class="header-actions">
@@ -880,15 +880,15 @@
          <div class="status-sub" id="deviceAutomationSub">Automation-Status wird geladen</div>
        </article>
 
-       <article class="status-card"><div class="status-top"><div class="status-name">Ruhephase</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht aktiviert</div><div class="status-sub">Eine spätere T7-Steuerung wird separat und auditierbar verbunden.</div></article>
-      <article class="status-card"><div class="status-top"><div class="status-name">Queue</div><span class="dot" aria-hidden="true"></span></div><div class="status-value">Nicht aktiviert</div><div class="status-sub">Keine T6-Queue oder automatische Chatprüfung ist derzeit aktiv.</div></article>
       </section>
 
+      <details class="technical legacy-capture-audit" id="legacyCaptureAuditPanel">
+       <summary>Historisches Capture- und Zuordnungs-Audit</summary><div class="technical-body">
       <section class="enrollment-panel pending-capture-panel" id="pendingCapturePanel" aria-labelledby="pendingCaptureHeading">
-        <h2 id="pendingCaptureHeading">Ausstehende Tinder-Zuordnungen</h2>
+        <h2 id="pendingCaptureHeading">Historische Capture-Zuordnungen</h2>
         <p>
-          Sichere T2-Captures werden erst nach einer ausdrücklichen menschlichen
-          Auswahl zugeordnet. Der sichtbare Name erzeugt oder verbindet keinen Kontakt.
+          Technische Altdaten für optionale Datenpflege. Sie blockieren weder
+          dauerhafte Tinder-Conversations noch den Read-/Sync-Pfad.
         </p>
         <div class="pending-capture-list" id="pendingCaptureList" aria-live="polite"></div>
         <span class="enrollment-message" id="pendingCaptureMessage" role="status" aria-live="polite">
@@ -897,10 +897,11 @@
       </section>
 
       <section class="enrollment-panel pending-capture-panel" id="unboundConversationPanel" aria-labelledby="unboundConversationHeading">
-        <h2 id="unboundConversationHeading">Neue, noch unzugeordnete Conversations</h2>
+        <h2 id="unboundConversationHeading">Historische PENDING-Projektion</h2>
         <p>
-          Sicher gelesene Verlaeufe bleiben ohne Personen- oder Kontaktzuordnung PENDING.
-          Die read-only Ansicht erstellt keine Zuordnung, keinen Entwurf und keinen Versand.
+          Diese frühere technische Ansicht bleibt nur zum Audit erhalten. Neue
+          stabile Threads erscheinen unabhängig von einer Kontaktzuordnung im
+          normalen Conversation-Bereich.
         </p>
         <div class="pending-capture-list" id="unboundConversationList" aria-live="polite"></div>
         <span class="enrollment-message" id="unboundConversationMessage" role="status" aria-live="polite">
@@ -966,6 +967,8 @@
           <button class="button warn" id="cancelCaptureDraftApproval" type="button" hidden>Freigabe widerrufen</button>
         </div>
       </section>
+       </div>
+      </details>
 
       <details class="technical">
        <summary>Technik &amp; Diagnose</summary><div class="technical-body">
@@ -1122,19 +1125,19 @@
 
      <section class="matches" aria-label="Matches"><h2>MATCHES</h2><div class="match-row"><div class="match-empty"><div class="match-circle">🔥</div><span>Noch keine echten Matchdaten vorhanden.</span></div></div></section>
 
-     <section class="workspace" aria-label="Tinder Arbeitsbereich">
-       <aside class="panel" aria-labelledby="confirmedConversationHeading">
+     <section class="workspace" aria-label="Tinder Conversations">
+       <aside class="panel" aria-labelledby="productConversationHeading">
          <div class="panel-header">
            <div class="panel-heading">
-             <h2 id="confirmedConversationHeading">Bestätigte Conversations</h2>
-             <p>Nur die neuesten, sicher bestätigten Captures</p>
+             <h2 id="productConversationHeading">Conversations</h2>
+             <p>Dauerhafte Tinder-Threads – auch ohne Kontaktzuordnung</p>
            </div>
-           <span class="badge">Begrenzt</span>
+           <span class="badge">Read-only</span>
          </div>
 
-         <div class="conversation-list" id="confirmedConversationList" aria-live="polite"></div>
-         <p class="conversation-status" id="confirmedConversationMessage" role="status" aria-live="polite">
-           Bestätigte Conversations werden geladen. Nachrichtentext wird erst nach einer bewussten Auswahl geladen.
+         <div class="conversation-list" id="productConversationList" aria-live="polite"></div>
+         <p class="conversation-status" id="productConversationMessage" role="status" aria-live="polite">
+           Dauerhafte Conversations werden für das aktive Android-Gerät geladen. Nachrichtentext wird erst nach einer Auswahl geladen.
          </p>
        </aside>
 
@@ -1142,13 +1145,13 @@
          <div class="panel-header">
            <div class="panel-heading">
              <h2 id="conversationDetailHeading">Nachrichtenansicht</h2>
-             <p>Read-only Ansicht einer bewusst ausgewählten Conversation</p>
+             <p>Read-only Ansicht einer ausgewählten Conversation</p>
            </div>
            <span class="badge">Kein Versand</span>
          </div>
 
-         <div class="conversation-detail" id="confirmedConversationDetail" aria-live="polite">
-           <div class="conversation-detail-empty"><div><strong>Conversation auswählen</strong>Wähle links eine bestätigte Conversation. Es wird keine Nachricht gesendet oder automatisch nachgeladen.</div></div>
+         <div class="conversation-detail" id="productConversationDetail" aria-live="polite">
+           <div class="conversation-detail-empty"><div><strong>Conversation auswählen</strong>Wähle links eine dauerhafte Conversation. Es wird nichts gesendet.</div></div>
          </div>
        </section>
 
@@ -1181,7 +1184,7 @@
    </main>
 
    <footer class="system-footer">
-     <span>Marcel AI · Tinder Module · Manual Gate</span>
+     <span>Marcel AI · Tinder Read Channel</span>
      <span>Letzte Statusprüfung: <strong id="lastChecked">Noch nicht geprüft</strong></span>
    </footer>
  </div></div>
@@ -1228,6 +1231,7 @@
         document.getElementById("lastAcceptedPassiveInboxObservationDiagnosticAfterLatestV2Resume"),
        pendingCaptureList: document.getElementById("pendingCaptureList"),
        pendingCaptureMessage: document.getElementById("pendingCaptureMessage"),
+       legacyCaptureAuditPanel: document.getElementById("legacyCaptureAuditPanel"),
        unboundConversationList: document.getElementById("unboundConversationList"),
        unboundConversationMessage: document.getElementById("unboundConversationMessage"),
        openDraftReviewList: document.getElementById("openDraftReviewList"),
@@ -1237,9 +1241,9 @@
        draftEligibleCaptureMessage: document.getElementById("draftEligibleCaptureMessage"),
        humanArmedBindingList: document.getElementById("humanArmedBindingList"),
        humanArmedBindingMessage: document.getElementById("humanArmedBindingMessage"),
-       confirmedConversationList: document.getElementById("confirmedConversationList"),
-       confirmedConversationMessage: document.getElementById("confirmedConversationMessage"),
-       confirmedConversationDetail: document.getElementById("confirmedConversationDetail"),
+       productConversationList: document.getElementById("productConversationList"),
+       productConversationMessage: document.getElementById("productConversationMessage"),
+       productConversationDetail: document.getElementById("productConversationDetail"),
        captureDraftPanel: document.getElementById("captureDraftPanel"),
        createCaptureDraft: document.getElementById("createCaptureDraft"),
        captureDraftMessage: document.getElementById("captureDraftMessage"),
@@ -1284,6 +1288,9 @@
     let draftReview = null;
     let draftReviewBusy = false;
     let draftReviewLoadState = "idle";
+    let latestProductConversations = [];
+    let selectedProductConversationHandle = null;
+    let productConversationSelectionRequest = 0;
     let latestConfirmedConversations = [];
     let selectedConversationCaptureId = null;
     let conversationSelectionRequest = 0;
@@ -1301,6 +1308,14 @@
    const UNBOUND_CONVERSATION_TRANSCRIPT_LIMIT = 8;
    const UNBOUND_CONVERSATION_MESSAGE_LIMIT = 100;
    const UNBOUND_CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
+   const PRODUCT_CONVERSATION_LIMIT = 25;
+   const PRODUCT_CONVERSATION_MESSAGE_LIMIT = 100;
+   const PRODUCT_CONVERSATION_MESSAGE_TEXT_LIMIT = 4096;
+   const PRODUCT_CONVERSATION_IDENTITY_STATES = new Set(["UNASSIGNED", "ASSIGNED"]);
+   const PRODUCT_CONVERSATION_IDENTITY_REVIEWS = new Set(["PENDING", "CONFIRMED", "CONFLICT"]);
+   const PRODUCT_CONVERSATION_HISTORY_SCOPES = new Set([
+     "AGGREGATED_PARTIAL", "AGGREGATED_COMPLETE"
+   ]);
    const TINDER_MANUAL_GATE_COMMANDS = new Set(["CONNECT_TINDER", "DISCONNECT_TINDER"]);
    const INBOX_NAVIGATION_STAGES = new Set([
      "IDLE", "AWAITING_INBOX", "AWAITING_OFFICIAL_RESUME_HANDOFF",
@@ -2060,6 +2075,17 @@
       }
     }
 
+    // Historical capture/mapping controls remain available for explicit audit
+    // work, but they do not load or refresh as part of the normal Conversation
+    // product flow.
+    function loadLegacyCaptureAuditIfOpen() {
+      if (!elements.legacyCaptureAuditPanel.open) return;
+      void loadPendingCaptureDiscovery();
+      void loadOpenDraftReviewDiscovery();
+      void loadDraftEligibleCaptureDiscovery();
+      void loadHumanArmedBindingList();
+    }
+
     function captureMappingStatus(capture) {
      return String(capture?.mapping_status || capture?.mappingStatus || "").toUpperCase();
    }
@@ -2640,6 +2666,210 @@
    function hasExactConversationFields(value, fields) {
      return value && typeof value === "object" && !Array.isArray(value) &&
        Object.keys(value).sort().join("|") === [...fields].sort().join("|");
+   }
+
+   function productConversationIsSafeForSelection(conversation) {
+     const observedAt = new Date(conversation?.observed_at || "");
+     return hasExactConversationFields(conversation, [
+       "conversation_handle", "visible_name", "observed_at", "identity_state", "identity_review", "history_scope"
+     ]) && UUID_V4.test(String(conversation.conversation_handle || ""))
+       && typeof conversation.visible_name === "string" && conversation.visible_name.trim().length > 0
+       && conversation.visible_name.trim().length <= 240
+       && PRODUCT_CONVERSATION_IDENTITY_STATES.has(conversation.identity_state)
+       && PRODUCT_CONVERSATION_IDENTITY_REVIEWS.has(conversation.identity_review)
+       && PRODUCT_CONVERSATION_HISTORY_SCOPES.has(conversation.history_scope)
+       && !Number.isNaN(observedAt.valueOf());
+   }
+
+   function productConversationDetailIsSafe(conversation, conversationHandle) {
+     return hasExactConversationFields(conversation, [
+       "conversation_handle", "visible_name", "observed_at", "identity_state", "identity_review", "history_scope", "messages"
+     ]) && conversation.conversation_handle === conversationHandle
+       && productConversationIsSafeForSelection({
+         conversation_handle: conversation.conversation_handle,
+         visible_name: conversation.visible_name,
+         observed_at: conversation.observed_at,
+         identity_state: conversation.identity_state,
+         identity_review: conversation.identity_review,
+         history_scope: conversation.history_scope
+       }) && Array.isArray(conversation.messages)
+       && conversation.messages.length > 0 && conversation.messages.length <= PRODUCT_CONVERSATION_MESSAGE_LIMIT
+       && conversation.messages.every((message) =>
+         hasExactConversationFields(message, ["direction", "text"])
+         && ["INCOMING", "OUTGOING", "UNKNOWN"].includes(String(message.direction || "").toUpperCase())
+         && typeof message.text === "string" && message.text.trim().length > 0
+         && message.text.trim().length <= PRODUCT_CONVERSATION_MESSAGE_TEXT_LIMIT
+       );
+   }
+
+   function productConversationIdentityLabel(conversation) {
+     if (conversation.identity_state === "ASSIGNED" && conversation.identity_review === "CONFIRMED") {
+       return "Zugeordnet · bestätigt";
+     }
+     if (conversation.identity_review === "CONFLICT") {
+       return "Unzugeordnet · Konflikt offen";
+     }
+     return "Unzugeordnet · PENDING";
+   }
+
+   function productConversationHistoryLabel(conversation) {
+     if (conversation.history_scope === "AGGREGATED_COMPLETE") {
+       return "Zusammengeführter Verlauf – vollständig gelesen";
+     }
+     return "Zusammengeführter Verlauf – noch unvollständig";
+   }
+
+   function setProductConversationDetailPlaceholder(title, message) {
+     elements.productConversationDetail.replaceChildren();
+     const empty = document.createElement("div");
+     empty.className = "conversation-detail-empty";
+     const copy = document.createElement("div");
+     const heading = document.createElement("strong");
+     const body = document.createElement("span");
+     heading.textContent = title;
+     body.textContent = message;
+     copy.append(heading, body);
+     empty.append(copy);
+     elements.productConversationDetail.append(empty);
+   }
+
+   function renderProductConversationList(conversations) {
+     elements.productConversationList.replaceChildren();
+     if (conversations.length === 0) {
+       const empty = document.createElement("div");
+       empty.className = "conversation-list-empty";
+       empty.textContent = "Derzeit liegt keine sicher gelesene Tinder-Conversation für dieses Gerät vor.";
+       elements.productConversationList.append(empty);
+       elements.productConversationMessage.textContent = "Keine Conversation verfügbar.";
+       return;
+     }
+
+     for (const conversation of conversations) {
+       const choice = document.createElement("button");
+       choice.type = "button";
+       choice.className = `conversation-choice${conversation.conversation_handle === selectedProductConversationHandle ? " selected" : ""}`;
+       choice.setAttribute("aria-current", conversation.conversation_handle === selectedProductConversationHandle ? "true" : "false");
+       const name = document.createElement("span");
+       name.className = "conversation-choice-name";
+       name.textContent = conversation.visible_name.trim();
+       const identity = document.createElement("span");
+       identity.className = "conversation-choice-time";
+       identity.textContent = productConversationIdentityLabel(conversation);
+       const observedAt = document.createElement("span");
+       observedAt.className = "conversation-choice-time";
+       observedAt.textContent = `Zuletzt gelesen ${formatConversationCapturedAt(conversation.observed_at)}`;
+       const history = document.createElement("span");
+       history.className = "conversation-choice-time";
+       history.textContent = productConversationHistoryLabel(conversation);
+       choice.append(name, identity, observedAt, history);
+       choice.addEventListener("click", () => {
+         void selectProductConversation(conversation.conversation_handle);
+       });
+       elements.productConversationList.append(choice);
+     }
+     elements.productConversationMessage.textContent =
+       `${conversations.length} dauerhafte Conversation${conversations.length === 1 ? "" : "s"} verfügbar. Eine Kontaktzuordnung ist nicht erforderlich.`;
+   }
+
+   function renderProductConversationDetail(conversation) {
+     elements.productConversationDetail.replaceChildren();
+     const summary = document.createElement("div");
+     summary.className = "conversation-detail-summary";
+     const name = document.createElement("div");
+     name.className = "conversation-detail-name";
+     name.textContent = conversation.visible_name.trim();
+     const identity = document.createElement("div");
+     identity.className = "conversation-detail-time";
+     identity.textContent = productConversationIdentityLabel(conversation);
+     const observedAt = document.createElement("div");
+     observedAt.className = "conversation-detail-time";
+     observedAt.textContent = `Zuletzt gelesen am ${formatConversationCapturedAt(conversation.observed_at)}`;
+     const scope = document.createElement("div");
+     scope.className = "conversation-detail-time";
+     scope.textContent = productConversationHistoryLabel(conversation);
+     summary.append(name, identity, observedAt, scope);
+     elements.productConversationDetail.append(
+       summary,
+       renderConversationMessages(conversation.messages, "conversation-messages")
+     );
+   }
+
+   async function selectProductConversation(conversationHandle) {
+     const deviceId = String(selectedDevice?.device_id || "");
+     if (!UUID_V4.test(deviceId) || !UUID_V4.test(String(conversationHandle || ""))) return;
+     selectedProductConversationHandle = conversationHandle;
+     const requestId = ++productConversationSelectionRequest;
+     renderProductConversationList(latestProductConversations);
+     setProductConversationDetailPlaceholder(
+       "Conversation wird geladen",
+       "Der lesbare Conversation-Stand wird angefordert."
+     );
+     try {
+       const data = await requestJson(
+         `/api/tinder/captures?deviceId=${encodeURIComponent(deviceId)}&conversationHandle=${encodeURIComponent(conversationHandle)}&view=read-conversation`
+       );
+       if (requestId !== productConversationSelectionRequest) return null;
+       if (!productConversationDetailIsSafe(data?.conversation, conversationHandle)) {
+         throw new Error("Das Backend hat keine gültige Conversation geliefert.");
+       }
+       renderProductConversationDetail(data.conversation);
+       return data.conversation;
+     } catch (error) {
+       if (requestId !== productConversationSelectionRequest) return null;
+       setProductConversationDetailPlaceholder(
+         "Conversation nicht verfügbar",
+         error?.message || "Die ausgewählte Conversation konnte nicht sicher geladen werden."
+       );
+       return null;
+     }
+   }
+
+   async function loadProductConversationList() {
+     const deviceId = String(selectedDevice?.device_id || "");
+     if (!UUID_V4.test(deviceId)) {
+       latestProductConversations = [];
+       selectedProductConversationHandle = null;
+       productConversationSelectionRequest += 1;
+       renderProductConversationList([]);
+       elements.productConversationMessage.textContent =
+         "Conversations werden nach Auswahl eines eindeutigen aktiven Android-Geräts geladen.";
+       setProductConversationDetailPlaceholder(
+         "Android-Gerät auswählen",
+         "Die Conversation-Ansicht ist pro Gerät getrennt und ordnet keine Person automatisch zu."
+       );
+       return;
+     }
+     try {
+       const data = await requestJson(
+         `/api/tinder/captures?deviceId=${encodeURIComponent(deviceId)}&view=read-conversations`
+       );
+       const conversations = Array.isArray(data?.conversations) ? data.conversations : null;
+       if (!conversations || conversations.length > PRODUCT_CONVERSATION_LIMIT
+           || conversations.some((conversation) => !productConversationIsSafeForSelection(conversation))) {
+         throw new Error("Das Backend hat keine gültige Conversation-Liste geliefert.");
+       }
+       latestProductConversations = conversations;
+       if (!conversations.some((conversation) => conversation.conversation_handle === selectedProductConversationHandle)) {
+         selectedProductConversationHandle = null;
+         productConversationSelectionRequest += 1;
+         setProductConversationDetailPlaceholder(
+           "Conversation auswählen",
+           "Wähle links eine Conversation. Eine Kontaktzuordnung ist nicht erforderlich."
+         );
+       }
+       renderProductConversationList(conversations);
+     } catch (error) {
+       latestProductConversations = [];
+       selectedProductConversationHandle = null;
+       productConversationSelectionRequest += 1;
+       renderProductConversationList([]);
+       elements.productConversationMessage.textContent =
+         error?.message || "Tinder-Conversations konnten nicht geladen werden.";
+       setProductConversationDetailPlaceholder(
+         "Conversation nicht verfügbar",
+         "Die Conversation-Ansicht konnte nicht sicher geladen werden."
+       );
+     }
    }
 
    function confirmedConversationIsSafeForSelection(conversation) {
@@ -3851,7 +4081,7 @@
          selectedDevice = device;
          renderDeviceSelection(devices);
          renderDeviceStatus({ devices: [device] });
-         void loadPendingReadConversations();
+         void loadProductConversationList();
        });
        return button;
      }));
@@ -3951,10 +4181,10 @@
      }
 
      elements.lastChecked.textContent = formatNow();
-     // The binding card deliberately follows the newly accepted bounded
-     // device observation. This is only an advisory disable; the backend
-     // revalidates the same bound device before any permit is created.
-     void loadHumanArmedBindingList();
+     // Historical binding/audit data is asynchronous and never controls the
+     // product Conversation list. Refresh it only while its audit panel is
+     // explicitly open.
+     if (elements.legacyCaptureAuditPanel.open) void loadHumanArmedBindingList();
    }
 
   function renderDeviceStatusError(error) {
@@ -3962,14 +4192,14 @@
     // for the presentation-only bootstrap affordance. Re-rendering the
     // binding cards keeps the UI disabled without replaying any command.
     selectedDevice = null;
-    void loadPendingReadConversations();
+    void loadProductConversationList();
      setDot(elements.deviceDot, "bad");
      elements.deviceValue.textContent = "Nicht verfügbar";
      elements.deviceSub.textContent = error?.message || "Device-Bridge-Status konnte nicht geladen werden";
      setUnavailableDeviceDetails("Unbekannt");
      setCommandAvailability(null, "Gerätestatus nicht verfügbar. Kein Command wird gesendet.", true);
     elements.lastChecked.textContent = formatNow();
-    void loadHumanArmedBindingList();
+    if (elements.legacyCaptureAuditPanel.open) void loadHumanArmedBindingList();
   }
 
   function wait(milliseconds) {
@@ -4073,7 +4303,7 @@
      try {
        const data = await requestJson("/api/tinder/device-status");
        renderDeviceStatus(data);
-       await loadPendingReadConversations();
+       await loadProductConversationList();
        return data;
      } catch (error) {
        renderDeviceStatusError(error);
@@ -4154,13 +4384,16 @@
      void refreshAllStatuses();
     });
 
+   elements.legacyCaptureAuditPanel.addEventListener("toggle", () => {
+     loadLegacyCaptureAuditIfOpen();
+   });
+
      void refreshAllStatuses();
-     void loadPendingCaptureDiscovery();
-     void loadOpenDraftReviewDiscovery();
-     void loadDraftEligibleCaptureDiscovery();
-     void loadHumanArmedBindingList();
-     void loadLatestConfirmedConversationList();
-     void loadCaptureMappingFromLocation();
+     void loadProductConversationList();
+     if (captureIdFromLocation()) {
+       elements.legacyCaptureAuditPanel.open = true;
+       void loadCaptureMappingFromLocation();
+     }
 
    window.setInterval(() => {
      void refreshAllStatuses();

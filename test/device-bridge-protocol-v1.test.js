@@ -43,6 +43,7 @@ import {
 } from "../device-bridge/protocol-v1.js";
 import {
   deviceBridgeFoundationMiddleware,
+  deviceBridgeRequestShapeMiddleware,
   markDeviceBridgeReady
 } from "../device-bridge/readiness.js";
 
@@ -288,13 +289,33 @@ test("bridge readiness returns controlled 503 before initialization", async () =
   assert.equal(body.error.code, "BACKEND_NOT_READY");
 });
 
-test("index registers bridge raw parser before global parsers", () => {
+test("index registers passive read after raw shape validation and before global command readiness", () => {
   const source = fs.readFileSync(new URL("../index.js", import.meta.url), "utf8");
   const raw = source.indexOf('express.raw({');
+  const passive = source.indexOf("registerTinderPassiveReadCaptureIngress({", raw);
+  const globalFoundation = source.indexOf('app.use("/device-bridge/v1", deviceBridgeFoundationMiddleware)', raw);
   const json = source.indexOf('app.use(express.json({ limit: "2mb" }))');
   const urlencoded = source.indexOf("app.use(express.urlencoded({ extended: true }))");
   assert.ok(raw >= 0 && raw < json && raw < urlencoded);
+  assert.ok(passive > raw && passive < globalFoundation);
+  assert.match(source.slice(passive, globalFoundation), /deviceBridgeRequestShapeMiddleware/);
   assert.match(source, /app\.use\("\/device-bridge\/v1", deviceBridgeFoundationMiddleware\)/);
+});
+
+test("shared signed-route shape validation protects the early passive route", () => {
+  const request = {
+    originalUrl: "/device-bridge/v1/devices/e880455d-325c-4f35-9914-823dcb0e0d18/tinder-passive-read-captures",
+    body: BODY,
+    get(name) { return name === "content-type" ? "application/json; charset=utf-8" : REQUEST_ID; }
+  };
+  let continued = false;
+  deviceBridgeRequestShapeMiddleware(request, {}, () => { continued = true; });
+  assert.equal(continued, true);
+
+  const response = { statusCode: null, body: null, status(value) { this.statusCode = value; return this; }, json(value) { this.body = value; } };
+  deviceBridgeRequestShapeMiddleware({ ...request, originalUrl: `${request.originalUrl}?x=1` }, response, () => assert.fail("query must not continue"));
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.error.code, "INVALID_HEADER");
 });
 
 test("ready foundation preserves raw Buffer and rejects query strings", () => {

@@ -865,6 +865,15 @@ test("capture discovery routes remain protected and are registered before the ca
   assert.ok(registrations.find(({ method, path }) =>
     method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/pending-read-conversations"
   ));
+  const readableListIndex = registrations.findIndex(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/read-conversations"
+  );
+  const readableDetailIndex = registrations.findIndex(({ method, path }) =>
+    method === "GET" && path === "/dashboard-api/tinder/devices/:deviceId/read-conversations/:conversationHandle"
+  );
+  assert.ok(readableListIndex >= 0);
+  assert.ok(readableDetailIndex > readableListIndex);
+  assert.ok(captureIndex > readableDetailIndex);
 
   const bindingRoute = registrations.find(({ method, path }) =>
     method === "POST" && path === "/dashboard-api/tinder/captures/:captureId/conversation-binding"

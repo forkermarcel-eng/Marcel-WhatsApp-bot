@@ -3,17 +3,24 @@ import test from "node:test";
 import {
   TINDER_CONVERSATION_MESSAGE_LIMIT,
   TINDER_LATEST_CONFIRMED_CONVERSATION_LIMIT,
+  TINDER_READABLE_CONVERSATION_HISTORY_SCOPE,
+  TINDER_READABLE_CONVERSATION_LIMIT,
   TinderConversationProductReadError,
   createPgTinderConversationProductReadRepository,
+  createPgTinderReadableConversationProductReadRepository,
   createTinderConversationProductReadService,
+  createTinderReadableConversationProductReadService,
   normalizeLatestConfirmedConversationDetail,
   normalizeLatestConfirmedConversationListItem,
   normalizeLatestConfirmedOfficialAppResume,
   normalizeLatestConfirmedVerifiedChatReturn,
+  normalizeTinderReadableConversationDetail,
+  normalizeTinderReadableConversationList,
   normalizeVisibleChatSync
 } from "../services/tinder-conversation-product-read.js";
 
 const CAPTURE_ID = "6c7308cf-5d40-423d-913b-c4424f0e4ee0";
+const CONVERSATION_ID = "8e44b221-8e1a-4f18-832d-28e211d26d1c";
 
 function capture(overrides = {}) {
   return {
@@ -36,6 +43,22 @@ function capture(overrides = {}) {
     capture_fingerprint: "private-capture-fingerprint",
     resolved_contact_id: 9,
     provenance: { private: true },
+    ...overrides
+  };
+}
+
+function readableConversation(overrides = {}) {
+  return {
+    conversation_handle: CONVERSATION_ID,
+    visible_name: "Unzugeordnet",
+    observed_at: "2026-09-22T12:30:00.000Z",
+    identity_state: "UNASSIGNED",
+    identity_review: "PENDING",
+    history_scope: "AGGREGATED_PARTIAL",
+    messages: [
+      { direction: "INCOMING", text: "Hallo" },
+      { direction: "OUTGOING", text: "Hi" }
+    ],
     ...overrides
   };
 }
@@ -270,6 +293,245 @@ test("conversation product service keeps the verified-chat return status bounded
   ]) {
     assert.equal(rendered.includes(forbidden), false);
   }
+});
+
+test("readable Conversation projection requires a durable public thread and may remain unassigned", () => {
+  const pending = readableConversation();
+  assert.deepEqual(normalizeTinderReadableConversationList([{
+    conversation_handle: pending.conversation_handle,
+    visible_name: pending.visible_name,
+    observed_at: pending.observed_at,
+    identity_state: pending.identity_state,
+    identity_review: pending.identity_review,
+    history_scope: pending.history_scope
+  }]), [{
+    conversation_handle: CONVERSATION_ID,
+    visible_name: "Unzugeordnet",
+    observed_at: "2026-09-22T12:30:00.000Z",
+    identity_state: "UNASSIGNED",
+    identity_review: "PENDING",
+    history_scope: TINDER_READABLE_CONVERSATION_HISTORY_SCOPE
+  }]);
+  const detail = normalizeTinderReadableConversationDetail(pending);
+  assert.equal(detail.history_scope, "AGGREGATED_PARTIAL");
+  assert.deepEqual(detail.messages, [
+    { direction: "INCOMING", text: "Hallo" },
+    { direction: "OUTGOING", text: "Hi" }
+  ]);
+  assert.throws(
+    () => normalizeTinderReadableConversationDetail({
+      ...pending,
+      conversation_handle: CAPTURE_ID,
+      capture_id: CAPTURE_ID
+    }),
+    TinderConversationProductReadError
+  );
+});
+
+test("readable Conversation service is device-scoped, bounded, and requires durable projections", async () => {
+  const calls = [];
+  const service = createTinderReadableConversationProductReadService({
+    async findReadableConversations(input) {
+      calls.push({ kind: "list", input });
+      const { messages, ...item } = readableConversation();
+      return [item];
+    },
+    async findReadableConversationByHandle(input) {
+      calls.push({ kind: "detail", input });
+      return input.conversationHandle === CONVERSATION_ID ? readableConversation() : null;
+    }
+  });
+
+  const deviceId = "e880455d-325c-4f35-9914-823dcb0e0d18";
+  const list = await service.listReadableConversations(deviceId);
+  const detail = await service.getReadableConversation(deviceId, CONVERSATION_ID);
+  assert.deepEqual(calls, [
+    { kind: "list", input: { deviceId } },
+    { kind: "detail", input: { deviceId, conversationHandle: CONVERSATION_ID } }
+  ]);
+  assert.equal(JSON.stringify(list).includes("Hallo"), false);
+  assert.equal(detail.messages.length, 2);
+  assert.equal(detail.history_scope, "AGGREGATED_PARTIAL");
+
+  const oversized = createTinderReadableConversationProductReadService({
+    async findReadableConversations() {
+      return Array.from({ length: TINDER_READABLE_CONVERSATION_LIMIT + 1 }, () => {
+        const { messages, ...item } = readableConversation();
+        return item;
+      });
+    },
+    async findReadableConversationByHandle() { return null; }
+  });
+  await assert.rejects(() => oversized.listReadableConversations(deviceId), TinderConversationProductReadError);
+  assert.equal(await service.getReadableConversation(deviceId, "f5e4136c-2904-4d1e-9843-8332849601fd"), null);
+});
+
+test("readable Conversation reader requires the durable foundation and never promotes a raw capture", async () => {
+  const calls = [];
+  const repository = createPgTinderReadableConversationProductReadRepository({
+    async query(text, values) {
+      calls.push({ text, values });
+      return { rows: [] };
+    }
+  }, {
+    async inspectProductSchema() {
+      return { state: "ABSENT" };
+    }
+  });
+  const deviceId = "e880455d-325c-4f35-9914-823dcb0e0d18";
+
+  await assert.rejects(
+    () => repository.findReadableConversations({ deviceId }),
+    (error) => error?.code === "TINDER_PRODUCT_CONVERSATION_PRODUCT_READ_NOT_READY"
+  );
+  await assert.rejects(
+    () => repository.findReadableConversationByHandle({ deviceId, conversationHandle: CAPTURE_ID }),
+    (error) => error?.code === "TINDER_PRODUCT_CONVERSATION_PRODUCT_READ_NOT_READY"
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("canonical product foundation returns a stable Conversation handle and aggregated linked history", async () => {
+  const conversationId = "8e44b221-8e1a-4f18-832d-28e211d26d1c";
+  const deviceId = "e880455d-325c-4f35-9914-823dcb0e0d18";
+  const threadFingerprint = "a".repeat(64);
+  const durableRows = [
+    {
+      conversation_handle: conversationId,
+      identity_binding_state: "UNASSIGNED",
+      correlation_state: "CORRELATED",
+      history_state: "PARTIAL",
+      last_observed_at: "2026-09-22T12:31:00.000Z",
+      capture_id: CAPTURE_ID,
+      device_id: deviceId,
+      runtime_thread_fingerprint: threadFingerprint,
+      visible_thread_metadata: { visible_name: "Unzugeordnet" },
+      visible_messages: [
+        { visible_order: 1, direction: "INCOMING", text: "Hallo" },
+        { visible_order: 2, direction: "OUTGOING", text: "Hi" }
+      ],
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      capture_resolved_contact_id: null,
+      captured_at: "2026-09-22T12:30:00.000Z",
+      received_at: "2026-09-22T12:30:00.000Z"
+    },
+    {
+      conversation_handle: conversationId,
+      identity_binding_state: "UNASSIGNED",
+      correlation_state: "CORRELATED",
+      history_state: "PARTIAL",
+      last_observed_at: "2026-09-22T12:31:00.000Z",
+      capture_id: "9b9627f4-3da4-445f-bf27-cf450d9fd20f",
+      device_id: deviceId,
+      runtime_thread_fingerprint: threadFingerprint,
+      visible_thread_metadata: { visible_name: "Unzugeordnet" },
+      visible_messages: [
+        { visible_order: 1, direction: "OUTGOING", text: "Hi" },
+        { visible_order: 2, direction: "INCOMING", text: "Neu" }
+      ],
+      mapping_status: "NEEDS_HUMAN_MAPPING",
+      human_review_status: "PENDING",
+      capture_resolved_contact_id: null,
+      captured_at: "2026-09-22T12:31:00.000Z",
+      received_at: "2026-09-22T12:31:00.000Z"
+    }
+  ];
+  const calls = [];
+  const repository = createPgTinderReadableConversationProductReadRepository({
+    async query(text, values) {
+      calls.push({ text, values });
+      if (text.includes("FROM tinder_thread_conversations conversation")) {
+        if (text.includes("WITH latest_capture")) return { rows: [durableRows[1]] };
+        return { rows: durableRows };
+      }
+      // Canonical rows are already linked; the observation fallback must not
+      // duplicate them as capture-shaped list items.
+      return { rows: [] };
+    }
+  }, {
+    async inspectProductSchema() {
+      return { state: "CANONICAL" };
+    }
+  });
+
+  const list = await repository.findReadableConversations({ deviceId });
+  const detail = await repository.findReadableConversationByHandle({ deviceId, conversationHandle: conversationId });
+  assert.deepEqual(list, [{
+    conversation_handle: conversationId,
+    visible_name: "Unzugeordnet",
+    observed_at: "2026-09-22T12:31:00.000Z",
+    identity_state: "UNASSIGNED",
+    identity_review: "PENDING",
+    history_scope: "AGGREGATED_PARTIAL"
+  }]);
+  assert.deepEqual(detail.messages, [
+    { direction: "INCOMING", text: "Hallo" },
+    { direction: "OUTGOING", text: "Hi" },
+    { direction: "INCOMING", text: "Neu" }
+  ]);
+  assert.equal(detail.conversation_handle, conversationId);
+  assert.equal(detail.history_scope, "AGGREGATED_PARTIAL");
+  const durableCalls = calls.filter(({ text }) => text.includes("FROM tinder_thread_conversations conversation"));
+  for (const call of durableCalls) {
+    assert.match(call.text, /tinder_thread_conversations/);
+    assert.match(call.text, /tinder_thread_conversation_capture_links/);
+    assert.doesNotMatch(call.text, /DISTINCT ON \(c\.device_id, c\.runtime_thread_fingerprint\)/);
+  }
+  assert.ok(durableCalls.some(({ text }) => text.includes("latest_capture.device_id = conversation.device_id")));
+  assert.ok(durableCalls.some(({ text }) => text.includes("capture.device_id = conversation.device_id")));
+});
+
+test("durable detail remains partial when a linked capture cannot be placed by ordered overlap", async () => {
+  const deviceId = "e880455d-325c-4f35-9914-823dcb0e0d18";
+  const conversationId = CONVERSATION_ID;
+  const common = {
+    conversation_handle: conversationId,
+    identity_binding_state: "UNASSIGNED",
+    correlation_state: "CORRELATED",
+    history_state: "COMPLETE",
+    last_observed_at: "2026-09-22T12:31:00.000Z",
+    device_id: deviceId,
+    runtime_thread_fingerprint: "b".repeat(64),
+    visible_thread_metadata: { visible_name: "Unzugeordnet" },
+    mapping_status: "NEEDS_HUMAN_MAPPING",
+    human_review_status: "PENDING",
+    capture_resolved_contact_id: null
+  };
+  const rows = [
+    {
+      ...common,
+      capture_id: CAPTURE_ID,
+      visible_messages: [
+        { visible_order: 1, direction: "INCOMING", text: "Hallo" },
+        { visible_order: 2, direction: "OUTGOING", text: "Hi" }
+      ],
+      captured_at: "2026-09-22T12:30:00.000Z",
+      received_at: "2026-09-22T12:30:00.000Z"
+    },
+    {
+      ...common,
+      capture_id: "9b9627f4-3da4-445f-bf27-cf450d9fd20f",
+      visible_messages: [
+        { visible_order: 1, direction: "INCOMING", text: "Nicht platzierbar" },
+        { visible_order: 2, direction: "OUTGOING", text: "Weiter" }
+      ],
+      captured_at: "2026-09-22T12:31:00.000Z",
+      received_at: "2026-09-22T12:31:00.000Z"
+    }
+  ];
+  const repository = createPgTinderReadableConversationProductReadRepository({
+    async query() { return { rows }; }
+  }, {
+    async inspectProductSchema() { return { state: "CANONICAL" }; }
+  });
+
+  const detail = await repository.findReadableConversationByHandle({ deviceId, conversationHandle: conversationId });
+  assert.equal(detail.history_scope, "AGGREGATED_PARTIAL");
+  assert.deepEqual(detail.messages, [
+    { direction: "INCOMING", text: "Hallo" },
+    { direction: "OUTGOING", text: "Hi" }
+  ]);
 });
 
 test("Postgres reader selects only the latest safe resolved confirmed capture and never selects technical fields", async () => {

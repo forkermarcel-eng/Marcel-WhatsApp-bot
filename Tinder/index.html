@@ -2,82 +2,52 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Marcel AI · Tinder</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Marcel AI | Tinder</title>
+  <link rel="stylesheet" href="/platform.css">
   <style>
-    :root { color-scheme: dark; --bg:#0b1015; --rail:#0d1319; --panel:#121a22; --panel-soft:#17222c; --border:#263643; --text:#edf5fb; --muted:#91a2b2; --accent:#ff4f7b; --good:#4fd19d; --warn:#ffbf5b; --bad:#ff7d7d; --blue:#73a7ff; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    * { box-sizing:border-box; } body { min-width:320px; margin:0; color:var(--text); background:var(--bg); } button { font:inherit; cursor:pointer; }
-    .platform-layout { min-height:100vh; display:grid; grid-template-columns:218px minmax(0,1fr); }
-    .platform-rail { padding:24px 15px; border-right:1px solid var(--border); background:var(--rail); }
-    .platform-brand { padding:8px 10px 22px; font-size:20px; font-weight:900; letter-spacing:.8px; }.platform-brand span { color:var(--accent); }
-    .platform-nav { display:grid; gap:5px; }.platform-nav a { display:block; padding:10px 11px; border-radius:9px; color:var(--muted); text-decoration:none; font-size:14px; }.platform-nav a:hover,.platform-nav a.active { color:var(--text); background:rgba(115,167,255,.12); }.platform-secondary { margin-top:18px; padding-top:14px; border-top:1px solid var(--border); }
-    .shell { min-width:0; } header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:22px 28px; border-bottom:1px solid var(--border); background:rgba(13,19,25,.88); }.module-label { display:grid; gap:3px; }.module-label h1 { margin:0; font-size:23px; }.module-label span { color:var(--muted); font-size:13px; }
-    main { max-width:1600px; margin:0 auto; padding:20px 28px 32px; }.button { min-height:38px; padding:8px 13px; border:1px solid var(--border); border-radius:9px; color:var(--text); background:var(--panel-soft); }.button:hover:not(:disabled) { border-color:var(--blue); background:#1a2b38; }.button:disabled { cursor:default; opacity:.58; }.button.primary { color:#201018; border-color:transparent; background:linear-gradient(135deg,#ff7392,#ff4f7b); font-weight:800; }
-    .status-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }.status-card,.panel,.module-panel,.bridge-panel { border:1px solid var(--border); border-radius:14px; background:var(--panel); }.status-card { min-height:108px; padding:14px; }.status-top { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.35px; text-transform:uppercase; }.dot { width:9px; height:9px; border-radius:50%; background:#65727d; }.dot.good { background:var(--good); box-shadow:0 0 0 3px rgba(79,209,157,.13); }.dot.warn { background:var(--warn); box-shadow:0 0 0 3px rgba(255,191,91,.13); }.dot.bad { background:var(--bad); box-shadow:0 0 0 3px rgba(255,125,125,.13); }.status-value { margin-top:13px; font-size:16px; font-weight:800; overflow-wrap:anywhere; }.status-sub { margin-top:5px; color:var(--muted); font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
-    .module-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-bottom:16px; }.module-panel { min-height:145px; padding:17px; }.module-panel h2,.panel h2,.bridge-panel summary { margin:0; font-size:14px; letter-spacing:.3px; }.module-copy,.empty-copy,.bridge-copy { margin:12px 0 0; color:var(--muted); font-size:13px; line-height:1.55; }
-    .workspace { display:grid; grid-template-columns:minmax(230px,.75fr) minmax(360px,1.6fr) minmax(220px,.65fr); gap:16px; }.panel { min-width:0; overflow:hidden; }.panel-heading { padding:16px 17px 12px; border-bottom:1px solid var(--border); }.panel-heading p { margin:5px 0 0; color:var(--muted); font-size:12px; line-height:1.45; }.empty-copy { margin:14px; padding:14px; border:1px dashed var(--border); border-radius:10px; }.chat-empty { min-height:420px; display:grid; place-items:center; padding:20px; color:var(--muted); font-size:13px; line-height:1.55; text-align:center; }.chat-empty strong { display:block; margin-bottom:8px; color:var(--text); font-size:15px; }
-    .bridge-panel { margin-top:16px; overflow:hidden; }.bridge-panel summary { padding:15px 17px; cursor:pointer; }.bridge-body { padding:0 17px 17px; border-top:1px solid var(--border); }.bridge-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(250px,.8fr); gap:16px; }.bridge-grid h2 { margin:16px 0 0; font-size:14px; }.enrollment-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:13px; }.enrollment-result { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:9px; align-items:center; margin-top:12px; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--panel-soft); }.enrollment-code { min-width:0; overflow-wrap:anywhere; color:#ffd6e0; font-size:13px; }.status-message { color:var(--muted); font-size:12px; line-height:1.45; }.status-message.error { color:var(--bad); }.device-selection-list { display:grid; gap:8px; margin-top:12px; }.device-choice { width:100%; display:grid; gap:4px; padding:11px; color:var(--text); text-align:left; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,.018); }.device-choice:hover,.device-choice:focus-visible,.device-choice.selected { border-color:var(--blue); background:rgba(115,167,255,.12); outline:none; }.device-choice-title { font-size:13px; font-weight:800; }.device-choice-meta { color:var(--muted); font-size:11px; line-height:1.4; } footer { margin-top:24px; color:var(--muted); font-size:11px; text-align:right; }
-    @media(max-width:1050px) { .workspace { grid-template-columns:minmax(220px,.8fr) minmax(360px,1.5fr); }.profile-panel { grid-column:1/-1; } } @media(max-width:780px) { .platform-layout { grid-template-columns:1fr; }.platform-rail { border-right:0; border-bottom:1px solid var(--border); }.platform-nav { grid-template-columns:repeat(4,minmax(0,1fr)); }.platform-nav a { text-align:center; font-size:12px; }.platform-secondary { display:none; } header,main { padding-left:16px; padding-right:16px; }.status-grid,.module-grid,.workspace,.bridge-grid { grid-template-columns:1fr; }.profile-panel { grid-column:auto; } }
+    :root{--accent:#ff5d70;--active-bg:#2a171b}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{min-height:156px}.card h2{margin:0 0 14px;font-size:15px}@media(max-width:760px){.grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <div class="platform-layout">
     <aside class="platform-rail">
       <div class="platform-brand">MARCEL <span>AI</span></div>
-      <nav class="platform-nav" aria-label="Hauptnavigation">
-        <a href="/Hub/">Hub</a><a href="/Dashboard/">WhatsApp</a><a class="active" href="/Tinder/">Tinder</a><a href="/Instagram/">Instagram</a><a href="/X/">X (Twitter)</a><a href="/Brain/">Brain</a><a href="/Trading/">Trading</a>
-        <div class="platform-secondary"><a href="/Kontakte/">Kontakte</a><a href="/Analyse/">Analyse</a><a href="/Einstellungen/">Einstellungen</a></div>
+      <button class="platform-toggle">Menü</button>
+      <nav class="platform-nav">
+        <a href="/Hub/">Hub</a>
+        <a href="/Dashboard/">WhatsApp</a>
+        <a class="active" href="/Tinder/">Tinder</a>
+        <a href="/Instagram/">Instagram</a>
+        <a href="/X/">X (Twitter)</a>
+        <a href="/Brain/">Brain</a>
+        <a href="/Trading/">Trading</a>
+        <div class="platform-secondary">
+          <a href="/Kontakte/">Kontakte</a>
+          <a href="/Analyse/">Analyse</a>
+          <a href="/Einstellungen/">Einstellungen</a>
+        </div>
       </nav>
     </aside>
-    <div class="shell">
-      <header><div class="module-label"><h1>Tinder</h1><span>Read · Conversations · Verlauf</span></div><button class="button" id="refreshStatus" type="button">Status aktualisieren</button></header>
-      <main>
-        <section class="status-grid" aria-label="Tinder Status">
-          <article class="status-card"><div class="status-top"><span class="dot" id="deviceDot"></span> Gerät</div><div class="status-value" id="deviceValue">Wird geladen …</div><div class="status-sub" id="deviceSub">Gerätestatus wird angefordert.</div></article>
-          <article class="status-card"><div class="status-top"><span class="dot" id="bridgeDot"></span> Bridge</div><div class="status-value" id="bridgeValue">Wird geladen …</div><div class="status-sub" id="bridgeSub">Bridge-Status wird angefordert.</div></article>
-          <article class="status-card"><div class="status-top"><span class="dot"></span> Read-Kanal</div><div class="status-value">Nicht eingerichtet</div><div class="status-sub">Der Produktbereich bleibt leer, bis ein neuer Read-Kanal bereitsteht.</div></article>
+    <main class="platform-main">
+      <div class="platform-wrap">
+        <header class="page-head">
+          <div>
+            <div class="eyebrow">Tinder</div>
+            <h1>Tinder</h1>
+            <div class="muted">Noch keine Produktdaten verfügbar.</div>
+          </div>
+        </header>
+        <section class="grid">
+          <article class="card"><h2>Matches</h2><div class="empty">Keine Daten verfügbar.</div></article>
+          <article class="card"><h2>Conversations</h2><div class="empty">Keine Daten verfügbar.</div></article>
+          <article class="card"><h2>Chat</h2><div class="empty">Keine Daten verfügbar.</div></article>
+          <article class="card"><h2>Profil</h2><div class="empty">Keine Daten verfügbar.</div></article>
         </section>
-        <section class="module-grid" aria-label="Tinder Überblick">
-          <section class="module-panel"><h2>Matches</h2><div class="module-copy">Noch keine Match-Daten im neuen Produktmodell.</div></section>
-          <section class="module-panel"><h2>Read-Status</h2><div class="module-copy">Der neue Tinder-Read-Kanal wird nach dem Reset neu aufgebaut.</div></section>
-        </section>
-        <section class="workspace" aria-label="Tinder Arbeitsbereich">
-          <aside class="panel"><div class="panel-heading"><h2>Conversations</h2><p>Der leere Produktbereich ist bereit für neue durable Threads.</p></div><div class="empty-copy">Noch keine Conversations verfügbar.</div></aside>
-          <section class="panel"><div class="panel-heading"><h2>Chat</h2></div><div class="chat-empty"><div><strong>Keine Conversation ausgewählt</strong>Nach dem Reset erscheinen neue gelesene Threads hier als stabiler Verlauf.</div></div></section>
-          <aside class="panel profile-panel"><div class="panel-heading"><h2>Profil</h2></div><div class="empty-copy">Noch keine Profildaten verfügbar.</div></aside>
-        </section>
-        <details class="bridge-panel">
-          <summary>Android Device Bridge</summary>
-          <div class="bridge-body"><div class="bridge-grid">
-            <section><h2>Enrollment</h2><p class="bridge-copy">Erstellt bei Bedarf einen zeitlich begrenzten Code für eine neue Android-Bridge-Registrierung.</p><div class="enrollment-actions"><button class="button primary" id="createEnrollmentCode" type="button">Enrollment-Code erstellen</button><span class="status-message" id="enrollmentMessage" role="status"></span></div><div class="enrollment-result" id="enrollmentResult" hidden><code class="enrollment-code" id="enrollmentCode"></code><button class="button" id="copyEnrollmentCode" type="button">Kopieren</button><span class="status-message">Gültig bis <strong id="enrollmentExpires"></strong></span></div></section>
-            <section><h2>Android-Gerät</h2><p class="bridge-copy">Die Auswahl zeigt nur den bestehenden gebundenen Geräte- und Bridge-Status.</p><div class="device-selection-list" id="deviceSelectionList" aria-live="polite"></div></section>
-          </div></div>
-        </details>
-        <footer>Zuletzt aktualisiert: <span id="lastChecked">–</span></footer>
-      </main>
-    </div>
+      </div>
+    </main>
   </div>
-  <script>
-    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-    const elements = {
-      refreshStatus: document.getElementById("refreshStatus"), deviceDot: document.getElementById("deviceDot"), deviceValue: document.getElementById("deviceValue"), deviceSub: document.getElementById("deviceSub"), bridgeDot: document.getElementById("bridgeDot"), bridgeValue: document.getElementById("bridgeValue"), bridgeSub: document.getElementById("bridgeSub"), createEnrollmentCode: document.getElementById("createEnrollmentCode"), copyEnrollmentCode: document.getElementById("copyEnrollmentCode"), enrollmentResult: document.getElementById("enrollmentResult"), enrollmentCode: document.getElementById("enrollmentCode"), enrollmentExpires: document.getElementById("enrollmentExpires"), enrollmentMessage: document.getElementById("enrollmentMessage"), deviceSelectionList: document.getElementById("deviceSelectionList"), lastChecked: document.getElementById("lastChecked")
-    };
-    let devices = [];
-    let selectedDevice = null;
-
-    function setDot(element, state) { element.className = `dot${state ? ` ${state}` : ""}`; }
-    function formatTimestamp(value) { const timestamp = new Date(value || ""); return Number.isNaN(timestamp.valueOf()) ? "–" : new Intl.DateTimeFormat("de-DE", { dateStyle:"short", timeStyle:"short" }).format(timestamp); }
-    function shortDeviceId(value) { const id = String(value || ""); return id.length > 8 ? `…${id.slice(-8)}` : id || "unbekannt"; }
-    function setLastChecked() { elements.lastChecked.textContent = new Intl.DateTimeFormat("de-DE", { dateStyle:"short", timeStyle:"medium" }).format(new Date()); }
-    async function requestJson(url, options = {}) { const response = await fetch(url, { credentials:"same-origin", cache:"no-store", ...options, headers:{ Accept:"application/json", ...(options.body ? { "Content-Type":"application/json" } : {}), ...(options.headers || {}) } }); const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = {}; } if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`); return data; }
-    function deviceIsSafe(device) { return device && typeof device === "object" && UUID_V4.test(String(device.device_id || "")) && typeof device.display_name === "string" && device.display_name.trim().length > 0 && typeof device.enrollment_state === "string" && typeof device.device_status === "string" && typeof device.bridge_service_state === "string"; }
-    function statusDot(value, good, warning = []) { const normalized = String(value || "UNKNOWN").toUpperCase(); return normalized === good ? "good" : warning.includes(normalized) ? "warn" : ["OFFLINE", "ERROR"].includes(normalized) ? "bad" : ""; }
-    function renderDeviceStatus() { const device = selectedDevice; if (!device) { setDot(elements.deviceDot, ""); setDot(elements.bridgeDot, ""); elements.deviceValue.textContent = devices.length > 1 ? "Auswahl erforderlich" : "Kein Gerät"; elements.deviceSub.textContent = "Wähle einen vorhandenen Geräte-Eintrag aus."; elements.bridgeValue.textContent = "–"; elements.bridgeSub.textContent = "Kein Gerät ausgewählt."; return; } setDot(elements.deviceDot, statusDot(device.device_status, "ONLINE")); elements.deviceValue.textContent = device.device_status; elements.deviceSub.textContent = `${device.display_name} · Enrollment ${device.enrollment_state} · ${formatTimestamp(device.last_heartbeat_accepted_at)}`; setDot(elements.bridgeDot, statusDot(device.bridge_service_state, "RUNNING", ["STARTING", "STOPPING"])); elements.bridgeValue.textContent = device.bridge_service_state; elements.bridgeSub.textContent = `App ${device.app_version || "–"} · Build ${device.app_build ?? "–"}`; }
-    function renderDeviceSelection() { elements.deviceSelectionList.replaceChildren(); if (devices.length === 0) { const empty = document.createElement("div"); empty.className = "empty-copy"; empty.textContent = "Kein registriertes Android-Gerät verfügbar."; elements.deviceSelectionList.append(empty); return; } for (const device of devices) { const choice = document.createElement("button"); choice.type = "button"; choice.className = `device-choice${device.device_id === selectedDevice?.device_id ? " selected" : ""}`; const title = document.createElement("span"); title.className = "device-choice-title"; title.textContent = device.display_name; const meta = document.createElement("span"); meta.className = "device-choice-meta"; meta.textContent = `${shortDeviceId(device.device_id)} · ${device.device_status} · Enrollment ${device.enrollment_state}`; choice.append(title, meta); choice.addEventListener("click", () => { selectedDevice = device; renderDeviceSelection(); renderDeviceStatus(); }); elements.deviceSelectionList.append(choice); } }
-    async function loadDeviceStatus() { try { const data = await requestJson("/api/tinder/device-status"); if (!Array.isArray(data?.devices) || data.devices.some((device) => !deviceIsSafe(device))) throw new Error("Das Backend hat keine gültige Geräteansicht geliefert."); const previousId = selectedDevice?.device_id; devices = data.devices; selectedDevice = devices.find((device) => device.device_id === previousId) || (devices.length === 1 ? devices[0] : null); renderDeviceSelection(); renderDeviceStatus(); } catch (error) { devices = []; selectedDevice = null; renderDeviceSelection(); renderDeviceStatus(); elements.deviceSub.textContent = error?.message || "Gerätestatus ist nicht verfügbar."; } finally { setLastChecked(); } }
-    async function createEnrollmentCode() { elements.createEnrollmentCode.disabled = true; elements.enrollmentMessage.className = "status-message"; elements.enrollmentMessage.textContent = "Enrollment-Code wird erstellt …"; try { const data = await requestJson("/api/tinder/enrollment-code", { method:"POST", body:"{}" }); if (typeof data?.enrollment_code !== "string" || !data.enrollment_code || typeof data?.expires_at !== "string") throw new Error("Das Backend hat keinen gültigen Enrollment-Code geliefert."); elements.enrollmentCode.textContent = data.enrollment_code; elements.enrollmentExpires.textContent = formatTimestamp(data.expires_at); elements.enrollmentResult.hidden = false; elements.enrollmentMessage.textContent = "Enrollment-Code bereit."; } catch (error) { elements.enrollmentMessage.className = "status-message error"; elements.enrollmentMessage.textContent = error?.message || "Enrollment-Code konnte nicht erstellt werden."; } finally { elements.createEnrollmentCode.disabled = false; } }
-    async function copyEnrollmentCode() { const code = String(elements.enrollmentCode.textContent || ""); if (!code || !navigator.clipboard?.writeText) return; try { await navigator.clipboard.writeText(code); elements.enrollmentMessage.className = "status-message"; elements.enrollmentMessage.textContent = "Enrollment-Code kopiert."; } catch { elements.enrollmentMessage.className = "status-message error"; elements.enrollmentMessage.textContent = "Enrollment-Code konnte nicht kopiert werden."; } }
-    elements.refreshStatus.addEventListener("click", () => { void loadDeviceStatus(); }); elements.createEnrollmentCode.addEventListener("click", () => { void createEnrollmentCode(); }); elements.copyEnrollmentCode.addEventListener("click", () => { void copyEnrollmentCode(); }); void loadDeviceStatus();
-  </script>
+  <script>document.querySelector(".platform-toggle").onclick=()=>document.querySelector(".platform-rail").classList.toggle("open")</script>
 </body>
 </html>

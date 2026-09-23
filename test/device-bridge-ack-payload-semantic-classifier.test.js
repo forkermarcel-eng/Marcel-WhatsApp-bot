@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { createAdminAckPayloadSemanticClassifierHandler } from "../device-bridge/admin.js";
-import { registerDeviceBridgeBlock3Routes } from "../device-bridge/block3-routes.js";
 import { runDeviceBridgeAckPayloadSemanticClassifier } from "../device-bridge/ack-payload-semantic-classifier.js";
 
 const STATUSES = ["RECEIVED", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED"];
@@ -13,17 +11,6 @@ const CANONICAL_ACCEPTANCE = Object.freeze({
   REJECTED: [true, true, false, false],
   EXPIRED: [true, false, false, false]
 });
-
-function responseRecorder() {
-  return {
-    statusCode: null,
-    body: null,
-    headers: {},
-    setHeader(name, value) { this.headers[name] = value; },
-    status(value) { this.statusCode = value; return this; },
-    json(value) { this.body = value; return this; }
-  };
-}
 
 function semanticMatrix(overrides = {}) {
   return STATUSES.flatMap((status, statusIndex) => CANONICAL_ACCEPTANCE[status].map((canonical_accepts, combinationIndex) => ({
@@ -372,173 +359,6 @@ test("rollback failure prevents a successful semantic classification response", 
   assert.deepEqual(result, { ok: false, reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE" });
   assert.equal(fake.calls.at(-1)?.sql, "ROLLBACK");
   assert.equal(fake.state.released, true);
-});
-
-test("semantic classifier route retains dashboard auth and runs before device-bridge readiness", async () => {
-  const routes = new Map();
-  const app = {
-    get(path, handler) { routes.set(`GET ${path}`, handler); },
-    post(path, handler) { routes.set(`POST ${path}`, handler); }
-  };
-  let connects = 0;
-  const pool = { async connect() { connects += 1; throw new Error("unreachable"); } };
-  registerDeviceBridgeBlock3Routes({
-    app,
-    pool,
-    dashboardApiReady: () => true,
-    dashboardApiAuthorized: () => false,
-    requireDeviceBridgeReady: () => false
-  });
-  const route = routes.get("GET /dashboard-api/device-bridge/ack-payload-semantics");
-  assert.equal(typeof route, "function");
-  const unauthorized = responseRecorder();
-  await route({ query: {} }, unauthorized);
-  assert.equal(unauthorized.statusCode, 401);
-  assert.equal(connects, 0);
-
-  registerDeviceBridgeBlock3Routes({
-    app,
-    pool,
-    dashboardApiReady: () => true,
-    dashboardApiAuthorized: () => true,
-    requireDeviceBridgeReady: () => false
-  });
-  const beforeReady = responseRecorder();
-  await routes.get("GET /dashboard-api/device-bridge/ack-payload-semantics")({ query: {} }, beforeReady);
-  assert.equal(connects, 1);
-  assert.equal(beforeReady.statusCode, 503);
-});
-
-test("handler rejects all caller input and serializes only bounded classifications", async () => {
-  let invoked = false;
-  const handler = createAdminAckPayloadSemanticClassifierHandler({}, {
-    runClassifier: async () => {
-      invoked = true;
-      return {
-        ok: true,
-        reason_code: "SEMANTIC_CLASSIFICATION_COMPLETE",
-        classification: {
-          status_rules: Object.fromEntries(STATUSES.map(status => [status, "MATCH"])),
-          overall_classification: "SEMANTICALLY_EQUIVALENT",
-          production_can_accept_rows_canonical_rejects: false,
-          canonical_can_accept_rows_production_rejects: false,
-          raw_constraint_definition: "CHECK (private_secret IS NOT NULL)",
-          matrix: [{ raw_ack_row: true }],
-          database_url: "TEST_DATABASE_URL_SENTINEL",
-          unrelated_schema: "private_schema"
-        }
-      };
-    }
-  });
-  for (const req of [
-    { query: { sql: "SELECT 1" } },
-    { query: { constraint: "any_constraint" } },
-    { query: "sql=SELECT+1" },
-    { query: {}, body: { include_rows: true } }
-  ]) {
-    const rejected = responseRecorder();
-    await handler(req, rejected);
-    assert.equal(rejected.statusCode, 400);
-    assert.equal(invoked, false);
-  }
-
-  const accepted = responseRecorder();
-  await handler({ query: {} }, accepted);
-  assert.equal(accepted.statusCode, 200);
-  assert.equal(accepted.headers["Cache-Control"], "no-store, max-age=0");
-  assert.deepEqual(Object.keys(accepted.body.classification).sort(), [
-    "canonical_can_accept_rows_production_rejects",
-    "overall_classification",
-    "production_can_accept_rows_canonical_rejects",
-    "status_rules"
-  ]);
-  assert.equal(Object.hasOwn(accepted.body, "diagnostic"), false);
-  const serialized = JSON.stringify(accepted.body);
-  assert.equal(serialized.includes("private_secret"), false);
-  assert.equal(serialized.includes("TEST_DATABASE_URL_SENTINEL"), false);
-  assert.equal(serialized.includes("raw_ack_row"), false);
-  assert.equal(serialized.includes("private_schema"), false);
-});
-
-test("unresolved handler metadata is strictly allowlisted and unavailable responses disclose none", async () => {
-  const handler = createAdminAckPayloadSemanticClassifierHandler({}, {
-    runClassifier: async () => ({
-      ok: true,
-      reason_code: "SEMANTIC_CLASSIFICATION_UNRESOLVED",
-      classification: {
-        status_rules: Object.fromEntries(STATUSES.map(status => [status, "UNRESOLVED"])),
-        overall_classification: "UNRESOLVED",
-        production_can_accept_rows_canonical_rejects: "UNRESOLVED",
-        canonical_can_accept_rows_production_rejects: "UNRESOLVED"
-      },
-      diagnostic: {
-        stage: "SYNTHETIC_EVALUATION",
-        reason_code: "EVALUATION_ERROR",
-        scope: "ATTACKER_CONTROLLED",
-        affected_statuses: ["FAILED", "UNSUPPORTED", "RECEIVED", "FAILED"],
-        candidate_evaluations: { attempted: 20, completed: 19 },
-        raw_constraint_definition: "CHECK (private_secret IS NOT NULL)",
-        raw_database_error: "TEST_DATABASE_URL_SENTINEL",
-        stack: "private stack trace",
-        rows: [{ private: true }]
-      }
-    })
-  });
-  const accepted = responseRecorder();
-  await handler({ query: {} }, accepted);
-  assert.equal(accepted.statusCode, 200);
-  assert.deepEqual(accepted.body.diagnostic, {
-    stage: "SYNTHETIC_EVALUATION",
-    reason_code: "EVALUATION_ERROR",
-    scope: "STATUS_SPECIFIC",
-    affected_statuses: ["RECEIVED", "FAILED"],
-    candidate_evaluations: { attempted: 20, completed: 19 }
-  });
-  const serialized = JSON.stringify(accepted.body);
-  assert.equal(serialized.includes("private_secret"), false);
-  assert.equal(serialized.includes("TEST_DATABASE_URL_SENTINEL"), false);
-  assert.equal(serialized.includes("private stack trace"), false);
-  assert.equal(serialized.includes('"rows"'), false);
-
-  const unavailable = createAdminAckPayloadSemanticClassifierHandler({}, {
-    runClassifier: async () => ({
-      ok: false,
-      reason_code: "SEMANTIC_CLASSIFIER_UNAVAILABLE",
-      diagnostic: { raw_database_error: "must-not-serialize" }
-    })
-  });
-  const unavailableResponse = responseRecorder();
-  await unavailable({ query: {} }, unavailableResponse);
-  assert.equal(unavailableResponse.statusCode, 503);
-  assert.equal(JSON.stringify(unavailableResponse.body).includes("must-not-serialize"), false);
-
-  const unknownMetadata = createAdminAckPayloadSemanticClassifierHandler({}, {
-    runClassifier: async () => ({
-      ok: true,
-      reason_code: "SEMANTIC_CLASSIFICATION_UNRESOLVED",
-      classification: {
-        status_rules: Object.fromEntries(STATUSES.map(status => [status, "UNRESOLVED"])),
-        overall_classification: "UNRESOLVED",
-        production_can_accept_rows_canonical_rejects: "UNRESOLVED",
-        canonical_can_accept_rows_production_rejects: "UNRESOLVED"
-      },
-      diagnostic: {
-        stage: "not-an-allowed-stage",
-        reason_code: "not-an-allowed-code",
-        affected_statuses: ["UNSUPPORTED"],
-        candidate_evaluations: { attempted: 100, completed: 100 }
-      }
-    })
-  });
-  const unknownResponse = responseRecorder();
-  await unknownMetadata({ query: {} }, unknownResponse);
-  assert.deepEqual(unknownResponse.body.diagnostic, {
-    stage: "STATUS_CLASSIFICATION",
-    reason_code: "UNKNOWN_SAFE_FAILURE",
-    scope: "STATUS_SPECIFIC",
-    affected_statuses: [],
-    candidate_evaluations: { attempted: null, completed: null }
-  });
 });
 
 test("unexpected classifier exceptions stay fail closed without exposing raw errors", async () => {

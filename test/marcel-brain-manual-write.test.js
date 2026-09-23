@@ -210,13 +210,8 @@ test("Brain write routes reuse one Vercel function and remain below the function
     .filter(file => String(file).endsWith(".js"));
   // Vercel also emits middleware.js as an output. Keep the complete output
   // count within the verified Hobby-plan cap of twelve.
-  assert.equal(functionFiles.length, 11);
-  assert.equal(functionFiles.length + 1, 12);
-  assert.equal(functionFiles.includes("tinder\\captures.js"), true);
-  assert.equal(functionFiles.includes("tinder\\legacy.js"), true);
-  assert.equal(functionFiles.includes("tinder\\control.js"), false);
-  assert.equal(functionFiles.includes("tinder\\read.js"), false);
-  assert.equal(functionFiles.includes("tinder\\status.js"), false);
+  assert.equal(functionFiles.length, 7);
+  assert.equal(functionFiles.length + 1, 8);
   assert.equal(functionFiles.includes("dashboard\\marcel-brain\\facts.js"), false);
   assert.equal(functionFiles.includes("dashboard\\marcel-brain\\live-state.js"), false);
   assert.equal(functionFiles.includes("dashboard\\_brain-write-proxy.js"), false);

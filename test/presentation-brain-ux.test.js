@@ -215,9 +215,6 @@ test("Tinder keeps the product shell without retired diagnostic or control UI", 
   assert.match(tinder, /<h2>Conversations<\/h2>/);
   assert.match(tinder, /<h2>Chat<\/h2>/);
   assert.match(tinder, /<h2>Profil<\/h2>/);
-  assert.match(tinder, /<summary>Android Device Bridge<\/summary>/);
-  assert.match(tinder, /Read-Kanal<\/div><div class="status-value">Nicht eingerichtet/);
-  assert.doesNotMatch(tinder, /Technik &amp; Diagnose/);
-  assert.doesNotMatch(tinder, /Tinder verbinden|Sichtbare Tinder-Inbox|Capture-Approval|Human-Mapping/);
-  assert.doesNotMatch(tinder, /MarcelPresentation\.status\(deviceStatus\)/);
+  assert.doesNotMatch(tinder, /Android Device Bridge|Technik &amp; Diagnose|Capture-Approval|Human-Mapping/);
+  assert.doesNotMatch(tinder, /<script[^>]*src=|\/api\//);
 });

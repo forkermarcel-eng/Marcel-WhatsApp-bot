@@ -8,8 +8,6 @@ import {
 import {
   runDeviceBridgeAckReadOnlyDiagnosis
 } from "../device-bridge/ack-readonly-diagnosis.js";
-import { createAdminAckFoundationDiagnosisHandler } from "../device-bridge/admin.js";
-import { registerDeviceBridgeBlock3Routes } from "../device-bridge/block3-routes.js";
 import {
   FOUNDATION_COLUMN_CONTRACT,
   FOUNDATION_CONSTRAINT_CONTRACT,
@@ -20,17 +18,6 @@ const ACK_TABLE = "device_bridge_command_acks";
 const ACK_COLUMNS = FOUNDATION_COLUMN_CONTRACT[ACK_TABLE];
 const ACK_KEYS = FOUNDATION_CONSTRAINT_CONTRACT.filter(contract => contract.table === ACK_TABLE && contract.type !== "c");
 const ACK_INDEXES = FOUNDATION_INDEX_CONTRACT.filter(contract => contract.table === ACK_TABLE);
-
-function responseRecorder() {
-  return {
-    statusCode: null,
-    body: null,
-    headers: {},
-    setHeader(name, value) { this.headers[name] = value; },
-    status(value) { this.statusCode = value; return this; },
-    json(value) { this.body = value; return this; }
-  };
-}
 
 function checkDefinition(expression) {
   return `CHECK (${expression})`;
@@ -331,96 +318,6 @@ test("row compatibility is aggregate-only and checked only after a safely typed 
   assert.equal(unavailableCountResult.diagnosis.row_compatibility.status, "NOT_CHECKED");
   assert.equal(unavailableCountResult.diagnosis.classification, "ACK_ROW_COMPATIBILITY_NOT_CHECKED");
   assertReadOnlyTransaction(unavailableCount);
-});
-
-test("ACK diagnosis route preserves dashboard auth, rejects all caller input, and remains callable before runtime readiness", async () => {
-  const routes = new Map();
-  const app = {
-    get(path, handler) { routes.set(`GET ${path}`, handler); },
-    post(path, handler) { routes.set(`POST ${path}`, handler); }
-  };
-  let connects = 0;
-  const pool = { async connect() { connects += 1; throw new Error("unreachable"); } };
-  registerDeviceBridgeBlock3Routes({
-    app,
-    pool,
-    dashboardApiReady: () => true,
-    dashboardApiAuthorized: () => false,
-    requireDeviceBridgeReady: () => false
-  });
-  const route = routes.get("GET /dashboard-api/device-bridge/ack-schema-diagnosis");
-  assert.equal(typeof route, "function");
-  const unauthorized = responseRecorder();
-  await route({ query: {} }, unauthorized);
-  assert.equal(unauthorized.statusCode, 401);
-  assert.equal(connects, 0);
-
-  registerDeviceBridgeBlock3Routes({
-    app,
-    pool,
-    dashboardApiReady: () => true,
-    dashboardApiAuthorized: () => true,
-    requireDeviceBridgeReady: () => false
-  });
-  const beforeReady = responseRecorder();
-  await routes.get("GET /dashboard-api/device-bridge/ack-schema-diagnosis")({ query: {} }, beforeReady);
-  assert.equal(beforeReady.statusCode, 503);
-  assert.equal(connects, 1);
-});
-
-test("handler serializes an allowlisted bounded response and never accepts SQL-like input", async () => {
-  let invoked = false;
-  const handler = createAdminAckFoundationDiagnosisHandler({}, {
-    runDiagnosis: async () => {
-      invoked = true;
-      return {
-        ok: true,
-        reason_code: "ACK_DIAGNOSIS_COMPLETE",
-        diagnosis: {
-          table: { exists: true, object_type: "TABLE" },
-          columns: { columns: [], unexpected_column_count: 0 },
-          relationships: { relationships: [], unexpected_constraint_count: 0 },
-          indexes: { required: [], unexpected_noncontractual_index_count: 0, unexpected_noncontractual_index_status: "NONE" },
-          checks: {
-            checks: [],
-            observed: [{ columns: ["status"], semantic_rule: "ACK_STATUS_VALUES", payload_name_status: "NOT_NAME_CONTRACTUAL", validation: "VALID", raw_definition: "CHECK (secret_column IS NOT NULL)" }],
-            observed_truncated: false,
-            actual_check_count: 5,
-            unexpected_check_count: 0
-          },
-          row_compatibility: { status: "COMPATIBLE", incompatible_count: 0, rows: [{ private: true }] },
-          classification: "CANONICAL",
-          contract_compatible: true,
-          comparator: { normalizes_equivalent_pg_definitions: true, false_positive_status: "NOT_IDENTIFIED", assessment: "SAFE" },
-          database_url: "postgres://private-user:private-password@private-host/private-db",
-          raw_constraint_definition: "CHECK (secret_column IS NOT NULL)"
-        }
-      };
-    }
-  });
-  const rejected = responseRecorder();
-  await handler({ query: { sql: "SELECT 1" } }, rejected);
-  assert.equal(rejected.statusCode, 400);
-  assert.equal(invoked, false);
-
-  const malformedQuery = responseRecorder();
-  await handler({ query: "sql=SELECT+1" }, malformedQuery);
-  assert.equal(malformedQuery.statusCode, 400);
-  assert.equal(invoked, false);
-
-  const rejectedBody = responseRecorder();
-  await handler({ query: {}, body: { include_rows: true } }, rejectedBody);
-  assert.equal(rejectedBody.statusCode, 400);
-  assert.equal(invoked, false);
-
-  const accepted = responseRecorder();
-  await handler({ query: {} }, accepted);
-  assert.equal(accepted.statusCode, 200);
-  assert.equal(accepted.headers["Cache-Control"], "no-store, max-age=0");
-  const serialized = JSON.stringify(accepted.body);
-  assert.equal(serialized.includes("postgres://"), false);
-  assert.equal(serialized.includes("secret_column"), false);
-  assert.equal(serialized.includes("private"), false);
 });
 
 test("ACK diagnosis and shared transaction modules have no migration or mutation authority", () => {

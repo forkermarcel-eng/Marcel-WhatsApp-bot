@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import {
   ACK_REQUIRED_CHECKS,
@@ -323,17 +322,4 @@ test("ACK canonicalization CLI is explicit and does not reveal DATABASE_URL", as
     logger
   }), false);
   assert.equal(JSON.stringify(entries).includes("DATABASE_URL="), false);
-});
-
-test("startup, read-only preflight, and T1 runner cannot import the ACK mutation authority", () => {
-  const sources = [
-    "../index.js",
-    "../device-bridge/initialization.js",
-    "../device-bridge/t1-readonly-preflight.js",
-    "../device-bridge/database.js"
-  ].map(relative => fs.readFileSync(new URL(relative, import.meta.url), "utf8"));
-  for (const source of sources) {
-    assert.doesNotMatch(source, /ack-canonicalization/);
-    assert.doesNotMatch(source, /migrate-device-bridge-ack-canonicalization/);
-  }
 });

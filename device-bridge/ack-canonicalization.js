@@ -1,11 +1,11 @@
 import {
   assertDeviceBridgeAckDataCompatible,
+  assertDeviceBridgeAckSchemaReady,
   FINAL_ACK_CHECK_EXPRESSION,
   FINAL_ACK_CONSTRAINT_NAME,
-  preflightDeviceBridgeAckSchemaForCanonicalization,
-  preflightDeviceBridgeAckSchemaForT1
+  preflightDeviceBridgeAckSchemaForCanonicalization
 } from "./ack-schema.js";
-import { preflightDeviceBridgeFoundationForT1 } from "./schema-readiness.js";
+import { preflightDeviceBridgeFoundation } from "./schema-readiness.js";
 
 /* ==================================================
 DEVICE BRIDGE — EXPLICIT ACK_PAYLOAD_V1 CANONICALIZATION
@@ -111,7 +111,7 @@ async function acquireAdvisoryLock(client) {
 }
 
 async function preflightAckCanonicalization(client) {
-  await preflightDeviceBridgeFoundationForT1(client);
+  await preflightDeviceBridgeFoundation(client);
   return preflightDeviceBridgeAckSchemaForCanonicalization(client);
 }
 
@@ -138,8 +138,8 @@ async function applyAckPayloadCanonicalization(client, payload, markDdlAttempt =
 }
 
 async function postcheckAckCanonicalization(client) {
-  await preflightDeviceBridgeAckSchemaForT1(client);
-  await preflightDeviceBridgeFoundationForT1(client);
+  await preflightDeviceBridgeFoundation(client);
+  await assertDeviceBridgeAckSchemaReady(client);
   await assertDeviceBridgeAckDataCompatible(client);
 }
 

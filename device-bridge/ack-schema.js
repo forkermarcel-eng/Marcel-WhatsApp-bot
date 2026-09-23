@@ -3,7 +3,6 @@ DEVICE BRIDGE T0 — ACK SCHEMA COMPATIBILITY
 ================================================== */
 
 import { canonicalCheckDefinition } from "./schema-contract.js";
-import { isDeviceBridgeReadOnlyTransactionClient } from "./read-only-transaction.js";
 
 export const ACK_FOUNDATION_TABLE = "device_bridge_command_acks";
 export const FINAL_ACK_CONSTRAINT_NAME = "device_bridge_command_acks_payload_check_v1";
@@ -51,7 +50,6 @@ export const ACK_REQUIRED_COLUMN_TYPES = Object.freeze({ status: "text", result:
 function sameColumns(actual, expected) {
   return Array.isArray(actual) && actual.length === expected.length && actual.every((column, index) => column === expected[index]);
 }
-
 function hasExpectedDefinition(row, specification) {
   try {
     return sameColumns(row.column_names, specification.columns)
@@ -119,13 +117,6 @@ async function completePayloadSemanticClassification(client, row, specification)
   }
 }
 
-async function hasCompatibleAckCheckDefinition(client, row, specification, allowSemanticFallback) {
-  if (specification?.id !== "ACK_PAYLOAD_V1" || !allowSemanticFallback) {
-    return hasExpectedDefinition(row, specification);
-  }
-  return hasSemanticallyEquivalentPayloadDefinition(client, row, specification);
-}
-
 export async function readDeviceBridgeAckCheckConstraints(client) {
   return client.query(`
     SELECT c.conname, c.convalidated, c.condeferrable, c.condeferred,
@@ -173,7 +164,6 @@ export async function inspectDeviceBridgeAckPayloadConstraint(client) {
     constraintName: payload.conname
   };
 }
-
 export async function assertDeviceBridgeAckSchemaReady(client) {
   const inspection = await inspectDeviceBridgeAckSchema(client);
   if (!inspection.ready) throw new Error("Device Bridge ACK schema is not ready.");
@@ -203,25 +193,6 @@ export async function assertDeviceBridgeAckDataCompatible(client) {
   if (compatibility.rows[0]?.incompatible !== false) {
     throw new Error("Device Bridge ACK data is incompatible with Protocol V1.");
   }
-}
-
-async function preflightDeviceBridgeAckSchema(client, allowSemanticFallback) {
-  const constraints = await readDeviceBridgeAckCheckConstraints(client);
-  if (!await inspectAckColumnTypes(client)) {
-    throw new Error("Device Bridge ACK schema compatibility check failed.");
-  }
-  let validChecks = constraints.rows.length === ACK_REQUIRED_CHECKS.length;
-  for (const specification of ACK_REQUIRED_CHECKS) {
-    if (!validChecks) break;
-    let matches = 0;
-    for (const row of constraints.rows) {
-      if (await hasCompatibleAckCheckDefinition(client, row, specification, allowSemanticFallback)) matches += 1;
-    }
-    if (matches !== 1) validChecks = false;
-  }
-  if (!validChecks) throw new Error("Device Bridge ACK schema compatibility check failed.");
-  await assertDeviceBridgeAckDataCompatible(client);
-  return { ready: true };
 }
 
 /**
@@ -268,35 +239,4 @@ export async function preflightDeviceBridgeAckSchemaForCanonicalization(client) 
       semanticClassification
     }
   };
-}
-
-/**
- * Strict structural T1-runner preflight. ACK must already be canonical; this
- * path never repairs it and scans current rows before the first T1 DDL.
- */
-export async function preflightDeviceBridgeAckSchemaForT1(client) {
-  return preflightDeviceBridgeAckSchema(client, false);
-}
-
-/**
- * The explicit T1 migration runner reuses the same bounded semantic
- * equivalence check as the protected read-only preflight, but owns its
- * writable transaction itself. The classifier performs only SELECTs through
- * this already-owned client and never begins, commits, rolls back, or releases
- * it.
- */
-export async function preflightDeviceBridgeAckSchemaForT1Migration(client) {
-  return preflightDeviceBridgeAckSchema(client, true);
-}
-
-/**
- * The protected T1 read-only diagnostic preflight owns a fixed read-only
- * transaction and may use the same bounded semantic fallback only through its
- * guarded client.
- */
-export async function preflightDeviceBridgeAckSchemaForProtectedT1Preflight(client) {
-  if (!isDeviceBridgeReadOnlyTransactionClient(client)) {
-    throw new Error("Device Bridge ACK schema compatibility check failed.");
-  }
-  return preflightDeviceBridgeAckSchema(client, true);
 }

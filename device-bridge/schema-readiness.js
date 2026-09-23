@@ -1,9 +1,8 @@
 import { assertDeviceBridgeAckSchemaReady } from "./ack-schema.js";
 import { canonicalCheckDefinition, canonicalSchemaDefinition } from "./schema-contract.js";
-import { assertDeviceBridgeT1SchemaReady } from "./t1-schema.js";
 
 /* ==================================================
-DEVICE BRIDGE — READ-ONLY RUNTIME AND T1 CONTRACT CHECKS
+DEVICE BRIDGE — GENERIC READ-ONLY SCHEMA CONTRACT CHECKS
 ================================================== */
 
 const REQUIRED_TABLES = Object.freeze([
@@ -19,7 +18,7 @@ const REQUIRED_TABLES = Object.freeze([
 export const FOUNDATION_TABLE_COLUMNS = Object.freeze({
   device_bridge_devices: Object.freeze({
     device_id: "uuid", installation_id: "uuid", display_name: "text", enrollment_state: "text",
-    bridge_service_state: "text", tinder_state: "text", automation_state: "text", app_version_name: "text",
+    bridge_service_state: "text", automation_state: "text", app_version_name: "text",
     app_version_code: "int8", manufacturer: "text", model: "text", android_api: "int4", abis: "jsonb",
     capabilities: "jsonb", configuration_revision: "int4", last_heartbeat_sequence: "int8",
     last_heartbeat_body_sha256: "bpchar", last_accepted_heartbeat_at: "timestamptz", revoked_at: "timestamptz",
@@ -66,7 +65,7 @@ const FORMAT_TYPE_BY_UDT = Object.freeze({
 
 const NOT_NULL_COLUMNS = new Set([
   "device_bridge_devices.device_id", "device_bridge_devices.installation_id", "device_bridge_devices.display_name",
-  "device_bridge_devices.enrollment_state", "device_bridge_devices.bridge_service_state", "device_bridge_devices.tinder_state",
+  "device_bridge_devices.enrollment_state", "device_bridge_devices.bridge_service_state",
   "device_bridge_devices.automation_state", "device_bridge_devices.abis", "device_bridge_devices.capabilities",
   "device_bridge_devices.configuration_revision", "device_bridge_devices.created_at", "device_bridge_devices.updated_at",
   "device_bridge_keys.key_id", "device_bridge_keys.device_id", "device_bridge_keys.algorithm",
@@ -88,7 +87,6 @@ const NOT_NULL_COLUMNS = new Set([
 const COLUMN_DEFAULTS = Object.freeze({
   "device_bridge_devices.enrollment_state": "'ACTIVE'",
   "device_bridge_devices.bridge_service_state": "'STOPPED'",
-  "device_bridge_devices.tinder_state": "'UNKNOWN'",
   "device_bridge_devices.automation_state": "'STOPPED'",
   "device_bridge_devices.abis": "'[]'",
   "device_bridge_devices.capabilities": "'[]'",
@@ -295,13 +293,6 @@ function expectedConstraintFingerprint(contract) {
   });
 }
 
-function isMutableT1Check(record) {
-  return record.contype === "c" && (
-    (record.table_name === "device_bridge_devices" && sameArray(record.column_names, ["tinder_state"]))
-    || (record.table_name === "device_bridge_commands" && sameArray(record.column_names, ["command_type"]))
-  );
-}
-
 function isAckCheck(record) {
   return record.table_name === "device_bridge_command_acks" && record.contype === "c";
 }
@@ -435,7 +426,7 @@ function hasExactColumns(rows) {
 }
 
 function hasExactConstraints(rows) {
-  const remaining = rows.filter(row => !isMutableT1Check(row) && !isAckCheck(row));
+  const remaining = rows.filter(row => !isAckCheck(row));
   if (!remaining.every(row => row.convalidated === true && row.condeferrable === false && row.condeferred === false)) return false;
   for (const contract of FOUNDATION_CONSTRAINT_CONTRACT) {
     const expected = expectedConstraintFingerprint(contract);
@@ -467,13 +458,13 @@ function hasExactIndexes(rows) {
 }
 
 /**
- * Explicit T1 release preflight. This is fully read-only and requires the
- * complete, canonical T0 foundation. It never creates or repairs anything.
+ * Explicit generic schema preflight. This is fully read-only and requires the
+ * complete canonical Bridge foundation. It never creates or repairs anything.
  */
-export async function preflightDeviceBridgeFoundationForT1(client) {
+export async function preflightDeviceBridgeFoundation(client) {
   const presence = await inspectDeviceBridgeFoundationTables(client);
   if (!presence.ready) {
-    throw new Error("Device Bridge T1 migration requires a complete existing foundation.");
+    throw new Error("Device Bridge schema check requires a complete existing foundation.");
   }
   const relations = await readFoundationRelations(client);
   const columns = await readFoundationColumns(client);
@@ -482,7 +473,7 @@ export async function preflightDeviceBridgeFoundationForT1(client) {
   const canonicalRelations = relations.rows.length === REQUIRED_TABLES.length
     && REQUIRED_TABLES.every(table => relations.rows.some(row => row.table_name === table && row.relkind === "r"));
   if (!canonicalRelations || !hasExactColumns(columns.rows) || !hasExactConstraints(constraints.rows) || !hasExactIndexes(indexes.rows)) {
-    throw new Error("Device Bridge T1 foundation compatibility check failed.");
+    throw new Error("Device Bridge foundation compatibility check failed.");
   }
   return { ready: true };
 }
@@ -495,7 +486,6 @@ export async function verifyDeviceBridgeSchema(pool) {
   const client = await pool.connect();
   try {
     await assertDeviceBridgeFoundationTables(client);
-    await assertDeviceBridgeT1SchemaReady(client);
     await assertDeviceBridgeAckSchemaReady(client);
     return { ready: true };
   } finally {

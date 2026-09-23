@@ -15,17 +15,13 @@ import {
 /* ==================================================
 DEVICE BRIDGE RESET HEARTBEAT
 
-This is deliberately a generic liveness update.  It accepts an installed
-pre-reset Bridge heartbeat so the enrolled device does not need to be
-re-enrolled, but drops every Tinder-specific capability, state, and
-diagnostic before persistence.  It never selects, acknowledges, or issues a
-command.
+This is deliberately a generic liveness update. It persists only the enrolled
+device baseline and never selects, acknowledges, or issues a command.
 ================================================== */
 
 const MAX_CAPABILITIES = 64;
 const GENERIC_CAPABILITY = /^[A-Z0-9_:-]{1,128}$/;
 const RETAINED_CAPABILITIES = new Set(T0_DEVICE_CAPABILITIES);
-const LEGACY_TINDER_FIELD = /^tinder_[a-z0-9_]*$/;
 const ROOT_FIELDS = new Set([
   "protocol_version",
   "sequence",
@@ -33,9 +29,7 @@ const ROOT_FIELDS = new Set([
   "app",
   "device",
   "bridge",
-  "capabilities",
-  "tinder_state",
-  "automation_state"
+  "capabilities"
 ]);
 
 function plainObject(value) {
@@ -61,8 +55,7 @@ function normalizeGenericCapabilities(value) {
     throw invalidHeartbeat("Heartbeat capabilities are invalid");
   }
 
-  // Existing installations may still advertise retired extensions. Keep only
-  // the fixed generic baseline; ignored values are neither persisted as
+  // Keep only the fixed generic baseline; extensions are neither persisted as
   // runtime state nor used as an authorization signal.
   return Object.freeze([...new Set(value.filter((capability) => RETAINED_CAPABILITIES.has(capability)))]);
 }
@@ -75,7 +68,7 @@ function parseAndValidateResetHeartbeat(req) {
     throw new DeviceBridgeProtocolError(400, "INVALID_JSON", "Heartbeat body is not valid JSON");
   }
   if (!plainObject(body)) throw invalidHeartbeat("Heartbeat body must be an object");
-  if (Object.keys(body).some((key) => !ROOT_FIELDS.has(key) && !LEGACY_TINDER_FIELD.test(key))) {
+  if (Object.keys(body).some((key) => !ROOT_FIELDS.has(key))) {
     throw invalidHeartbeat("Heartbeat body contains unsupported fields");
   }
   if (body.protocol_version !== 1) {

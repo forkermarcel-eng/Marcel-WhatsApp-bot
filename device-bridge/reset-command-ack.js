@@ -13,9 +13,7 @@ import {
 /* ==================================================
 DEVICE BRIDGE RESET COMMAND ACK
 
-Only the retained device-baseline commands can be acknowledged.  A historical
-Tinder prototype command is deliberately neither acknowledged nor projected;
-it remains inert until the separately authorized data cleanup removes it.
+Only retained device-baseline commands can be acknowledged.
 ================================================== */
 
 const RETAINED_COMMANDS = new Set([
@@ -37,10 +35,6 @@ const GENERIC_ERROR_CODES = new Set([
   "DEVICE_STOP_FAILED",
   "CONFIGURATION_REVISION_UNSUPPORTED"
 ]);
-
-function plainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function exactKeys(value, keys) {
   return plainObject(value)
@@ -132,22 +126,6 @@ function validateRetainedAck(ack, commandType) {
   throw invalidAck("Ack result is invalid for a retained command");
 }
 
-function normalizeRetainedAck(ack, commandType) {
-  // Older installed Bridge builds include tinder_state in a generic status
-  // acknowledgement.  Accept that bounded legacy envelope, then discard the
-  // retired field before validation, hashing, and persistence.
-  if (commandType !== "REQUEST_STATUS" || !plainObject(ack.result)) return ack;
-  const allowed = new Set(["bridge_service_state", "automation_state", "tinder_state"]);
-  if (Object.keys(ack.result).some((key) => !allowed.has(key))) return ack;
-  return {
-    ...ack,
-    result: {
-      bridge_service_state: ack.result.bridge_service_state,
-      automation_state: ack.result.automation_state
-    }
-  };
-}
-
 function assertTransition(currentStatus, nextStatus) {
   const valid = currentStatus === null
     ? new Set(["RECEIVED", "REJECTED", "EXPIRED"]).has(nextStatus)
@@ -195,16 +173,15 @@ async function processResetCommandAckTransaction(pool, auth, ack, now = new Date
       throw new DeviceBridgeProtocolError(409, "COMMAND_DEVICE_MISMATCH", "Command does not belong to this device");
     }
     if (!RETAINED_COMMANDS.has(command.command_type)) {
-      throw new DeviceBridgeProtocolError(410, "RETIRED_COMMAND", "Retired command cannot be acknowledged");
+      throw new DeviceBridgeProtocolError(400, "COMMAND_TYPE_UNSUPPORTED", "Command type is not supported");
     }
     if (Number(command.configuration_revision) !== Number(device.configuration_revision)) {
       throw new DeviceBridgeProtocolError(409, "CONFIGURATION_REVISION_UNSUPPORTED", "Command configuration revision is unsupported");
     }
-    const normalizedAck = normalizeRetainedAck(ack, command.command_type);
-    validateRetainedAck(normalizedAck, command.command_type);
+    validateRetainedAck(ack, command.command_type);
     await registerAuthenticatedRequestReplay(client, auth, now);
 
-    const bodySha256 = semanticHash(normalizedAck);
+    const bodySha256 = semanticHash(ack);
     const history = await client.query(
       `SELECT status, body_sha256
          FROM device_bridge_command_acks
@@ -221,31 +198,31 @@ async function processResetCommandAckTransaction(pool, auth, ack, now = new Date
       return ackResponse(ack.command_id, ack.status, now);
     }
     const currentStatus = command.terminal_status || (history.rows.some((row) => row.status === "RECEIVED") ? "RECEIVED" : null);
-    assertTransition(currentStatus, normalizedAck.status);
+    assertTransition(currentStatus, ack.status);
     const expired = new Date(command.expires_at).valueOf() <= now.valueOf();
-    if (expired && currentStatus === null && normalizedAck.status !== "EXPIRED") {
+    if (expired && currentStatus === null && ack.status !== "EXPIRED") {
       throw new DeviceBridgeProtocolError(410, "COMMAND_EXPIRED", "Command has expired");
     }
-    if (!expired && currentStatus === null && normalizedAck.status === "EXPIRED") {
+    if (!expired && currentStatus === null && ack.status === "EXPIRED") {
       throw new DeviceBridgeProtocolError(409, "INVALID_ACK_TRANSITION", "Command has not expired");
     }
     await client.query(
       `INSERT INTO device_bridge_command_acks
          (command_id, device_id, status, occurred_at, result, error, body_sha256, accepted_at)
        VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8)`,
-      [normalizedAck.command_id, auth.deviceId, normalizedAck.status, normalizedAck.occurred_at,
-        normalizedAck.result === null ? null : JSON.stringify(normalizedAck.result),
-        normalizedAck.error === null ? null : JSON.stringify(normalizedAck.error), bodySha256, now]
+      [ack.command_id, auth.deviceId, ack.status, ack.occurred_at,
+        ack.result === null ? null : JSON.stringify(ack.result),
+        ack.error === null ? null : JSON.stringify(ack.error), bodySha256, now]
     );
-    if (TERMINAL_STATUSES.has(normalizedAck.status)) {
+    if (TERMINAL_STATUSES.has(ack.status)) {
       await client.query(
         `UPDATE device_bridge_commands
             SET terminal_status=$2, terminal_at=$3
           WHERE command_id=$1`,
-        [normalizedAck.command_id, normalizedAck.status, now]
+        [ack.command_id, ack.status, now]
       );
     }
-    if (command.command_type === "STOP_BRIDGE" && normalizedAck.status === "SUCCEEDED") {
+    if (command.command_type === "STOP_BRIDGE" && ack.status === "SUCCEEDED") {
       await client.query(
         `UPDATE device_bridge_devices
             SET bridge_service_state='STOPPED', automation_state='STOPPED', updated_at=$2
@@ -257,12 +234,12 @@ async function processResetCommandAckTransaction(pool, auth, ack, now = new Date
       `INSERT INTO device_bridge_audit_events
          (event_type, request_id, device_id, key_id, command_id, result_code, http_status, details)
        VALUES ($1,$2,$3,$4,$5,'SUCCEEDED',200,$6::jsonb)`,
-        [TERMINAL_STATUSES.has(normalizedAck.status) ? "COMMAND_ACK_TERMINAL" : "COMMAND_ACK_RECEIVED",
+        [TERMINAL_STATUSES.has(ack.status) ? "COMMAND_ACK_TERMINAL" : "COMMAND_ACK_RECEIVED",
         auth.requestId, auth.deviceId, auth.keyId, ack.command_id,
-        JSON.stringify({ command_type: command.command_type, ack_status: normalizedAck.status })]
+        JSON.stringify({ command_type: command.command_type, ack_status: ack.status })]
     );
     await client.query("COMMIT");
-    return ackResponse(ack.command_id, normalizedAck.status, now);
+    return ackResponse(ack.command_id, ack.status, now);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -288,7 +265,6 @@ function createResetCommandAckHandler(pool) {
 export {
   RETAINED_COMMANDS,
   createResetCommandAckHandler,
-  normalizeRetainedAck,
   parseAndValidateResetCommandAck,
   processResetCommandAckTransaction
 };

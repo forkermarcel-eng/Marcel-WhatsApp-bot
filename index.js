@@ -8451,8 +8451,7 @@ app.post(
 );
 
 // Preserve only the existing device baseline: signed liveness, enrollment,
-// device status, and a small generic command allowlist. Legacy Tinder V1-V10
-// command/ACK/heartbeat orchestration is not registered.
+// device status, and a small generic command allowlist.
 registerDeviceBridgeResetRoutes({
   app,
   pool,
@@ -8460,11 +8459,6 @@ registerDeviceBridgeResetRoutes({
   dashboardApiAuthorized,
   requireDeviceBridgeReady
 });
-
-// No Tinder capture, read, mapping, permit, receipt, draft, send, or dashboard
-// route remains active after the zero reset.  Historical source may remain in
-// the repository for an explicitly authorized data cleanup, but startup does
-// not import or register it.
 
 
 /* ==================================================

@@ -10,8 +10,7 @@ import { RETAINED_COMMANDS } from "./reset-command-ack.js";
 /* ==================================================
 DEVICE BRIDGE RESET ADMIN SURFACE
 
-This is a small generic device surface.  It deliberately exposes no Tinder
-capture, mapping, permit, receipt, diagnostic, or draft/send control.
+This is a small generic device surface.
 ================================================== */
 
 const COMMAND_EXPIRY_MS = Object.freeze({
@@ -63,9 +62,6 @@ function commandProjection(command, acknowledgement) {
 
 function canonicalCommand(type) {
   if (!RETAINED_COMMANDS.has(type) || !Object.hasOwn(COMMAND_EXPIRY_MS, type)) {
-    if (typeof type === "string" && type.includes("TINDER")) {
-      throw new DeviceBridgeProtocolError(410, "RETIRED_COMMAND", "Retired command type is unavailable");
-    }
     throw new DeviceBridgeProtocolError(400, "COMMAND_TYPE_UNSUPPORTED", "Command type is not supported");
   }
   return {
@@ -207,7 +203,7 @@ function createResetAdminCommandStatusHandler(pool) {
       const command = commandResult.rows[0];
       if (!command) throw new DeviceBridgeProtocolError(404, "COMMAND_NOT_FOUND", "Command was not found");
       if (!RETAINED_COMMANDS.has(command.command_type)) {
-        throw new DeviceBridgeProtocolError(410, "RETIRED_COMMAND", "Retired command status is unavailable");
+        throw new DeviceBridgeProtocolError(400, "COMMAND_TYPE_UNSUPPORTED", "Command type is not supported");
       }
       const acknowledgement = await pool.query(
         `SELECT status, occurred_at, accepted_at

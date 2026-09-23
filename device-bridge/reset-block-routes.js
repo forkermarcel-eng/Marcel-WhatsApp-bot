@@ -12,7 +12,7 @@ import {
 DEVICE BRIDGE RESET ROUTES
 
 Retains the enrolled device's generic transport and small baseline command
-surface.  The historical Tinder lifecycle is intentionally absent.
+surface.
 ================================================== */
 
 function registerDeviceBridgeResetRoutes({

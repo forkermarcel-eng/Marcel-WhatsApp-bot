@@ -9,44 +9,19 @@ useMultiFileAuthState
 import P from "pino";
 import pg from "pg";
 import { DEVICE_BRIDGE_PROTOCOL } from "./device-bridge/protocol-v1.js";
-import { initializeDeviceBridgeDatabase } from "./device-bridge/initialization.js";
+import { initializeResetDeviceBridgeDatabase } from "./device-bridge/reset-initialization.js";
 import {
   createAdminEnrollmentCodeHandler,
   createDeviceEnrollmentHandler
 } from "./device-bridge/enrollment.js";
-import { registerDeviceBridgeBlock3Routes } from "./device-bridge/block3-routes.js";
-import {
-  registerTinderPassiveReadCaptureIngress,
-  registerTinderPassiveReadDuplicateReprojectionProofIngress,
-  registerTinderVisibleChatCaptureIngress
-} from "./device-bridge/tinder-visible-chat-capture-ingress.js";
-import { registerTinderVisibleChatSyncIngress } from "./device-bridge/tinder-visible-chat-sync-ingress.js";
-import { registerTinderLocalConversationAttestationIngress } from "./device-bridge/tinder-local-conversation-attestation-ingress.js";
-import { registerTinderUnboundInboxConversationSweepTranscriptIngress } from "./device-bridge/tinder-unbound-inbox-conversation-sweep-ingress.js";
-import { registerTinderUnboundInboxConversationSweepReturnIngress } from "./device-bridge/tinder-unbound-inbox-conversation-sweep-return-ingress.js";
-import { registerTinderVerifiedChatReturnIngress } from "./device-bridge/tinder-verified-chat-return-ingress.js";
-import { registerTinderResumedForegroundChatReturnIngress } from "./device-bridge/tinder-resumed-foreground-chat-return-ingress.js";
-import { registerTinderCaptureRoutes } from "./device-bridge/tinder-capture-routes.js";
-import { registerTinderDraftRoutes } from "./device-bridge/tinder-draft-routes.js";
-import { registerTinderManualSendRoutes } from "./device-bridge/tinder-manual-send-routes.js";
+import { registerDeviceBridgeResetRoutes } from "./device-bridge/reset-block-routes.js";
 import {
   deviceBridgeFoundationMiddleware,
   deviceBridgeRawBodyErrorMiddleware,
-  deviceBridgeRequestShapeMiddleware,
   requireDeviceBridgeReady
 } from "./device-bridge/readiness.js";
-import { createTinderPassiveReadIngressFoundationMiddleware } from "./device-bridge/tinder-passive-read-readiness.js";
 import { createContactMediaService } from "./services/contact-media.js";
 import { createContactIdentityService } from "./services/contact-identities.js";
-import {
-  createPgTinderDraftRepository,
-  createTinderDraftFoundationService
-} from "./services/tinder-draft-foundation.js";
-import {
-  createPgTinderManualSendRepository,
-  createTinderManualSendService
-} from "./services/tinder-manual-send.js";
-import { createTinderManualSendDeliveryPolicy } from "./services/tinder-manual-send-delivery-policy.js";
 
 const { Pool } = pg;
 
@@ -68,25 +43,6 @@ app.use(
 );
 app.use("/device-bridge/v1", deviceBridgeRawBodyErrorMiddleware);
 
-// Passive V2 reads are signed, replay-protected capture ingestion rather than
-// Device Bridge command traffic.  Register this exact path before global
-// command/ACK readiness and validate only its auth/replay + T2 foundation.
-registerTinderPassiveReadCaptureIngress({
-  app,
-  pool,
-  middleware: [
-    deviceBridgeRequestShapeMiddleware,
-    createTinderPassiveReadIngressFoundationMiddleware(pool)
-  ]
-});
-registerTinderPassiveReadDuplicateReprojectionProofIngress({
-  app,
-  pool,
-  middleware: [
-    deviceBridgeRequestShapeMiddleware,
-    createTinderPassiveReadIngressFoundationMiddleware(pool)
-  ]
-});
 app.use("/device-bridge/v1", deviceBridgeFoundationMiddleware);
 
 app.use(express.json({ limit: "2mb" }));
@@ -1939,7 +1895,7 @@ DATENBANK INITIALISIEREN
 
 async function initDatabase() {
 
-await initializeDeviceBridgeDatabase(pool);
+await initializeResetDeviceBridgeDatabase(pool);
 
 await pool.query(`
 CREATE TABLE IF NOT EXISTS contacts (
@@ -8494,7 +8450,10 @@ app.post(
   deviceEnrollmentHandler
 );
 
-registerDeviceBridgeBlock3Routes({
+// Preserve only the existing device baseline: signed liveness, enrollment,
+// device status, and a small generic command allowlist. Legacy Tinder V1-V10
+// command/ACK/heartbeat orchestration is not registered.
+registerDeviceBridgeResetRoutes({
   app,
   pool,
   dashboardApiReady,
@@ -8502,58 +8461,10 @@ registerDeviceBridgeBlock3Routes({
   requireDeviceBridgeReady
 });
 
-registerTinderVisibleChatCaptureIngress({ app, pool });
-registerTinderVisibleChatSyncIngress({ app, pool });
-registerTinderLocalConversationAttestationIngress({ app, pool });
-registerTinderUnboundInboxConversationSweepTranscriptIngress({ app, pool });
-registerTinderUnboundInboxConversationSweepReturnIngress({ app, pool });
-registerTinderVerifiedChatReturnIngress({ app, pool });
-registerTinderResumedForegroundChatReturnIngress({ app, pool });
-
-registerTinderCaptureRoutes({
-  app,
-  pool,
-  dashboardApiReady,
-  dashboardApiAuthorized,
-  requireDeviceBridgeReady
-});
-
-const tinderDraftService = createTinderDraftFoundationService({
-  repository: createPgTinderDraftRepository(pool),
-  getContactById,
-  getContactMemoryProfile,
-  getRelevantMemoryItems,
-  getRelevantMemoryEvents,
-  getMarcelMemory,
-  getMarcelLiveState,
-  buildMemoryContext,
-  resolveReplyLanguage,
-  generateSharedReply
-});
-
-registerTinderDraftRoutes({
-  app,
-  dashboardApiReady,
-  dashboardApiAuthorized,
-  requireDeviceBridgeReady,
-  draftService: tinderDraftService
-});
-
-// T5 dispatch remains server-owned and finite.  The Android writer still
-// rejects the received command as BLOCKED_WRITER_NOT_IMPLEMENTED; this wiring
-// neither sends nor enables any browser-owned Device Bridge command surface.
-const tinderManualSendService = createTinderManualSendService({
-  repository: createPgTinderManualSendRepository(pool),
-  deliveryPolicy: createTinderManualSendDeliveryPolicy()
-});
-
-registerTinderManualSendRoutes({
-  app,
-  dashboardApiReady,
-  dashboardApiAuthorized,
-  requireDeviceBridgeReady,
-  service: tinderManualSendService
-});
+// No Tinder capture, read, mapping, permit, receipt, draft, send, or dashboard
+// route remains active after the zero reset.  Historical source may remain in
+// the repository for an explicitly authorized data cleanup, but startup does
+// not import or register it.
 
 
 /* ==================================================

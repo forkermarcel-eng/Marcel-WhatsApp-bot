@@ -4,256 +4,28 @@ import test from "node:test";
 
 const page = readFileSync(new URL("../Tinder/index.html", import.meta.url), "utf8");
 
-function sourceBetween(start, end) {
-  const startIndex = page.indexOf(start);
-  const endIndex = page.indexOf(end, startIndex);
-  assert.notEqual(startIndex, -1, `missing ${start}`);
-  assert.notEqual(endIndex, -1, `missing ${end}`);
-  return page.slice(startIndex, endIndex);
-}
-
-test("Tinder primary Conversation UI exposes durable aggregated threads and keeps capture audit explicit", () => {
-  const productCode = sourceBetween(
-    "function productConversationIsSafeForSelection",
-    "function confirmedConversationIsSafeForSelection"
-  );
-  const startupCode = sourceBetween(
-    'window.addEventListener("focus"',
-    "window.setInterval"
-  );
-
-  assert.match(page, /id="productConversationList"/);
-  assert.match(page, /id="productConversationDetail"/);
-  assert.match(page, /id="legacyCaptureAuditPanel"/);
-  assert.match(page, /Historisches Capture- und Zuordnungs-Audit/);
-  assert.match(page, /Dauerhafte Tinder-Threads/);
-  assert.match(page, /Android Control · Tinder Read/);
-  assert.match(productCode, /function loadProductConversationList\(\)/);
-  assert.match(productCode, /view=read-conversations/);
-  assert.match(productCode, /conversationHandle=\$\{encodeURIComponent\(conversationHandle\)\}&view=read-conversation/);
-  assert.match(page, /void loadProductConversationList\(\)/);
-  assert.match(productCode, /PRODUCT_CONVERSATION_HISTORY_SCOPES/);
-  assert.match(page, /"AGGREGATED_PARTIAL", "AGGREGATED_COMPLETE"/);
-  assert.match(productCode, /conversations\.length > PRODUCT_CONVERSATION_LIMIT/);
-  assert.match(productCode, /conversation\.messages\.length > 0 && conversation\.messages\.length <= PRODUCT_CONVERSATION_MESSAGE_LIMIT/);
-  assert.match(productCode, /renderConversationMessages\(conversation\.messages, "conversation-messages"\)/);
-  assert.match(productCode, /productConversationIdentityLabel/);
-  assert.doesNotMatch(page, /id="confirmedConversationList"/);
-  assert.doesNotMatch(page, /void loadLatestConfirmedConversationList\(\)/);
-  assert.doesNotMatch(startupCode, /void loadPendingCaptureDiscovery\(|void loadOpenDraftReviewDiscovery\(|void loadDraftEligibleCaptureDiscovery\(|void loadHumanArmedBindingList\(/);
-  assert.match(page, /function loadLegacyCaptureAuditIfOpen\(\)/);
-  assert.match(page, /function loadLegacyCaptureAuditIfOpen\(\)[\s\S]*?void loadPendingCaptureDiscovery\([\s\S]*?void loadOpenDraftReviewDiscovery\([\s\S]*?void loadDraftEligibleCaptureDiscovery\([\s\S]*?void loadHumanArmedBindingList\(/);
-  assert.match(page, /legacyCaptureAuditPanel\.addEventListener\("toggle"/);
-});
-
-test("product Conversation messages render only a readable name, identity state, explicit history scope, and direction/text", () => {
-  const productCode = sourceBetween(
-    "function productConversationIsSafeForSelection",
-    "function confirmedConversationIsSafeForSelection"
-  );
-  const messageCode = sourceBetween("function renderConversationMessages", "function visibleChatSyncStatusText");
-  const renderedAssignments = (productCode.match(/\w+\.textContent\s*=\s*[^;]+;/g) || []).join("\n");
-
-  assert.match(productCode, /name\.textContent = conversation\.visible_name\.trim\(\)/);
-  assert.match(productCode, /renderConversationMessages\(conversation\.messages, "conversation-messages"\)/);
-  assert.match(messageCode, /text\.textContent = message\.text\.trim\(\)/);
-  assert.match(productCode, /Unzugeordnet.*PENDING/);
-  assert.match(productCode, /Zusammengeführter Verlauf/);
-  assert.doesNotMatch(productCode, /Technische Lese-Beobachtung|OBSERVATION_ONLY/);
-  assert.doesNotMatch(productCode, /textContent\s*=\s*conversation\.conversation_handle/);
-  assert.doesNotMatch(productCode, /dataset\./);
-  assert.doesNotMatch(renderedAssignments, /conversation_handle|device|thread|fingerprint|revision|resolved|mapping|review|provenance/i);
-  assert.doesNotMatch(productCode, /thread_fingerprint|capture_fingerprint|resolved_contact_id|visible_order|provenance|mapping_status|human_review_status/i);
-  assert.doesNotMatch(productCode, /draft|SEND_TINDER_DRAFT|operation=|method:\s*"POST"|JSON\.stringify|body:/i);
-  assert.doesNotMatch(productCode, /window\.location(?:\.href)?\s*=/);
-});
-
-test("selected detail has bounded one-shot official-app resume and visible-chat sync actions, without a navigation surface", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
-
-  assert.match(conversationCode, /operation=resume-official-app/);
-  assert.match(conversationCode, /RESUME_OFFICIAL_TINDER_APP/);
-  assert.match(conversationCode, /Offizielle Tinder-App einmal öffnen/);
-  assert.match(conversationCode, /Standard-Launcher-Activity/);
-  assert.match(conversationCode, /operation=visible-chat-sync/);
-  assert.match(conversationCode, /body: JSON\.stringify\(\{\}\)/);
-  assert.match(conversationCode, /Sichtbaren geöffneten Chat synchronisieren/);
-  assert.match(conversationCode, /Der Vorgang öffnet keinen Chat, ordnet keine Person zu und versendet nichts/);
-  assert.match(conversationCode, /visible_chat_sync/);
-  assert.match(conversationCode, /official_app_resume/);
-  assert.match(conversationCode, /OFFICIAL_APP_RESUME_OBSERVATION_STATUSES/);
-  assert.match(page, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES/);
-  assert.match(
-    conversationCode,
-    /officialAppResumeIsSafe\(conversation\.official_app_resume\)\s*&& OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\.has\(conversation\.official_app_resume\.status\)/
-  );
-  assert.match(conversationCode, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\.has\(resume\.status\)/);
-  assert.match(page, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\s*=\s*new Set\(\[\s*"NOT_REQUESTED", "DISPATCHED", "CANCELLED", "EXPIRED"\s*\]\)/);
-  assert.match(conversationCode, /officialAppResumeAttemptedCaptureId === captureId/);
-  assert.match(conversationCode, /officialAppResumeAttemptedCaptureId === conversation\.capture_id/);
-  assert.match(conversationCode, /Synchronisierter sichtbarer Verlauf/);
-  assert.doesNotMatch(conversationCode, /thread_fingerprint|capture_fingerprint|source_capture_id|command_id|permit/i);
-  assert.doesNotMatch(conversationCode, /startActivity|ComponentName|setPackage|setData|ACTION_VIEW|performAction|GLOBAL_ACTION|ACTION_CLICK|setText|openChat/i);
-});
-
-test("existing human-confirmed binding card can create a fresh launcher-only resume without exposing or selecting a source", () => {
-  const bindingCode = sourceBetween(
-    "function renderHumanArmedBindingList",
-    "async function loadHumanArmedBindingList"
-  );
-  const resumeStart = bindingCode.indexOf("resume.addEventListener");
-  const resumeEnd = bindingCode.indexOf("const confirmation", resumeStart);
-  assert.ok(resumeStart >= 0 && resumeEnd > resumeStart);
-  const resumeCode = bindingCode.slice(resumeStart, resumeEnd);
-  assert.match(bindingCode, /official_app_resume_status/);
-  assert.match(bindingCode, /OFFICIAL_APP_RESUME_REQUESTABLE_STATUSES\.has\(officialAppResumeStatus\)/);
-  assert.match(resumeCode, /operation=human-armed-official-app-resume/);
-  assert.match(resumeCode, /body: JSON\.stringify\(\{\}\)/);
-  assert.match(bindingCode, /RESUME_OFFICIAL_TINDER_APP/);
-  assert.match(bindingCode, /Offizielle Tinder-App einmal öffnen/);
-  assert.equal((resumeCode.match(/operation=human-armed-official-app-resume/g) || []).length, 1);
-  assert.equal((resumeCode.match(/method:\s*"POST"/g) || []).length, 1);
-  assert.doesNotMatch(resumeCode, /textContent\s*=\s*binding\.binding_id/);
-  for (const forbidden of [
-    /\bsourceCaptureId\b/, /\bdeviceId\b/, /\bthreadFingerprint\b/, /\bcaptureFingerprint\b/,
-    /\bsetPackage\b/, /\bACTION_VIEW\b/, /\bopenChat\b/
-  ]) assert.doesNotMatch(resumeCode, forbidden);
-});
-
-test("queued visible-chat sync refreshes only the selected product detail and never queues a retry", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
-
-  assert.match(conversationCode, /function scheduleVisibleChatSyncDetailRefresh\(captureId\)/);
-  assert.match(conversationCode, /await selectConfirmedConversation\(captureId\)/);
-  assert.match(conversationCode, /if \(conversation\.visible_chat_sync\)/);
-  assert.match(conversationCode, /refreshVisibleChatSyncDetail\(captureId, generation, attempt \+ 1\)/);
-  assert.equal((conversationCode.match(/operation=visible-chat-sync/g) || []).length, 1);
-  assert.equal((conversationCode.match(/operation=resume-official-app/g) || []).length, 1);
-});
-
-test("selected Conversation detail cannot bypass the confirmed-binding local-attestation flow", () => {
-  const detailCode = sourceBetween("function renderConfirmedConversationDetail", "async function selectConfirmedConversation");
-
-  assert.match(detailCode, /syncButton\.hidden = true/);
-  assert.match(detailCode, /syncButton\.disabled = true/);
-  assert.match(detailCode, /bestehenden Binding-Karte/);
-  assert.doesNotMatch(detailCode, /requestVisibleChatSync\(/);
-  assert.doesNotMatch(detailCode, /operation=visible-chat-sync/);
-});
-
-test("a fresh official-app resume status clears only the local latch for a later separate request", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
-  const refreshCode = sourceBetween(
-    "async function refreshOfficialAppResumeDetail",
-    "function scheduleOfficialAppResumeDetailRefresh"
-  );
-  const requestCode = sourceBetween(
-    "async function requestOfficialAppResume",
-    "function renderConfirmedConversationDetail"
-  );
-  assert.match(conversationCode, /function scheduleOfficialAppResumeDetailRefresh\(captureId\)/);
-  assert.match(conversationCode, /await selectConfirmedConversation\(captureId\)/);
-  assert.match(conversationCode, /status === "PENDING"/);
-  assert.match(conversationCode, /OFFICIAL_APP_RESUME_TERMINAL_STATUSES\.has\(status\)/);
-  assert.match(conversationCode, /officialAppResumeQueuedCaptureId = null/);
-  assert.match(conversationCode, /officialAppResumeAttemptedCaptureId = null/);
-  assert.match(conversationCode, /scheduleOfficialAppResumeDetailRefresh\(captureId\)/);
-  assert.match(
-    conversationCode,
-    /officialAppResumeQueuedCaptureId !== captureId\s*&&\s*officialAppResumeAttemptedCaptureId !== captureId/
-  );
-  assert.match(
-    conversationCode,
-    /catch \(error\) \{[\s\S]*?scheduleOfficialAppResumeDetailRefresh\(captureId\);/
-  );
-  assert.match(
-    conversationCode,
-    /status === "NOT_REQUESTED"\s*&&\s*officialAppResumeAttemptedCaptureId === captureId\s*&&\s*officialAppResumeQueuedCaptureId !== captureId/
-  );
-  assert.match(refreshCode, /status === "PENDING"[\s\S]*?refreshOfficialAppResumeDetail\(captureId, generation, attempt \+ 1\);[\s\S]*?return;/);
-  assert.doesNotMatch(refreshCode, /requestOfficialAppResume\(|operation=resume-official-app|method:\s*"POST"/);
-  assert.ok(
-    refreshCode.indexOf('status === "PENDING"')
-      < refreshCode.indexOf("officialAppResumeQueuedCaptureId = null")
-  );
-  assert.equal((requestCode.match(/operation=resume-official-app/g) || []).length, 1);
-  assert.equal((requestCode.match(/method:\s*"POST"/g) || []).length, 1);
-});
-
-test("rejected official-app resume preparation exposes only bounded status and reason evidence", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
-  const requestCode = sourceBetween(
-    "async function requestOfficialAppResume",
-    "function renderConfirmedConversationDetail"
-  );
-  const rejectionStart = requestCode.indexOf("const rejected = officialAppResumeQueueFailureIsSafe");
-  const rejectionEnd = requestCode.indexOf(
-    "scheduleOfficialAppResumeDetailRefresh(captureId);",
-    rejectionStart
-  );
-  const rejectionCode = requestCode.slice(rejectionStart, rejectionEnd);
-
-  assert.match(page, /OFFICIAL_APP_RESUME_QUEUE_FAILURE_STATUSES/);
-  assert.match(page, /OFFICIAL_APP_RESUME_QUEUE_FAILURE_REASONS/);
-  assert.match(conversationCode, /function officialAppResumeQueueFailureIsSafe\(resume\)/);
-  assert.match(conversationCode, /hasExactConversationFields\(resume, \["command_type", "status", "reason_code"\]\)/);
-  assert.match(conversationCode, /resume\.command_type === "RESUME_OFFICIAL_TINDER_APP"/);
-  assert.match(requestCode, /officialAppResumeQueueFailureIsSafe\(error\?\.data\?\.resume\)/);
-  assert.match(requestCode, /rejected\.status} \/ \$\{rejected\.reason_code/);
-  assert.ok(rejectionStart >= 0 && rejectionEnd > rejectionStart);
-  assert.doesNotMatch(rejectionCode, /command_id|device_id|capture_id|binding_id|fingerprint|payload/i);
-  assert.equal((requestCode.match(/operation=resume-official-app/g) || []).length, 1);
-  assert.equal((requestCode.match(/method:\s*"POST"/g) || []).length, 1);
-});
-
-test("verified-chat return status is display-only and cannot become a browser control surface", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
-  const statusCode = sourceBetween("function verifiedChatReturnStatusText", "function visibleChatSyncIsSafe");
-  const detailCode = sourceBetween("function renderConfirmedConversationDetail", "async function selectConfirmedConversation");
-
-  assert.match(conversationCode, /verified_chat_return/);
-  assert.match(conversationCode, /VERIFIED_CHAT_RETURN_OBSERVATION_STATUSES/);
-  assert.match(detailCode, /verifiedChatReturnStatusText\(conversation\.verified_chat_return\)/);
-  for (const status of ["NOT_REQUESTED", "PENDING", "STAGED", "RETURNED", "CANCELLED", "EXPIRED"]) {
-    assert.match(statusCode, new RegExp(`case "${status}"`));
+test("Tinder shell keeps the normal Status, Matches, Conversations, Chat, and Profile layout", () => {
+  for (const label of ["Gerät", "Bridge", "Read-Kanal", "Matches", "Conversations", "Chat", "Profil"]) {
+    assert.match(page, new RegExp(label));
   }
-  assert.doesNotMatch(statusCode, /command_id|device_id|source_capture_id|binding_id|binding_revision|resume_command_id|expires_at|terminal_reason|receipt|fingerprint/i);
-  assert.doesNotMatch(statusCode, /addEventListener|requestJson|method:\s*"POST"|operation=|JSON\.stringify|body:/);
-  assert.doesNotMatch(detailCode, /RETURN_TINDER_VERIFIED_CHAT_TO_INBOX|tinder-verified-chat-return/i);
+  assert.match(page, /href="\/Dashboard\/">WhatsApp<\/a>/);
+  assert.match(page, /href="\/Brain\/">Brain<\/a>/);
+  assert.match(page, /Noch keine Conversations verfügbar\./);
+  assert.match(page, /Noch keine Match-Daten im neuen Produktmodell\./);
 });
 
-test("conversation selection remains local and does not enter the existing capture mapping URL flow", () => {
-  const conversationCode = sourceBetween("function hasExactConversationFields", "function formatTimestamp");
-  assert.match(page, /let selectedConversationCaptureId = null/);
-  assert.match(conversationCode, /selectedConversationCaptureId = captureId/);
-  assert.doesNotMatch(conversationCode, /pendingCaptureMappingUrl|captureIdFromLocation|new URLSearchParams\(window\.location/);
+test("reset dashboard has no active Tinder data, control, mapping, or prototype UI call", () => {
+  assert.doesNotMatch(page, /\/api\/tinder\/captures/);
+  assert.doesNotMatch(page, /read-conversations|read-conversation|captureMapping|humanArmed|draft|attestation|sweep|receipt|permit/i);
+  assert.doesNotMatch(page, /CONNECT_TINDER|DISCONNECT_TINDER|REQUEST_STATUS|\bPING\b/);
+  assert.doesNotMatch(page, /resume-official|visible-chat-sync|pending-read/i);
+  assert.doesNotMatch(page, /tinder_state/i);
 });
 
-test("legacy pending capture audit remains available but is no longer the primary Conversation loader", () => {
-  const unboundCode = sourceBetween(
-    "function pendingReadConversationIsSafe",
-    "function setUnavailableDeviceDetails"
-  );
-  const panelMarkup = sourceBetween(
-    '<section class="enrollment-panel pending-capture-panel" id="unboundConversationPanel"',
-    '<section class="enrollment-panel pending-capture-panel" id="openDraftReviewPanel"'
-  );
-  const renderedAssignments = (unboundCode.match(/\w+\.textContent\s*=\s*[^;]+;/g) || []).join("\n");
-
-  assert.match(page, /id="unboundConversationPanel"/);
-  assert.match(page, /id="unboundConversationList"/);
-  assert.match(page, /id="unboundConversationMessage"/);
-  assert.match(unboundCode, /function loadPendingReadConversations\(\)/);
-  assert.match(unboundCode, /view=pending-read-conversations/);
-  assert.match(unboundCode, /mapping_status === "NEEDS_HUMAN_MAPPING"/);
-  assert.match(unboundCode, /human_review_status === "PENDING"/);
-  assert.match(unboundCode, /Read-only Nachrichtenansicht/);
-  assert.match(unboundCode, /text: message\.text/);
-  assert.doesNotMatch(page, /(?:await|void) loadPendingReadConversations\(\)/);
-
-  assert.doesNotMatch(panelMarkup, /<button|<input|<select|<form|href=|data-/i);
-  assert.doesNotMatch(unboundCode, /transcript_id|sweep_id|command_id|binding_id|contact_id|capture_id|thread_fingerprint|capture_fingerprint|fingerprint|unbound-inbox-conversation-sweep/i);
-  assert.doesNotMatch(renderedAssignments, /received_at|device|command|sweep|binding|capture|thread|fingerprint|nonce|mapping_status|human_review_status/i);
-  assert.doesNotMatch(unboundCode, /createElement\("button"\)|addEventListener\(|method:\s*"POST"|operation=|JSON\.stringify|body:/);
-  assert.doesNotMatch(unboundCode, /pendingCaptureMappingUrl|window\.location|dataset\./);
+test("generic enrollment and read-only device status remain available", () => {
+  assert.match(page, /\/api\/tinder\/enrollment-code/);
+  assert.match(page, /\/api\/tinder\/device-status/);
+  assert.match(page, /function renderDeviceSelection\(\)/);
+  assert.match(page, /function renderDeviceStatus\(\)/);
+  assert.match(page, /function shortDeviceId\(value\)/);
 });

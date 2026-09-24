@@ -24,6 +24,8 @@ const bearerToken = String(process.env.DASHBOARD_API_SECRET || "").trim();
 const limit = Number.parseInt(process.env.TINDER_BLOCK2_CORRECTION_LIMIT || "3", 10);
 const maxUpwardGestures = Number.parseInt(process.env.TINDER_BLOCK2_MAX_UPWARD_GESTURES || "80", 10);
 const installedBridgeVersionCode = Number.parseInt(process.env.TINDER_DEVICE_VERSION_CODE || "", 10);
+const scrollSettleMilliseconds = 3000;
+const boundarySettleMilliseconds = 4500;
 
 if (!sessionId) throw new Error("APPIUM_SESSION is required");
 if (!bearerToken) throw new Error("DASHBOARD_API_SECRET is required");
@@ -87,20 +89,24 @@ async function tap(bounds) {
 
 async function scrollUp(bounds) {
   const inset = Math.max(24, Math.round(bounds.width * 0.05));
-  await appium("/execute/sync", {
+  const canScrollMore = await appium("/execute/sync", {
     method: "POST",
     body: {
-      script: "mobile: swipeGesture",
+      script: "mobile: scrollGesture",
       args: [{
         left: bounds.left + inset,
         top: bounds.top + Math.max(24, Math.round(bounds.height * 0.08)),
         width: bounds.width - inset * 2,
         height: bounds.height - Math.max(48, Math.round(bounds.height * 0.16)),
         direction: "up",
-        percent: 0.42
+        percent: 1.0
       }]
     }
   });
+  if (typeof canScrollMore !== "boolean") {
+    throw new Error("Appium chat scroll did not report a physical boundary result");
+  }
+  return canScrollMore;
 }
 
 function onlyExistingConversation(list, displayName) {
@@ -138,66 +144,85 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
   });
   const adapter = createTinderAppiumAdapter({ deviceId, transport });
   adapter.start({ profile: existing.profile, messages: viewport.messages });
-  const resolved = await adapter.resolve();
-  const resolvedExisting = resolved?.conversation?.id === existing.id;
-  const singletonCandidate = !resolved?.conversation
-    && Number(existing.message_count) === 1
-    && viewport.messages.length === 1;
-  if (!resolvedExisting && !singletonCandidate) {
-    throw new Error("Existing Tinder conversation could not be revalidated before correction");
-  }
 
   let assembled = viewport.messages;
-  let unchangedViewportStreak = 0;
   let gestures = 0;
   for (; gestures < maxUpwardGestures; gestures += 1) {
-    await scrollUp(viewport.scroll_bounds);
-    await sleep(700);
+    const canScrollMore = await scrollUp(viewport.scroll_bounds);
+    await sleep(scrollSettleMilliseconds);
     const fresh = observeConversationViewportFromXml(await sourceXml());
     if (!fresh?.profile_display_name || fresh.profile_display_name !== viewport.profile_display_name
       || fresh.messages.length < 1 || !fresh.scroll_bounds) {
       throw new Error("Conversation changed while its history was being read");
     }
 
-    unchangedViewportStreak = sameObservedViewport(viewport, fresh)
-      ? unchangedViewportStreak + 1
-      : 0;
     assembled = adapter.appendViewport(fresh.messages);
     viewport = fresh;
 
-    // One duplicate/no-new viewport is not terminal.  Three independently
-    // fresh post-gesture observations establish the physical upper boundary.
-    if (unchangedViewportStreak >= 3) {
-      if (singletonCandidate) {
-        if (!await isVerifiedUnchangedSingleton(existing, assembled)) {
-          throw new Error("A singleton Tinder conversation cannot be safely corrected without an exact unchanged match");
-        }
-        return Object.freeze({
-          conversation_id: existing.id,
-          messages: assembled.length,
-          inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
-          outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
-          gestures: gestures + 1,
-          oldest_boundary_reached: true,
-          history_persisted: false
-        });
-      }
-      const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: true });
-      if (synced?.created || synced?.conversation?.id !== existing.id
-        || synced?.conversation?.history_complete !== true
-        || Number(synced?.conversation?.message_count) !== assembled.length) {
-        throw new Error("Corrective Tinder history persistence was not identity-preserving");
+    // The UiAutomator2 result is the physical chat-container boundary signal.
+    // It is never replaced by repeated equal XML projections.  A second,
+    // longer local read catches delayed Tinder history loading before COMPLETE.
+    if (canScrollMore) continue;
+
+    await sleep(boundarySettleMilliseconds);
+    const settled = observeConversationViewportFromXml(await sourceXml());
+    if (!settled?.profile_display_name || settled.profile_display_name !== viewport.profile_display_name
+      || settled.messages.length < 1 || !settled.scroll_bounds) {
+      throw new Error("Conversation changed while its history boundary was being verified");
+    }
+    assembled = adapter.appendViewport(settled.messages);
+    viewport = settled;
+
+    // A false gesture result can race a late render.  If the settled product
+    // viewport changed, retain it and ask the actual chat container again.
+    if (!sameObservedViewport(fresh, settled)) continue;
+
+    const confirmedAtBoundary = await scrollUp(viewport.scroll_bounds);
+    await sleep(scrollSettleMilliseconds);
+    const confirmed = observeConversationViewportFromXml(await sourceXml());
+    if (!confirmed?.profile_display_name || confirmed.profile_display_name !== viewport.profile_display_name
+      || confirmed.messages.length < 1 || !confirmed.scroll_bounds) {
+      throw new Error("Conversation changed while its history boundary was being confirmed");
+    }
+    assembled = adapter.appendViewport(confirmed.messages);
+    viewport = confirmed;
+
+    if (confirmedAtBoundary || !sameObservedViewport(settled, confirmed)) continue;
+
+    // The full, bounded history is now in RAM.  Revalidate the selected
+    // existing conversation only here, where ordered overlap can be proven.
+    const resolved = await adapter.resolve();
+    const resolvedExisting = resolved?.conversation?.id === existing.id;
+    if (!resolvedExisting) {
+      if (!await isVerifiedUnchangedSingleton(existing, assembled)) {
+        throw new Error("Existing Tinder conversation could not be revalidated after its complete history was read");
       }
       return Object.freeze({
         conversation_id: existing.id,
         messages: assembled.length,
         inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
         outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
-        gestures: gestures + 1,
+        gestures: gestures + 2,
         oldest_boundary_reached: true,
-        history_persisted: true
+        history_persisted: false
       });
     }
+
+    const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: true });
+    if (synced?.created || synced?.conversation?.id !== existing.id
+      || synced?.conversation?.history_complete !== true
+      || Number(synced?.conversation?.message_count) !== assembled.length) {
+      throw new Error("Corrective Tinder history persistence was not identity-preserving");
+    }
+    return Object.freeze({
+      conversation_id: existing.id,
+      messages: assembled.length,
+      inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
+      outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
+      gestures: gestures + 2,
+      oldest_boundary_reached: true,
+      history_persisted: true
+    });
   }
   throw new Error("The real oldest Tinder history boundary was not reached within the approved bound");
 }

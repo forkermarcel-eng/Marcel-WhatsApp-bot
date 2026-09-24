@@ -528,10 +528,21 @@ test("corrective history runner revalidates a fresh Inbox row and waits for the 
   assert.doesNotMatch(runner, /processedRows\.add\(next\.ram_key\);\s*await tap/);
 });
 
+test("corrective history runner requires the real UiAutomator chat-scroll boundary before COMPLETE", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
+  assert.match(runner, /script: "mobile: scrollGesture"/);
+  assert.doesNotMatch(runner, /mobile: swipeGesture|unchangedViewportStreak/);
+  assert.match(runner, /typeof canScrollMore !== "boolean"/);
+  assert.match(runner, /await sleep\(boundarySettleMilliseconds\)/);
+  assert.match(runner, /const confirmedAtBoundary = await scrollUp\(viewport\.scroll_bounds\)/);
+  assert.match(runner, /if \(confirmedAtBoundary \|\| !sameObservedViewport\(settled, confirmed\)\) continue/);
+  assert.ok(runner.indexOf("const resolved = await adapter.resolve()") > runner.indexOf("const confirmedAtBoundary = await scrollUp"));
+});
+
 test("a one-message correction candidate is no-op only after an exact unchanged product-data check", () => {
   const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
   assert.match(runner, /async function isVerifiedUnchangedSingleton/);
   assert.match(runner, /sameOrdinaryMessage\(stored\[0\], assembled\[0\]\)/);
   assert.match(runner, /history_persisted: false/);
-  assert.match(runner, /cannot be safely corrected without an exact unchanged match/);
+  assert.match(runner, /could not be revalidated after its complete history was read/);
 });

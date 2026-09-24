@@ -23,12 +23,16 @@ const sessionId = String(process.env.APPIUM_SESSION || "").trim();
 const bearerToken = String(process.env.DASHBOARD_API_SECRET || "").trim();
 const limit = Number.parseInt(process.env.TINDER_BLOCK2_CORRECTION_LIMIT || "3", 10);
 const maxUpwardGestures = Number.parseInt(process.env.TINDER_BLOCK2_MAX_UPWARD_GESTURES || "80", 10);
+const installedBridgeVersionCode = Number.parseInt(process.env.TINDER_DEVICE_VERSION_CODE || "", 10);
 
 if (!sessionId) throw new Error("APPIUM_SESSION is required");
 if (!bearerToken) throw new Error("DASHBOARD_API_SECRET is required");
 if (!Number.isInteger(limit) || limit < 1 || limit > 3) throw new Error("TINDER_BLOCK2_CORRECTION_LIMIT must be between 1 and 3");
 if (!Number.isInteger(maxUpwardGestures) || maxUpwardGestures < 3 || maxUpwardGestures > 120) {
   throw new Error("TINDER_BLOCK2_MAX_UPWARD_GESTURES must be between 3 and 120");
+}
+if (!Number.isInteger(installedBridgeVersionCode) || installedBridgeVersionCode < 0) {
+  throw new Error("TINDER_DEVICE_VERSION_CODE must be the installed Bridge version code");
 }
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -62,12 +66,13 @@ async function dashboard(path) {
 
 async function resolveDeviceId() {
   const result = await dashboard("/dashboard-api/device-bridge/devices");
-  const active = (result.devices || []).filter((device) => device.enrollment_state === "ACTIVE"
-    && device.bridge_service_state === "RUNNING");
-  if (active.length !== 1 || typeof active[0].device_id !== "string") {
-    throw new Error("A unique active generic bridge device is required");
+  // This is ordinary device binding only.  In particular, read work does not
+  // depend on enrollment, heartbeat, device online state, or Bridge service state.
+  const bound = (result.devices || []).filter((device) => Number(device.app_version_code) === installedBridgeVersionCode);
+  if (bound.length !== 1 || typeof bound[0].device_id !== "string") {
+    throw new Error("A unique device matching the installed Bridge version is required");
   }
-  return active[0].device_id;
+  return bound[0].device_id;
 }
 
 async function tap(bounds) {

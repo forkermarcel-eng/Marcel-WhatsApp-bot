@@ -511,3 +511,10 @@ test("new mirror routes use existing dashboard transport without a bridge gate",
   assert.doesNotMatch(routes, /requireDeviceBridgeReady|registerAuthenticatedRequestReplay|verifyAuthenticatedDeviceRequest/);
   assert.match(routes, /\/dashboard-api\/tinder\/conversations/);
 });
+
+test("corrective history runner binds the installed device version without a Bridge state gate", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
+  assert.match(runner, /TINDER_DEVICE_VERSION_CODE/);
+  assert.match(runner, /app_version_code/);
+  assert.doesNotMatch(runner, /device\.enrollment_state|device\.bridge_service_state|device\.device_status|device\.last_heartbeat/i);
+});

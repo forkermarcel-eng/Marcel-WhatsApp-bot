@@ -594,3 +594,15 @@ test("corrective runner uses an existing continuation and never turns a mismatch
   assert.doesNotMatch(runner, /isVerifiedUnchangedSingleton|history_persisted: false/);
   assert.match(runner, /could not be revalidated after its complete history was read/);
 });
+
+test("corrective runner plans only overlap-capable unique existing records before an Inbox tap", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
+  assert.match(runner, /function correctionPlan\(conversations\)/);
+  assert.match(runner, /Number\(conversation\?\.message_count\) >= 2/);
+  assert.match(runner, /names\.get\(conversation\?\.profile\?\.display_name\) === 1/);
+  assert.match(runner, /function uniquelyVisibleRowForPlan\(rows, existing\)/);
+  assert.match(runner, /rowContainsExactVisibleName/);
+  assert.match(runner, /for \(const existing of plan\)/);
+  assert.match(runner, /openPlannedConversation\(existing, processedRows\)/);
+  assert.doesNotMatch(runner, /rows\.find\(\(row\) => !processedRows\.has\(row\.ram_key\)\)/);
+});

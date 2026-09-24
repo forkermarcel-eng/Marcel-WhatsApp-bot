@@ -109,8 +109,42 @@ async function scrollUp(bounds) {
   return canScrollMore;
 }
 
-function onlyExistingConversation(list, displayName) {
-  const matches = list.filter((conversation) => conversation?.profile?.display_name === displayName);
+/*
+ * This is local navigation planning only.  It neither resolves a Tinder
+ * identity nor authorizes persistence: the completed ordered history still
+ * has to revalidate the selected existing conversation in the backend.
+ *
+ * A one-message stored record cannot establish the existing two-message
+ * ordered overlap.  It must therefore remain untouched by this corrective
+ * runner unless the already-existing continuation rule can prove it later.
+ */
+function correctionPlan(conversations) {
+  const names = new Map();
+  for (const conversation of conversations) {
+    const displayName = conversation?.profile?.display_name;
+    if (typeof displayName === "string" && displayName) {
+      names.set(displayName, (names.get(displayName) || 0) + 1);
+    }
+  }
+  return conversations
+    .filter((conversation) => Number(conversation?.message_count) >= 2)
+    .filter((conversation) => names.get(conversation?.profile?.display_name) === 1)
+    .sort((left, right) => Number(right.message_count) - Number(left.message_count));
+}
+
+function rowContainsExactVisibleName(row, displayName) {
+  try {
+    const ram = JSON.parse(row?.ram_key || "");
+    return Array.isArray(ram?.texts) && ram.texts.filter((text) => text === displayName).length === 1;
+  } catch {
+    return false;
+  }
+}
+
+function uniquelyVisibleRowForPlan(rows, existing) {
+  const displayName = existing?.profile?.display_name;
+  if (typeof displayName !== "string" || !displayName) return null;
+  const matches = rows.filter((row) => rowContainsExactVisibleName(row, displayName));
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -243,9 +277,12 @@ async function waitForOpenedConversation(ramKey) {
   return verifiedSameInbox ? null : undefined;
 }
 
-async function openNextConversation(processedRows) {
+async function openPlannedConversation(existing, processedRows) {
   const rows = observeInboxConversationRowsFromXml(await sourceXml());
-  const next = rows.find((row) => !processedRows.has(row.ram_key));
+  const next = uniquelyVisibleRowForPlan(
+    rows.filter((row) => !processedRows.has(row.ram_key)),
+    existing
+  );
   if (!next) return null;
 
   // Revalidate the exact candidate immediately before action.  The second
@@ -275,6 +312,7 @@ const beforeIds = new Set(beforeConversations.map((conversation) => conversation
 const beforeProfiles = new Map(beforeConversations.map((conversation) => [conversation.id, JSON.stringify(conversation.profile)]));
 const processedRows = new Set();
 const results = [];
+const plan = correctionPlan(beforeConversations).slice(0, limit);
 let source = await sourceXml();
 
 // A previous interrupted local run may leave a verified chat open.  Return
@@ -284,17 +322,13 @@ if (observeConversationViewportFromXml(source)) {
   source = await sourceXml();
 }
 
-while (results.length < limit) {
-  let viewport = observeConversationViewportFromXml(source);
-  if (!viewport) {
-    source = await openNextConversation(processedRows);
-    if (!source) break;
-    viewport = observeConversationViewportFromXml(source);
+for (const existing of plan) {
+  source = await openPlannedConversation(existing, processedRows);
+  if (!source) {
+    throw new Error("A uniquely visible Tinder Inbox row is unavailable for the selected corrective conversation");
   }
-  const existing = onlyExistingConversation(beforeConversations, viewport.profile_display_name);
-  if (!existing) {
-    throw new Error("No unique already mirrored conversation is available for this corrective re-read");
-  }
+  const viewport = observeConversationViewportFromXml(source);
+  if (!viewport) throw new Error("Selected Tinder Inbox row did not open a verified conversation");
   const corrected = await readToVerifiedOldestBoundary({ deviceId, existing, source });
   results.push(corrected);
   source = await sourceXml();

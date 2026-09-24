@@ -47,12 +47,21 @@ export default async function handler(req, res) {
   }
 
   const id = req.query?.id;
+  const resource = req.query?.resource;
+  if (resource !== undefined && resource !== "matches") {
+    return res.status(400).json({ ok: false, error: "Ungültige Tinder-Ressource." });
+  }
+  if (resource === "matches" && id !== undefined) {
+    return res.status(400).json({ ok: false, error: "Matches haben keine Conversation-ID-Abfrage." });
+  }
   if (id !== undefined && !validUuid(id)) {
     return res.status(400).json({ ok: false, error: "Ungültige Conversation-ID." });
   }
-  const path = id
-    ? `/dashboard-api/tinder/conversations/${encodeURIComponent(id)}`
-    : "/dashboard-api/tinder/conversations";
+  const path = resource === "matches"
+    ? "/dashboard-api/tinder/matches"
+    : id
+      ? `/dashboard-api/tinder/conversations/${encodeURIComponent(id)}`
+      : "/dashboard-api/tinder/conversations";
   try {
     const response = await fetch(`${backendUrl}${path}`, {
       method: "GET",

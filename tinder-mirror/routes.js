@@ -1,4 +1,5 @@
 import { TinderMirrorError, createTinderConversationMirror } from "./conversation.js";
+import { createTinderMatchMirror } from "./matches.js";
 
 function errorResponse(res, error) {
   const status = error instanceof TinderMirrorError ? error.status : 500;
@@ -27,6 +28,7 @@ function requireDashboardAccess({ dashboardApiReady, dashboardApiAuthorized }, r
  */
 export function registerTinderMirrorRoutes({ app, pool, dashboardApiReady, dashboardApiAuthorized }) {
   const mirror = createTinderConversationMirror({ pool });
+  const matches = createTinderMatchMirror({ pool });
   const access = { dashboardApiReady, dashboardApiAuthorized };
 
   app.post("/dashboard-api/tinder/conversations/resolve", async (req, res) => {
@@ -88,6 +90,27 @@ export function registerTinderMirrorRoutes({ app, pool, dashboardApiReady, dashb
     if (!requireDashboardAccess(access, req, res)) return;
     try {
       return res.status(200).json({ ok: true, ...(await mirror.detail(req.params.conversationId)) });
+    } catch (error) {
+      return errorResponse(res, error);
+    }
+  });
+
+  // A Match is an ordinary, read-only Tinder product record.  It is not a
+  // Conversation, command, enrollment flow, or bridge-readiness operation.
+  app.post("/dashboard-api/tinder/matches", async (req, res) => {
+    if (!requireDashboardAccess(access, req, res)) return;
+    const deviceId = String(req.body?.device_id || "");
+    try {
+      return res.status(201).json({ ok: true, ...(await matches.sync({ deviceId, payload: req.body?.match })) });
+    } catch (error) {
+      return errorResponse(res, error);
+    }
+  });
+
+  app.get("/dashboard-api/tinder/matches", async (req, res) => {
+    if (!requireDashboardAccess(access, req, res)) return;
+    try {
+      return res.status(200).json({ ok: true, matches: await matches.list() });
     } catch (error) {
       return errorResponse(res, error);
     }

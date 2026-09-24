@@ -136,14 +136,24 @@ test("active startup retains no retired product entrypoint and exposes only focu
   assert.deepEqual(Object.keys(packageJson.scripts).filter((name) => /tinder/i.test(name)), [
     "test:tinder-mirror",
     "test:tinder-last-message-order-migration",
+    "test:tinder-matches",
+    "test:tinder-matches-migration",
+    "test:tinder-match-initial-sync",
     "preflight:tinder-conversation-mirror",
     "migrate:tinder-conversation-mirror",
     "preflight:tinder-block2-last-message-order",
-    "migrate:tinder-block2-last-message-order"
+    "migrate:tinder-block2-last-message-order",
+    "preflight:tinder-block2-matches",
+    "migrate:tinder-block2-matches"
   ]);
   assert.equal(packageJson.scripts["test:tinder-mirror"], "node --test test/tinder-conversation-mirror.test.js");
   assert.match(packageJson.scripts["preflight:tinder-conversation-mirror"], /--preflight/);
   assert.match(packageJson.scripts["migrate:tinder-conversation-mirror"], /--apply/);
   assert.match(packageJson.scripts["preflight:tinder-block2-last-message-order"], /--preflight/);
   assert.match(packageJson.scripts["migrate:tinder-block2-last-message-order"], /--apply/);
+  assert.equal(packageJson.scripts["test:tinder-matches"], "node --test test/tinder-matches.test.js");
+  assert.equal(packageJson.scripts["test:tinder-matches-migration"], "node --test test/tinder-matches-migration.test.js");
+  assert.equal(packageJson.scripts["test:tinder-match-initial-sync"], "node --test test/tinder-match-initial-sync.test.js");
+  assert.match(packageJson.scripts["preflight:tinder-block2-matches"], /--preflight/);
+  assert.match(packageJson.scripts["migrate:tinder-block2-matches"], /--apply/);
 });

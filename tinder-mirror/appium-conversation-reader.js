@@ -429,6 +429,97 @@ export function observeInboxFromXml(xml) {
   });
 }
 
+function descendantCount(node, expression) {
+  let count = 0;
+  const visit = (current) => {
+    if (expression.test(className(current))) count += 1;
+    for (const child of current.children || []) visit(child);
+  };
+  visit(node);
+  return count;
+}
+
+function hasClickableDescendant(node) {
+  let found = false;
+  const visit = (current) => {
+    if (isClickable(current)) found = true;
+    for (const child of current.children || []) visit(child);
+  };
+  visit(node);
+  return found;
+}
+
+function visibleMatchTile(node, screen) {
+  if (!node?.bounds || !screen || !within(node.bounds, screen)) return null;
+  const texts = subtreeTexts(node);
+  const normalized = texts.map((text) => text.normalize("NFC").trim()).filter(Boolean);
+  const combined = normalized.join("\n").toLocaleLowerCase("de-DE");
+  // The Likes aggregate is not an individual Match.  A real tile must expose
+  // one visible text value and its own regular compact image/control shape.
+  if (!normalized.length || /\b(?:likes|gefällt)\b/u.test(combined)) return null;
+  if (descendantCount(node, /ImageView$/) < 1 || !hasClickableDescendant(node)) return null;
+  if (node.bounds.width < Math.round(screen.width * 0.12)
+    || node.bounds.width > Math.round(screen.width * 0.46)
+    || node.bounds.height < 72
+    || node.bounds.height > Math.round(screen.height * 0.35)) return null;
+
+  const attributes = Object.fromEntries(normalized.slice(1, 33).map((value, index) => [
+    `visible_tile_${String(index + 1).padStart(2, "0")}`,
+    value
+  ]));
+  return Object.freeze({
+    tile: Object.freeze({
+      display_name: normalized[0],
+      attributes: Object.freeze(attributes),
+      media_refs: Object.freeze([])
+    }),
+    ram_key: JSON.stringify({
+      left: node.bounds.left,
+      top: node.bounds.top,
+      right: node.bounds.right,
+      bottom: node.bounds.bottom,
+      texts: normalized
+    })
+  });
+}
+
+/*
+ * The New-Matches carousel is a separate, compact horizontal RecyclerView
+ * nested in the verified Inbox.  It is not a normal message row and exposes
+ * no tap target from this observer.  The caller may use only its own fresh
+ * scroll bounds for a read-only horizontal inventory.
+ */
+export function observeMatchCarouselFromXml(xml) {
+  const root = parseUiAutomatorXml(xml);
+  const screen = screenBounds(root);
+  const nodes = flattenUiNodes(root);
+  if (!screen || hasBottomComposer(nodes, screen)) return null;
+  const inbox = inboxRecycler(nodes, screen);
+  if (!inbox?.recycler?.bounds) return null;
+
+  const candidates = nodes
+    .filter((node) => /RecyclerView$/.test(className(node)) && node !== inbox.recycler && node.bounds)
+    .map((carousel) => ({
+      carousel,
+      tiles: (carousel.children || []).map((child) => visibleMatchTile(child, screen)).filter(Boolean)
+    }))
+    .filter(({ carousel, tiles }) => within(carousel.bounds, inbox.recycler.bounds)
+      && carousel.bounds.width >= Math.round(screen.width * 0.82)
+      && carousel.bounds.height >= 96
+      && carousel.bounds.height <= Math.round(screen.height * 0.36)
+      && tiles.length > 0)
+    .sort((left, right) => right.tiles.length - left.tiles.length
+      || (right.carousel.bounds.width * right.carousel.bounds.height) - (left.carousel.bounds.width * left.carousel.bounds.height));
+  if (!candidates.length) return null;
+  if (candidates.length > 1 && candidates[0].tiles.length === candidates[1].tiles.length
+    && candidates[0].carousel.bounds.width * candidates[0].carousel.bounds.height
+      === candidates[1].carousel.bounds.width * candidates[1].carousel.bounds.height) return null;
+  return Object.freeze({
+    tiles: Object.freeze(candidates[0].tiles),
+    scroll_bounds: Object.freeze({ ...candidates[0].carousel.bounds })
+  });
+}
+
 /*
  * Each candidate is one fresh visible row from the main vertical Inbox list.
  * New-match tiles, section labels and Match-/Like-CTA rows are excluded.  The

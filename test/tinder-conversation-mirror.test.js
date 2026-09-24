@@ -1093,11 +1093,19 @@ test("normal initial mirror is a separate Appium Inbox loop with CTA exclusion, 
   assert.match(runner, /async function readProfileToPhysicalBoundary/);
   assert.match(runner, /async function readChatToVerifiedOldestBoundary/);
   assert.match(runner, /const chatScrollPercent = 0\.45/);
-  assert.match(runner, /const inboxScrollPercent = 0\.45/);
+  assert.match(runner, /const inboxScrollPercent = 0\.05/);
+  assert.match(runner, /function nextInboxOverlap/);
+  assert.match(runner, /function sameInboxRowSlots/);
+  assert.match(runner, /function carryProcessedInboxRows/);
+  assert.match(runner, /const processedConversationIds = new Set\(\)/);
+  assert.match(runner, /first_observed_in_sweep/);
   assert.match(runner, /function adjacentInboxOverlap/);
-  assert.match(runner, /Tinder Inbox scroll did not retain a visible row overlap/);
-  assert.match(runner, /scrollUp\(viewport\.scroll_bounds, chatScrollPercent\)/);
-  assert.match(runner, /const confirmedAtBoundary = await scrollUp\(viewport\.scroll_bounds, chatScrollPercent\)/);
+  assert.match(runner, /Tinder Inbox scroll did not establish direct local continuity/);
+  assert.match(runner, /const scrollTowardTop/);
+  assert.match(runner, /const scrollTowardBottom/);
+  assert.match(runner, /scrollTowardTop\(viewport\.scroll_bounds, chatScrollPercent\)/);
+  assert.match(runner, /const confirmedAtBoundary = await scrollTowardTop\(viewport\.scroll_bounds, chatScrollPercent\)/);
+  assert.match(runner, /scrollTowardBottom\(before\.scroll_bounds, inboxScrollPercent\)/);
   assert.match(runner, /await returnToInbox\(\)/);
   assert.match(runner, /synced\.created \? "NEW_MIRRORED" : "KNOWN_COMPLETED"/);
   assert.match(runner, /action: "KNOWN_SKIPPED"/);
@@ -1105,4 +1113,33 @@ test("normal initial mirror is a separate Appium Inbox loop with CTA exclusion, 
   assert.match(runner, /last_message_visible_time_captured/);
   assert.doesNotMatch(runner, /mobile: swipeGesture|directContinuityRepair|TINDER_BLOCK2_DIRECT_REPAIR_CONVERSATION_ID/);
   assert.doesNotMatch(runner, /device\.last_heartbeat|requireDeviceBridgeReady|registerAuthenticatedRequestReplay|verifyAuthenticatedDeviceRequest/);
+  assert.doesNotMatch(runner, /const pageKeys = new Set\(\)/);
+});
+
+test("initial import discovers the full Inbox before it can open a thread, and consumes each RAM-only inventory entry once", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-initial-sync.mjs", import.meta.url), "utf8");
+  const discoveryStart = runner.indexOf("async function discoverInboxInventory()");
+  const processingStart = runner.indexOf("async function processDiscoveredInboxInventory");
+  const mainStart = runner.indexOf("const deviceId = await resolveDeviceId()");
+  assert.ok(discoveryStart >= 0);
+  assert.ok(processingStart > discoveryStart);
+  assert.ok(mainStart > processingStart);
+
+  const discovery = runner.slice(discoveryStart, processingStart);
+  const processing = runner.slice(processingStart, mainStart);
+  assert.match(discovery, /inventory\.push\(inventoryEntryFromRow\(row, inventory\.length\)\)/);
+  assert.match(discovery, /reconcileProcessedInboxRows/);
+  assert.doesNotMatch(discovery, /openReadAndMirror|openInitialProfile|readProfileToPhysicalBoundary|readChatToVerifiedOldestBoundary|\btap\(/);
+
+  assert.match(processing, /const processedInventoryOrdinals = new Set\(\)/);
+  assert.match(processing, /if \(processedInventoryOrdinals\.has\(planned\.inbox_position\)\)/);
+  assert.match(processing, /sameTransientInboxRow\(row, planned\.observed_row\)/);
+  assert.match(processing, /await openReadAndMirror/);
+  assert.match(processing, /requireDirectContinuity: true/);
+  assert.match(processing, /same_sweep_reopens: 0/);
+  assert.match(runner, /const discovery = await discoverInboxInventory\(\);/);
+  assert.match(runner, /const processing = await processDiscoveredInboxInventory\(\{ deviceId, inventory: discovery\.inventory \}\);/);
+  assert.match(runner, /discovery_thread_opens: 0/);
+  assert.match(runner, /discovery_history_reads: 0/);
+  assert.match(runner, /discovery_profile_reads: 0/);
 });

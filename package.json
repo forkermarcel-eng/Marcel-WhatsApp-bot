@@ -13,11 +13,16 @@
     "test:contact-identities": "node --test test/contact-identities.test.js",
     "test:tinder-mirror": "node --test test/tinder-conversation-mirror.test.js",
     "test:tinder-last-message-order-migration": "node --test test/tinder-last-message-order-migration.test.js",
+    "test:tinder-matches": "node --test test/tinder-matches.test.js",
+    "test:tinder-matches-migration": "node --test test/tinder-matches-migration.test.js",
+    "test:tinder-match-initial-sync": "node --test test/tinder-match-initial-sync.test.js",
     "preflight:tinder-conversation-mirror": "node scripts/tinder-conversation-mirror-migration.js --preflight",
     "migrate:tinder-conversation-mirror": "node scripts/tinder-conversation-mirror-migration.js --apply",
     "preflight:tinder-block2-last-message-order": "node scripts/tinder-block2-last-message-order-migration.js --preflight",
     "migrate:tinder-block2-last-message-order": "node scripts/tinder-block2-last-message-order-migration.js --apply",
-    "test": "npm run test:device-bridge && npm run test:brain-write && npm run test:web-ui && npm run test:presentation && npm run test:contact-identities && npm run test:tinder-mirror && npm run test:tinder-last-message-order-migration"
+    "preflight:tinder-block2-matches": "node scripts/tinder-block2-matches-migration.js --preflight",
+    "migrate:tinder-block2-matches": "node scripts/tinder-block2-matches-migration.js --apply",
+    "test": "npm run test:device-bridge && npm run test:brain-write && npm run test:web-ui && npm run test:presentation && npm run test:contact-identities && npm run test:tinder-mirror && npm run test:tinder-last-message-order-migration && npm run test:tinder-matches && npm run test:tinder-matches-migration && npm run test:tinder-match-initial-sync"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.14",

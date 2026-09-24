@@ -53,7 +53,7 @@ function createMemoryPool() {
     if (normalized.startsWith("SELECT device_id FROM device_bridge_devices")) {
       return { rows: state.devices.has(params[0]) ? [{ device_id: params[0] }] : [] };
     }
-    if (normalized.includes("FROM tinder_conversation_messages")) {
+    if (normalized.startsWith("SELECT") && normalized.includes("FROM tinder_conversation_messages")) {
       const rows = (state.messages.get(params[0]) || [])
         .slice()
         .sort((left, right) => left.ordinal - right.ordinal)
@@ -215,6 +215,15 @@ test("thin mirror payload only accepts ordinary product fields", () => {
     }),
     (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"
   );
+  assert.throws(
+    () => normalizeTinderMirrorPayload({
+      direct_continuity_repair: true,
+      profile: profile(),
+      messages: [message("INBOUND", "Hello")],
+      history_complete: true
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"
+  );
 });
 
 test("history merge uses ordered overlap and retains repeated equal messages at different positions", () => {
@@ -288,6 +297,28 @@ test("Appium adapter holds only RAM sweep continuity and requires a verified old
   assert.deepEqual(requests[1].observation.messages.map((item) => item.text), ["A", "B", "C"]);
   adapter.clear();
   assert.throws(() => adapter.appendViewport([message("INBOUND", "x")]), /No Tinder conversation/);
+});
+
+test("Appium adapter carries direct continuity only for an explicitly selected completed-history repair", async () => {
+  const requests = [];
+  const adapter = createTinderAppiumAdapter({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    transport: {
+      async resolve(request) { requests.push({ type: "resolve", ...request }); return { action: "READ_HISTORY", conversation: null }; },
+      async sync(request) { requests.push({ type: "sync", ...request }); return { created: false, conversation: { id: "00000000-0000-4000-8000-000000000002" } }; }
+    }
+  });
+  adapter.start({
+    profile: profile(),
+    messages: [message("INBOUND", "Verified current")],
+    continuationConversationId: "00000000-0000-4000-8000-000000000002",
+    directContinuityRepair: true
+  });
+  await adapter.persistCompletedHistory({ oldestBoundaryReached: true });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].type, "sync");
+  assert.equal(requests[0].observation.direct_continuity_repair, true);
+  assert.equal(requests[0].observation.continuation_conversation_id, "00000000-0000-4000-8000-000000000002");
 });
 
 test("history overlap keeps direction corrections from a verified bubble container", () => {
@@ -453,6 +484,90 @@ test("a selected existing continuation fails closed instead of creating a second
   assert.equal(pool.state.deleteMessageCalls, 0);
 });
 
+test("a selected direct-continuity repair replaces only that existing conversation history in place", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({
+    pool,
+    now: () => new Date("2026-09-24T10:00:00.000Z"),
+    idFactory: () => "00000000-0000-4000-8000-000000000099"
+  });
+  const initial = {
+    profile: profile({ city: "Example city", age: "30" }),
+    messages: [message("OUTBOUND", "Incorrect old one"), message("INBOUND", "Incorrect old two")],
+    history_complete: true
+  };
+  const created = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload: initial });
+  const repairedMessages = [
+    message("INBOUND", "Real oldest"),
+    message("OUTBOUND", "Real middle"),
+    message("INBOUND", "Real newest")
+  ];
+
+  const repaired = await mirror.sync({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    payload: {
+      continuation_conversation_id: created.conversation.id,
+      direct_continuity_repair: true,
+      profile: initial.profile,
+      messages: repairedMessages,
+      history_complete: true
+    }
+  });
+
+  const rows = pool.state.messages.get(created.conversation.id).slice().sort((left, right) => left.ordinal - right.ordinal);
+  assert.equal(repaired.created, false);
+  assert.equal(repaired.conversation.id, created.conversation.id);
+  assert.equal(repaired.history_changed, true);
+  assert.deepEqual(rows.map((row) => ({ direction: row.direction, text: row.message_text })), repairedMessages.map(({ direction, text }) => ({ direction, text })));
+  assert.deepEqual(pool.state.conversations.get(created.conversation.id).profile, initial.profile);
+  assert.equal((await mirror.list()).length, 1);
+  assert.equal(pool.state.deleteMessageCalls, 1);
+
+  await assert.rejects(
+    mirror.sync({
+      deviceId: "00000000-0000-4000-8000-000000000001",
+      payload: {
+        continuation_conversation_id: "00000000-0000-4000-8000-000000000098",
+        direct_continuity_repair: true,
+        profile: initial.profile,
+        messages: repairedMessages,
+        history_complete: true
+      }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_CONTINUATION_UNVERIFIED"
+  );
+  assert.equal((await mirror.list()).length, 1);
+
+  await assert.rejects(
+    mirror.sync({
+      deviceId: "00000000-0000-4000-8000-000000000001",
+      payload: {
+        continuation_conversation_id: created.conversation.id,
+        direct_continuity_repair: true,
+        profile: profile({ city: "Different city", age: "30" }),
+        messages: repairedMessages,
+        history_complete: true
+      }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_CONTINUATION_UNVERIFIED"
+  );
+  assert.equal((await mirror.list()).length, 1);
+
+  await assert.rejects(
+    mirror.resolve({
+      deviceId: "00000000-0000-4000-8000-000000000001",
+      payload: {
+        continuation_conversation_id: created.conversation.id,
+        direct_continuity_repair: true,
+        profile: initial.profile,
+        messages: repairedMessages,
+        history_complete: false
+      }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_DIRECT_CONTINUITY_REPAIR_SYNC_ONLY"
+  );
+});
+
 test("an exact selected singleton continuation corrects direction in place without creating a conversation", async () => {
   const pool = createMemoryPool();
   const mirror = createTinderConversationMirror({
@@ -597,6 +712,14 @@ test("corrective runner uses an existing continuation and never turns a mismatch
   assert.match(runner, /history_persisted: false/);
   assert.match(runner, /threads_unrevalidated/);
   assert.ok(runner.indexOf("const resolved = await adapter.resolve()") < runner.indexOf("const synced = await adapter.persistCompletedHistory"));
+});
+
+test("corrective runner limits direct history replacement to one explicitly selected existing target", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
+  assert.match(runner, /TINDER_BLOCK2_DIRECT_REPAIR_CONVERSATION_ID/);
+  assert.match(runner, /const directContinuityRepair = directRepairConversationId === existing\.id/);
+  assert.match(runner, /if \(!directContinuityRepair\) \{/);
+  assert.match(runner, /directContinuityRepair/);
 });
 
 test("corrective runner plans only overlap-capable unique existing records before an Inbox tap", () => {

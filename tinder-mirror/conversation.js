@@ -122,13 +122,23 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
   if (!plainObject(value)) {
     throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "payload must be an object");
   }
-  const allowed = new Set(["continuation_conversation_id", "profile", "messages", "history_complete"]);
+  const allowed = new Set(["continuation_conversation_id", "direct_continuity_repair", "profile", "messages", "history_complete"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "payload contains unsupported fields");
   }
   const continuation = value.continuation_conversation_id;
   if (continuation !== undefined && continuation !== null && (!UUID_V4.test(continuation))) {
     throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "continuation conversation id is invalid");
+  }
+  const directContinuityRepair = value.direct_continuity_repair === true;
+  if (value.direct_continuity_repair !== undefined && typeof value.direct_continuity_repair !== "boolean") {
+    throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "direct continuity repair is invalid");
+  }
+  if (directContinuityRepair && !continuation) {
+    throw new TinderMirrorError(
+      "INVALID_TINDER_MIRROR_PAYLOAD",
+      "direct continuity repair requires its selected existing conversation"
+    );
   }
   if (!Array.isArray(value.messages) || value.messages.length < 1 || value.messages.length > MAX_MESSAGES) {
     throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "messages are invalid");
@@ -141,6 +151,7 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
   }
   return Object.freeze({
     continuation_conversation_id: continuation || null,
+    direct_continuity_repair: directContinuityRepair,
     profile: normalizeTinderProfile(value.profile),
     messages: Object.freeze(value.messages.map(normalizeTinderMessage)),
     history_complete: value.history_complete
@@ -530,6 +541,17 @@ async function reconcileMessagesInPlace(client, conversationId, existingRows, de
   await insertMessages(client, conversationId, after, { startOrdinal: existingAt + existingRows.length });
 }
 
+/*
+ * The direct-continuity repair path is deliberately separate from normal
+ * recognition.  It is available only for an explicitly selected existing
+ * record after the caller has kept the same verified chat open through a
+ * complete history read.  It never creates or selects a Conversation.
+ */
+async function replaceMessagesInPlace(client, conversationId, desiredMessages) {
+  await client.query("DELETE FROM tinder_conversation_messages WHERE conversation_id=$1", [conversationId]);
+  await insertMessages(client, conversationId, desiredMessages);
+}
+
 export function createTinderConversationMirror({ pool, now = () => new Date(), idFactory = crypto.randomUUID }) {
   if (!pool || typeof pool.connect !== "function") throw new TypeError("A PostgreSQL pool is required");
 
@@ -538,6 +560,12 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
       throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "device id is invalid");
     }
     const observation = normalizeTinderMirrorPayload(payload);
+    if (observation.direct_continuity_repair) {
+      throw new TinderMirrorError(
+        "TINDER_DIRECT_CONTINUITY_REPAIR_SYNC_ONLY",
+        "Direct continuity repair is available only to the completed-history sync"
+      );
+    }
     const client = await pool.connect();
     try {
       await client.query("BEGIN READ ONLY");
@@ -571,10 +599,28 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
       // Serializing at the ordinary device row prevents concurrent adapters
       // from creating two initial records before either can be recognized.
       await assertExistingDevice(client, deviceId, { lock: true });
-      let conversation = await resolveStoredConversation(client, deviceId, observation, {
-        lock: true,
-        continuationRequired: Boolean(observation.continuation_conversation_id)
-      });
+      const directContinuityRepair = observation.direct_continuity_repair;
+      let conversation;
+      if (directContinuityRepair) {
+        conversation = await loadContinuationConversation(
+          client,
+          deviceId,
+          observation.continuation_conversation_id,
+          { lock: true }
+        );
+        if (!conversation || !profileDoesNotConflict(conversation.profile, observation.profile)) {
+          throw new TinderMirrorError(
+            "TINDER_CONTINUATION_UNVERIFIED",
+            "The selected existing conversation is unavailable for the direct continuity repair",
+            409
+          );
+        }
+      } else {
+        conversation = await resolveStoredConversation(client, deviceId, observation, {
+          lock: true,
+          continuationRequired: Boolean(observation.continuation_conversation_id)
+        });
+      }
       let created = false;
       let historyChanged = false;
 
@@ -603,7 +649,9 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
         historyChanged = true;
       } else {
         const mergedProfile = mergeTinderProfile(conversation.profile, observation.profile);
-        const mergedHistory = mergeTinderHistory(conversation.messages, observation.messages);
+        const mergedHistory = directContinuityRepair
+          ? observation.messages
+          : mergeTinderHistory(conversation.messages, observation.messages);
         const profileChanged = !profilesEqual(mergedProfile, conversation.profile);
         historyChanged = !historiesEqual(mergedHistory, conversation.messages);
         const completionChanged = Boolean(conversation.history_complete) !== observation.history_complete;
@@ -619,12 +667,16 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
               profileChanged, timestamp, historyChanged || completionChanged]
           );
           if (historyChanged) {
-            await reconcileMessagesInPlace(
-              client,
-              conversation.conversation_id,
-              conversation.messageRows,
-              mergedHistory
-            );
+            if (directContinuityRepair) {
+              await replaceMessagesInPlace(client, conversation.conversation_id, mergedHistory);
+            } else {
+              await reconcileMessagesInPlace(
+                client,
+                conversation.conversation_id,
+                conversation.messageRows,
+                mergedHistory
+              );
+            }
           }
         }
         conversation = {

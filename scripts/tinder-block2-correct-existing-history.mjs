@@ -24,8 +24,10 @@ const bearerToken = String(process.env.DASHBOARD_API_SECRET || "").trim();
 const limit = Number.parseInt(process.env.TINDER_BLOCK2_CORRECTION_LIMIT || "3", 10);
 const maxUpwardGestures = Number.parseInt(process.env.TINDER_BLOCK2_MAX_UPWARD_GESTURES || "80", 10);
 const installedBridgeVersionCode = Number.parseInt(process.env.TINDER_DEVICE_VERSION_CODE || "", 10);
+const directRepairConversationId = String(process.env.TINDER_BLOCK2_DIRECT_REPAIR_CONVERSATION_ID || "").trim();
 const scrollSettleMilliseconds = 3000;
 const boundarySettleMilliseconds = 4500;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 if (!sessionId) throw new Error("APPIUM_SESSION is required");
 if (!bearerToken) throw new Error("DASHBOARD_API_SECRET is required");
@@ -35,6 +37,9 @@ if (!Number.isInteger(maxUpwardGestures) || maxUpwardGestures < 3 || maxUpwardGe
 }
 if (!Number.isInteger(installedBridgeVersionCode) || installedBridgeVersionCode < 0) {
   throw new Error("TINDER_DEVICE_VERSION_CODE must be the installed Bridge version code");
+}
+if (directRepairConversationId && !UUID_V4.test(directRepairConversationId)) {
+  throw new Error("TINDER_BLOCK2_DIRECT_REPAIR_CONVERSATION_ID must be an existing conversation id");
 }
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -165,13 +170,16 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
     bearerToken
   });
   const adapter = createTinderAppiumAdapter({ deviceId, transport });
-  // This runner corrects an already selected existing record only.  The
-  // backend still requires ordered overlap, or the narrow exact-singleton
-  // continuation check, and rejects rather than creates on any mismatch.
+  const directContinuityRepair = directRepairConversationId === existing.id;
+  // This runner corrects an already selected existing record only.  Normal
+  // reopens still require ordered overlap.  The separately selected direct
+  // repair target is allowed only because this exact chat stays open through
+  // the verified full-history read below; it never creates a Conversation.
   adapter.start({
     profile: existing.profile,
     messages: viewport.messages,
-    continuationConversationId: existing.id
+    continuationConversationId: existing.id,
+    directContinuityRepair
   });
 
   let assembled = viewport.messages;
@@ -220,22 +228,24 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
 
     // The full, bounded history is now in RAM.  Revalidate the selected
     // existing conversation only here, where ordered overlap can be proven.
-    const resolved = await adapter.resolve();
-    const resolvedExisting = resolved?.conversation?.id === existing.id;
-    if (!resolvedExisting) {
-      // This is deliberately a local no-mutation result, not a persisted
-      // skip/state.  A legacy record without the required ordered overlap
-      // remains untouched, but cannot prevent other independently
-      // revalidatable existing conversations from being corrected.
-      return Object.freeze({
-        conversation_id: existing.id,
-        messages: assembled.length,
-        inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
-        outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
-        gestures: gestures + 2,
-        oldest_boundary_reached: true,
-        history_persisted: false
-      });
+    if (!directContinuityRepair) {
+      const resolved = await adapter.resolve();
+      const resolvedExisting = resolved?.conversation?.id === existing.id;
+      if (!resolvedExisting) {
+        // This is deliberately a local no-mutation result, not a persisted
+        // skip/state.  A legacy record without the required ordered overlap
+        // remains untouched, but cannot prevent other independently
+        // revalidatable existing conversations from being corrected.
+        return Object.freeze({
+          conversation_id: existing.id,
+          messages: assembled.length,
+          inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
+          outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
+          gestures: gestures + 2,
+          oldest_boundary_reached: true,
+          history_persisted: false
+        });
+      }
     }
 
     const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: true });

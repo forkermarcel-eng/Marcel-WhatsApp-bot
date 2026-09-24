@@ -13,11 +13,15 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
   }
   let state = null;
 
-  function start({ profile, messages, continuationConversationId = null }) {
+  function start({ profile, messages, continuationConversationId = null, directContinuityRepair = false }) {
+    if (typeof directContinuityRepair !== "boolean") {
+      throw new TypeError("directContinuityRepair must be a boolean");
+    }
     state = {
       profile,
       messages: [...messages],
-      continuation_conversation_id: continuationConversationId
+      continuation_conversation_id: continuationConversationId,
+      direct_continuity_repair: directContinuityRepair
     };
   }
 
@@ -31,6 +35,7 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
     if (!state) throw new Error("No Tinder conversation is active");
     return normalizeTinderMirrorPayload({
       continuation_conversation_id: state.continuation_conversation_id,
+      ...(state.direct_continuity_repair ? { direct_continuity_repair: true } : {}),
       profile: state.profile,
       messages: state.messages,
       history_complete: historyComplete

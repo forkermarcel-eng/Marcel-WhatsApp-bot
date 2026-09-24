@@ -15,6 +15,14 @@ import {
   preflightTinderConversationMirror
 } from "../tinder-mirror/migration.js";
 import { createTinderAppiumAdapter } from "../tinder-mirror/appium-adapter.js";
+import {
+  classifyBubbleDirection,
+  classifyMessageTextNode,
+  flattenUiNodes,
+  parseUiAutomatorXml,
+  screenBounds
+} from "../tinder-mirror/appium-ui-observer.js";
+import { observeInboxConversationRowsFromXml } from "../tinder-mirror/appium-conversation-reader.js";
 
 const profile = (attributes = { city: "Example city" }) => ({
   display_name: "Example profile",
@@ -29,11 +37,14 @@ const message = (direction, text, visibleTime = null) => ({
   visible_status: null
 });
 
+const zteScreen = { left: 0, top: 0, right: 576, bottom: 1280, width: 576, height: 1280 };
+
 function createMemoryPool() {
   const state = {
     devices: new Set(["00000000-0000-4000-8000-000000000001"]),
     conversations: new Map(),
-    messages: new Map()
+    messages: new Map(),
+    deleteMessageCalls: 0
   };
   const rowsForConversation = (conversation) => conversation ? [{ ...conversation }] : [];
   async function query(sql, params = []) {
@@ -43,7 +54,10 @@ function createMemoryPool() {
       return { rows: state.devices.has(params[0]) ? [{ device_id: params[0] }] : [] };
     }
     if (normalized.includes("FROM tinder_conversation_messages")) {
-      const rows = (state.messages.get(params[0]) || []).map((item) => ({ ...item }));
+      const rows = (state.messages.get(params[0]) || [])
+        .slice()
+        .sort((left, right) => left.ordinal - right.ordinal)
+        .map((item) => ({ ...item }));
       return { rows };
     }
     if (normalized.includes("FROM tinder_conversations") && normalized.includes("profile->>'display_name'")) {
@@ -52,16 +66,17 @@ function createMemoryPool() {
         .map((item) => ({ ...item }));
       return { rows };
     }
-    if (normalized.includes("FROM tinder_conversations") && normalized.includes("conversation_id=$1")) {
-      return { rows: rowsForConversation(state.conversations.get(params[0])) };
+    if (normalized.includes("FROM tinder_conversations") && normalized.includes("conversation_id=$")) {
+      const conversationId = normalized.includes("conversation_id=$2") ? params[1] : params[0];
+      return { rows: rowsForConversation(state.conversations.get(conversationId)) };
     }
     if (normalized.startsWith("INSERT INTO tinder_conversations")) {
-      const [conversationId, deviceId, serializedProfile, timestamp] = params;
+      const [conversationId, deviceId, serializedProfile, historyComplete, timestamp] = params;
       state.conversations.set(conversationId, {
         conversation_id: conversationId,
         device_id: deviceId,
         profile: JSON.parse(serializedProfile),
-        history_complete: true,
+        history_complete: historyComplete,
         profile_synced_at: timestamp,
         history_synced_at: timestamp,
         created_at: timestamp,
@@ -70,21 +85,34 @@ function createMemoryPool() {
       return { rows: [] };
     }
     if (normalized.startsWith("DELETE FROM tinder_conversation_messages")) {
+      state.deleteMessageCalls += 1;
       state.messages.set(params[0], []);
       return { rows: [] };
     }
     if (normalized.startsWith("INSERT INTO tinder_conversation_messages")) {
-      const [, conversationId, ordinal, direction, text, visibleTime, visibleStatus] = params;
+      const [messageId, conversationId, ordinal, direction, text, visibleTime, visibleStatus] = params;
       const rows = state.messages.get(conversationId) || [];
-      rows.push({ ordinal, direction, message_text: text, visible_time: visibleTime, visible_status: visibleStatus });
+      rows.push({ message_id: messageId, ordinal, direction, message_text: text, visible_time: visibleTime, visible_status: visibleStatus });
       state.messages.set(conversationId, rows);
       return { rows: [] };
     }
+    if (normalized.startsWith("UPDATE tinder_conversation_messages SET ordinal=ordinal+$2")) {
+      const [conversationId, offset] = params;
+      for (const row of state.messages.get(conversationId) || []) row.ordinal += offset;
+      return { rows: [] };
+    }
+    if (normalized.startsWith("UPDATE tinder_conversation_messages SET ordinal=$3")) {
+      const [conversationId, messageId, ordinal, direction, text, visibleTime, visibleStatus] = params;
+      const row = (state.messages.get(conversationId) || []).find((item) => item.message_id === messageId);
+      if (!row) throw new Error("message row not found");
+      Object.assign(row, { ordinal, direction, message_text: text, visible_time: visibleTime, visible_status: visibleStatus });
+      return { rows: [] };
+    }
     if (normalized.startsWith("UPDATE tinder_conversations")) {
-      const [conversationId, serializedProfile, profileChanged, timestamp, historyChanged] = params;
+      const [conversationId, serializedProfile, historyComplete, profileChanged, timestamp, historyChanged] = params;
       const existing = state.conversations.get(conversationId);
       existing.profile = JSON.parse(serializedProfile);
-      existing.history_complete = true;
+      existing.history_complete = historyComplete;
       if (profileChanged) existing.profile_synced_at = timestamp;
       if (historyChanged) existing.history_synced_at = timestamp;
       if (profileChanged || historyChanged) existing.updated_at = timestamp;
@@ -233,7 +261,7 @@ test("exactly one compatible normal product record with ordered history is reusa
   ], observation), null);
 });
 
-test("Appium adapter holds only RAM sweep continuity and persists a completed assembled history", async () => {
+test("Appium adapter holds only RAM sweep continuity and requires a verified oldest boundary before completion", async () => {
   const requests = [];
   const adapter = createTinderAppiumAdapter({
     deviceId: "00000000-0000-4000-8000-000000000001",
@@ -251,12 +279,78 @@ test("Appium adapter holds only RAM sweep continuity and persists a completed as
   adapter.start({ profile: profile(), messages: [message("OUTBOUND", "B"), message("INBOUND", "C")] });
   adapter.appendViewport([message("INBOUND", "A"), message("OUTBOUND", "B")]);
   await adapter.resolve();
-  await adapter.persistCompletedHistory();
+  await assert.rejects(adapter.persistCompletedHistory(), /verified oldest history boundary/);
+  adapter.appendViewport([message("OUTBOUND", "B"), message("INBOUND", "C")]);
+  await assert.rejects(adapter.persistCompletedHistory({ oldestBoundaryReached: false }), /verified oldest history boundary/);
+  await adapter.persistCompletedHistory({ oldestBoundaryReached: true });
   assert.equal(requests[0].observation.history_complete, false);
   assert.equal(requests[1].observation.history_complete, true);
   assert.deepEqual(requests[1].observation.messages.map((item) => item.text), ["A", "B", "C"]);
   adapter.clear();
   assert.throws(() => adapter.appendViewport([message("INBOUND", "x")]), /No Tinder conversation/);
+});
+
+test("history overlap keeps direction corrections from a verified bubble container", () => {
+  const existing = [
+    message("OUTBOUND", "Older"),
+    message("OUTBOUND", "Long incoming"),
+    message("OUTBOUND", "Newest")
+  ];
+  const observed = [
+    message("INBOUND", "Older"),
+    message("INBOUND", "Long incoming"),
+    message("OUTBOUND", "Newest")
+  ];
+  const merged = mergeTinderHistory(existing, observed);
+  assert.deepEqual(merged.map((item) => item.direction), ["INBOUND", "INBOUND", "OUTBOUND"]);
+  assert.equal(largestContiguousOverlap(existing, observed), 1);
+  assert.equal(largestContiguousOverlap(existing, observed, { identityOnly: true }), 3);
+});
+
+test("current ZTE Tinder bubble edges classify wide incoming and right-anchored outgoing containers", () => {
+  assert.equal(classifyBubbleDirection({ left: 84, top: 546, right: 492, bottom: 681, width: 408, height: 135 }, zteScreen), "INBOUND");
+  assert.equal(classifyBubbleDirection({ left: 84, top: 209, right: 407, bottom: 282, width: 323, height: 73 }, zteScreen), "INBOUND");
+  assert.equal(classifyBubbleDirection({ left: 380, top: 341, right: 564, bottom: 414, width: 184, height: 73 }, zteScreen), "OUTBOUND");
+  assert.equal(classifyBubbleDirection({ left: 144, top: 740, right: 564, bottom: 937, width: 420, height: 197 }, zteScreen), "OUTBOUND");
+  assert.equal(classifyBubbleDirection({ left: 156, top: 315, right: 421, bottom: 341, width: 265, height: 26 }, zteScreen), null);
+});
+
+test("class-named UiAutomator2 XML keeps the verified same-bound FrameLayout as a bubble container", () => {
+  const root = parseUiAutomatorXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,152][576,1122]">
+          <android.view.ViewGroup bounds="[0,152][576,209]">
+            <android.widget.FrameLayout bounds="[144,152][564,200]">
+              <android.widget.TextView text="ordinary visible message" bounds="[144,152][564,200]" />
+            </android.widget.FrameLayout>
+          </android.view.ViewGroup>
+        </androidx.recyclerview.widget.RecyclerView>
+      </android.widget.FrameLayout>
+    </hierarchy>`);
+  const text = flattenUiNodes(root).find((node) => node.attributes.text);
+  assert.ok(text);
+  assert.equal(classifyMessageTextNode(text, screenBounds(root)), "OUTBOUND");
+});
+
+test("Inbox observation excludes semantic Match-/Like-CTA rows without naming a person", () => {
+  const rows = observeInboxConversationRowsFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,225][576,1122]">
+          <android.widget.FrameLayout bounds="[0,618][576,726]">
+            <android.widget.TextView text="Mag Dich" bounds="[80,630][220,680]" />
+            <android.widget.TextView text="Vor kurzem aktiv - jetzt matchen!" bounds="[80,680][500,710]" />
+          </android.widget.FrameLayout>
+          <android.widget.FrameLayout bounds="[0,726][576,846]">
+            <android.widget.TextView text="Ordinary existing message preview" bounds="[80,740][500,800]" />
+            <android.widget.TextView text="DU BIST DRAN" bounds="[360,740][540,780]" />
+          </android.widget.FrameLayout>
+        </androidx.recyclerview.widget.RecyclerView>
+      </android.widget.FrameLayout>
+    </hierarchy>`);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].bounds.top, 726);
 });
 
 test("one completed initial thread is created once and a later exact reopen skips history", async () => {
@@ -284,6 +378,79 @@ test("one completed initial thread is created once and a later exact reopen skip
   assert.equal(syncedAgain.history_changed, false);
   assert.equal((await mirror.list()).length, 1);
   assert.equal((await mirror.detail(created.conversation.id)).messages.length, 3);
+  assert.equal(pool.state.deleteMessageCalls, 0);
+});
+
+test("completed corrective re-sync preserves an existing conversation and message rows while adding older history", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({
+    pool,
+    now: () => new Date("2026-09-24T10:00:00.000Z"),
+    idFactory: () => "00000000-0000-4000-8000-000000000099"
+  });
+  const initial = {
+    profile: profile({ city: "Example city", age: "30" }),
+    messages: [message("OUTBOUND", "Current A"), message("OUTBOUND", "Current B")],
+    history_complete: true
+  };
+  const created = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload: initial });
+  const originalRows = pool.state.messages.get(created.conversation.id).map((row) => ({ ...row }));
+
+  const corrected = {
+    profile: initial.profile,
+    messages: [
+      message("INBOUND", "Older A"),
+      message("INBOUND", "Current A"),
+      message("OUTBOUND", "Current B")
+    ],
+    history_complete: true
+  };
+  const result = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload: corrected });
+  const rows = pool.state.messages.get(created.conversation.id).slice().sort((left, right) => left.ordinal - right.ordinal);
+
+  assert.equal(result.created, false);
+  assert.equal(result.conversation.id, created.conversation.id);
+  assert.equal(result.history_changed, true);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].message_id, originalRows[0].message_id);
+  assert.equal(rows[2].message_id, originalRows[1].message_id);
+  assert.equal(rows[1].direction, "INBOUND");
+  assert.equal(pool.state.deleteMessageCalls, 0);
+
+  const unchanged = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload: corrected });
+  assert.equal(unchanged.created, false);
+  assert.equal(unchanged.history_changed, false);
+  assert.equal(pool.state.messages.get(created.conversation.id).length, 3);
+  assert.equal(pool.state.deleteMessageCalls, 0);
+});
+
+test("a selected existing continuation fails closed instead of creating a second conversation", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({
+    pool,
+    now: () => new Date("2026-09-24T10:00:00.000Z"),
+    idFactory: () => "00000000-0000-4000-8000-000000000099"
+  });
+  const initial = {
+    profile: profile({ city: "Example city", age: "30" }),
+    messages: [message("INBOUND", "One"), message("OUTBOUND", "Two")],
+    history_complete: true
+  };
+  const created = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload: initial });
+  await assert.rejects(
+    mirror.sync({
+      deviceId: "00000000-0000-4000-8000-000000000001",
+      payload: {
+        continuation_conversation_id: created.conversation.id,
+        profile: initial.profile,
+        messages: [message("INBOUND", "Unrelated one"), message("OUTBOUND", "Unrelated two")],
+        history_complete: true
+      }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_CONTINUATION_UNVERIFIED"
+  );
+  assert.equal((await mirror.list()).length, 1);
+  assert.equal(pool.state.deleteMessageCalls, 0);
 });
 
 test("migration is additive, device-bound and has no retired prototype machinery", () => {

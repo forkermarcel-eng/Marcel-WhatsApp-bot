@@ -158,35 +158,53 @@ export function messagesEqual(left, right) {
     && sameOptionalText(left.visible_status, right.visible_status);
 }
 
-function sequenceMatchesAt(haystack, needle, start) {
-  return needle.every((message, offset) => messagesEqual(haystack[start + offset], message));
+/*
+ * Direction is a property that the observer can correct after seeing a
+ * bubble's real container.  It must not prevent the same ordered message
+ * from being recognized while that correction is being applied.  This is
+ * deliberately not a fingerprint: it is only an ordered equality check for
+ * the ordinary message fields already persisted by the mirror.
+ */
+export function messageIdentityEqual(left, right) {
+  return left.text === right.text
+    && sameOptionalText(left.visible_time, right.visible_time)
+    && sameOptionalText(left.visible_status, right.visible_status);
 }
 
-function containsSequence(haystack, needle) {
-  if (needle.length === 0) return true;
-  if (needle.length > haystack.length) return false;
+function sequenceMatchesAt(haystack, needle, start, equals = messagesEqual) {
+  return needle.every((message, offset) => equals(haystack[start + offset], message));
+}
+
+function findSequenceStart(haystack, needle, equals = messagesEqual) {
+  if (needle.length === 0) return 0;
+  if (needle.length > haystack.length) return -1;
   for (let start = 0; start <= haystack.length - needle.length; start += 1) {
-    if (sequenceMatchesAt(haystack, needle, start)) return true;
+    if (sequenceMatchesAt(haystack, needle, start, equals)) return start;
   }
-  return false;
+  return -1;
 }
 
-function boundaryOverlap(left, right) {
+function containsSequence(haystack, needle, equals = messagesEqual) {
+  return findSequenceStart(haystack, needle, equals) !== -1;
+}
+
+function boundaryOverlap(left, right, equals = messagesEqual) {
   const maximum = Math.min(left.length, right.length);
   for (let size = maximum; size > 0; size -= 1) {
-    if (sequenceMatchesAt(left, right.slice(0, size), left.length - size)) return size;
+    if (sequenceMatchesAt(left, right.slice(0, size), left.length - size, equals)) return size;
   }
   return 0;
 }
 
-export function largestContiguousOverlap(left, right) {
+export function largestContiguousOverlap(left, right, { identityOnly = false } = {}) {
+  const equals = identityOnly ? messageIdentityEqual : messagesEqual;
   let largest = 0;
   for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
     for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
       let size = 0;
       while (leftIndex + size < left.length
         && rightIndex + size < right.length
-        && messagesEqual(left[leftIndex + size], right[rightIndex + size])) {
+        && equals(left[leftIndex + size], right[rightIndex + size])) {
         size += 1;
       }
       largest = Math.max(largest, size);
@@ -203,16 +221,48 @@ export function largestContiguousOverlap(left, right) {
 export function mergeTinderHistory(existing, observed) {
   if (existing.length === 0) return [...observed];
   if (observed.length === 0) return [...existing];
-  if (containsSequence(existing, observed)) return [...existing];
-  if (containsSequence(observed, existing)) return [...observed];
 
-  const existingThenObserved = boundaryOverlap(existing, observed);
-  if (existingThenObserved > 0) {
-    return [...existing, ...observed.slice(existingThenObserved)];
+  const mergeObserved = (stored, fresh) => ({
+    direction: fresh.direction,
+    text: fresh.text,
+    visible_time: fresh.visible_time ?? stored.visible_time ?? null,
+    visible_status: fresh.visible_status ?? stored.visible_status ?? null
+  });
+  const overlay = (stored, fresh) => fresh.map((message, index) => mergeObserved(stored[index], message));
+
+  const observedInExistingAt = findSequenceStart(existing, observed, messageIdentityEqual);
+  if (observedInExistingAt !== -1) {
+    return [
+      ...existing.slice(0, observedInExistingAt),
+      ...overlay(existing.slice(observedInExistingAt, observedInExistingAt + observed.length), observed),
+      ...existing.slice(observedInExistingAt + observed.length)
+    ];
   }
-  const observedThenExisting = boundaryOverlap(observed, existing);
+
+  const existingInObservedAt = findSequenceStart(observed, existing, messageIdentityEqual);
+  if (existingInObservedAt !== -1) {
+    return [
+      ...observed.slice(0, existingInObservedAt),
+      ...overlay(existing, observed.slice(existingInObservedAt, existingInObservedAt + existing.length)),
+      ...observed.slice(existingInObservedAt + existing.length)
+    ];
+  }
+
+  const existingThenObserved = boundaryOverlap(existing, observed, messageIdentityEqual);
+  if (existingThenObserved > 0) {
+    return [
+      ...existing.slice(0, existing.length - existingThenObserved),
+      ...overlay(existing.slice(existing.length - existingThenObserved), observed.slice(0, existingThenObserved)),
+      ...observed.slice(existingThenObserved)
+    ];
+  }
+  const observedThenExisting = boundaryOverlap(observed, existing, messageIdentityEqual);
   if (observedThenExisting > 0) {
-    return [...observed, ...existing.slice(observedThenExisting)];
+    return [
+      ...observed.slice(0, observed.length - observedThenExisting),
+      ...overlay(existing.slice(0, observedThenExisting), observed.slice(observed.length - observedThenExisting)),
+      ...existing.slice(observedThenExisting)
+    ];
   }
   throw new TinderMirrorError(
     "TINDER_HISTORY_OVERLAP_UNVERIFIED",
@@ -261,7 +311,11 @@ function hasCompatibleProfileEvidence(storedValue, observedProfile) {
 
 export function selectConservativeConversationMatch(candidates, observation) {
   const matches = candidates.filter((candidate) => hasCompatibleProfileEvidence(candidate.profile, observation.profile)
-    && largestContiguousOverlap(candidate.messages || [], observation.messages) >= 2);
+    // A re-read can correct the UI-derived direction while every ordinary
+    // product field is unchanged.  Direction therefore cannot be a matching
+    // precondition here; profile evidence and two ordered ordinary messages
+    // still make an ambiguous match fail closed.
+    && largestContiguousOverlap(candidate.messages || [], observation.messages, { identityOnly: true }) >= 2);
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -337,13 +391,21 @@ async function assertExistingDevice(client, deviceId, { lock = false } = {}) {
 
 async function readConversationMessages(client, conversationId, { lock = false } = {}) {
   const result = await client.query(
-    `SELECT ordinal, direction, message_text, visible_time, visible_status
+    `SELECT message_id, ordinal, direction, message_text, visible_time, visible_status
        FROM tinder_conversation_messages
       WHERE conversation_id=$1
       ORDER BY ordinal ASC${lock ? " FOR UPDATE" : ""}`,
     [conversationId]
   );
-  return result.rows.map(dbMessage);
+  return result.rows;
+}
+
+function messagesFromRows(rows) {
+  return rows.map(dbMessage);
+}
+
+async function loadConversationMessageRows(client, conversationId, options = {}) {
+  return readConversationMessages(client, conversationId, options);
 }
 
 async function loadCandidateConversations(client, deviceId, displayName, { lock = false } = {}) {
@@ -356,10 +418,10 @@ async function loadCandidateConversations(client, deviceId, displayName, { lock 
       LIMIT 25${lock ? " FOR UPDATE" : ""}`,
     [deviceId, displayName]
   );
-  return Promise.all(result.rows.map(async (row) => ({
-    ...row,
-    messages: await readConversationMessages(client, row.conversation_id, { lock })
-  })));
+  return Promise.all(result.rows.map(async (row) => {
+    const messageRows = await loadConversationMessageRows(client, row.conversation_id, { lock });
+    return { ...row, messageRows, messages: messagesFromRows(messageRows) };
+  }));
 }
 
 async function loadContinuationConversation(client, deviceId, conversationId, { lock = false } = {}) {
@@ -372,33 +434,90 @@ async function loadContinuationConversation(client, deviceId, conversationId, { 
   );
   const row = result.rows[0];
   if (!row) return null;
-  return { ...row, messages: await readConversationMessages(client, row.conversation_id, { lock }) };
+  const messageRows = await loadConversationMessageRows(client, row.conversation_id, { lock });
+  return { ...row, messageRows, messages: messagesFromRows(messageRows) };
 }
 
-async function resolveStoredConversation(client, deviceId, observation, { lock = false } = {}) {
+async function resolveStoredConversation(client, deviceId, observation, { lock = false, continuationRequired = false } = {}) {
   if (observation.continuation_conversation_id) {
     const continuation = await loadContinuationConversation(client, deviceId, observation.continuation_conversation_id, { lock });
     if (continuation
       && profileDoesNotConflict(continuation.profile, observation.profile)
-      && largestContiguousOverlap(continuation.messages, observation.messages) >= 2) {
+      && largestContiguousOverlap(continuation.messages, observation.messages, { identityOnly: true }) >= 2) {
       return continuation;
+    }
+    if (continuationRequired) {
+      throw new TinderMirrorError(
+        "TINDER_CONTINUATION_UNVERIFIED",
+        "The selected existing conversation no longer matches the observed ordered history",
+        409
+      );
     }
   }
   const candidates = await loadCandidateConversations(client, deviceId, observation.profile.display_name, { lock });
   return selectConservativeConversationMatch(candidates, observation);
 }
 
-async function writeMessages(client, conversationId, messages) {
-  await client.query("DELETE FROM tinder_conversation_messages WHERE conversation_id=$1", [conversationId]);
+async function insertMessages(client, conversationId, messages, { startOrdinal = 0 } = {}) {
   for (const [ordinal, message] of messages.entries()) {
     await client.query(
       `INSERT INTO tinder_conversation_messages
          (message_id, conversation_id, ordinal, direction, message_text, visible_time, visible_status)
        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [crypto.randomUUID(), conversationId, ordinal, message.direction, message.text,
+      [crypto.randomUUID(), conversationId, startOrdinal + ordinal, message.direction, message.text,
         message.visible_time, message.visible_status]
     );
   }
+}
+
+function historiesEqual(left, right) {
+  return left.length === right.length && left.every((message, index) => messagesEqual(message, right[index]));
+}
+
+/*
+ * A completed re-read can prepend older messages and can fix a direction.
+ * Preserve every already stored row when its ordinary ordered identity still
+ * exists in the assembled history; only genuinely new messages are inserted.
+ * If that preservation cannot be proven, abort the transaction rather than
+ * delete or recreate a history.
+ */
+async function reconcileMessagesInPlace(client, conversationId, existingRows, desiredMessages) {
+  const storedMessages = messagesFromRows(existingRows);
+  const existingAt = findSequenceStart(desiredMessages, storedMessages, messageIdentityEqual);
+  if (existingAt === -1) {
+    throw new TinderMirrorError(
+      "TINDER_HISTORY_RECONCILIATION_UNVERIFIED",
+      "Existing history cannot be aligned with the completed observed history"
+    );
+  }
+
+  const mapped = existingRows.map((row, index) => ({ row, message: desiredMessages[existingAt + index], ordinal: existingAt + index }));
+  const requiresOrdinalShift = mapped.some(({ row, ordinal }) => Number(row.ordinal) !== ordinal);
+  if (requiresOrdinalShift) {
+    const largestStoredOrdinal = Math.max(-1, ...existingRows.map((row) => Number(row.ordinal)));
+    const offset = largestStoredOrdinal + desiredMessages.length + existingRows.length + 1;
+    await client.query(
+      "UPDATE tinder_conversation_messages SET ordinal=ordinal+$2 WHERE conversation_id=$1",
+      [conversationId, offset]
+    );
+  }
+
+  for (const { row, message, ordinal } of mapped) {
+    if (requiresOrdinalShift || Number(row.ordinal) !== ordinal || !messagesEqual(dbMessage(row), message)) {
+      await client.query(
+        `UPDATE tinder_conversation_messages
+            SET ordinal=$3, direction=$4, message_text=$5, visible_time=$6, visible_status=$7
+          WHERE conversation_id=$1 AND message_id=$2`,
+        [conversationId, row.message_id, ordinal, message.direction, message.text,
+          message.visible_time, message.visible_status]
+      );
+    }
+  }
+
+  const before = desiredMessages.slice(0, existingAt);
+  const after = desiredMessages.slice(existingAt + existingRows.length);
+  await insertMessages(client, conversationId, before, { startOrdinal: 0 });
+  await insertMessages(client, conversationId, after, { startOrdinal: existingAt + existingRows.length });
 }
 
 export function createTinderConversationMirror({ pool, now = () => new Date(), idFactory = crypto.randomUUID }) {
@@ -442,7 +561,10 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
       // Serializing at the ordinary device row prevents concurrent adapters
       // from creating two initial records before either can be recognized.
       await assertExistingDevice(client, deviceId, { lock: true });
-      let conversation = await resolveStoredConversation(client, deviceId, observation, { lock: true });
+      let conversation = await resolveStoredConversation(client, deviceId, observation, {
+        lock: true,
+        continuationRequired: Boolean(observation.continuation_conversation_id)
+      });
       let created = false;
       let historyChanged = false;
 
@@ -452,15 +574,15 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
           `INSERT INTO tinder_conversations
              (conversation_id, device_id, channel, profile, history_complete,
               profile_synced_at, history_synced_at, created_at, updated_at)
-           VALUES ($1,$2,'tinder',$3::jsonb,true,$4,$4,$4,$4)`,
-          [conversationId, deviceId, JSON.stringify(observation.profile), timestamp]
+           VALUES ($1,$2,'tinder',$3::jsonb,$4,$5,$5,$5,$5)`,
+          [conversationId, deviceId, JSON.stringify(observation.profile), observation.history_complete, timestamp]
         );
-        await writeMessages(client, conversationId, observation.messages);
+        await insertMessages(client, conversationId, observation.messages);
         conversation = {
           conversation_id: conversationId,
           device_id: deviceId,
           profile: observation.profile,
-          history_complete: true,
+          history_complete: observation.history_complete,
           profile_synced_at: timestamp,
           history_synced_at: timestamp,
           created_at: timestamp,
@@ -473,29 +595,36 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
         const mergedProfile = mergeTinderProfile(conversation.profile, observation.profile);
         const mergedHistory = mergeTinderHistory(conversation.messages, observation.messages);
         const profileChanged = !profilesEqual(mergedProfile, conversation.profile);
-        historyChanged = JSON.stringify(mergedHistory) !== JSON.stringify(conversation.messages);
-        if (profileChanged || historyChanged || !conversation.history_complete) {
+        historyChanged = !historiesEqual(mergedHistory, conversation.messages);
+        const completionChanged = Boolean(conversation.history_complete) !== observation.history_complete;
+        if (profileChanged || historyChanged || completionChanged) {
           await client.query(
             `UPDATE tinder_conversations
-                SET profile=$2::jsonb, history_complete=true,
-                    profile_synced_at=CASE WHEN $3 THEN $4 ELSE profile_synced_at END,
-                    history_synced_at=CASE WHEN $5 THEN $4 ELSE history_synced_at END,
-                    updated_at=$4
+                SET profile=$2::jsonb, history_complete=$3,
+                    profile_synced_at=CASE WHEN $4 THEN $5 ELSE profile_synced_at END,
+                    history_synced_at=CASE WHEN $6 THEN $5 ELSE history_synced_at END,
+                    updated_at=$5
               WHERE conversation_id=$1`,
-            [conversation.conversation_id, JSON.stringify(mergedProfile), profileChanged, timestamp, historyChanged]
+            [conversation.conversation_id, JSON.stringify(mergedProfile), observation.history_complete,
+              profileChanged, timestamp, historyChanged || completionChanged]
           );
-          if (historyChanged || !conversation.history_complete) {
-            await writeMessages(client, conversation.conversation_id, mergedHistory);
+          if (historyChanged) {
+            await reconcileMessagesInPlace(
+              client,
+              conversation.conversation_id,
+              conversation.messageRows,
+              mergedHistory
+            );
           }
         }
         conversation = {
           ...conversation,
           profile: mergedProfile,
           messages: mergedHistory,
-          history_complete: true,
+          history_complete: observation.history_complete,
           profile_synced_at: profileChanged ? timestamp : conversation.profile_synced_at,
-          history_synced_at: historyChanged ? timestamp : conversation.history_synced_at,
-          updated_at: profileChanged || historyChanged ? timestamp : conversation.updated_at
+          history_synced_at: historyChanged || completionChanged ? timestamp : conversation.history_synced_at,
+          updated_at: profileChanged || historyChanged || completionChanged ? timestamp : conversation.updated_at
         };
       }
       await client.query("COMMIT");
@@ -542,7 +671,7 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
       );
       const row = result.rows[0];
       if (!row) throw new TinderMirrorError("TINDER_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
-      const messages = await readConversationMessages(pool, conversationId);
+      const messages = messagesFromRows(await readConversationMessages(pool, conversationId));
       return {
         conversation: publicConversation(row, messages.length),
         messages: messages.map((message, index) => ({ order: index, ...message }))

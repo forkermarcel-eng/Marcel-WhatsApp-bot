@@ -43,7 +43,10 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
     return result;
   }
 
-  async function persistCompletedHistory() {
+  async function persistCompletedHistory({ oldestBoundaryReached } = {}) {
+    if (oldestBoundaryReached !== true) {
+      throw new Error("A verified oldest history boundary is required before completion can be persisted");
+    }
     const result = await transport.sync({ deviceId, observation: observation(true) });
     if (result?.conversation?.id) state.continuation_conversation_id = result.conversation.id;
     return result;

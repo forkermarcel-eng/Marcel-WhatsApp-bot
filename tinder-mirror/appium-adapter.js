@@ -42,7 +42,7 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
 
   function observation(historyComplete = false) {
     if (!state) throw new Error("No Tinder conversation is active");
-    return normalizeTinderMirrorPayload({
+    const normalized = normalizeTinderMirrorPayload({
       continuation_conversation_id: state.continuation_conversation_id,
       ...(state.direct_continuity_repair ? { direct_continuity_repair: true } : {}),
       profile: state.profile,
@@ -53,6 +53,15 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
         : { last_message_visible_time: state.last_message_visible_time }),
       ...(state.inbox_position === undefined ? {} : { inbox_position: state.inbox_position })
     });
+    // `has_*` is server-local normalization bookkeeping.  The ordinary
+    // dashboard transport accepts only source product fields and must never
+    // receive those helper flags as part of its public observation contract.
+    const {
+      has_last_message_visible_time: _hasLastMessageVisibleTime,
+      has_inbox_position: _hasInboxPosition,
+      ...wireObservation
+    } = normalized;
+    return Object.freeze(wireObservation);
   }
 
   async function resolve() {

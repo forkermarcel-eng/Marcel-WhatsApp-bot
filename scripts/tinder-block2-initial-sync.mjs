@@ -234,16 +234,28 @@ async function openFreshRow(row) {
   if (!target) throw new Error("The selected Tinder Inbox row changed before its tap");
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await tap(target.bounds);
-    for (let settle = 0; settle < 12; settle += 1) {
+    let conversationWithoutHeader = false;
+    for (let settle = 0; settle < 20; settle += 1) {
       await sleep(250);
       const source = await sourceXml();
       const viewport = observeConversationViewportFromXml(source);
-      if (viewport) return Object.freeze({ source, viewport });
+      // Tinder can project the chat RecyclerView and composer one render
+      // before its visible header text.  That is a transition, not a second
+      // Inbox target: remain on this same chat until the header itself is
+      // fresh and usable for the Profile/History continuity checks below.
+      if (viewport?.profile_display_name) return Object.freeze({ source, viewport });
+      if (viewport) {
+        conversationWithoutHeader = true;
+        continue;
+      }
       const inbox = observeInboxFromXml(source);
       if (!inbox) continue;
       if (!inbox.rows.some((candidate) => candidate.ram_key === row.ram_key)) {
         throw new Error("Tinder navigation drifted away from the selected row");
       }
+    }
+    if (conversationWithoutHeader) {
+      throw new Error("Tinder conversation did not settle to a verified visible header");
     }
     target = await freshRow(row.ram_key);
     if (!target) throw new Error("The selected Tinder Inbox row changed before its bounded retry");

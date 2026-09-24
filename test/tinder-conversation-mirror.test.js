@@ -342,6 +342,27 @@ test("exactly one compatible normal product record with ordered history is reusa
   ], observation), null);
 });
 
+test("a uniquely exact singleton reuses its complete stored product record without name-only matching", () => {
+  const observation = normalizeTinderMirrorPayload({
+    profile: profile({ city: "Example city", age: "30" }),
+    messages: [message("INBOUND", "Only ordinary message")],
+    history_complete: false
+  });
+  const candidate = {
+    id: "singleton",
+    profile: profile({ city: "Example city", age: "30" }),
+    messages: observation.messages
+  };
+  assert.equal(selectConservativeConversationMatch([candidate], observation), candidate);
+  assert.equal(selectConservativeConversationMatch([
+    candidate,
+    { ...candidate, id: "ambiguous-copy" }
+  ], observation), null);
+  assert.equal(selectConservativeConversationMatch([
+    { ...candidate, profile: profile({ city: "Different city", age: "30" }) }
+  ], observation), null);
+});
+
 test("Appium adapter holds only RAM sweep continuity and requires a verified oldest boundary before completion", async () => {
   const requests = [];
   const adapter = createTinderAppiumAdapter({
@@ -373,6 +394,8 @@ test("Appium adapter holds only RAM sweep continuity and requires a verified old
   assert.equal(requests[1].observation.history_complete, true);
   assert.equal(requests[1].observation.last_message_visible_time, "08:15");
   assert.equal(requests[1].observation.inbox_position, 2);
+  assert.equal(Object.hasOwn(requests[1].observation, "has_last_message_visible_time"), false);
+  assert.equal(Object.hasOwn(requests[1].observation, "has_inbox_position"), false);
   assert.deepEqual(requests[1].observation.messages.map((item) => item.text), ["A", "B", "C"]);
   adapter.clear();
   assert.throws(() => adapter.appendViewport([message("INBOUND", "x")]), /No Tinder conversation/);
@@ -1020,6 +1043,8 @@ test("normal initial mirror is a separate Appium Inbox loop with CTA exclusion, 
   assert.match(runner, /headerProfileTargetFromXml/);
   assert.match(runner, /observeProfileFromXml/);
   assert.match(runner, /async function openFreshRow/);
+  assert.match(runner, /viewport\?\.profile_display_name/);
+  assert.match(runner, /conversationWithoutHeader/);
   assert.match(runner, /async function readProfileToPhysicalBoundary/);
   assert.match(runner, /async function readChatToVerifiedOldestBoundary/);
   assert.match(runner, /const chatScrollPercent = 0\.45/);

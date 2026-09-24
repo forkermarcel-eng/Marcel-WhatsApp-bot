@@ -371,12 +371,27 @@ function hasCompatibleProfileEvidence(storedValue, observedProfile) {
 }
 
 export function selectConservativeConversationMatch(candidates, observation) {
-  const matches = candidates.filter((candidate) => hasCompatibleProfileEvidence(candidate.profile, observation.profile)
-    // A re-read can correct the UI-derived direction while every ordinary
-    // product field is unchanged.  Direction therefore cannot be a matching
-    // precondition here; profile evidence and two ordered ordinary messages
-    // still make an ambiguous match fail closed.
-    && largestContiguousOverlap(candidate.messages || [], observation.messages, { identityOnly: true }) >= 2);
+  const matches = candidates.filter((candidate) => {
+    const messages = candidate.messages || [];
+    const ordinaryOrderedOverlap = hasCompatibleProfileEvidence(candidate.profile, observation.profile)
+      // A re-read can correct the UI-derived direction while every ordinary
+      // product field is unchanged.  Direction therefore cannot be a matching
+      // precondition here; profile evidence and two ordered ordinary messages
+      // still make an ambiguous match fail closed.
+      && largestContiguousOverlap(messages, observation.messages, { identityOnly: true }) >= 2;
+
+    // A complete one-message thread has no possible two-message overlap.
+    // When exactly one existing record has the same complete stored profile
+    // and the same sole ordinary message, reuse that ordinary product record
+    // instead of manufacturing a second copy.  This is not name-only, a new
+    // identifier, or a heuristic fingerprint; multiple matching candidates
+    // still return null below and remain deliberately unmerged.
+    const uniqueExactSingleton = messages.length === 1
+      && observation.messages.length === 1
+      && profilesEqual(candidate.profile, observation.profile)
+      && messageIdentityEqual(messages[0], observation.messages[0]);
+    return ordinaryOrderedOverlap || uniqueExactSingleton;
+  });
   return matches.length === 1 ? matches[0] : null;
 }
 

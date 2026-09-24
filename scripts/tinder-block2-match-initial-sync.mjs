@@ -226,7 +226,10 @@ async function carouselAtLeadingEdge(runtime, { maxGestures }) {
   let noProgress = 0;
   for (let gesture = 0; gesture < maxGestures; gesture += 1) {
     const before = carousel;
-    const canScrollMore = await runtime.scrollCarousel(before.scroll_bounds, "right");
+    // The live Tinder carousel's visual leading edge is reached by moving
+    // its RecyclerView left.  From that edge, a rightward move preserves a
+    // suffix/prefix overlap in normal visual order.
+    const canScrollMore = await runtime.scrollCarousel(before.scroll_bounds, "left");
     await sleep(700);
     const fresh = await freshCarousel(runtime);
     if (!sameCarouselProjection(before, fresh)) {
@@ -239,7 +242,7 @@ async function carouselAtLeadingEdge(runtime, { maxGestures }) {
       if (noProgress < 3) continue;
       throw new Error("Tinder New-Matches carousel reported leading movement without a changed projection");
     }
-    const confirmed = await runtime.scrollCarousel(fresh.scroll_bounds, "right");
+    const confirmed = await runtime.scrollCarousel(fresh.scroll_bounds, "left");
     await sleep(700);
     const projection = await freshCarousel(runtime);
     if (!sameCarouselProjection(fresh, projection)) {
@@ -269,7 +272,7 @@ export async function discoverMatchInventory(runtime, { maxGestures }) {
 
   for (let gesture = 0; gesture < maxGestures; gesture += 1) {
     const before = carousel;
-    const canScrollMore = await runtime.scrollCarousel(before.scroll_bounds, "left");
+    const canScrollMore = await runtime.scrollCarousel(before.scroll_bounds, "right");
     await sleep(700);
     const fresh = await freshCarousel(runtime);
     if (!sameCarouselProjection(before, fresh)) {
@@ -288,7 +291,7 @@ export async function discoverMatchInventory(runtime, { maxGestures }) {
       if (noProgress < 3) continue;
       throw new Error("Tinder New-Matches carousel reported movement without a changed projection");
     }
-    const confirmed = await runtime.scrollCarousel(fresh.scroll_bounds, "left");
+    const confirmed = await runtime.scrollCarousel(fresh.scroll_bounds, "right");
     await sleep(700);
     const projection = await freshCarousel(runtime);
     if (!sameCarouselProjection(fresh, projection)) {

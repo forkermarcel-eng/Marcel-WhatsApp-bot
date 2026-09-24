@@ -84,3 +84,14 @@ test("the runner has a strict Phase 1 observation boundary and no tile/chat/prof
   assert.doesNotMatch(source, /permit|receipt|attestation/i);
   assert.match(source, /heartbeat_used_as_gate:\s*false/);
 });
+
+test("the real carousel traversal starts at the visual leading edge before preserving direct suffix-prefix overlap", () => {
+  const source = readFileSync(new URL("../scripts/tinder-block2-match-initial-sync.mjs", import.meta.url), "utf8");
+  const leading = source.slice(
+    source.indexOf("async function carouselAtLeadingEdge"),
+    source.indexOf("export async function discoverMatchInventory")
+  );
+  const inventory = source.slice(source.indexOf("export async function discoverMatchInventory"));
+  assert.equal((leading.match(/scrollCarousel\([^\n]+, "left"\)/g) || []).length, 2);
+  assert.equal((inventory.match(/scrollCarousel\([^\n]+, "right"\)/g) || []).length, 2);
+});

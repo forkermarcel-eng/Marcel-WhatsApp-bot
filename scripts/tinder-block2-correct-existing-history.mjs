@@ -110,7 +110,7 @@ function onlyExistingConversation(list, displayName) {
 
 async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
   let viewport = observeConversationViewportFromXml(source);
-  if (!viewport?.profile_display_name || viewport.messages.length < 2 || !viewport.scroll_bounds) {
+  if (!viewport?.profile_display_name || viewport.messages.length < 1 || !viewport.scroll_bounds) {
     throw new Error("Current Tinder conversation projection is not sufficient for a corrective read");
   }
   if (viewport.profile_display_name !== existing.profile.display_name) {
@@ -178,18 +178,54 @@ async function returnToInbox() {
   return rows;
 }
 
+async function freshInboxRow(ramKey) {
+  const rows = observeInboxConversationRowsFromXml(await sourceXml());
+  return rows.find((row) => row.ram_key === ramKey) || null;
+}
+
+async function waitForOpenedConversation(ramKey) {
+  let verifiedSameInbox = false;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await sleep(250);
+    const source = await sourceXml();
+    if (observeConversationViewportFromXml(source)) return source;
+
+    const row = observeInboxConversationRowsFromXml(source).find((candidate) => candidate.ram_key === ramKey);
+    if (row) {
+      verifiedSameInbox = true;
+      continue;
+    }
+
+    // A loading transition has neither a complete Inbox nor a complete chat
+    // projection.  It receives the remaining bounded settling interval, but
+    // never authorizes another target or an unverified retry.
+  }
+  return verifiedSameInbox ? null : undefined;
+}
+
 async function openNextConversation(processedRows) {
   const rows = observeInboxConversationRowsFromXml(await sourceXml());
   const next = rows.find((row) => !processedRows.has(row.ram_key));
   if (!next) return null;
-  processedRows.add(next.ram_key);
-  await tap(next.bounds);
-  await sleep(700);
-  const source = await sourceXml();
-  if (!observeConversationViewportFromXml(source)) {
-    throw new Error("A structurally valid Inbox row did not open a verified Tinder conversation");
+
+  // Revalidate the exact candidate immediately before action.  The second
+  // bounded attempt is permitted only when that same fresh Inbox row remains.
+  let target = await freshInboxRow(next.ram_key);
+  if (!target) throw new Error("The selected Tinder Inbox row changed before its tap");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await tap(target.bounds);
+    const source = await waitForOpenedConversation(next.ram_key);
+    if (source) {
+      processedRows.add(next.ram_key);
+      return source;
+    }
+    if (source === undefined) {
+      throw new Error("Tinder navigation did not settle to a verified Inbox or conversation");
+    }
+    target = await freshInboxRow(next.ram_key);
+    if (!target) throw new Error("The selected Tinder Inbox row changed before its bounded retry");
   }
-  return source;
+  throw new Error("A revalidated Tinder Inbox row did not open a verified Tinder conversation");
 }
 
 const deviceId = await resolveDeviceId();

@@ -518,3 +518,12 @@ test("corrective history runner binds the installed device version without a Bri
   assert.match(runner, /app_version_code/);
   assert.doesNotMatch(runner, /device\.enrollment_state|device\.bridge_service_state|device\.device_status|device\.last_heartbeat/i);
 });
+
+test("corrective history runner revalidates a fresh Inbox row and waits for the chat before marking it processed", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
+  assert.match(runner, /async function freshInboxRow/);
+  assert.match(runner, /async function waitForOpenedConversation/);
+  assert.match(runner, /for \(let attempt = 0; attempt < 2; attempt \+= 1\)/);
+  assert.match(runner, /processedRows\.add\(next\.ram_key\);/);
+  assert.doesNotMatch(runner, /processedRows\.add\(next\.ram_key\);\s*await tap/);
+});

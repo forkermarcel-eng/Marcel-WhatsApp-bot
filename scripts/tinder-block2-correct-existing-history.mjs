@@ -99,7 +99,10 @@ async function scrollUp(bounds) {
         width: bounds.width - inset * 2,
         height: bounds.height - Math.max(48, Math.round(bounds.height * 0.16)),
         direction: "up",
-        percent: 1.0
+        // On the verified ZTE chat RecyclerView this preserves an ordered
+        // overlap between adjacent viewports.  A full-length gesture skips
+        // past that overlap and must not be used for history assembly.
+        percent: 0.45
       }]
     }
   });
@@ -220,7 +223,19 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
     const resolved = await adapter.resolve();
     const resolvedExisting = resolved?.conversation?.id === existing.id;
     if (!resolvedExisting) {
-      throw new Error("Existing Tinder conversation could not be revalidated after its complete history was read");
+      // This is deliberately a local no-mutation result, not a persisted
+      // skip/state.  A legacy record without the required ordered overlap
+      // remains untouched, but cannot prevent other independently
+      // revalidatable existing conversations from being corrected.
+      return Object.freeze({
+        conversation_id: existing.id,
+        messages: assembled.length,
+        inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
+        outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
+        gestures: gestures + 2,
+        oldest_boundary_reached: true,
+        history_persisted: false
+      });
     }
 
     const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: true });
@@ -345,7 +360,7 @@ const profilesPreserved = sameIds && afterConversations.every((conversation) => 
 console.log(JSON.stringify({
   threads_corrected: results.length,
   threads_persisted: results.filter((result) => result.history_persisted).length,
-  threads_verified_unchanged: results.filter((result) => !result.history_persisted).length,
+  threads_unrevalidated: results.filter((result) => !result.history_persisted).length,
   conversations_created: afterConversations.length - beforeConversations.length,
   messages_read: results.reduce((total, result) => total + result.messages, 0),
   inbound_samples: results.reduce((total, result) => total + result.inbound_samples, 0),

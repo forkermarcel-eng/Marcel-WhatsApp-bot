@@ -581,6 +581,7 @@ test("corrective history runner requires the real UiAutomator chat-scroll bounda
   const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
   assert.match(runner, /script: "mobile: scrollGesture"/);
   assert.doesNotMatch(runner, /mobile: swipeGesture|unchangedViewportStreak/);
+  assert.match(runner, /percent: 0\.45/);
   assert.match(runner, /typeof canScrollMore !== "boolean"/);
   assert.match(runner, /await sleep\(boundarySettleMilliseconds\)/);
   assert.match(runner, /const confirmedAtBoundary = await scrollUp\(viewport\.scroll_bounds\)/);
@@ -591,8 +592,11 @@ test("corrective history runner requires the real UiAutomator chat-scroll bounda
 test("corrective runner uses an existing continuation and never turns a mismatch into a new conversation", () => {
   const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
   assert.match(runner, /continuationConversationId: existing\.id/);
-  assert.doesNotMatch(runner, /isVerifiedUnchangedSingleton|history_persisted: false/);
-  assert.match(runner, /could not be revalidated after its complete history was read/);
+  assert.doesNotMatch(runner, /isVerifiedUnchangedSingleton/);
+  assert.match(runner, /const resolvedExisting = resolved\?\.conversation\?\.id === existing\.id/);
+  assert.match(runner, /history_persisted: false/);
+  assert.match(runner, /threads_unrevalidated/);
+  assert.ok(runner.indexOf("const resolved = await adapter.resolve()") < runner.indexOf("const synced = await adapter.persistCompletedHistory"));
 });
 
 test("corrective runner plans only overlap-capable unique existing records before an Inbox tap", () => {

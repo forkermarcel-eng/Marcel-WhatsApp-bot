@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { decode } from "html-entities";
 import "../presentation.js";
 import { normalizeContactMediaItem, normalizePublicMediaRef } from "../services/contact-media.js";
 
@@ -12,12 +13,61 @@ const contactMedia = readFileSync(new URL("../services/contact-media.js", import
 const proxy = readFileSync(new URL("../api/dashboard/marcel-brain.js", import.meta.url), "utf8");
 const P = globalThis.MarcelPresentation;
 
-test("Tinder profile presentation prefers deterministic structured label-value rows and preserves readable fallback values", () => {
+function dashboardDecoder() {
+  const source = tinder.match(/function decodeStoredTinderText\(value\) \{[\s\S]*?\n    \}/)?.[0];
+  assert.ok(source, "Tinder dashboard entity decoder is present");
+  const parseCalls = [];
+  class LocalDomParser {
+    parseFromString(markup, type) {
+      parseCalls.push({ markup, type });
+      return { body: { textContent: decode(markup, { level: "html5", scope: "strict" }) } };
+    }
+  }
+  return {
+    decodeText: new Function("DOMParser", `${source}; return decodeStoredTinderText;`)(LocalDomParser),
+    parseCalls
+  };
+}
+
+function dashboardProfileRows() {
+  const { decodeText } = dashboardDecoder();
+  const source = tinder.match(/function profileDetailRows\(attributes\) \{[\s\S]*?\n    \}/)?.[0];
+  assert.ok(source, "Tinder dashboard profile row formatter is present");
+  return new Function("decodeStoredTinderText", `${source}; return profileDetailRows;`)(decodeText);
+}
+
+test("Tinder dashboard decodes existing entity text into safe text nodes", () => {
+  const { decodeText, parseCalls } = dashboardDecoder();
+  assert.equal(decodeText("line one&#10;line two &#x1F60D; &#128522; &ouml;"), "line one\nline two 😍 😊 ö");
+  assert.equal(decodeText("&#38;amp;"), "&amp;");
+  assert.equal(decodeText("<literal> &lt;tag&gt;"), "<literal> <tag>");
+  assert.equal(parseCalls.at(-1).type, "text/html");
+  assert.match(parseCalls.at(-1).markup, /&lt;literal&gt;/);
+  assert.doesNotMatch(tinder, /\.innerHTML/);
+  assert.match(tinder, /text\.textContent = decodeStoredTinderText\(message\.text\)/);
+});
+
+test("Tinder profile presentation prefers deterministic structured rows and unlabelled legacy fallback values", () => {
+  const profileRows = dashboardProfileRows();
+  assert.deepEqual(profileRows({
+    visible_profile_01: "Ignored legacy label",
+    visible_profile_02: "Ignored legacy value",
+    structured_profile_01_label: "Actual &ouml; label",
+    structured_profile_01_value: "line one&#10;line two &#x1F60D;"
+  }), [{ label: "Actual ö label", value: "line one\nline two 😍" }]);
+  assert.deepEqual(profileRows({
+    visible_profile_01: "line one&#10;line two",
+    visible_profile_02: "&#128522;"
+  }), [
+    { label: null, value: "line one\nline two" },
+    { label: null, value: "😊" }
+  ]);
   assert.match(tinder, /function profileDetailRows\(attributes\)/);
   assert.match(tinder, /\^structured_profile_\(\\d\{2\}\)_\(label\|value\)\$/);
-  assert.match(tinder, /const structuredKeys = new Set\(\);/);
+  assert.match(tinder, /if \(structured\.length\) return structured;/);
+  assert.match(tinder, /label: \/\^\(\?:visible_profile\|structured_profile\)/);
   assert.match(tinder, /for \(const \{ label, value \} of profileDetailRows\(profile\.attributes\)\)/);
-  assert.match(tinder, /if \(structuredKeys\.has\(key\)\) continue;/);
+  assert.match(tinder, /definition\.classList\.add\("tinder-profile-fallback"\)/);
   assert.match(tinder, /term\.textContent = label/);
   assert.match(tinder, /\.tinder-profile dd\{margin:0;white-space:pre-wrap;/);
 });

@@ -114,21 +114,6 @@ function onlyExistingConversation(list, displayName) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function sameOrdinaryMessage(left, right) {
-  return Boolean(left && right
-    && left.direction === right.direction
-    && left.text === right.text
-    && (left.visible_time ?? null) === (right.visible_time ?? null)
-    && (left.visible_status ?? null) === (right.visible_status ?? null));
-}
-
-async function isVerifiedUnchangedSingleton(existing, assembled) {
-  if (assembled.length !== 1 || Number(existing.message_count) !== 1) return false;
-  const detail = await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(existing.id)}`);
-  const stored = Array.isArray(detail.messages) ? detail.messages : [];
-  return stored.length === 1 && sameOrdinaryMessage(stored[0], assembled[0]);
-}
-
 async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
   let viewport = observeConversationViewportFromXml(source);
   if (!viewport?.profile_display_name || viewport.messages.length < 1 || !viewport.scroll_bounds) {
@@ -143,7 +128,14 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
     bearerToken
   });
   const adapter = createTinderAppiumAdapter({ deviceId, transport });
-  adapter.start({ profile: existing.profile, messages: viewport.messages });
+  // This runner corrects an already selected existing record only.  The
+  // backend still requires ordered overlap, or the narrow exact-singleton
+  // continuation check, and rejects rather than creates on any mismatch.
+  adapter.start({
+    profile: existing.profile,
+    messages: viewport.messages,
+    continuationConversationId: existing.id
+  });
 
   let assembled = viewport.messages;
   let gestures = 0;
@@ -194,18 +186,7 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
     const resolved = await adapter.resolve();
     const resolvedExisting = resolved?.conversation?.id === existing.id;
     if (!resolvedExisting) {
-      if (!await isVerifiedUnchangedSingleton(existing, assembled)) {
-        throw new Error("Existing Tinder conversation could not be revalidated after its complete history was read");
-      }
-      return Object.freeze({
-        conversation_id: existing.id,
-        messages: assembled.length,
-        inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
-        outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
-        gestures: gestures + 2,
-        oldest_boundary_reached: true,
-        history_persisted: false
-      });
+      throw new Error("Existing Tinder conversation could not be revalidated after its complete history was read");
     }
 
     const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: true });

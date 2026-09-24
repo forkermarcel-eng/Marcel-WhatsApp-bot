@@ -441,9 +441,19 @@ async function loadContinuationConversation(client, deviceId, conversationId, { 
 async function resolveStoredConversation(client, deviceId, observation, { lock = false, continuationRequired = false } = {}) {
   if (observation.continuation_conversation_id) {
     const continuation = await loadContinuationConversation(client, deviceId, observation.continuation_conversation_id, { lock });
+    const orderedOverlapVerified = continuation
+      && largestContiguousOverlap(continuation.messages, observation.messages, { identityOnly: true }) >= 2;
+    // A selected existing singleton has no possible two-message overlap.  This
+    // narrow continuation-only case permits correcting its observed bubble
+    // direction in place when its one ordinary message is otherwise exact.
+    // It is never used during ordinary candidate selection or record creation.
+    const exactSingletonContinuation = continuation
+      && continuation.messages.length === 1
+      && observation.messages.length === 1
+      && messageIdentityEqual(continuation.messages[0], observation.messages[0]);
     if (continuation
       && profileDoesNotConflict(continuation.profile, observation.profile)
-      && largestContiguousOverlap(continuation.messages, observation.messages, { identityOnly: true }) >= 2) {
+      && (orderedOverlapVerified || exactSingletonContinuation)) {
       return continuation;
     }
     if (continuationRequired) {

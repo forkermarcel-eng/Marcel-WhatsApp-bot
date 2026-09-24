@@ -453,6 +453,55 @@ test("a selected existing continuation fails closed instead of creating a second
   assert.equal(pool.state.deleteMessageCalls, 0);
 });
 
+test("an exact selected singleton continuation corrects direction in place without creating a conversation", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({
+    pool,
+    now: () => new Date("2026-09-24T10:00:00.000Z"),
+    idFactory: () => "00000000-0000-4000-8000-000000000099"
+  });
+  const initial = {
+    profile: profile({ city: "Example city", age: "30" }),
+    messages: [message("OUTBOUND", "Only ordinary message")],
+    history_complete: true
+  };
+  const created = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload: initial });
+  const originalRow = pool.state.messages.get(created.conversation.id)[0];
+
+  const corrected = await mirror.sync({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    payload: {
+      continuation_conversation_id: created.conversation.id,
+      profile: initial.profile,
+      messages: [message("INBOUND", "Only ordinary message")],
+      history_complete: true
+    }
+  });
+
+  const rows = pool.state.messages.get(created.conversation.id);
+  assert.equal(corrected.created, false);
+  assert.equal(corrected.conversation.id, created.conversation.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].message_id, originalRow.message_id);
+  assert.equal(rows[0].direction, "INBOUND");
+  assert.equal((await mirror.list()).length, 1);
+  assert.equal(pool.state.deleteMessageCalls, 0);
+
+  await assert.rejects(
+    mirror.sync({
+      deviceId: "00000000-0000-4000-8000-000000000001",
+      payload: {
+        continuation_conversation_id: created.conversation.id,
+        profile: initial.profile,
+        messages: [message("INBOUND", "Different ordinary message")],
+        history_complete: true
+      }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_CONTINUATION_UNVERIFIED"
+  );
+  assert.equal((await mirror.list()).length, 1);
+});
+
 test("migration is additive, device-bound and has no retired prototype machinery", () => {
   const migration = readFileSync(new URL("../migrations/20260924_tinder_conversation_mirror.sql", import.meta.url), "utf8");
   assert.match(migration, /CREATE TABLE tinder_conversations/);
@@ -539,10 +588,9 @@ test("corrective history runner requires the real UiAutomator chat-scroll bounda
   assert.ok(runner.indexOf("const resolved = await adapter.resolve()") > runner.indexOf("const confirmedAtBoundary = await scrollUp"));
 });
 
-test("a one-message correction candidate is no-op only after an exact unchanged product-data check", () => {
+test("corrective runner uses an existing continuation and never turns a mismatch into a new conversation", () => {
   const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
-  assert.match(runner, /async function isVerifiedUnchangedSingleton/);
-  assert.match(runner, /sameOrdinaryMessage\(stored\[0\], assembled\[0\]\)/);
-  assert.match(runner, /history_persisted: false/);
+  assert.match(runner, /continuationConversationId: existing\.id/);
+  assert.doesNotMatch(runner, /isVerifiedUnchangedSingleton|history_persisted: false/);
   assert.match(runner, /could not be revalidated after its complete history was read/);
 });

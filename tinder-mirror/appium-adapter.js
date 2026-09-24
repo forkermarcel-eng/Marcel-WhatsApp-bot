@@ -13,11 +13,11 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
   }
   let state = null;
 
-  function start({ profile, messages }) {
+  function start({ profile, messages, continuationConversationId = null }) {
     state = {
       profile,
       messages: [...messages],
-      continuation_conversation_id: null
+      continuation_conversation_id: continuationConversationId
     };
   }
 

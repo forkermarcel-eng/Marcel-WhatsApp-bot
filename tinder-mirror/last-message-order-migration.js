@@ -287,6 +287,10 @@ async function readCatalog(client) {
     JOIN pg_namespace namespace ON namespace.oid=rel.relnamespace
     LEFT JOIN pg_class ref ON ref.oid=con.confrelid
     WHERE namespace.nspname=current_schema() AND rel.relname=ANY($1::text[])
+      -- PostgreSQL 18 also exposes implicit NOT NULL constraints (contype=n)
+      -- here. Column nullability is checked separately, so only ordinary
+      -- schema constraints belong to this canonical comparison.
+      AND con.contype IN ('p','f','u','c')
     ORDER BY rel.relname, con.conname
   `, [TARGET_TABLES]);
   const indexes = await client.query(`

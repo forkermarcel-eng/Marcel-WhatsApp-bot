@@ -54,7 +54,7 @@ function baseConstraints() {
   ];
 }
 
-function createMigrationPool({ target = false, failOn = null, lockError = false, extraIndex = false } = {}) {
+function createMigrationPool({ target = false, failOn = null, lockError = false, extraIndex = false, includeNotNullConstraints = false } = {}) {
   const statements = [];
   const applied = new Set(target ? ["visible", "position", "check", "index"] : []);
   const counts = { conversations: 3, messages: 21 };
@@ -66,6 +66,18 @@ function createMigrationPool({ target = false, failOn = null, lockError = false,
   ];
   const constraints = () => [
     ...baseConstraints(),
+    ...(includeNotNullConstraints ? [{
+      table_name: "tinder_conversations",
+      contype: "n",
+      conname: "tinder_conversations_profile_not_null",
+      columns: ["profile"],
+      reference_table: null,
+      confdeltype: " ",
+      confupdtype: " ",
+      condeferrable: false,
+      condeferred: false,
+      definition: "NOT NULL profile"
+    }] : []),
     ...(applied.has("check") ? [{
       table_name: "tinder_conversations",
       contype: "c",
@@ -122,7 +134,12 @@ function createMigrationPool({ target = false, failOn = null, lockError = false,
       ] };
     }
     if (normalized.includes("FROM information_schema.columns")) return { rows: columns() };
-    if (normalized.includes("FROM pg_constraint con")) return { rows: constraints() };
+    if (normalized.includes("FROM pg_constraint con")) {
+      const rows = constraints();
+      return { rows: normalized.includes("con.contype IN ('p','f','u','c')")
+        ? rows.filter(row => ["p", "f", "u", "c"].includes(row.contype))
+        : rows };
+    }
     if (normalized.includes("FROM pg_index index_entry")) return { rows: indexes() };
     if (normalized.includes("FROM pg_trigger trigger")) return { rows: [{ count: 0 }] };
     if (normalized.includes("SELECT (SELECT COUNT(*)::int FROM tinder_conversations)")) {
@@ -164,6 +181,14 @@ test("ordering preflight accepts only the exact two-table baseline without writi
   assert.equal(result.state, "ELIGIBLE_FOR_MIGRATION");
   assert.deepEqual(result.counts, { conversations: 3, messages: 21 });
   assert.ok(pool.statements.includes("BEGIN READ ONLY"));
+  assert.equal(pool.statements.some(statement => /^(ALTER|CREATE|LOCK TABLE)/.test(statement)), false);
+});
+
+test("ordering preflight ignores PostgreSQL implicit NOT NULL catalog constraints", async () => {
+  const pool = createMigrationPool({ includeNotNullConstraints: true });
+  const result = await preflightTinderLastMessageOrder(pool);
+  assert.equal(result.state, "ELIGIBLE_FOR_MIGRATION");
+  assert.ok(pool.statements.some(statement => statement.includes("con.contype IN ('p','f','u','c')")));
   assert.equal(pool.statements.some(statement => /^(ALTER|CREATE|LOCK TABLE)/.test(statement)), false);
 });
 

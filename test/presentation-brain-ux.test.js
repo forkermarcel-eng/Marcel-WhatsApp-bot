@@ -210,11 +210,15 @@ test("contact preview and media foundation preserve source data", () => {
   assert.equal(sticker.metadata.stickerCatalog.favorite, null);
 });
 
-test("Tinder keeps the product shell without retired diagnostic or control UI", () => {
+test("Tinder renders ordinary Conversation, Chat and Profile product data without retired control UI", () => {
   assert.match(tinder, /<h2>Matches<\/h2>/);
   assert.match(tinder, /<h2>Conversations<\/h2>/);
   assert.match(tinder, /<h2>Chat<\/h2>/);
   assert.match(tinder, /<h2>Profil<\/h2>/);
+  assert.match(tinder, /api\/dashboard\/tinder/);
+  assert.match(tinder, /data-tinder-conversations/);
+  assert.match(tinder, /data-tinder-chat/);
+  assert.match(tinder, /data-tinder-profile/);
   assert.doesNotMatch(tinder, /Android Device Bridge|Technik &amp; Diagnose|Capture-Approval|Human-Mapping/);
-  assert.doesNotMatch(tinder, /<script[^>]*src=|\/api\//);
+  assert.doesNotMatch(tinder, /permit|receipt|attestation|heartbeat/i);
 });

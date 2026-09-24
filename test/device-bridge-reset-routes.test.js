@@ -127,11 +127,18 @@ test("reset route registration retains only generic signed and admin bridge endp
   ]);
 });
 
-test("active startup and package scripts contain no retired product entrypoint", () => {
+test("active startup retains no retired product entrypoint and exposes only focused Tinder mirror operations", () => {
   const index = fs.readFileSync(new URL("../index.js", import.meta.url), "utf8");
   const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
   assert.match(index, /initializeResetDeviceBridgeDatabase/);
   assert.match(index, /registerDeviceBridgeResetRoutes/);
-  assert.deepEqual(Object.keys(packageJson.scripts).filter((name) => /tinder/i.test(name)), []);
+  assert.deepEqual(Object.keys(packageJson.scripts).filter((name) => /tinder/i.test(name)), [
+    "test:tinder-mirror",
+    "preflight:tinder-conversation-mirror",
+    "migrate:tinder-conversation-mirror"
+  ]);
+  assert.equal(packageJson.scripts["test:tinder-mirror"], "node --test test/tinder-conversation-mirror.test.js");
+  assert.match(packageJson.scripts["preflight:tinder-conversation-mirror"], /--preflight/);
+  assert.match(packageJson.scripts["migrate:tinder-conversation-mirror"], /--apply/);
 });

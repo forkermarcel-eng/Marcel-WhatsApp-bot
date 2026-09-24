@@ -22,6 +22,7 @@ import {
 } from "./device-bridge/readiness.js";
 import { createContactMediaService } from "./services/contact-media.js";
 import { createContactIdentityService } from "./services/contact-identities.js";
+import { registerTinderMirrorRoutes } from "./tinder-mirror/routes.js";
 
 const { Pool } = pg;
 
@@ -8458,6 +8459,16 @@ registerDeviceBridgeResetRoutes({
   dashboardApiReady,
   dashboardApiAuthorized,
   requireDeviceBridgeReady
+});
+
+// Block 2 is intentionally independent of device heartbeat/readiness.  The
+// existing dashboard bearer protects the adapter transport; normal product
+// storage is device-bound by an ordinary foreign key only.
+registerTinderMirrorRoutes({
+  app,
+  pool,
+  dashboardApiReady,
+  dashboardApiAuthorized
 });
 
 

@@ -49,6 +49,44 @@ function nullableText(value, field, maximum) {
   return normalizedText(value, field, maximum);
 }
 
+function nullableNonNegativeInteger(value, field) {
+  if (value === undefined || value === null) return null;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", `${field} must be a non-negative integer`);
+  }
+  return value;
+}
+
+/*
+ * These are ordinary, source-faithful Inbox display fields.  They are not a
+ * timestamp parser or an identity mechanism: a missing source value remains
+ * missing, and an Inbox position exists only for the current verified sweep.
+ */
+export function normalizeTinderInboxOrder(value, { requireInboxPosition = false } = {}) {
+  if (!plainObject(value)) {
+    throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "Inbox order must be an object");
+  }
+  const allowed = new Set(["last_message_visible_time", "inbox_position"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "Inbox order contains unsupported fields");
+  }
+  const hasVisibleTime = Object.hasOwn(value, "last_message_visible_time");
+  const hasInboxPosition = Object.hasOwn(value, "inbox_position");
+  if (requireInboxPosition && (!hasInboxPosition || value.inbox_position === null)) {
+    throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "inbox_position is required");
+  }
+  return Object.freeze({
+    has_last_message_visible_time: hasVisibleTime,
+    last_message_visible_time: hasVisibleTime
+      ? nullableText(value.last_message_visible_time, "last_message_visible_time", 256)
+      : undefined,
+    has_inbox_position: hasInboxPosition,
+    inbox_position: hasInboxPosition
+      ? nullableNonNegativeInteger(value.inbox_position, "inbox_position")
+      : undefined
+  });
+}
+
 function normalizeMediaRef(value) {
   const reference = normalizedText(value, "profile.media_refs", 2_048);
   let url;
@@ -122,7 +160,15 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
   if (!plainObject(value)) {
     throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "payload must be an object");
   }
-  const allowed = new Set(["continuation_conversation_id", "direct_continuity_repair", "profile", "messages", "history_complete"]);
+  const allowed = new Set([
+    "continuation_conversation_id",
+    "direct_continuity_repair",
+    "profile",
+    "messages",
+    "history_complete",
+    "last_message_visible_time",
+    "inbox_position"
+  ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "payload contains unsupported fields");
   }
@@ -149,12 +195,16 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
   if (requireCompleteHistory && value.history_complete !== true) {
     throw new TinderMirrorError("TINDER_HISTORY_NOT_COMPLETE", "A completed reachable history is required before persistence");
   }
+  const inboxOrder = normalizeTinderInboxOrder(
+    Object.fromEntries(Object.entries(value).filter(([key]) => key === "last_message_visible_time" || key === "inbox_position"))
+  );
   return Object.freeze({
     continuation_conversation_id: continuation || null,
     direct_continuity_repair: directContinuityRepair,
     profile: normalizeTinderProfile(value.profile),
     messages: Object.freeze(value.messages.map(normalizeTinderMessage)),
-    history_complete: value.history_complete
+    history_complete: value.history_complete,
+    ...inboxOrder
   });
 }
 
@@ -367,6 +417,14 @@ function publicConversation(row, messageCount = null) {
     channel: "tinder",
     profile: asProfile(row.profile),
     history_complete: Boolean(row.history_complete),
+    // This is the exact, possibly partial label Tinder exposed in the Inbox;
+    // it is intentionally not parsed into an invented point in time.
+    last_message_visible_time: row.last_message_visible_time ?? null,
+    // Zero is the current top-most normal Inbox row.  NULL means no verified
+    // source order has been observed for this record yet.
+    inbox_position: row.inbox_position === undefined || row.inbox_position === null
+      ? null
+      : Number(row.inbox_position),
     profile_synced_at: row.profile_synced_at ? new Date(row.profile_synced_at).toISOString() : null,
     history_synced_at: row.history_synced_at ? new Date(row.history_synced_at).toISOString() : null,
     updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null,
@@ -422,7 +480,7 @@ async function loadConversationMessageRows(client, conversationId, options = {})
 async function loadCandidateConversations(client, deviceId, displayName, { lock = false } = {}) {
   const result = await client.query(
     `SELECT conversation_id, device_id, profile, history_complete, profile_synced_at,
-            history_synced_at, created_at, updated_at
+            history_synced_at, last_message_visible_time, inbox_position, created_at, updated_at
        FROM tinder_conversations
       WHERE device_id=$1 AND profile->>'display_name'=$2
       ORDER BY created_at ASC
@@ -438,7 +496,7 @@ async function loadCandidateConversations(client, deviceId, displayName, { lock 
 async function loadContinuationConversation(client, deviceId, conversationId, { lock = false } = {}) {
   const result = await client.query(
     `SELECT conversation_id, device_id, profile, history_complete, profile_synced_at,
-            history_synced_at, created_at, updated_at
+            history_synced_at, last_message_visible_time, inbox_position, created_at, updated_at
        FROM tinder_conversations
       WHERE device_id=$1 AND conversation_id=$2${lock ? " FOR UPDATE" : ""}`,
     [deviceId, conversationId]
@@ -623,15 +681,25 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
       }
       let created = false;
       let historyChanged = false;
+      let orderingChanged = false;
 
       if (!conversation) {
         const conversationId = idFactory();
         await client.query(
           `INSERT INTO tinder_conversations
              (conversation_id, device_id, channel, profile, history_complete,
-              profile_synced_at, history_synced_at, created_at, updated_at)
-           VALUES ($1,$2,'tinder',$3::jsonb,$4,$5,$5,$5,$5)`,
-          [conversationId, deviceId, JSON.stringify(observation.profile), observation.history_complete, timestamp]
+              profile_synced_at, history_synced_at, created_at, updated_at,
+              last_message_visible_time, inbox_position)
+           VALUES ($1,$2,'tinder',$3::jsonb,$4,$5,$5,$5,$5,$6,$7)`,
+          [
+            conversationId,
+            deviceId,
+            JSON.stringify(observation.profile),
+            observation.history_complete,
+            timestamp,
+            observation.last_message_visible_time ?? null,
+            observation.inbox_position ?? null
+          ]
         );
         await insertMessages(client, conversationId, observation.messages);
         conversation = {
@@ -641,6 +709,8 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
           history_complete: observation.history_complete,
           profile_synced_at: timestamp,
           history_synced_at: timestamp,
+          last_message_visible_time: observation.last_message_visible_time ?? null,
+          inbox_position: observation.inbox_position ?? null,
           created_at: timestamp,
           updated_at: timestamp,
           messages: observation.messages
@@ -655,16 +725,37 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
         const profileChanged = !profilesEqual(mergedProfile, conversation.profile);
         historyChanged = !historiesEqual(mergedHistory, conversation.messages);
         const completionChanged = Boolean(conversation.history_complete) !== observation.history_complete;
-        if (profileChanged || historyChanged || completionChanged) {
+        const nextVisibleTime = observation.has_last_message_visible_time
+          ? observation.last_message_visible_time
+          : conversation.last_message_visible_time ?? null;
+        const nextInboxPosition = observation.has_inbox_position
+          ? observation.inbox_position
+          : conversation.inbox_position ?? null;
+        orderingChanged = nextVisibleTime !== (conversation.last_message_visible_time ?? null)
+          || nextInboxPosition !== (conversation.inbox_position ?? null);
+        if (profileChanged || historyChanged || completionChanged || orderingChanged) {
           await client.query(
             `UPDATE tinder_conversations
                 SET profile=$2::jsonb, history_complete=$3,
-                    profile_synced_at=CASE WHEN $4 THEN $5 ELSE profile_synced_at END,
-                    history_synced_at=CASE WHEN $6 THEN $5 ELSE history_synced_at END,
-                    updated_at=$5
+                    last_message_visible_time=CASE WHEN $4 THEN $5 ELSE last_message_visible_time END,
+                    inbox_position=CASE WHEN $6 THEN $7 ELSE inbox_position END,
+                    profile_synced_at=CASE WHEN $8 THEN $9 ELSE profile_synced_at END,
+                    history_synced_at=CASE WHEN $10 THEN $9 ELSE history_synced_at END,
+                    updated_at=CASE WHEN $8 OR $10 OR $11 THEN $9 ELSE updated_at END
               WHERE conversation_id=$1`,
-            [conversation.conversation_id, JSON.stringify(mergedProfile), observation.history_complete,
-              profileChanged, timestamp, historyChanged || completionChanged]
+            [
+              conversation.conversation_id,
+              JSON.stringify(mergedProfile),
+              observation.history_complete,
+              observation.has_last_message_visible_time,
+              nextVisibleTime,
+              observation.has_inbox_position,
+              nextInboxPosition,
+              profileChanged,
+              timestamp,
+              historyChanged || completionChanged,
+              completionChanged
+            ]
           );
           if (historyChanged) {
             if (directContinuityRepair) {
@@ -684,6 +775,8 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
           profile: mergedProfile,
           messages: mergedHistory,
           history_complete: observation.history_complete,
+          last_message_visible_time: nextVisibleTime,
+          inbox_position: nextInboxPosition,
           profile_synced_at: profileChanged ? timestamp : conversation.profile_synced_at,
           history_synced_at: historyChanged || completionChanged ? timestamp : conversation.history_synced_at,
           updated_at: profileChanged || historyChanged || completionChanged ? timestamp : conversation.updated_at
@@ -693,7 +786,73 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
       return Object.freeze({
         created,
         history_changed: historyChanged,
+        ordering_changed: orderingChanged,
         conversation: publicConversation(conversation, conversation.messages.length)
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw mapDatabaseError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  /*
+   * A known, safely skipped conversation has no reason to submit its profile
+   * or history again merely to refresh its current official Inbox position.
+   * This deliberately updates only the two source-order product fields on an
+   * existing device-bound conversation; it cannot create a record or alter
+   * messages/profile/history.
+   */
+  async function updateInboxOrder({ deviceId, conversationId, inboxOrder }) {
+    if (!UUID_V4.test(deviceId || "")) {
+      throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "device id is invalid");
+    }
+    if (!UUID_V4.test(conversationId || "")) {
+      throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "conversation id is invalid");
+    }
+    const normalizedOrder = normalizeTinderInboxOrder(inboxOrder, { requireInboxPosition: true });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await assertExistingDevice(client, deviceId, { lock: true });
+      const conversation = await loadContinuationConversation(client, deviceId, conversationId, { lock: true });
+      if (!conversation) {
+        throw new TinderMirrorError(
+          "TINDER_CONVERSATION_NOT_FOUND",
+          "The selected Tinder conversation is unavailable for this device",
+          404
+        );
+      }
+      const nextVisibleTime = normalizedOrder.has_last_message_visible_time
+        ? normalizedOrder.last_message_visible_time
+        : conversation.last_message_visible_time ?? null;
+      const nextInboxPosition = normalizedOrder.inbox_position;
+      const changed = nextVisibleTime !== (conversation.last_message_visible_time ?? null)
+        || nextInboxPosition !== (conversation.inbox_position ?? null);
+      if (changed) {
+        await client.query(
+          `UPDATE tinder_conversations
+              SET last_message_visible_time=CASE WHEN $3 THEN $4 ELSE last_message_visible_time END,
+                  inbox_position=$5
+            WHERE conversation_id=$1 AND device_id=$2`,
+          [
+            conversationId,
+            deviceId,
+            normalizedOrder.has_last_message_visible_time,
+            nextVisibleTime,
+            nextInboxPosition
+          ]
+        );
+      }
+      await client.query("COMMIT");
+      return Object.freeze({
+        changed,
+        conversation: publicConversation({
+          ...conversation,
+          last_message_visible_time: nextVisibleTime,
+          inbox_position: nextInboxPosition
+        }, conversation.messages.length)
       });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -707,11 +866,12 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
     try {
       const result = await pool.query(
         `SELECT c.conversation_id, c.profile, c.history_complete, c.profile_synced_at,
-                c.history_synced_at, c.created_at, c.updated_at, COUNT(m.message_id)::int AS message_count
+                c.history_synced_at, c.last_message_visible_time, c.inbox_position,
+                c.created_at, c.updated_at, COUNT(m.message_id)::int AS message_count
            FROM tinder_conversations c
            LEFT JOIN tinder_conversation_messages m ON m.conversation_id=c.conversation_id
           GROUP BY c.conversation_id
-          ORDER BY c.updated_at DESC, c.created_at DESC`
+          ORDER BY c.inbox_position ASC NULLS LAST, c.conversation_id ASC`
       );
       return result.rows.map((row) => publicConversation(row, row.message_count));
     } catch (error) {
@@ -726,7 +886,7 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
     try {
       const result = await pool.query(
         `SELECT conversation_id, profile, history_complete, profile_synced_at,
-                history_synced_at, created_at, updated_at
+                history_synced_at, last_message_visible_time, inbox_position, created_at, updated_at
            FROM tinder_conversations
           WHERE conversation_id=$1`,
         [conversationId]
@@ -743,5 +903,5 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
     }
   }
 
-  return Object.freeze({ resolve, sync, list, detail });
+  return Object.freeze({ resolve, sync, updateInboxOrder, list, detail });
 }

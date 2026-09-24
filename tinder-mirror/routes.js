@@ -49,6 +49,32 @@ export function registerTinderMirrorRoutes({ app, pool, dashboardApiReady, dashb
     }
   });
 
+  // Existing completed threads may refresh their current official Inbox
+  // ordering without resubmitting a profile or history snapshot.
+  app.post("/dashboard-api/tinder/conversations/:conversationId/inbox-order", async (req, res) => {
+    if (!requireDashboardAccess(access, req, res)) return;
+    const deviceId = String(req.body?.device_id || "");
+    try {
+      return res.status(200).json({
+        ok: true,
+        ...(await mirror.updateInboxOrder({
+          deviceId,
+          conversationId: req.params.conversationId,
+          inboxOrder: {
+            ...(Object.hasOwn(req.body || {}, "last_message_visible_time")
+              ? { last_message_visible_time: req.body.last_message_visible_time }
+              : {}),
+            ...(Object.hasOwn(req.body || {}, "inbox_position")
+              ? { inbox_position: req.body.inbox_position }
+              : {})
+          }
+        }))
+      });
+    } catch (error) {
+      return errorResponse(res, error);
+    }
+  });
+
   app.get("/dashboard-api/tinder/conversations", async (req, res) => {
     if (!requireDashboardAccess(access, req, res)) return;
     try {

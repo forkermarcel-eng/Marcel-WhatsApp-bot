@@ -135,10 +135,15 @@ test("active startup retains no retired product entrypoint and exposes only focu
   assert.match(index, /registerDeviceBridgeResetRoutes/);
   assert.deepEqual(Object.keys(packageJson.scripts).filter((name) => /tinder/i.test(name)), [
     "test:tinder-mirror",
+    "test:tinder-last-message-order-migration",
     "preflight:tinder-conversation-mirror",
-    "migrate:tinder-conversation-mirror"
+    "migrate:tinder-conversation-mirror",
+    "preflight:tinder-block2-last-message-order",
+    "migrate:tinder-block2-last-message-order"
   ]);
   assert.equal(packageJson.scripts["test:tinder-mirror"], "node --test test/tinder-conversation-mirror.test.js");
   assert.match(packageJson.scripts["preflight:tinder-conversation-mirror"], /--preflight/);
   assert.match(packageJson.scripts["migrate:tinder-conversation-mirror"], /--apply/);
+  assert.match(packageJson.scripts["preflight:tinder-block2-last-message-order"], /--preflight/);
+  assert.match(packageJson.scripts["migrate:tinder-block2-last-message-order"], /--apply/);
 });

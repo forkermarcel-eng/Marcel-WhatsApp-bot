@@ -6,6 +6,7 @@ import {
   createTinderConversationMirror,
   largestContiguousOverlap,
   mergeTinderHistory,
+  normalizeTinderInboxOrder,
   normalizeTinderMirrorPayload,
   selectConservativeConversationMatch
 } from "../tinder-mirror/conversation.js";
@@ -22,7 +23,12 @@ import {
   parseUiAutomatorXml,
   screenBounds
 } from "../tinder-mirror/appium-ui-observer.js";
-import { observeInboxConversationRowsFromXml } from "../tinder-mirror/appium-conversation-reader.js";
+import {
+  headerProfileTargetFromXml,
+  observeInboxConversationRowsFromXml,
+  observeInboxFromXml,
+  observeProfileFromXml
+} from "../tinder-mirror/appium-conversation-reader.js";
 
 const profile = (attributes = { city: "Example city" }) => ({
   display_name: "Example profile",
@@ -71,7 +77,7 @@ function createMemoryPool() {
       return { rows: rowsForConversation(state.conversations.get(conversationId)) };
     }
     if (normalized.startsWith("INSERT INTO tinder_conversations")) {
-      const [conversationId, deviceId, serializedProfile, historyComplete, timestamp] = params;
+      const [conversationId, deviceId, serializedProfile, historyComplete, timestamp, lastMessageVisibleTime, inboxPosition] = params;
       state.conversations.set(conversationId, {
         conversation_id: conversationId,
         device_id: deviceId,
@@ -79,6 +85,8 @@ function createMemoryPool() {
         history_complete: historyComplete,
         profile_synced_at: timestamp,
         history_synced_at: timestamp,
+        last_message_visible_time: lastMessageVisibleTime ?? null,
+        inbox_position: inboxPosition ?? null,
         created_at: timestamp,
         updated_at: timestamp
       });
@@ -108,18 +116,48 @@ function createMemoryPool() {
       Object.assign(row, { ordinal, direction, message_text: text, visible_time: visibleTime, visible_status: visibleStatus });
       return { rows: [] };
     }
+    if (normalized.startsWith("UPDATE tinder_conversations SET last_message_visible_time")) {
+      const [conversationId, deviceId, hasVisibleTime, visibleTime, inboxPosition] = params;
+      const existing = state.conversations.get(conversationId);
+      if (!existing || existing.device_id !== deviceId) throw new Error("conversation row not found");
+      if (hasVisibleTime) existing.last_message_visible_time = visibleTime;
+      existing.inbox_position = inboxPosition;
+      return { rows: [] };
+    }
     if (normalized.startsWith("UPDATE tinder_conversations")) {
-      const [conversationId, serializedProfile, historyComplete, profileChanged, timestamp, historyChanged] = params;
+      const [
+        conversationId,
+        serializedProfile,
+        historyComplete,
+        hasVisibleTime,
+        visibleTime,
+        hasInboxPosition,
+        inboxPosition,
+        profileChanged,
+        timestamp,
+        historyChanged,
+        completionChanged
+      ] = params;
       const existing = state.conversations.get(conversationId);
       existing.profile = JSON.parse(serializedProfile);
       existing.history_complete = historyComplete;
+      if (hasVisibleTime) existing.last_message_visible_time = visibleTime;
+      if (hasInboxPosition) existing.inbox_position = inboxPosition;
       if (profileChanged) existing.profile_synced_at = timestamp;
       if (historyChanged) existing.history_synced_at = timestamp;
-      if (profileChanged || historyChanged) existing.updated_at = timestamp;
+      if (profileChanged || historyChanged || completionChanged) existing.updated_at = timestamp;
       return { rows: [] };
     }
     if (normalized.includes("FROM tinder_conversations c") && normalized.includes("COUNT(m.message_id)")) {
-      return { rows: [...state.conversations.values()].map((item) => ({ ...item, message_count: (state.messages.get(item.conversation_id) || []).length })) };
+      return {
+        rows: [...state.conversations.values()]
+          .sort((left, right) => {
+            const leftPosition = left.inbox_position ?? Number.POSITIVE_INFINITY;
+            const rightPosition = right.inbox_position ?? Number.POSITIVE_INFINITY;
+            return leftPosition - rightPosition || left.conversation_id.localeCompare(right.conversation_id);
+          })
+          .map((item) => ({ ...item, message_count: (state.messages.get(item.conversation_id) || []).length }))
+      };
     }
     throw new Error(`Unexpected SQL: ${normalized}`);
   }
@@ -226,6 +264,40 @@ test("thin mirror payload only accepts ordinary product fields", () => {
   );
 });
 
+test("Inbox ordering keeps only direct source labels and a non-negative current position", () => {
+  const normalized = normalizeTinderInboxOrder({
+    last_message_visible_time: "08:15",
+    inbox_position: 0
+  }, { requireInboxPosition: true });
+  assert.deepEqual(normalized, {
+    has_last_message_visible_time: true,
+    last_message_visible_time: "08:15",
+    has_inbox_position: true,
+    inbox_position: 0
+  });
+  assert.throws(
+    () => normalizeTinderInboxOrder({ inbox_position: -1 }, { requireInboxPosition: true }),
+    (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"
+  );
+  assert.throws(
+    () => normalizeTinderInboxOrder({ inbox_position: null }, { requireInboxPosition: true }),
+    (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"
+  );
+  assert.throws(
+    () => normalizeTinderInboxOrder({ inbox_position: 1, technical_updated_at: "must-not-cross" }),
+    (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"
+  );
+  const payload = normalizeTinderMirrorPayload({
+    profile: profile(),
+    messages: [message("INBOUND", "Hello")],
+    history_complete: false,
+    last_message_visible_time: "Heute",
+    inbox_position: 3
+  });
+  assert.equal(payload.last_message_visible_time, "Heute");
+  assert.equal(payload.inbox_position, 3);
+});
+
 test("history merge uses ordered overlap and retains repeated equal messages at different positions", () => {
   const existing = [message("INBOUND", "A"), message("OUTBOUND", "B"), message("INBOUND", "A")];
   const observed = [message("OUTBOUND", "B"), message("INBOUND", "A"), message("OUTBOUND", "C")];
@@ -285,7 +357,12 @@ test("Appium adapter holds only RAM sweep continuity and requires a verified old
       }
     }
   });
-  adapter.start({ profile: profile(), messages: [message("OUTBOUND", "B"), message("INBOUND", "C")] });
+  adapter.start({
+    profile: profile(),
+    messages: [message("OUTBOUND", "B"), message("INBOUND", "C")],
+    lastMessageVisibleTime: "08:15",
+    inboxPosition: 2
+  });
   adapter.appendViewport([message("INBOUND", "A"), message("OUTBOUND", "B")]);
   await adapter.resolve();
   await assert.rejects(adapter.persistCompletedHistory(), /verified oldest history boundary/);
@@ -294,6 +371,8 @@ test("Appium adapter holds only RAM sweep continuity and requires a verified old
   await adapter.persistCompletedHistory({ oldestBoundaryReached: true });
   assert.equal(requests[0].observation.history_complete, false);
   assert.equal(requests[1].observation.history_complete, true);
+  assert.equal(requests[1].observation.last_message_visible_time, "08:15");
+  assert.equal(requests[1].observation.inbox_position, 2);
   assert.deepEqual(requests[1].observation.messages.map((item) => item.text), ["A", "B", "C"]);
   adapter.clear();
   assert.throws(() => adapter.appendViewport([message("INBOUND", "x")]), /No Tinder conversation/);
@@ -384,6 +463,145 @@ test("Inbox observation excludes semantic Match-/Like-CTA rows without naming a 
   assert.equal(rows[0].bounds.top, 726);
 });
 
+test("semantic Inbox observation exposes only the verified vertical Inbox container and keeps CTA rows out", () => {
+  const inbox = observeInboxFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,225][576,1122]">
+          <android.widget.FrameLayout bounds="[0,618][576,726]">
+            <android.widget.TextView text="Mag Dich" bounds="[80,630][220,680]" />
+            <android.widget.TextView text="Vor kurzem aktiv - jetzt matchen!" bounds="[80,680][500,710]" />
+          </android.widget.FrameLayout>
+          <android.widget.FrameLayout bounds="[0,726][576,846]">
+            <android.widget.TextView text="Existing ordinary preview" bounds="[80,740][500,800]" />
+            <android.widget.TextView text="DU BIST DRAN" bounds="[360,740][540,780]" />
+          </android.widget.FrameLayout>
+        </androidx.recyclerview.widget.RecyclerView>
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,160][576,216]">
+          <android.widget.FrameLayout bounds="[0,160][120,216]">
+            <android.widget.TextView text="Tile" bounds="[8,168][110,204]" />
+          </android.widget.FrameLayout>
+        </androidx.recyclerview.widget.RecyclerView>
+      </android.widget.FrameLayout>
+    </hierarchy>`);
+  assert.ok(inbox);
+  assert.deepEqual(inbox.scroll_bounds, { left: 0, top: 225, right: 576, bottom: 1122, width: 576, height: 897 });
+  assert.equal(inbox.rows.length, 1);
+  assert.equal(inbox.rows[0].bounds.top, 726);
+});
+
+test("semantic Inbox preserves one unparsed Tinder time label but refuses an ambiguous row label", () => {
+  const inbox = observeInboxFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,225][576,1122]">
+          <android.widget.FrameLayout bounds="[0,726][576,846]">
+            <android.widget.TextView text="Existing ordinary preview" bounds="[80,740][420,800]" />
+            <android.widget.TextView text="08:15" bounds="[460,740][540,780]" />
+          </android.widget.FrameLayout>
+          <android.widget.FrameLayout bounds="[0,846][576,966]">
+            <android.widget.TextView text="Another ordinary preview" bounds="[80,860][420,920]" />
+            <android.widget.TextView text="Heute" bounds="[430,860][500,900]" />
+            <android.widget.TextView text="08:15" bounds="[500,860][560,900]" />
+          </android.widget.FrameLayout>
+        </androidx.recyclerview.widget.RecyclerView>
+      </android.widget.FrameLayout>
+    </hierarchy>`);
+  assert.ok(inbox);
+  assert.equal(inbox.rows.length, 2);
+  assert.equal(inbox.rows[0].last_message_visible_time, "08:15");
+  assert.equal(inbox.rows[1].last_message_visible_time, null);
+});
+
+test("semantic Inbox observation refuses a conversation screen with a composer", () => {
+  const inbox = observeInboxFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,160][576,1080]">
+          <android.widget.FrameLayout bounds="[0,700][576,820]">
+            <android.widget.TextView text="Visible ordinary text" bounds="[80,730][500,790]" />
+          </android.widget.FrameLayout>
+        </androidx.recyclerview.widget.RecyclerView>
+        <android.widget.EditText bounds="[70,1120][500,1200]" />
+      </android.widget.FrameLayout>
+    </hierarchy>`);
+  assert.equal(inbox, null);
+});
+
+test("profile navigation accepts only the described header avatar of a verified conversation", () => {
+  const source = `
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <android.widget.ImageView clickable="true" content-desc="back" bounds="[20,58][70,108]" />
+        <android.widget.ImageView clickable="true" content-desc="profile" bounds="[112,52][172,112]" />
+        <android.widget.TextView text="Example Profile" bounds="[200,68][390,116]" />
+        <android.widget.ImageView clickable="true" content-desc="menu" bounds="[480,52][536,108]" />
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,160][576,1080]">
+          <android.widget.FrameLayout bounds="[0,500][576,610]">
+            <android.widget.FrameLayout bounds="[80,510][430,590]">
+              <android.widget.TextView text="Visible ordinary message" bounds="[96,528][410,572]" />
+            </android.widget.FrameLayout>
+          </android.widget.FrameLayout>
+        </androidx.recyclerview.widget.RecyclerView>
+        <android.widget.EditText bounds="[70,1120][500,1200]" />
+      </android.widget.FrameLayout>
+    </hierarchy>`;
+  assert.deepEqual(headerProfileTargetFromXml(source), { left: 112, top: 52, right: 172, bottom: 112, width: 60, height: 60 });
+  assert.equal(headerProfileTargetFromXml(source.replace('content-desc="profile"', 'content-desc=""')), null);
+});
+
+test("profile observation accepts the real ScrollView and ViewPager surface with direct chat continuity", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,740]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView text="Visible profile detail" bounds="[40,310][500,360]" />
+            <android.widget.TextView clickable="true" text="Control label" bounds="[40,650][300,700]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.ok(observed);
+  assert.deepEqual(observed.profile, {
+    display_name: "Example Profile",
+    attributes: { visible_profile_01: "Visible profile detail" },
+    media_refs: []
+  });
+  assert.deepEqual(observed.scroll_bounds, { left: 0, top: 160, right: 576, bottom: 1120, width: 576, height: 960 });
+  assert.doesNotMatch(JSON.stringify(observed), /content-desc/);
+});
+
+test("profile observation refuses a ScrollView without the required regular media region", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.TextView text="Visible profile detail" bounds="[40,310][500,360]" />
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.equal(observed, null);
+});
+
+test("a verified profile scroll may keep the same profile body after its opening ViewPager has scrolled off-screen", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.TextView text="Older visible profile detail" bounds="[40,310][500,360]" />
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, {
+    expectedDisplayName: "Example Profile",
+    continuedProfileScroll: true,
+    expectedScrollBounds: { left: 0, top: 160, right: 576, bottom: 1120, width: 576, height: 960 }
+  });
+  assert.ok(observed);
+  assert.deepEqual(observed.profile.attributes, { visible_profile_01: "Older visible profile detail" });
+});
+
 test("one completed initial thread is created once and a later exact reopen skips history", async () => {
   const pool = createMemoryPool();
   const mirror = createTinderConversationMirror({
@@ -410,6 +628,59 @@ test("one completed initial thread is created once and a later exact reopen skip
   assert.equal((await mirror.list()).length, 1);
   assert.equal((await mirror.detail(created.conversation.id)).messages.length, 3);
   assert.equal(pool.state.deleteMessageCalls, 0);
+});
+
+test("current verified Inbox order is persisted without resubmitting a known history", async () => {
+  const pool = createMemoryPool();
+  let sequence = 0;
+  const mirror = createTinderConversationMirror({
+    pool,
+    now: () => new Date("2026-09-24T10:00:00.000Z"),
+    idFactory: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`
+  });
+  const first = await mirror.sync({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    payload: {
+      profile: profile({ city: "One" }),
+      messages: [message("INBOUND", "One"), message("OUTBOUND", "Two")],
+      history_complete: true,
+      last_message_visible_time: "08:15",
+      inbox_position: 3
+    }
+  });
+  const second = await mirror.sync({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    payload: {
+      profile: profile({ city: "Two" }),
+      messages: [message("INBOUND", "Three"), message("OUTBOUND", "Four")],
+      history_complete: true,
+      inbox_position: 1
+    }
+  });
+  const beforeMessages = pool.state.messages.get(first.conversation.id).map((row) => ({ ...row }));
+  const refreshed = await mirror.updateInboxOrder({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    conversationId: first.conversation.id,
+    inboxOrder: { last_message_visible_time: "09:30", inbox_position: 0 }
+  });
+  assert.equal(refreshed.changed, true);
+  assert.equal(refreshed.conversation.last_message_visible_time, "09:30");
+  assert.equal(refreshed.conversation.inbox_position, 0);
+  assert.deepEqual(pool.state.messages.get(first.conversation.id), beforeMessages);
+  const sourceOmitted = await mirror.sync({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    payload: {
+      profile: profile({ city: "One" }),
+      messages: [message("INBOUND", "One"), message("OUTBOUND", "Two")],
+      history_complete: true
+    }
+  });
+  assert.equal(sourceOmitted.conversation.last_message_visible_time, "09:30");
+  assert.equal(sourceOmitted.conversation.inbox_position, 0);
+  assert.deepEqual((await mirror.list()).map((item) => item.id), [first.conversation.id, second.conversation.id]);
+  const detail = await mirror.detail(first.conversation.id);
+  assert.equal(detail.conversation.last_message_visible_time, "09:30");
+  assert.equal(detail.conversation.inbox_position, 0);
 });
 
 test("completed corrective re-sync preserves an existing conversation and message rows while adding older history", async () => {
@@ -674,6 +945,8 @@ test("new mirror routes use existing dashboard transport without a bridge gate",
   assert.match(routes, /dashboardApiAuthorized/);
   assert.doesNotMatch(routes, /requireDeviceBridgeReady|registerAuthenticatedRequestReplay|verifyAuthenticatedDeviceRequest/);
   assert.match(routes, /\/dashboard-api\/tinder\/conversations/);
+  assert.match(routes, /\/inbox-order/);
+  assert.match(routes, /updateInboxOrder/);
 });
 
 test("corrective history runner binds the installed device version without a Bridge state gate", () => {
@@ -732,4 +1005,27 @@ test("corrective runner plans only overlap-capable unique existing records befor
   assert.match(runner, /for \(const existing of plan\)/);
   assert.match(runner, /openPlannedConversation\(existing, processedRows\)/);
   assert.doesNotMatch(runner, /rows\.find\(\(row\) => !processedRows\.has\(row\.ram_key\)\)/);
+});
+
+test("normal initial mirror is a separate Appium Inbox loop with CTA exclusion, safe profile return, and physical history completion", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-initial-sync.mjs", import.meta.url), "utf8");
+  assert.match(runner, /observeInboxFromXml/);
+  assert.match(runner, /headerProfileTargetFromXml/);
+  assert.match(runner, /observeProfileFromXml/);
+  assert.match(runner, /async function openFreshRow/);
+  assert.match(runner, /async function readProfileToPhysicalBoundary/);
+  assert.match(runner, /async function readChatToVerifiedOldestBoundary/);
+  assert.match(runner, /const chatScrollPercent = 0\.45/);
+  assert.match(runner, /const inboxScrollPercent = 0\.45/);
+  assert.match(runner, /function adjacentInboxOverlap/);
+  assert.match(runner, /Tinder Inbox scroll did not retain a visible row overlap/);
+  assert.match(runner, /scrollUp\(viewport\.scroll_bounds, chatScrollPercent\)/);
+  assert.match(runner, /const confirmedAtBoundary = await scrollUp\(viewport\.scroll_bounds, chatScrollPercent\)/);
+  assert.match(runner, /await returnToInbox\(\)/);
+  assert.match(runner, /synced\.created \? "NEW_MIRRORED" : "KNOWN_COMPLETED"/);
+  assert.match(runner, /action: "KNOWN_SKIPPED"/);
+  assert.match(runner, /updateInboxOrder/);
+  assert.match(runner, /last_message_visible_time_captured/);
+  assert.doesNotMatch(runner, /mobile: swipeGesture|directContinuityRepair|TINDER_BLOCK2_DIRECT_REPAIR_CONVERSATION_ID/);
+  assert.doesNotMatch(runner, /device\.last_heartbeat|requireDeviceBridgeReady|registerAuthenticatedRequestReplay|verifyAuthenticatedDeviceRequest/);
 });

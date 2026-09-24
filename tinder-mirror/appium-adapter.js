@@ -13,7 +13,14 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
   }
   let state = null;
 
-  function start({ profile, messages, continuationConversationId = null, directContinuityRepair = false }) {
+  function start({
+    profile,
+    messages,
+    continuationConversationId = null,
+    directContinuityRepair = false,
+    lastMessageVisibleTime = undefined,
+    inboxPosition = undefined
+  }) {
     if (typeof directContinuityRepair !== "boolean") {
       throw new TypeError("directContinuityRepair must be a boolean");
     }
@@ -21,7 +28,9 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
       profile,
       messages: [...messages],
       continuation_conversation_id: continuationConversationId,
-      direct_continuity_repair: directContinuityRepair
+      direct_continuity_repair: directContinuityRepair,
+      last_message_visible_time: lastMessageVisibleTime,
+      inbox_position: inboxPosition
     };
   }
 
@@ -38,7 +47,11 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
       ...(state.direct_continuity_repair ? { direct_continuity_repair: true } : {}),
       profile: state.profile,
       messages: state.messages,
-      history_complete: historyComplete
+      history_complete: historyComplete,
+      ...(state.last_message_visible_time === undefined
+        ? {}
+        : { last_message_visible_time: state.last_message_visible_time }),
+      ...(state.inbox_position === undefined ? {} : { inbox_position: state.inbox_position })
     });
   }
 
@@ -94,6 +107,14 @@ export function createExistingDashboardBearerTransport({ baseUrl, bearerToken, f
     sync: ({ deviceId, observation }) => request("/dashboard-api/tinder/conversations", {
       device_id: deviceId,
       observation
-    })
+    }),
+    updateInboxOrder: ({ deviceId, conversationId, inboxPosition, lastMessageVisibleTime = undefined }) => request(
+      `/dashboard-api/tinder/conversations/${encodeURIComponent(conversationId)}/inbox-order`,
+      {
+        device_id: deviceId,
+        inbox_position: inboxPosition,
+        ...(lastMessageVisibleTime === undefined ? {} : { last_message_visible_time: lastMessageVisibleTime })
+      }
+    )
   });
 }

@@ -1,3 +1,5 @@
+import { compactSchemaSql, tokenizeSchemaSql } from "../device-bridge/schema-contract.js";
+
 /*
  * Block 2's only schema authority. This is deliberately separate from the
  * runtime mirror: it creates the two additive product tables once, inside one
@@ -68,10 +70,27 @@ function fail(code, message) {
   throw new TinderMirrorMigrationError(code, message);
 }
 
-function normalizedSql(value) {
-  return String(value || "").toLowerCase().replaceAll('"', "").replaceAll("::text", "")
-    .replace(/\s+/g, "").replaceAll("public.", "");
+function canonicalCheckShape(value) {
+  let tokens = tokenizeSchemaSql(value);
+  if (tokens[0] === "check" && tokens[1] === "(" && tokens.at(-1) === ")") tokens = tokens.slice(2, -1);
+  const compact = tokens.filter((token) => token !== "(" && token !== ")").join("");
+  const anyArray = compact.match(/^([a-z_][a-z0-9_$]*)=anyarray\[(.*)\]$/);
+  return anyArray ? `${anyArray[1]}in${anyArray[2]}` : compact;
 }
+
+function canonicalIndexShape(value) {
+  return compactSchemaSql(value).replace(/on(?:[a-z_][a-z0-9_$]*\.)+/g, "on");
+}
+
+const EXPECTED_CHECKS = Object.freeze({
+  channel: canonicalCheckShape("CHECK (channel = 'tinder')"),
+  ordinal: canonicalCheckShape("CHECK (ordinal >= 0)"),
+  direction: canonicalCheckShape("CHECK (direction IN ('INBOUND', 'OUTBOUND'))")
+});
+const EXPECTED_INDEXES = Object.freeze({
+  conversation: canonicalIndexShape("ON tinder_conversations USING btree (device_id, updated_at DESC)"),
+  message: canonicalIndexShape("ON tinder_conversation_messages USING btree (conversation_id, ordinal)")
+});
 
 function sameColumns(actual, expected) {
   const values = Array.isArray(actual) ? actual : [];
@@ -79,10 +98,7 @@ function sameColumns(actual, expected) {
 }
 
 function isExactCheck(row, kind) {
-  const definition = normalizedSql(row.definition);
-  if (kind === "channel") return /^check\(+channel='tinder'\)+$/.test(definition);
-  if (kind === "ordinal") return /^check\(+ordinal>=0\)+$/.test(definition);
-  return /^check\(+direction=any\(array\['inbound','outbound'\]\)+$/.test(definition);
+  return canonicalCheckShape(row.definition) === EXPECTED_CHECKS[kind];
 }
 
 function hasSingle(rows, predicate) {
@@ -114,8 +130,8 @@ function targetCatalogFailureReason({ relations, columns, constraints, indexes, 
   const conversationIndex = indexes.find((row) => row.indexname === "tinder_conversations_device_updated_idx");
   const messageIndex = indexes.find((row) => row.indexname === "tinder_conversation_messages_conversation_ordinal_idx");
   if (!conversationIndex || !messageIndex) return "INDEX_MISSING";
-  if (!normalizedSql(conversationIndex.indexdef).includes("ontinder_conversationsusingbtree(device_id,updated_atdesc)")) return "CONVERSATION_INDEX";
-  if (!normalizedSql(messageIndex.indexdef).includes("ontinder_conversation_messagesusingbtree(conversation_id,ordinal)")) return "MESSAGE_INDEX";
+  if (!canonicalIndexShape(conversationIndex.indexdef).includes(EXPECTED_INDEXES.conversation)) return "CONVERSATION_INDEX";
+  if (!canonicalIndexShape(messageIndex.indexdef).includes(EXPECTED_INDEXES.message)) return "MESSAGE_INDEX";
   return Number(triggers) === 0 ? null : "TRIGGERS";
 }
 

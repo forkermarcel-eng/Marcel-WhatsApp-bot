@@ -102,7 +102,7 @@ function createMemoryPool() {
   };
 }
 
-function createMigrationPool({ failOn = null } = {}) {
+function createMigrationPool({ failOn = null, catalogVariant = false } = {}) {
   const statements = [];
   const createdTables = new Set();
   const columns = [
@@ -127,12 +127,12 @@ function createMigrationPool({ failOn = null } = {}) {
   const constraints = [
     { table_name: "tinder_conversations", contype: "p", columns: ["conversation_id"], reference_table: null, confdeltype: " ", definition: "PRIMARY KEY (conversation_id)" },
     { table_name: "tinder_conversations", contype: "f", columns: ["device_id"], reference_table: "device_bridge_devices", confdeltype: "r", definition: "FOREIGN KEY (device_id) REFERENCES device_bridge_devices(device_id) ON DELETE RESTRICT" },
-    { table_name: "tinder_conversations", contype: "c", columns: ["channel"], reference_table: null, confdeltype: " ", definition: "CHECK ((channel = 'tinder'::text))" },
+    { table_name: "tinder_conversations", contype: "c", columns: ["channel"], reference_table: null, confdeltype: " ", definition: catalogVariant ? "CHECK (((channel)::text = 'tinder'::text))" : "CHECK ((channel = 'tinder'::text))" },
     { table_name: "tinder_conversation_messages", contype: "p", columns: ["message_id"], reference_table: null, confdeltype: " ", definition: "PRIMARY KEY (message_id)" },
     { table_name: "tinder_conversation_messages", contype: "f", columns: ["conversation_id"], reference_table: "tinder_conversations", confdeltype: "r", definition: "FOREIGN KEY (conversation_id) REFERENCES tinder_conversations(conversation_id) ON DELETE RESTRICT" },
     { table_name: "tinder_conversation_messages", contype: "u", columns: ["conversation_id", "ordinal"], reference_table: null, confdeltype: " ", definition: "UNIQUE (conversation_id, ordinal)" },
     { table_name: "tinder_conversation_messages", contype: "c", columns: ["ordinal"], reference_table: null, confdeltype: " ", definition: "CHECK ((ordinal >= 0))" },
-    { table_name: "tinder_conversation_messages", contype: "c", columns: ["direction"], reference_table: null, confdeltype: " ", definition: "CHECK ((direction = ANY (ARRAY['INBOUND'::text, 'OUTBOUND'::text])))" }
+    { table_name: "tinder_conversation_messages", contype: "c", columns: ["direction"], reference_table: null, confdeltype: " ", definition: catalogVariant ? "CHECK (((direction)::text = ANY ((ARRAY['INBOUND'::text, 'OUTBOUND'::text])::text[])))" : "CHECK ((direction = ANY (ARRAY['INBOUND'::text, 'OUTBOUND'::text])))" }
   ];
   const indexes = [
     { table_name: "tinder_conversations", indexname: "tinder_conversations_device_updated_idx", indexdef: "CREATE INDEX tinder_conversations_device_updated_idx ON public.tinder_conversations USING btree (device_id, updated_at DESC)" },
@@ -307,6 +307,13 @@ test("migration preflight is read-only and a fresh two-table apply commits only 
   assert.equal(pool.statements.filter((statement) => statement.startsWith("CREATE ")).length, 4);
   assert.equal(pool.statements.at(-1), "COMMIT");
   assert.equal(pool.statements.some((statement) => statement.startsWith("ROLLBACK")), false);
+});
+
+test("postcheck accepts harmless PostgreSQL cast and schema qualification rendering without weakening the contract", async () => {
+  const pool = createMigrationPool({ catalogVariant: true });
+  const result = await migrateTinderConversationMirror(pool);
+  assert.equal(result.migrated, true);
+  assert.equal(result.postcheck.state, "ALREADY_CANONICAL");
 });
 
 test("migration rolls back before commit if a DDL statement fails", async () => {

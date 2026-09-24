@@ -8,6 +8,7 @@ import {
   mergeTinderHistory,
   normalizeTinderInboxOrder,
   normalizeTinderMirrorPayload,
+  normalizeTinderProfile,
   selectConservativeConversationMatch
 } from "../tinder-mirror/conversation.js";
 import {
@@ -25,6 +26,7 @@ import {
 } from "../tinder-mirror/appium-ui-observer.js";
 import {
   headerProfileTargetFromXml,
+  mergeProfileSnapshots,
   observeInboxConversationRowsFromXml,
   observeInboxFromXml,
   observeProfileFromXml
@@ -466,6 +468,20 @@ test("class-named UiAutomator2 XML keeps the verified same-bound FrameLayout as 
   assert.equal(classifyMessageTextNode(text, screenBounds(root)), "OUTBOUND");
 });
 
+test("UiAutomator2 attribute parsing decodes strict HTML5 entities once and preserves native Unicode", () => {
+  const root = parseUiAutomatorXml(`
+    <hierarchy rotation="0">
+      <android.widget.TextView
+        text="line one&#10;line two &#x1FAE3; &ouml;"
+        content-desc="literal &#38;amp; remains encoded"
+        bounds="[0,0][576,1280]" />
+    </hierarchy>`);
+  const node = flattenUiNodes(root)[0];
+  assert.ok(node);
+  assert.equal(node.attributes.text, "line one\nline two 🫣 ö");
+  assert.equal(node.attributes["content-desc"], "literal &amp; remains encoded");
+});
+
 test("Inbox observation excludes semantic Match-/Like-CTA rows without naming a person", () => {
   const rows = observeInboxConversationRowsFromXml(`
     <hierarchy rotation="0">
@@ -599,8 +615,111 @@ test("profile observation accepts the real ScrollView and ViewPager surface with
     attributes: { visible_profile_01: "Visible profile detail" },
     media_refs: []
   });
+  assert.equal(Object.keys(observed.profile.attributes).some((key) => key.startsWith("structured_profile_")), false);
   assert.deepEqual(observed.scroll_bounds, { left: 0, top: 160, right: 576, bottom: 1120, width: 576, height: 960 });
   assert.doesNotMatch(JSON.stringify(observed), /content-desc/);
+});
+
+test("profile observation adds deterministic visible heading-to-value pairs without replacing the ordered fallback", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,900]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView heading="true" text="Visible section one" bounds="[40,620][500,660]" />
+            <android.widget.TextView text="Visible value one" bounds="[40,668][500,712]" />
+            <android.widget.TextView heading="true" text="Visible section two" bounds="[40,730][500,770]" />
+            <android.widget.TextView text="Visible value two" bounds="[40,778][500,822]" />
+            <android.widget.TextView clickable="true" text="Non profile control" bounds="[40,840][500,880]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.ok(observed);
+  assert.deepEqual(observed.profile.attributes, {
+    visible_profile_01: "Visible section one",
+    visible_profile_02: "Visible value one",
+    visible_profile_03: "Visible section two",
+    visible_profile_04: "Visible value two",
+    structured_profile_01_label: "Visible section one",
+    structured_profile_01_value: "Visible value one",
+    structured_profile_02_label: "Visible section two",
+    structured_profile_02_value: "Visible value two"
+  });
+});
+
+test("directly continuous profile viewports retain ordered fallback values and structured pairs", () => {
+  const opening = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,760]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView heading="true" text="Opening label" bounds="[40,620][500,660]" />
+            <android.widget.TextView text="Opening value" bounds="[40,668][500,712]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  const continued = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,760]">
+            <android.widget.TextView heading="true" text="Later label" bounds="[40,620][500,660]" />
+            <android.widget.TextView text="Later value" bounds="[40,668][500,712]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, {
+    expectedDisplayName: "Example Profile",
+    continuedProfileScroll: true,
+    expectedScrollBounds: { left: 0, top: 160, right: 576, bottom: 1120, width: 576, height: 960 }
+  });
+  assert.ok(opening);
+  assert.ok(continued);
+  assert.deepEqual(mergeProfileSnapshots(opening.profile, continued.profile).attributes, {
+    visible_profile_01: "Opening label",
+    visible_profile_02: "Opening value",
+    visible_profile_03: "Later label",
+    visible_profile_04: "Later value",
+    structured_profile_01_label: "Opening label",
+    structured_profile_01_value: "Opening value",
+    structured_profile_02_label: "Later label",
+    structured_profile_02_value: "Later value"
+  });
+});
+
+test("profile normalization admits the bounded fallback plus structured profile projection", () => {
+  const attributes = Object.fromEntries([
+    ...Array.from({ length: 32 }, (_, index) => [
+      `visible_profile_${String(index + 1).padStart(2, "0")}`,
+      `Visible value ${index + 1}`
+    ]),
+    ...Array.from({ length: 32 }, (_, index) => [
+      `structured_profile_${String(index + 1).padStart(2, "0")}_label`,
+      `Visible label ${index + 1}`
+    ]),
+    ...Array.from({ length: 32 }, (_, index) => [
+      `structured_profile_${String(index + 1).padStart(2, "0")}_value`,
+      `Visible paired value ${index + 1}`
+    ])
+  ]);
+  const normalized = normalizeTinderProfile({
+    display_name: "Example Profile",
+    attributes,
+    media_refs: []
+  });
+  assert.equal(Object.keys(normalized.attributes).length, 96);
+  assert.throws(
+    () => normalizeTinderProfile({
+      display_name: "Example Profile",
+      attributes: { ...attributes, extra_visible_value: "Beyond the bounded projection" },
+      media_refs: []
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"
+  );
 });
 
 test("profile observation refuses a ScrollView without the required regular media region", () => {

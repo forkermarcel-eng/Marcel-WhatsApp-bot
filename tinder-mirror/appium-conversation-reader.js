@@ -240,8 +240,10 @@ function sameScrollSurface(left, right) {
     && Math.abs(left.bottom - right.bottom) <= tolerance;
 }
 
-function profileBodyTexts(nodes, container) {
-  const seen = new Set();
+const MAX_VISIBLE_PROFILE_VALUES = 32;
+const MAX_STRUCTURED_PROFILE_PAIRS = 32;
+
+function profileBodyTextNodes(nodes, container) {
   return nodes
     .filter((node) => {
       const text = visibleText(node);
@@ -249,13 +251,139 @@ function profileBodyTexts(nodes, container) {
       if (!descendantOf(node, container) || !within(node.bounds, container.bounds)) return false;
       return !hasClickableAncestor(node);
     })
-    .sort((left, right) => left.bounds.top - right.bounds.top || left.bounds.left - right.bounds.left)
+    .sort((left, right) => left.bounds.top - right.bounds.top || left.bounds.left - right.bounds.left);
+}
+
+function profileBodyTexts(bodyNodes) {
+  const seen = new Set();
+  return bodyNodes
     .map(visibleText)
     .filter((text) => {
       if (seen.has(text)) return false;
       seen.add(text);
       return true;
     });
+}
+
+/*
+ * UiAutomator2 exposes Android's regular heading semantic on visible
+ * TextViews. A structured field is accepted only when that visible heading
+ * is immediately followed in the same verified profile surface by one
+ * ordinary, non-heading TextView. This is display structure, not profile
+ * identity, a capture, or a heuristic inferred from text content.
+ */
+function isVisibleProfileLabel(node) {
+  return node?.attributes?.heading === "true"
+    || node?.attributes?.["accessibility-heading"] === "true";
+}
+
+function structuredProfilePairs(bodyNodes) {
+  const pairs = [];
+  const seen = new Set();
+  for (let index = 0; index + 1 < bodyNodes.length && pairs.length < MAX_STRUCTURED_PROFILE_PAIRS; index += 1) {
+    const labelNode = bodyNodes[index];
+    const valueNode = bodyNodes[index + 1];
+    if (!isVisibleProfileLabel(labelNode) || isVisibleProfileLabel(valueNode)) continue;
+    const label = visibleText(labelNode);
+    const value = visibleText(valueNode);
+    if (!label || !value) continue;
+    const key = `${label}\u0000${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push(Object.freeze({ label, value }));
+  }
+  return pairs;
+}
+
+function profileAttributes(bodyTexts, pairs) {
+  const attributes = {};
+  for (const text of bodyTexts.slice(0, MAX_VISIBLE_PROFILE_VALUES)) {
+    const key = `visible_profile_${String(Object.keys(attributes).length + 1).padStart(2, "0")}`;
+    attributes[key] = text;
+  }
+  for (const [index, pair] of pairs.entries()) {
+    const ordinal = String(index + 1).padStart(2, "0");
+    attributes[`structured_profile_${ordinal}_label`] = pair.label;
+    attributes[`structured_profile_${ordinal}_value`] = pair.value;
+  }
+  return attributes;
+}
+
+function profileVisibleValues(profile) {
+  const attributes = profile?.attributes || {};
+  const ordered = Object.entries(attributes)
+    .map(([key, value]) => ({ match: /^visible_profile_(\d{2})$/.exec(key), value }))
+    .filter(({ match, value }) => match && typeof value === "string")
+    .sort((left, right) => Number(left.match[1]) - Number(right.match[1]))
+    .map(({ value }) => value);
+  if (ordered.length) return ordered;
+  return Object.entries(attributes)
+    .filter(([key, value]) => !/^structured_profile_\d{2}_(?:label|value)$/.test(key) && typeof value === "string")
+    .map(([, value]) => value);
+}
+
+function profileStructuredPairs(profile) {
+  const attributes = profile?.attributes || {};
+  const pairs = [];
+  for (const [key, label] of Object.entries(attributes)) {
+    const match = /^structured_profile_(\d{2})_label$/.exec(key);
+    if (!match || typeof label !== "string") continue;
+    const value = attributes[`structured_profile_${match[1]}_value`];
+    if (typeof value !== "string") continue;
+    pairs.push({ ordinal: Number(match[1]), label, value });
+  }
+  return pairs.sort((left, right) => left.ordinal - right.ordinal);
+}
+
+function uniqueProfileValues(values, maximum, errorMessage) {
+  const unique = [];
+  for (const value of values) {
+    if (!unique.includes(value)) unique.push(value);
+  }
+  if (unique.length > maximum) throw new Error(errorMessage);
+  return unique;
+}
+
+function uniqueProfilePairs(pairs) {
+  const unique = [];
+  const seen = new Set();
+  for (const pair of pairs) {
+    const key = `${pair.label}\u0000${pair.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push({ label: pair.label, value: pair.value });
+  }
+  if (unique.length > MAX_STRUCTURED_PROFILE_PAIRS) {
+    throw new Error("Visible Tinder structured profile exceeds the existing product field capacity");
+  }
+  return unique;
+}
+
+/*
+ * Merge only ordinary visible profile values across directly continuous
+ * profile scroll viewports. `visible_profile_*` remains the existing ordered
+ * fallback; structured pairs are additive display metadata and are rebuilt
+ * with stable local ordinals for the combined visible surface.
+ */
+export function mergeProfileSnapshots(current, observed) {
+  if (!current) return observed;
+  if (!observed || observed.display_name !== current.display_name) {
+    throw new Error("Tinder profile changed during its local read");
+  }
+  const visible = uniqueProfileValues(
+    [...profileVisibleValues(current), ...profileVisibleValues(observed)],
+    MAX_VISIBLE_PROFILE_VALUES,
+    "Visible Tinder profile exceeds the existing product field capacity"
+  );
+  const pairs = uniqueProfilePairs([
+    ...profileStructuredPairs(current),
+    ...profileStructuredPairs(observed)
+  ]);
+  return Object.freeze({
+    display_name: current.display_name,
+    attributes: Object.freeze(profileAttributes(visible, pairs)),
+    media_refs: Object.freeze([])
+  });
 }
 
 /*
@@ -383,18 +511,15 @@ export function observeProfileFromXml(xml, {
   // local continuation.
   if (!container?.bounds || (!media?.bounds && !continuedProfileScroll)) return null;
   if (continuedProfileScroll && expectedScrollBounds && !sameScrollSurface(container.bounds, expectedScrollBounds)) return null;
-  const bodyTexts = profileBodyTexts(nodes, container);
-
-  const attributes = {};
-  for (const text of bodyTexts) {
-    if (Object.values(attributes).includes(text)) continue;
-    // Keep the existing Block-2 product-profile field convention so an
-    // initial, safely compatible profile viewport can recognize a known
-    // thread without an unnecessary full profile/history read.
-    const key = `visible_profile_${String(Object.keys(attributes).length + 1).padStart(2, "0")}`;
-    attributes[key] = text;
-    if (Object.keys(attributes).length >= 32) break;
-  }
+  const bodyNodes = profileBodyTextNodes(nodes, container);
+  // Keep the existing Block-2 product-profile field convention exactly:
+  // every ordinary visible value remains available in visual order under its
+  // `visible_profile_*` fallback key. Structured label/value pairs are
+  // additive and never replace that compatible fallback.
+  const attributes = profileAttributes(
+    profileBodyTexts(bodyNodes),
+    structuredProfilePairs(bodyNodes)
+  );
 
   return Object.freeze({
     profile: Object.freeze({

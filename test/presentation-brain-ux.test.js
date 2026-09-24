@@ -12,6 +12,16 @@ const contactMedia = readFileSync(new URL("../services/contact-media.js", import
 const proxy = readFileSync(new URL("../api/dashboard/marcel-brain.js", import.meta.url), "utf8");
 const P = globalThis.MarcelPresentation;
 
+test("Tinder profile presentation prefers deterministic structured label-value rows and preserves readable fallback values", () => {
+  assert.match(tinder, /function profileDetailRows\(attributes\)/);
+  assert.match(tinder, /\^structured_profile_\(\\d\{2\}\)_\(label\|value\)\$/);
+  assert.match(tinder, /const structuredKeys = new Set\(\);/);
+  assert.match(tinder, /for \(const \{ label, value \} of profileDetailRows\(profile\.attributes\)\)/);
+  assert.match(tinder, /if \(structuredKeys\.has\(key\)\) continue;/);
+  assert.match(tinder, /term\.textContent = label/);
+  assert.match(tinder, /\.tinder-profile dd\{margin:0;white-space:pre-wrap;/);
+});
+
 test("shared presentation maps known keys and humanizes unknown snake case", () => {
   assert.equal(P.label("primary_language"), "Sprache");
   assert.equal(P.label("seeking_new_job"), "Arbeit");

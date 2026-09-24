@@ -7,7 +7,7 @@
   <title>Marcel AI | Tinder</title>
   <link rel="stylesheet" href="/platform.css">
   <style>
-    :root{--accent:#ff5d70;--active-bg:#2a171b}.tinder-grid{display:grid;grid-template-columns:minmax(220px,.85fr) minmax(280px,1.35fr) minmax(220px,.8fr);gap:14px;align-items:start}.tinder-card{min-height:220px}.tinder-card h2{margin:0 0 14px;font-size:15px}.tinder-list{display:grid;gap:8px}.tinder-item{width:100%;border:1px solid #30363d;border-radius:10px;background:#171a1f;color:inherit;padding:10px;text-align:left;cursor:pointer}.tinder-item:hover,.tinder-item[aria-current="true"]{border-color:var(--accent);background:#2a171b}.tinder-title{display:block;font-weight:700}.tinder-meta{display:block;margin-top:4px;font-size:12px;color:#98a2b3}.tinder-match-link{border:0;background:transparent;padding:0;text-decoration:underline;cursor:pointer}.tinder-messages{display:grid;gap:9px;max-height:560px;overflow:auto}.tinder-message{border-left:3px solid #56606d;padding:7px 9px;background:#171a1f;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere}.tinder-message.outbound{border-left-color:var(--accent)}.tinder-message-meta{font-size:11px;color:#98a2b3;margin-bottom:3px}.tinder-profile dl{display:grid;grid-template-columns:minmax(84px,.45fr) 1fr;gap:7px 10px;margin:0}.tinder-profile dt{color:#98a2b3}.tinder-profile dd{margin:0;overflow-wrap:anywhere}.tinder-media{margin:12px 0 0;padding-left:18px;overflow-wrap:anywhere}.tinder-status{min-height:20px}.tinder-status.error{color:#ff8d9a}@media(max-width:1000px){.tinder-grid{grid-template-columns:1fr 1fr}.tinder-card.chat{grid-column:span 2}}@media(max-width:680px){.tinder-grid{grid-template-columns:1fr}.tinder-card.chat{grid-column:auto}}
+    :root{--accent:#ff5d70;--active-bg:#2a171b}.tinder-grid{display:grid;grid-template-columns:minmax(220px,.85fr) minmax(280px,1.35fr) minmax(220px,.8fr);gap:14px;align-items:start}.tinder-card{min-height:220px}.tinder-card h2{margin:0 0 14px;font-size:15px}.tinder-list{display:grid;gap:8px}.tinder-item{width:100%;border:1px solid #30363d;border-radius:10px;background:#171a1f;color:inherit;padding:10px;text-align:left;cursor:pointer}.tinder-item:hover,.tinder-item[aria-current="true"]{border-color:var(--accent);background:#2a171b}.tinder-title{display:block;font-weight:700}.tinder-meta{display:block;margin-top:4px;font-size:12px;color:#98a2b3}.tinder-match-link{border:0;background:transparent;padding:0;text-decoration:underline;cursor:pointer}.tinder-messages{display:grid;gap:9px;max-height:560px;overflow:auto}.tinder-message{border-left:3px solid #56606d;padding:7px 9px;background:#171a1f;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere}.tinder-message.outbound{border-left-color:var(--accent)}.tinder-message-meta{font-size:11px;color:#98a2b3;margin-bottom:3px}.tinder-profile dl{display:grid;grid-template-columns:minmax(84px,.45fr) 1fr;gap:7px 10px;margin:0}.tinder-profile dt{color:#98a2b3}.tinder-profile dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.tinder-media{margin:12px 0 0;padding-left:18px;overflow-wrap:anywhere}.tinder-status{min-height:20px}.tinder-status.error{color:#ff8d9a}@media(max-width:1000px){.tinder-grid{grid-template-columns:1fr 1fr}.tinder-card.chat{grid-column:span 2}}@media(max-width:680px){.tinder-grid{grid-template-columns:1fr}.tinder-card.chat{grid-column:auto}}
   </style>
 </head>
 <body>
@@ -75,6 +75,47 @@
     function formatDate(value) { if (!value) return "Noch nicht synchronisiert"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? "Noch nicht synchronisiert" : date.toLocaleString("de-DE"); }
     function setStatus(message, error = false) { statusNode.textContent = message; statusNode.classList.toggle("error", error); }
     function profileName(conversation) { return conversation?.profile?.display_name || "Unbenannte Conversation"; }
+
+    function profileDetailRows(attributes) {
+      const entries = Object.entries(attributes || {});
+      const fields = new Map();
+      for (const [key, value] of entries) {
+        const match = /^structured_profile_(\d{2})_(label|value)$/.exec(key);
+        if (!match) continue;
+        const field = fields.get(match[1]) || {};
+        field[match[2]] = value;
+        fields.set(match[1], field);
+      }
+
+      const structuredKeys = new Set();
+      const structured = [...fields.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .flatMap(([ordinal, field]) => {
+          if (typeof field.label !== "string" || typeof field.value !== "string" || !field.label || !field.value) return [];
+          structuredKeys.add(`structured_profile_${ordinal}_label`);
+          structuredKeys.add(`structured_profile_${ordinal}_value`);
+          return [field];
+        });
+
+      // The original ordered visible_profile_NN values remain in the product
+      // payload.  Hide only their exact label/value counterparts when the
+      // same deterministic structured field is available; all unmatched
+      // values continue to render as the existing fallback.
+      const consumed = new Map();
+      for (const field of structured) {
+        for (const value of [field.label, field.value]) consumed.set(value, (consumed.get(value) || 0) + 1);
+      }
+      const fallback = [];
+      for (const [key, value] of entries) {
+        if (structuredKeys.has(key)) continue;
+        if (/^visible_profile_\d{2}$/.test(key) && consumed.get(value)) {
+          consumed.set(value, consumed.get(value) - 1);
+          continue;
+        }
+        fallback.push({ label: key.replaceAll("_", " "), value });
+      }
+      return [...structured, ...fallback];
+    }
 
     function renderConversationList(conversations) {
       clear(conversationsNode);
@@ -166,8 +207,8 @@
       const nameTerm = document.createElement("dt"); nameTerm.textContent = "Name";
       const nameDefinition = document.createElement("dd"); nameDefinition.textContent = profile.display_name || "–";
       details.append(nameTerm, nameDefinition);
-      for (const [key, value] of Object.entries(profile.attributes || {})) {
-        const term = document.createElement("dt"); term.textContent = key.replaceAll("_", " ");
+      for (const { label, value } of profileDetailRows(profile.attributes)) {
+        const term = document.createElement("dt"); term.textContent = label;
         const definition = document.createElement("dd"); definition.textContent = value;
         details.append(term, definition);
       }

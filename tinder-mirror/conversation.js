@@ -13,7 +13,10 @@ const ATTRIBUTE_KEY = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_MESSAGES = 5_000;
 const MAX_MESSAGE_TEXT = 12_000;
 const MAX_PROFILE_TEXT = 12_000;
-const MAX_PROFILE_ATTRIBUTES = 32;
+// Block 2 retains up to 32 ordered visible values and can add up to 32
+// deterministic label/value pairs from the same visible profile surface.
+// This is ordinary JSON profile data, not a schema or identity expansion.
+const MAX_PROFILE_ATTRIBUTES = 96;
 const MAX_MEDIA_REFS = 40;
 
 export class TinderMirrorError extends Error {

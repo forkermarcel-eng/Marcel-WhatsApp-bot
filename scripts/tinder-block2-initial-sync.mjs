@@ -15,6 +15,7 @@ import {
   observeConversationViewportFromXml,
   observeInboxFromXml,
   observeProfileFromXml,
+  mergeProfileSnapshots,
   sameObservedViewport
 } from "../tinder-mirror/appium-conversation-reader.js";
 
@@ -292,31 +293,6 @@ function inventoryEntryFromRow(row, inboxPosition) {
       ram_key: row.ram_key,
       last_message_visible_time: row.last_message_visible_time ?? undefined
     })
-  });
-}
-
-function profileValues(profile) {
-  return Object.values(profile?.attributes || {});
-}
-
-function mergeProfileSnapshots(current, observed) {
-  if (!current) return observed;
-  if (!observed || observed.display_name !== current.display_name) {
-    throw new Error("Tinder profile changed during its local read");
-  }
-  const values = [...profileValues(current), ...profileValues(observed)];
-  const unique = [];
-  for (const value of values) {
-    if (!unique.includes(value)) unique.push(value);
-  }
-  if (unique.length > 32) throw new Error("Visible Tinder profile exceeds the existing product field capacity");
-  return Object.freeze({
-    display_name: current.display_name,
-    attributes: Object.freeze(Object.fromEntries(unique.map((value, index) => [
-      `visible_profile_${String(index + 1).padStart(2, "0")}`,
-      value
-    ]))),
-    media_refs: Object.freeze([])
   });
 }
 

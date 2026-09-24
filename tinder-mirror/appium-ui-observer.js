@@ -1,3 +1,5 @@
+import { decode } from "html-entities";
+
 /*
  * Local-only helpers for the Appium/UiAutomator2 control loop.  They never
  * persist or transmit a node tree, element id, coordinate, or screenshot.
@@ -5,19 +7,14 @@
  * product data before passing it to the mirror adapter.
  */
 
-function decodeXml(value) {
-  return String(value || "")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
+function decodeXmlAttribute(value) {
+  return decode(String(value || ""), { level: "html5", scope: "strict" });
 }
 
 function attributesFromTag(tag) {
   const attributes = {};
   for (const match of tag.matchAll(/([\w:-]+)="([^"]*)"/g)) {
-    attributes[match[1]] = decodeXml(match[2]);
+    attributes[match[1]] = decodeXmlAttribute(match[2]);
   }
   return attributes;
 }

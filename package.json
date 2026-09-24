@@ -27,6 +27,7 @@
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.14",
     "express": "^5.1.0",
+    "html-entities": "2.6.0",
     "openai": "^5.0.0",
     "pg": "^8.16.3",
     "pino": "^9.9.0"

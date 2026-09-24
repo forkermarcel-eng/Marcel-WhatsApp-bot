@@ -106,15 +106,53 @@ function hasClickableAncestor(node) {
   return false;
 }
 
+/*
+ * A text-bearing child of the Inbox RecyclerView can be a static section
+ * label as well as a conversation row.  It is a permitted row target only
+ * when UiAutomator2 exposes one unambiguous, row-sized clickable surface.
+ * This is an actionability check, not a thread identifier or a legacy
+ * wrapper/leaf-topology requirement.
+ */
+function inboxRowActionTarget(row) {
+  if (!row?.bounds) return null;
+  const candidates = [];
+  const visit = (current) => {
+    if (isClickable(current) && current.bounds && within(current.bounds, row.bounds)) {
+      const horizontallyAligned = current.bounds.width >= Math.round(row.bounds.width * 0.9)
+        && Math.abs(current.bounds.left - row.bounds.left) <= 8
+        && Math.abs(current.bounds.right - row.bounds.right) <= 8;
+      const verticallyAligned = current.bounds.height >= Math.round(row.bounds.height * 0.8)
+        && Math.abs(current.bounds.top - row.bounds.top) <= 8
+        && Math.abs(current.bounds.bottom - row.bounds.bottom) <= 8;
+      if (horizontallyAligned && verticallyAligned) candidates.push(current);
+    }
+    for (const child of current.children || []) visit(child);
+  };
+  visit(row);
+
+  // A parent and its clickable child can expose the exact same physical
+  // surface.  Deduplicate that one surface, but refuse two genuinely
+  // different actions within an otherwise text-bearing list item.
+  const surfaces = new Map();
+  for (const candidate of candidates) {
+    const bounds = candidate.bounds;
+    const key = `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`;
+    if (!surfaces.has(key)) surfaces.set(key, candidate);
+  }
+  return surfaces.size === 1 ? [...surfaces.values()][0] : null;
+}
+
 function inboxRowNodes(recycler, screen) {
   if (!recycler?.bounds || !screen) return [];
   const minimumWidth = Math.round(screen.width * 0.78);
   const maximumHeight = Math.min(240, Math.round(screen.height * 0.22));
-  return (recycler.children || []).filter((row) => {
+  return (recycler.children || []).map((row) => {
     if (!row.bounds || !within(row.bounds, recycler.bounds)) return false;
     if (row.bounds.width < minimumWidth || row.bounds.height < 72 || row.bounds.height > maximumHeight) return false;
-    return subtreeTexts(row).length > 0;
-  });
+    if (subtreeTexts(row).length < 1) return false;
+    const actionTarget = inboxRowActionTarget(row);
+    return actionTarget ? { row, actionTarget } : false;
+  }).filter(Boolean);
 }
 
 /*
@@ -144,10 +182,12 @@ function inboxRecycler(nodes, screen) {
   return candidates[0];
 }
 
-function inboxRowObservation(row) {
+function inboxRowObservation({ row, actionTarget }) {
   const texts = subtreeTexts(row);
   return {
-    bounds: Object.freeze({ ...row.bounds }),
+    // The row container is retained only in the RAM continuity key below.
+    // Appium physical input targets the freshly observed action surface.
+    bounds: Object.freeze({ ...actionTarget.bounds }),
     match_cta: isMatchCta(texts),
     last_message_visible_time: inboxTemporalLabel(texts),
     // This remains an opaque, process-local continuity key. It is never a

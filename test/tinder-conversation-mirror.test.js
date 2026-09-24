@@ -468,11 +468,16 @@ test("semantic Inbox observation exposes only the verified vertical Inbox contai
     <hierarchy rotation="0">
       <android.widget.FrameLayout bounds="[0,0][576,1280]">
         <androidx.recyclerview.widget.RecyclerView bounds="[0,225][576,1122]">
+          <android.widget.FrameLayout bounds="[0,546][576,618]">
+            <android.widget.TextView text="Nachrichten" bounds="[32,560][230,604]" />
+          </android.widget.FrameLayout>
           <android.widget.FrameLayout bounds="[0,618][576,726]">
+            <android.view.View clickable="true" bounds="[0,618][576,726]" />
             <android.widget.TextView text="Mag Dich" bounds="[80,630][220,680]" />
             <android.widget.TextView text="Vor kurzem aktiv - jetzt matchen!" bounds="[80,680][500,710]" />
           </android.widget.FrameLayout>
           <android.widget.FrameLayout bounds="[0,726][576,846]">
+            <android.view.View clickable="true" bounds="[0,726][576,846]" />
             <android.widget.TextView text="Existing ordinary preview" bounds="[80,740][500,800]" />
             <android.widget.TextView text="DU BIST DRAN" bounds="[360,740][540,780]" />
           </android.widget.FrameLayout>
@@ -496,10 +501,12 @@ test("semantic Inbox preserves one unparsed Tinder time label but refuses an amb
       <android.widget.FrameLayout bounds="[0,0][576,1280]">
         <androidx.recyclerview.widget.RecyclerView bounds="[0,225][576,1122]">
           <android.widget.FrameLayout bounds="[0,726][576,846]">
+            <android.view.View clickable="true" bounds="[0,726][576,846]" />
             <android.widget.TextView text="Existing ordinary preview" bounds="[80,740][420,800]" />
             <android.widget.TextView text="08:15" bounds="[460,740][540,780]" />
           </android.widget.FrameLayout>
           <android.widget.FrameLayout bounds="[0,846][576,966]">
+            <android.view.View clickable="true" bounds="[0,846][576,966]" />
             <android.widget.TextView text="Another ordinary preview" bounds="[80,860][420,920]" />
             <android.widget.TextView text="Heute" bounds="[430,860][500,900]" />
             <android.widget.TextView text="08:15" bounds="[500,860][560,900]" />

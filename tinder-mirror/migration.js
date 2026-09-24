@@ -93,7 +93,11 @@ const EXPECTED_INDEXES = Object.freeze({
 });
 
 function sameColumns(actual, expected) {
-  const values = Array.isArray(actual) ? actual : [];
+  const values = Array.isArray(actual)
+    ? actual
+    : typeof actual === "string"
+      ? actual === "" ? [] : actual.replace(/^\{/, "").replace(/\}$/, "").split(",")
+      : [];
   return values.length === expected.length && values.every((value, index) => value === expected[index]);
 }
 
@@ -167,8 +171,9 @@ async function readTargetCatalog(client) {
   `, [TARGET_TABLES]);
   const constraints = await client.query(`
     SELECT rel.relname AS table_name, con.contype, con.conname,
-      ARRAY(SELECT attr.attname FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinal)
-        JOIN pg_attribute attr ON attr.attrelid=con.conrelid AND attr.attnum=key.attnum ORDER BY key.ordinal) AS columns,
+      COALESCE((SELECT string_agg(attr.attname, ',' ORDER BY key.ordinal)
+        FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinal)
+        JOIN pg_attribute attr ON attr.attrelid=con.conrelid AND attr.attnum=key.attnum), '') AS columns,
       ref.relname AS reference_table, con.confdeltype, pg_get_constraintdef(con.oid, true) AS definition
     FROM pg_constraint con JOIN pg_class rel ON rel.oid=con.conrelid
     JOIN pg_namespace namespace ON namespace.oid=rel.relnamespace LEFT JOIN pg_class ref ON ref.oid=con.confrelid

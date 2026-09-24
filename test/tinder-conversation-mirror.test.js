@@ -102,7 +102,7 @@ function createMemoryPool() {
   };
 }
 
-function createMigrationPool({ failOn = null, catalogVariant = false } = {}) {
+function createMigrationPool({ failOn = null, catalogVariant = false, stringColumns = false } = {}) {
   const statements = [];
   const createdTables = new Set();
   const columns = [
@@ -153,7 +153,9 @@ function createMigrationPool({ failOn = null, catalogVariant = false } = {}) {
       ] : [] };
     }
     if (normalized.includes("FROM information_schema.columns")) return { rows: allCreated() ? columns : [] };
-    if (normalized.includes("FROM pg_constraint con")) return { rows: allCreated() ? constraints : [] };
+    if (normalized.includes("FROM pg_constraint con")) return {
+      rows: allCreated() ? constraints.map((row) => ({ ...row, columns: stringColumns ? row.columns.join(",") : row.columns })) : []
+    };
     if (normalized.includes("FROM pg_indexes")) return { rows: allCreated() ? indexes : [] };
     if (normalized.includes("FROM pg_trigger trigger")) return { rows: [{ count: 0 }] };
     if (normalized.includes("SELECT (SELECT COUNT(*)::int FROM tinder_conversations)")) return { rows: [{ conversations: 0, messages: 0 }] };
@@ -310,7 +312,7 @@ test("migration preflight is read-only and a fresh two-table apply commits only 
 });
 
 test("postcheck accepts harmless PostgreSQL cast and schema qualification rendering without weakening the contract", async () => {
-  const pool = createMigrationPool({ catalogVariant: true });
+  const pool = createMigrationPool({ catalogVariant: true, stringColumns: true });
   const result = await migrateTinderConversationMirror(pool);
   assert.equal(result.migrated, true);
   assert.equal(result.postcheck.state, "ALREADY_CANONICAL");

@@ -441,6 +441,21 @@ async function openReadAndMirror({ deviceId, row, inboxPosition }) {
     initialViewport: chat.viewport
   });
   const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: read.oldest_boundary_reached });
+  if (synced?.skipped_existing_ambiguous_singleton === true) {
+    const result = Object.freeze({
+      action: "EXISTING_SINGLETON_DUPLICATE_UNCHANGED",
+      conversation_id: null,
+      inbox_position: inboxPosition,
+      last_message_visible_time_captured: lastMessageVisibleTime !== undefined,
+      full_profile_read: true,
+      full_history_read: true,
+      profile_linked: true,
+      history_gestures: read.gestures
+    });
+    adapter.clear();
+    await returnToInbox();
+    return result;
+  }
   if (!synced?.conversation?.id || synced.conversation.history_complete !== true) {
     throw new Error("Completed Tinder history was not accepted by the existing product mirror");
   }
@@ -527,12 +542,15 @@ const beforeIds = new Set((before.conversations || []).map((conversation) => con
 const results = await sweepInbox({ deviceId });
 const after = await dashboard("/dashboard-api/tinder/conversations");
 const afterIds = new Set((after.conversations || []).map((conversation) => conversation.id));
-const knownIds = new Set(results.filter((result) => result.action !== "NEW_MIRRORED").map((result) => result.conversation_id));
+const knownIds = new Set(results
+  .filter((result) => result.action !== "NEW_MIRRORED" && typeof result.conversation_id === "string")
+  .map((result) => result.conversation_id));
 const newIds = new Set(results.filter((result) => result.action === "NEW_MIRRORED").map((result) => result.conversation_id));
 
 console.log(JSON.stringify({
   normal_row_visits: results.length,
-  distinct_threads_processed: new Set(results.map((result) => result.conversation_id)).size,
+  distinct_threads_processed: new Set(results.map((result) => result.conversation_id).filter((id) => typeof id === "string")).size
+    + results.filter((result) => result.action === "EXISTING_SINGLETON_DUPLICATE_UNCHANGED").length,
   known_threads_reused: knownIds.size,
   new_threads_mirrored: newIds.size,
   full_histories_read: results.filter((result) => result.full_history_read).length,
@@ -540,8 +558,10 @@ console.log(JSON.stringify({
   profiles_linked: results.filter((result) => result.profile_linked).length,
   inbox_positions_observed: results.filter((result) => Number.isInteger(result.inbox_position)).length,
   last_message_visible_time_values: results.filter((result) => result.last_message_visible_time_captured).length,
+  existing_singleton_duplicate_rows_unchanged: results.filter((result) => result.action === "EXISTING_SINGLETON_DUPLICATE_UNCHANGED").length,
   reachable_history_complete: results.length > 0 && results.every((result) => result.action === "KNOWN_SKIPPED"
-    || result.action === "NEW_MIRRORED" || result.action === "KNOWN_COMPLETED"),
+    || result.action === "NEW_MIRRORED" || result.action === "KNOWN_COMPLETED"
+    || result.action === "EXISTING_SINGLETON_DUPLICATE_UNCHANGED"),
   conversations_before: beforeIds.size,
   conversations_after: afterIds.size,
   conversations_created: afterIds.size - beforeIds.size,

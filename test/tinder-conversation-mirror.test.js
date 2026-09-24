@@ -660,6 +660,51 @@ test("one completed initial thread is created once and a later exact reopen skip
   assert.equal(pool.state.deleteMessageCalls, 0);
 });
 
+test("an old exact completed singleton pair remains untouched instead of producing a third record", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({
+    pool,
+    now: () => new Date("2026-09-24T10:00:00.000Z"),
+    idFactory: () => "00000000-0000-4000-8000-000000000099"
+  });
+  const payload = {
+    profile: profile({ city: "Example city", age: "30" }),
+    messages: [message("INBOUND", "Only ordinary message", "09:30")],
+    history_complete: true
+  };
+  const first = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload });
+  const duplicateId = "00000000-0000-4000-8000-000000000098";
+  const originalConversation = pool.state.conversations.get(first.conversation.id);
+  const originalMessages = pool.state.messages.get(first.conversation.id);
+  pool.state.conversations.set(duplicateId, { ...originalConversation, conversation_id: duplicateId });
+  pool.state.messages.set(duplicateId, originalMessages.map((row) => ({
+    ...row,
+    message_id: "00000000-0000-4000-8000-000000000097",
+    conversation_id: duplicateId
+  })));
+  const before = {
+    conversations: [...pool.state.conversations.values()].map((row) => ({ ...row })).sort((a, b) => a.conversation_id.localeCompare(b.conversation_id)),
+    messages: [...pool.state.messages.entries()].map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]).sort(([a], [b]) => a.localeCompare(b))
+  };
+
+  const resolved = await mirror.resolve({
+    deviceId: "00000000-0000-4000-8000-000000000001",
+    payload: { ...payload, history_complete: false }
+  });
+  assert.equal(resolved.action, "READ_HISTORY");
+  const noOp = await mirror.sync({ deviceId: "00000000-0000-4000-8000-000000000001", payload });
+  const after = {
+    conversations: [...pool.state.conversations.values()].map((row) => ({ ...row })).sort((a, b) => a.conversation_id.localeCompare(b.conversation_id)),
+    messages: [...pool.state.messages.entries()].map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]).sort(([a], [b]) => a.localeCompare(b))
+  };
+
+  assert.equal(noOp.skipped_existing_ambiguous_singleton, true);
+  assert.equal(noOp.conversation, null);
+  assert.equal(pool.state.conversations.size, 2);
+  assert.equal(pool.state.deleteMessageCalls, 0);
+  assert.deepEqual(after, before);
+});
+
 test("current verified Inbox order is persisted without resubmitting a known history", async () => {
   const pool = createMemoryPool();
   let sequence = 0;

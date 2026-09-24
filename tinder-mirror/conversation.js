@@ -370,8 +370,16 @@ function hasCompatibleProfileEvidence(storedValue, observedProfile) {
   return stored.media_refs.some((reference) => observedProfile.media_refs.includes(reference));
 }
 
-export function selectConservativeConversationMatch(candidates, observation) {
-  const matches = candidates.filter((candidate) => {
+function exactSingletonProductMatch(candidate, observation) {
+  const messages = candidate.messages || [];
+  return messages.length === 1
+    && observation.messages.length === 1
+    && profilesEqual(candidate.profile, observation.profile)
+    && messageIdentityEqual(messages[0], observation.messages[0]);
+}
+
+function conservativeConversationMatches(candidates, observation) {
+  return candidates.filter((candidate) => {
     const messages = candidate.messages || [];
     const ordinaryOrderedOverlap = hasCompatibleProfileEvidence(candidate.profile, observation.profile)
       // A re-read can correct the UI-derived direction while every ordinary
@@ -386,13 +394,28 @@ export function selectConservativeConversationMatch(candidates, observation) {
     // instead of manufacturing a second copy.  This is not name-only, a new
     // identifier, or a heuristic fingerprint; multiple matching candidates
     // still return null below and remain deliberately unmerged.
-    const uniqueExactSingleton = messages.length === 1
-      && observation.messages.length === 1
-      && profilesEqual(candidate.profile, observation.profile)
-      && messageIdentityEqual(messages[0], observation.messages[0]);
-    return ordinaryOrderedOverlap || uniqueExactSingleton;
+    return ordinaryOrderedOverlap || exactSingletonProductMatch(candidate, observation);
   });
+}
+
+export function selectConservativeConversationMatch(candidates, observation) {
+  const matches = conservativeConversationMatches(candidates, observation);
   return matches.length === 1 ? matches[0] : null;
+}
+
+function messagesExactlyEqual(left, right) {
+  return left.direction === right.direction
+    && left.text === right.text
+    && left.visible_time === right.visible_time
+    && left.visible_status === right.visible_status;
+}
+
+function hasAmbiguousCompletedExactSingletonPair(candidates, observation) {
+  if (observation.history_complete !== true || observation.messages.length !== 1) return false;
+  const matches = candidates.filter((candidate) => Boolean(candidate.history_complete)
+    && exactSingletonProductMatch(candidate, observation)
+    && messagesExactlyEqual(candidate.messages[0], observation.messages[0]));
+  return matches.length > 1;
 }
 
 export function mergeTinderProfile(existingValue, observedProfile) {
@@ -552,6 +575,12 @@ async function resolveStoredConversation(client, deviceId, observation, { lock =
   return selectConservativeConversationMatch(candidates, observation);
 }
 
+async function hasExistingAmbiguousCompletedSingletonPair(client, deviceId, observation, { lock = false } = {}) {
+  if (observation.continuation_conversation_id || observation.history_complete !== true) return false;
+  const candidates = await loadCandidateConversations(client, deviceId, observation.profile.display_name, { lock });
+  return hasAmbiguousCompletedExactSingletonPair(candidates, observation);
+}
+
 async function insertMessages(client, conversationId, messages, { startOrdinal = 0 } = {}) {
   for (const [ordinal, message] of messages.entries()) {
     await client.query(
@@ -693,6 +722,21 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
           lock: true,
           continuationRequired: Boolean(observation.continuation_conversation_id)
         });
+        if (!conversation && await hasExistingAmbiguousCompletedSingletonPair(client, deviceId, observation, { lock: true })) {
+          // Do not choose one of the old copies merely to make this row
+          // progress.  The caller has just fully read a real one-message
+          // thread, but the old prototype already represents it twice.  A
+          // deliberately rolled-back no-op preserves both records exactly and
+          // prevents a third until an explicitly authorized cleanup.
+          await client.query("ROLLBACK");
+          return Object.freeze({
+            created: false,
+            history_changed: false,
+            ordering_changed: false,
+            skipped_existing_ambiguous_singleton: true,
+            conversation: null
+          });
+        }
       }
       let created = false;
       let historyChanged = false;

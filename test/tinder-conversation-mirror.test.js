@@ -527,3 +527,11 @@ test("corrective history runner revalidates a fresh Inbox row and waits for the 
   assert.match(runner, /processedRows\.add\(next\.ram_key\);/);
   assert.doesNotMatch(runner, /processedRows\.add\(next\.ram_key\);\s*await tap/);
 });
+
+test("a one-message correction candidate is no-op only after an exact unchanged product-data check", () => {
+  const runner = readFileSync(new URL("../scripts/tinder-block2-correct-existing-history.mjs", import.meta.url), "utf8");
+  assert.match(runner, /async function isVerifiedUnchangedSingleton/);
+  assert.match(runner, /sameOrdinaryMessage\(stored\[0\], assembled\[0\]\)/);
+  assert.match(runner, /history_persisted: false/);
+  assert.match(runner, /cannot be safely corrected without an exact unchanged match/);
+});

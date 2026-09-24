@@ -108,6 +108,21 @@ function onlyExistingConversation(list, displayName) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+function sameOrdinaryMessage(left, right) {
+  return Boolean(left && right
+    && left.direction === right.direction
+    && left.text === right.text
+    && (left.visible_time ?? null) === (right.visible_time ?? null)
+    && (left.visible_status ?? null) === (right.visible_status ?? null));
+}
+
+async function isVerifiedUnchangedSingleton(existing, assembled) {
+  if (assembled.length !== 1 || Number(existing.message_count) !== 1) return false;
+  const detail = await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(existing.id)}`);
+  const stored = Array.isArray(detail.messages) ? detail.messages : [];
+  return stored.length === 1 && sameOrdinaryMessage(stored[0], assembled[0]);
+}
+
 async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
   let viewport = observeConversationViewportFromXml(source);
   if (!viewport?.profile_display_name || viewport.messages.length < 1 || !viewport.scroll_bounds) {
@@ -124,7 +139,11 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
   const adapter = createTinderAppiumAdapter({ deviceId, transport });
   adapter.start({ profile: existing.profile, messages: viewport.messages });
   const resolved = await adapter.resolve();
-  if (resolved?.conversation?.id !== existing.id) {
+  const resolvedExisting = resolved?.conversation?.id === existing.id;
+  const singletonCandidate = !resolved?.conversation
+    && Number(existing.message_count) === 1
+    && viewport.messages.length === 1;
+  if (!resolvedExisting && !singletonCandidate) {
     throw new Error("Existing Tinder conversation could not be revalidated before correction");
   }
 
@@ -149,6 +168,20 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
     // One duplicate/no-new viewport is not terminal.  Three independently
     // fresh post-gesture observations establish the physical upper boundary.
     if (unchangedViewportStreak >= 3) {
+      if (singletonCandidate) {
+        if (!await isVerifiedUnchangedSingleton(existing, assembled)) {
+          throw new Error("A singleton Tinder conversation cannot be safely corrected without an exact unchanged match");
+        }
+        return Object.freeze({
+          conversation_id: existing.id,
+          messages: assembled.length,
+          inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
+          outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
+          gestures: gestures + 1,
+          oldest_boundary_reached: true,
+          history_persisted: false
+        });
+      }
       const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: true });
       if (synced?.created || synced?.conversation?.id !== existing.id
         || synced?.conversation?.history_complete !== true
@@ -161,7 +194,8 @@ async function readToVerifiedOldestBoundary({ deviceId, existing, source }) {
         inbound_samples: assembled.filter((message) => message.direction === "INBOUND").length,
         outbound_samples: assembled.filter((message) => message.direction === "OUTBOUND").length,
         gestures: gestures + 1,
-        oldest_boundary_reached: true
+        oldest_boundary_reached: true,
+        history_persisted: true
       });
     }
   }
@@ -237,6 +271,13 @@ const processedRows = new Set();
 const results = [];
 let source = await sourceXml();
 
+// A previous interrupted local run may leave a verified chat open.  Return
+// once through its checked header so every run row is freshly revalidated.
+if (observeConversationViewportFromXml(source)) {
+  await returnToInbox();
+  source = await sourceXml();
+}
+
 while (results.length < limit) {
   let viewport = observeConversationViewportFromXml(source);
   if (!viewport) {
@@ -263,8 +304,10 @@ const profilesPreserved = sameIds && afterConversations.every((conversation) => 
 
 console.log(JSON.stringify({
   threads_corrected: results.length,
+  threads_persisted: results.filter((result) => result.history_persisted).length,
+  threads_verified_unchanged: results.filter((result) => !result.history_persisted).length,
   conversations_created: afterConversations.length - beforeConversations.length,
-  messages_mirrored: results.reduce((total, result) => total + result.messages, 0),
+  messages_read: results.reduce((total, result) => total + result.messages, 0),
   inbound_samples: results.reduce((total, result) => total + result.inbound_samples, 0),
   outbound_samples: results.reduce((total, result) => total + result.outbound_samples, 0),
   multi_viewport_history: results.every((result) => result.gestures > 3),

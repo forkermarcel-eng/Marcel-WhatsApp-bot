@@ -7,7 +7,7 @@ import {
 } from "../tinder-mirror/migration.js";
 
 function diagnostic(logger, value) {
-  logger.error(`TINDER_CONVERSATION_MIRROR_DIAGNOSTIC stage=${value.stage} code=${value.code} transaction=${value.transaction} rollback=${value.rollback} ddl_started=${value.ddl_started}`);
+  logger.error(`TINDER_CONVERSATION_MIRROR_DIAGNOSTIC stage=${value.stage} code=${value.code} transaction=${value.transaction} rollback=${value.rollback} ddl_started=${value.ddl_started}${value.reason ? ` reason=${value.reason}` : ""}`);
 }
 
 async function createDefaultPool(options) {
@@ -44,7 +44,7 @@ export async function runTinderConversationMirrorCli({
     return true;
   } catch (error) {
     const migrationDiagnostic = getTinderConversationMirrorMigrationDiagnostic(error);
-    diagnostic(logger, migrationDiagnostic || { stage: "DATABASE_OPERATION", code: ["TINDER_CONVERSATION_MIRROR_SCHEMA_INVALID", "TINDER_CONVERSATION_MIRROR_FOUNDATION_INVALID"].includes(error?.code) ? error.code : "DATABASE_OPERATION_FAILED", transaction: "UNRESOLVED", rollback: "UNRESOLVED", ddl_started: "UNRESOLVED" });
+    diagnostic(logger, migrationDiagnostic || { stage: "DATABASE_OPERATION", code: ["TINDER_CONVERSATION_MIRROR_SCHEMA_INVALID", "TINDER_CONVERSATION_MIRROR_FOUNDATION_INVALID"].includes(error?.code) ? error.code : "DATABASE_OPERATION_FAILED", transaction: "UNRESOLVED", rollback: "UNRESOLVED", ddl_started: "UNRESOLVED", reason: typeof error?.reason === "string" ? error.reason : null });
     return false;
   } finally {
     await pool?.end().catch(() => {});

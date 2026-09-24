@@ -186,7 +186,12 @@ export async function inspectTinderConversationMirrorSchema(client) {
   if (catalog.relations.length === 0) return Object.freeze({ state: "ELIGIBLE_FOR_MIGRATION", counts: null });
   const catalogFailure = targetCatalogFailureReason(catalog);
   if (catalog.relations.length !== 2 || catalogFailure) {
-    fail("TINDER_CONVERSATION_MIRROR_SCHEMA_INVALID", `Tinder conversation mirror schema is not canonical: ${catalogFailure || "RELATIONS"}.`);
+    const error = new TinderMirrorMigrationError(
+      "TINDER_CONVERSATION_MIRROR_SCHEMA_INVALID",
+      "Tinder conversation mirror schema is not canonical."
+    );
+    error.reason = catalogFailure || "RELATIONS";
+    throw error;
   }
   return Object.freeze({ state: "ALREADY_CANONICAL", counts: await targetCounts(client) });
 }
@@ -220,7 +225,8 @@ function attachDiagnostic(error, state) {
     code: diagnosticCode(state.stage, error),
     transaction: state.commitConfirmed ? "COMMITTED" : state.commitAttempted ? "COMMIT_OUTCOME_UNKNOWN" : state.transactionStarted ? "STARTED" : "NOT_STARTED",
     rollback: state.rollbackAttempted ? state.rollbackCompleted ? "COMPLETED" : "FAILED" : "NOT_ATTEMPTED",
-    ddl_started: state.ddlStarted
+    ddl_started: state.ddlStarted,
+    reason: typeof error?.reason === "string" ? error.reason : null
   });
   if (error && (typeof error === "object" || typeof error === "function")) FAILURE_DIAGNOSTICS.set(error, diagnostic);
   return error;

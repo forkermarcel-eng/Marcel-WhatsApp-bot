@@ -324,7 +324,8 @@ test("migration rolls back before commit if a DDL statement fails", async () => 
     code: "DATABASE_OPERATION_FAILED",
     transaction: "STARTED",
     rollback: "COMPLETED",
-    ddl_started: true
+    ddl_started: true,
+    reason: null
   });
 });
 

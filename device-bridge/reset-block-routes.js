@@ -1,5 +1,6 @@
 import { createResetHeartbeatHandler } from "./reset-heartbeat.js";
 import { createResetCommandAckHandler } from "./reset-command-ack.js";
+import { createTinderPossibleChangeHandler } from "./tinder-change-hint.js";
 import {
   createResetAdminCommandHandler,
   createResetAdminCommandStatusHandler,
@@ -20,10 +21,12 @@ function registerDeviceBridgeResetRoutes({
   pool,
   dashboardApiReady,
   dashboardApiAuthorized,
-  requireDeviceBridgeReady
+  requireDeviceBridgeReady,
+  onTinderPossibleChange = null
 }) {
   const heartbeat = createResetHeartbeatHandler(pool);
   const commandAck = createResetCommandAckHandler(pool);
+  const tinderPossibleChange = createTinderPossibleChangeHandler(pool, { onAccepted: onTinderPossibleChange });
   const listDevices = createResetAdminDeviceListHandler(pool);
   const deviceStatus = createResetAdminDeviceStatusHandler(pool);
   const createCommand = createResetAdminCommandHandler(pool);
@@ -39,6 +42,7 @@ function registerDeviceBridgeResetRoutes({
 
   app.post("/device-bridge/v1/devices/:deviceId/heartbeat", heartbeat);
   app.post("/device-bridge/v1/devices/:deviceId/commands/:commandId/ack", commandAck);
+  app.post("/device-bridge/v1/devices/:deviceId/tinder-change-hints", tinderPossibleChange);
   app.get("/dashboard-api/device-bridge/devices", admin(listDevices));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/status", admin(deviceStatus));
   app.get("/dashboard-api/device-bridge/devices/:deviceId/commands/:commandId", admin(commandStatus));

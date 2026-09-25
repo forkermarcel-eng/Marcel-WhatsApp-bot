@@ -5,6 +5,10 @@ import { parseAndValidateResetHeartbeat } from "../device-bridge/reset-heartbeat
 import { RETAINED_COMMANDS } from "../device-bridge/reset-command-ack.js";
 import { registerDeviceBridgeResetRoutes } from "../device-bridge/reset-block-routes.js";
 import {
+  parseAndValidateTinderPossibleChange,
+  processTinderPossibleChangeTransaction
+} from "../device-bridge/tinder-change-hint.js";
+import {
   RESET_FOUNDATION,
   initializeResetDeviceBridgeDatabase,
   verifyResetDeviceBridgeSchema
@@ -42,6 +46,21 @@ function heartbeatRequest(body) {
   return {
     body: Buffer.from(JSON.stringify(body), "utf8"),
     get(name) { return name === "x-marcel-timestamp" ? STAMP : undefined; }
+  };
+}
+
+function tinderPossibleChangeRequest(body) {
+  return {
+    body: Buffer.from(JSON.stringify(body), "utf8"),
+    get(name) { return name === "x-marcel-timestamp" ? STAMP : undefined; }
+  };
+}
+
+function tinderPossibleChangeBody() {
+  return {
+    protocol_version: 1,
+    sent_at: STAMP,
+    event_type: "TINDER_POSSIBLE_CHANGE"
   };
 }
 
@@ -102,6 +121,64 @@ test("generic command allowlist is fixed", () => {
   assert.deepEqual([...RETAINED_COMMANDS].sort(), ["PING", "REQUEST_STATUS", "STOP_BRIDGE"]);
 });
 
+test("Tinder possible-change hint is exactly content-free and does not extend the heartbeat", () => {
+  assert.deepEqual(
+    parseAndValidateTinderPossibleChange(tinderPossibleChangeRequest(tinderPossibleChangeBody())),
+    { sent_at: STAMP, event_type: "TINDER_POSSIBLE_CHANGE" }
+  );
+  assert.throws(
+    () => parseAndValidateTinderPossibleChange(tinderPossibleChangeRequest({
+      ...tinderPossibleChangeBody(), notification_text: "not permitted"
+    })),
+    (error) => error?.code === "INVALID_BODY"
+  );
+  assert.throws(
+    () => parseAndValidateTinderPossibleChange(tinderPossibleChangeRequest({
+      ...tinderPossibleChangeBody(), event_type: "TINDER_NEW_MESSAGE"
+    })),
+    (error) => error?.code === "INVALID_BODY"
+  );
+});
+
+test("Tinder possible-change acceptance uses existing request replay and a non-gating audit only", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT d\.device_id/.test(sql)) {
+        return { rows: [{ device_id: DEVICE_ID, enrollment_state: "ACTIVE", revoked_at: null, key_id: DEVICE_ID, key_revoked_at: null }] };
+      }
+      if (/INSERT INTO device_bridge_request_nonces/.test(sql)
+        || /INSERT INTO device_bridge_audit_events/.test(sql)
+        || /^(BEGIN|COMMIT|ROLLBACK)$/.test(sql)) return { rows: [] };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+    release() { this.released = true; }
+  };
+  const pool = { async connect() { return client; } };
+  const now = new Date(STAMP);
+  const accepted = await processTinderPossibleChangeTransaction(pool, {
+    deviceId: DEVICE_ID,
+    keyId: DEVICE_ID,
+    requestId: "22222222-2222-4222-8222-222222222222",
+    contentSha256: "a".repeat(64)
+  }, { sent_at: STAMP, event_type: "TINDER_POSSIBLE_CHANGE" }, now);
+
+  assert.deepEqual(accepted, {
+    ok: true,
+    protocol_version: 1,
+    accepted_at: STAMP,
+    event_type: "TINDER_POSSIBLE_CHANGE",
+    delivery: "BEST_EFFORT"
+  });
+  assert.ok(calls.some(({ sql }) => /INSERT INTO device_bridge_request_nonces/.test(sql)));
+  const audit = calls.find(({ sql }) => /INSERT INTO device_bridge_audit_events/.test(sql));
+  assert.ok(audit);
+  assert.match(audit.sql, /TINDER_POSSIBLE_CHANGE_ACCEPTED/);
+  assert.equal(audit.params.length, 3);
+  assert.equal(client.released, true);
+});
+
 test("reset route registration retains only generic signed and admin bridge endpoints", () => {
   const routes = [];
   const app = {
@@ -119,6 +196,7 @@ test("reset route registration retains only generic signed and admin bridge endp
   assert.deepEqual(routes, [
     ["POST", "/device-bridge/v1/devices/:deviceId/heartbeat"],
     ["POST", "/device-bridge/v1/devices/:deviceId/commands/:commandId/ack"],
+    ["POST", "/device-bridge/v1/devices/:deviceId/tinder-change-hints"],
     ["GET", "/dashboard-api/device-bridge/devices"],
     ["GET", "/dashboard-api/device-bridge/devices/:deviceId/status"],
     ["GET", "/dashboard-api/device-bridge/devices/:deviceId/commands/:commandId"],

@@ -29,11 +29,28 @@ function dashboardDecoder() {
   };
 }
 
-function dashboardProfileRows() {
+function dashboardProfilePresentation() {
   const { decodeText } = dashboardDecoder();
-  const source = tinder.match(/function profileDetailRows\(attributes\) \{[\s\S]*?\n    \}/)?.[0];
-  assert.ok(source, "Tinder dashboard profile row formatter is present");
-  return new Function("decodeStoredTinderText", `${source}; return profileDetailRows;`)(decodeText);
+  const start = tinder.indexOf("function orderedProfileValues(attributes, expression)");
+  const end = tinder.indexOf("function renderConversationList", start);
+  assert.ok(start >= 0 && end > start, "Tinder dashboard profile presentation formatter is present");
+  const source = tinder.slice(start, end);
+  return new Function("decodeStoredTinderText", `${source}; return profilePresentation;`)(decodeText);
+}
+
+function dashboardProfileRows() {
+  const present = dashboardProfilePresentation();
+  return (attributes) => {
+    const profile = present(attributes);
+    const rows = profile.age ? [{ label: null, value: profile.age }] : [];
+    const hasStructuredPairs = Object.keys(attributes || {}).some((key) => /^structured_profile_\d{2}_label$/.test(key));
+    for (const group of profile.groups) {
+      if (!(hasStructuredPairs && group.title === null)) rows.push(...group.prose.map((value) => ({ label: null, value })));
+      rows.push(...group.facts);
+      rows.push(...group.chips.map((value) => ({ label: null, value })));
+    }
+    return rows;
+  };
 }
 
 test("Tinder dashboard decodes existing entity text into safe text nodes", () => {
@@ -74,14 +91,54 @@ test("Tinder profile presentation prefers deterministic structured rows and unla
     { label: null, value: "Visible tag one" },
     { label: null, value: "Visible tag two" }
   ]);
-  assert.match(tinder, /function profileDetailRows\(attributes\)/);
+  assert.match(tinder, /function profilePresentation\(attributes\)/);
   assert.match(tinder, /\^structured_profile_\(\\d\{2\}\)_\(label\|value\)\$/);
-  assert.match(tinder, /if \(structured\.length\) return \[\.\.\.headerAge, \.\.\.structured, \.\.\.chips\];/);
-  assert.match(tinder, /label: \/\^\(\?:visible_profile\|structured_profile\|profile_chip\)/);
-  assert.match(tinder, /for \(const \{ label, value \} of profileDetailRows\(profile\.attributes\)\)/);
-  assert.match(tinder, /definition\.classList\.add\("tinder-profile-fallback"\)/);
-  assert.match(tinder, /term\.textContent = label/);
-  assert.match(tinder, /\.tinder-profile dd\{margin:0;white-space:pre-wrap;/);
+  assert.match(tinder, /\^profile_section_\(\\d\{2\}\)\$/);
+  assert.match(tinder, /\^profile_chip_\(\\d\{2\}\)\$/);
+  assert.match(tinder, /function normalizedProfileValue\(value\)/);
+  assert.match(tinder, /tinder-profile-header/);
+  assert.match(tinder, /prose\.textContent = group\.prose\.join/);
+  assert.match(tinder, /value\.textContent = fact\.value/);
+  assert.match(tinder, /\.tinder-profile-fact\{display:grid/);
+});
+
+test("Tinder profile sections retain prose and suppress chip-derived fallback duplicates", () => {
+  const present = dashboardProfilePresentation();
+  const result = present({
+    header_profile_age: "36",
+    profile_section_01: "Seeking",
+    profile_section_02: "About",
+    profile_section_03: "Interests",
+    visible_profile_01: "Seeking",
+    visible_profile_02: "Committed relationship",
+    visible_profile_03: "About",
+    visible_profile_04: "A complete visible bio.",
+    visible_profile_05: "Interests",
+    visible_profile_06: "Instagram",
+    visible_profile_07: "Music",
+    structured_profile_01_label: "Seeking",
+    structured_profile_01_value: "Committed relationship",
+    profile_chip_01: "Instagram",
+    profile_chip_02: "Music"
+  });
+  assert.equal(result.age, "36");
+  assert.deepEqual(result.groups.map((group) => ({
+    title: group.title,
+    prose: group.prose,
+    facts: group.facts,
+    chips: group.chips
+  })), [
+    { title: "Seeking", prose: ["Committed relationship"], facts: [], chips: [] },
+    { title: "About", prose: ["A complete visible bio."], facts: [], chips: [] },
+    { title: "Interests", prose: [], facts: [], chips: ["Instagram", "Music"] }
+  ]);
+  assert.deepEqual(present({ visible_profile_01: "line one&#10;line two" }).groups, [{
+    title: null,
+    rawIndex: -1,
+    facts: [],
+    prose: ["line one\nline two"],
+    chips: []
+  }]);
 });
 
 test("shared presentation maps known keys and humanizes unknown snake case", () => {

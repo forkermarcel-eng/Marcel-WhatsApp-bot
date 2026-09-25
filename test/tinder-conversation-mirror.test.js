@@ -617,6 +617,7 @@ test("profile observation accepts the real ScrollView and ViewPager surface with
   });
   assert.equal(Object.keys(observed.profile.attributes).some((key) => key.startsWith("structured_profile_")), false);
   assert.deepEqual(observed.scroll_bounds, { left: 0, top: 160, right: 576, bottom: 1120, width: 576, height: 960 });
+  assert.deepEqual(observed.media_bounds, { left: 0, top: 160, right: 576, bottom: 600, width: 576, height: 440 });
   assert.doesNotMatch(JSON.stringify(observed), /content-desc/);
 });
 

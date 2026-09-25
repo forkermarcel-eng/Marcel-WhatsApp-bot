@@ -73,7 +73,29 @@ function profileViewportXml(name, text, { opening = false } = {}) {
     </hierarchy>`;
 }
 
-function createFakeRuntime({ carouselPages, initialCarouselIndex = 0, changeBeforePreTap = false }) {
+function matchConversationXml(name) {
+  return `
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <android.widget.ImageView clickable="true" content-desc="back" bounds="[20,58][70,108]" />
+        <android.widget.ImageView clickable="true" content-desc="profile" bounds="[112,52][172,112]" />
+        <android.widget.TextView text="${name}" bounds="[200,68][390,116]" />
+        <androidx.recyclerview.widget.RecyclerView bounds="[0,160][576,1080]">
+          <android.widget.FrameLayout bounds="[0,500][576,610]">
+            <android.widget.TextView text="Visible ordinary message" bounds="[96,528][410,572]" />
+          </android.widget.FrameLayout>
+        </androidx.recyclerview.widget.RecyclerView>
+        <android.widget.EditText bounds="[70,1120][500,1200]" />
+      </android.widget.FrameLayout>
+    </hierarchy>`;
+}
+
+function createFakeRuntime({
+  carouselPages,
+  initialCarouselIndex = 0,
+  changeBeforePreTap = false,
+  matchOpensConversation = false
+}) {
   let screen = "carousel";
   let carouselIndex = initialCarouselIndex;
   let carouselRightMoves = 0;
@@ -95,7 +117,9 @@ function createFakeRuntime({ carouselPages, initialCarouselIndex = 0, changeBefo
   return {
     calls,
     async sourceXml() {
-      return screen === "profile" ? profileXml(profileName) : carouselXml(currentCarouselNames());
+      if (screen === "profile") return profileXml(profileName);
+      if (screen === "match-conversation") return matchConversationXml(profileName);
+      return carouselXml(currentCarouselNames());
     },
     async scrollCarousel(_bounds, direction) {
       calls.carouselScrolls.push(direction);
@@ -111,9 +135,13 @@ function createFakeRuntime({ carouselPages, initialCarouselIndex = 0, changeBefo
     },
     async tap(bounds) {
       calls.tap.push(bounds);
+      if (screen === "match-conversation") {
+        screen = "profile";
+        return;
+      }
       const tileIndex = Math.round((bounds.left - 4) / 118);
       profileName = carouselPages[carouselIndex][tileIndex] || "Unknown";
-      screen = "profile";
+      screen = matchOpensConversation ? "match-conversation" : "profile";
     },
     async scrollProfile() {
       calls.profileScrolls += 1;
@@ -121,7 +149,7 @@ function createFakeRuntime({ carouselPages, initialCarouselIndex = 0, changeBefo
     },
     async back() {
       calls.back += 1;
-      screen = "carousel";
+      screen = screen === "profile" && matchOpensConversation ? "match-conversation" : "carousel";
     }
   };
 }
@@ -157,6 +185,25 @@ test("fresh carousel inventory is read-only and needs no tap, profile, or Back c
   assert.deepEqual(directions, ["left", "left", "right", "right"]);
 });
 
+test("fresh carousel inventory tolerates a transient empty UiAutomator projection before any action", async () => {
+  let sourceReads = 0;
+  const directions = [];
+  const inventory = await discoverFreshMatchCarousel({
+    async sourceXml() {
+      sourceReads += 1;
+      return sourceReads === 1 ? "<hierarchy rotation=\"0\" />" : carouselXml(["A", "B"]);
+    },
+    async scrollCarousel(_bounds, direction) {
+      directions.push(direction);
+      return false;
+    },
+    async sleep() {}
+  }, { maxCarouselGestures: 4, settleMilliseconds: 0 });
+  assert.deepEqual(inventory.inventory.map((entry) => entry.tile.display_name), ["A", "B"]);
+  assert.ok(sourceReads >= 2);
+  assert.deepEqual(directions, ["left", "left", "right", "right"]);
+});
+
 test("a requested Match uses freshly inventoried position, revalidates its current tile, reads the profile, and returns with Back", async () => {
   const runtime = createFakeRuntime({
     carouselPages: [["A", "B"], ["B", "C"]],
@@ -184,6 +231,25 @@ test("a requested Match uses freshly inventoried position, revalidates its curre
   assert.ok(runtime.calls.carouselScrolls.includes("left"));
   assert.ok(runtime.calls.carouselScrolls.includes("right"));
   assert.equal(runtime.calls.profileScrolls, 2);
+});
+
+test("a current Tinder Match chat shell is revalidated before its header profile action and needs two verified Backs", async () => {
+  const runtime = createFakeRuntime({
+    carouselPages: [["A", "B"]],
+    matchOpensConversation: true
+  });
+  const result = await runMatchToLiveProfile(runtime, { tile: requestedTile("A") }, {
+    maxCarouselGestures: 4,
+    maxProfileGestures: 4,
+    settleMilliseconds: 0,
+    boundarySettleMilliseconds: 0
+  });
+  assert.equal(result.status, "PROFILE_READ");
+  assert.equal(result.tap_performed, true);
+  assert.equal(result.profile_read, true);
+  assert.equal(result.returned_with_back, true);
+  assert.equal(runtime.calls.tap.length, 2);
+  assert.equal(runtime.calls.back, 2);
 });
 
 test("the live-profile reader traverses continued vertical viewports to its verified physical boundary", async () => {
@@ -272,6 +338,7 @@ test("the Match-to-live-profile runner stays isolated from sync, persistence, se
   assert.match(source, /export async function discoverFreshMatchCarousel/);
   assert.match(source, /export async function readCompleteLiveMatchProfile/);
   assert.match(source, /export async function runMatchToLiveProfile/);
+  assert.match(source, /headerProfileTargetFromXml/);
   assert.match(source, /await runtime\.back\(\)/);
   assert.doesNotMatch(source, /dashboard-api|createTinderAppiumAdapter|persistMatchInventory|\.sync\(|\.resolve\(|\bsend\(/);
 });

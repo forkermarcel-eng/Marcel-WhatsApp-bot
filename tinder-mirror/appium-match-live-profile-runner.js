@@ -1,5 +1,7 @@
 import {
+  headerProfileTargetFromXml,
   mergeProfileSnapshots,
+  observeConversationViewportFromXml,
   observeMatchCarouselFromXml,
   observeProfileFromXml
 } from "./appium-conversation-reader.js";
@@ -16,6 +18,7 @@ const DEFAULT_MAX_PROFILE_GESTURES = 80;
 const DEFAULT_REINVENTORY_ATTEMPTS = 2;
 const DEFAULT_SETTLE_MILLISECONDS = 350;
 const DEFAULT_BOUNDARY_SETTLE_MILLISECONDS = 700;
+const MAX_TRANSIENT_CAROUSEL_READS = 8;
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -154,9 +157,16 @@ async function wait(runtime, milliseconds) {
 }
 
 async function freshCarousel(runtime) {
-  const carousel = observeMatchCarouselFromXml(await runtime.sourceXml());
-  if (!carousel) throw new Error("Tinder is not at a verified Inbox with a readable New-Matches carousel");
-  return carousel;
+  // UiAutomator2 can briefly project the outer Inbox while Tinder recycles the
+  // compact horizontal child after a gesture.  A short source-only reread is
+  // not a fallback target or a stale tap: it merely waits for the same
+  // verified carousel to be observable again before any decision is made.
+  for (let attempt = 0; attempt < MAX_TRANSIENT_CAROUSEL_READS; attempt += 1) {
+    const carousel = observeMatchCarouselFromXml(await runtime.sourceXml());
+    if (carousel) return carousel;
+    if (attempt + 1 < MAX_TRANSIENT_CAROUSEL_READS) await wait(runtime, 150);
+  }
+  throw new Error("Tinder is not at a verified Inbox with a readable New-Matches carousel");
 }
 
 async function stableCarousel(runtime, initial, { settleMilliseconds }) {
@@ -368,6 +378,40 @@ async function waitForInitialProfile(runtime, expectedDisplayName, { settleMilli
 }
 
 /*
+ * Current Tinder versions can legitimately route a fresh Match tile to its
+ * lightweight chat shell before showing the profile.  The shell is not a
+ * substitute profile: only the one freshly observed compact header avatar is
+ * allowed to continue the already continuous local navigation.  No stored
+ * carousel ordinal, identifier, or previous target is reused here.
+ */
+async function enterLiveMatchProfile(runtime, expectedDisplayName, { settleMilliseconds }) {
+  let openedConversationShell = false;
+  for (let attempt = 0; attempt < 14; attempt += 1) {
+    await wait(runtime, settleMilliseconds);
+    const source = await runtime.sourceXml();
+    if (observeProfileFromXml(source, { expectedDisplayName })) {
+      return Object.freeze({ opened_conversation_shell: openedConversationShell });
+    }
+
+    const headerTarget = observeConversationViewportFromXml(source)
+      ? headerProfileTargetFromXml(source)
+      : null;
+    if (!headerTarget || openedConversationShell) continue;
+
+    // A second source read immediately before the only header tap rejects a
+    // changing shell instead of applying a coordinate from an old projection.
+    const freshSource = await runtime.sourceXml();
+    const freshTarget = observeConversationViewportFromXml(freshSource)
+      ? headerProfileTargetFromXml(freshSource)
+      : null;
+    if (!sameBounds(headerTarget, freshTarget)) continue;
+    await runtime.tap(freshTarget);
+    openedConversationShell = true;
+  }
+  throw new Error("Tinder did not settle to a verified Match profile");
+}
+
+/*
  * Full profile reading uses the same verified vertical profile surface as the
  * existing initial sync. Every continued viewport must retain that one scroll
  * surface and is merged through the generic profile projector.
@@ -471,6 +515,25 @@ async function waitForCarouselAfterBack(runtime, { settleMilliseconds }) {
   throw new Error("Tinder did not return to a verified New-Matches carousel after Profile Back");
 }
 
+/*
+ * Back is never repeated blindly.  A second Back is permitted only after the
+ * first one has freshly settled to the verified Match conversation shell;
+ * that is the expected local return path for current Tinder Match tiles.
+ */
+async function returnToCarouselAfterLiveProfile(runtime, { settleMilliseconds }) {
+  await runtime.back();
+  for (let attempt = 0; attempt < 14; attempt += 1) {
+    await wait(runtime, settleMilliseconds);
+    const source = await runtime.sourceXml();
+    if (observeMatchCarouselFromXml(source)) return;
+    if (!observeConversationViewportFromXml(source)) continue;
+    await runtime.back();
+    await waitForCarouselAfterBack(runtime, { settleMilliseconds });
+    return;
+  }
+  throw new Error("Tinder did not return to a verified New-Matches carousel after Profile Back");
+}
+
 function noTapResult(status, {
   freshInventories,
   currentCarouselPosition = null
@@ -554,15 +617,15 @@ export async function runMatchToLiveProfile(runtime, requestedMatch, options = {
     await runtime.tap(preTapTarget.tap_bounds);
     let profile;
     try {
+      await enterLiveMatchProfile(runtime, requestedTile.display_name, { settleMilliseconds });
       profile = await readCompleteLiveMatchProfile(runtime, requestedTile.display_name, {
         maxProfileGestures,
         settleMilliseconds,
         boundarySettleMilliseconds
       });
     } finally {
-      await runtime.back();
+      await returnToCarouselAfterLiveProfile(runtime, { settleMilliseconds });
     }
-    await waitForCarouselAfterBack(runtime, { settleMilliseconds });
     return Object.freeze({
       status: "PROFILE_READ",
       fresh_carousel_inventories: attempt,

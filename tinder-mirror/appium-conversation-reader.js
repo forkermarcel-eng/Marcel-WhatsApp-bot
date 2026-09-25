@@ -769,7 +769,12 @@ export function observeProfileFromXml(xml, {
       attributes: Object.freeze(attributes),
       media_refs: Object.freeze([])
     }),
-    scroll_bounds: Object.freeze({ ...container.bounds })
+    scroll_bounds: Object.freeze({ ...container.bounds }),
+    // Bounds are an ephemeral, freshly observed Appium action/crop surface.
+    // They are never put into the profile projection, persistence payload, or
+    // a durable media identifier; callers may use them only with the same
+    // immediately obtained screen observation.
+    media_bounds: media?.bounds ? Object.freeze({ ...media.bounds }) : null
   });
 }
 

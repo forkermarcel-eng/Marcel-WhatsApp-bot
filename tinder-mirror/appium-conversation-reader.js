@@ -240,8 +240,17 @@ function sameScrollSurface(left, right) {
     && Math.abs(left.bottom - right.bottom) <= tolerance;
 }
 
-const MAX_VISIBLE_PROFILE_VALUES = 32;
+/*
+ * These are deliberately bounded product projections, rather than a raw UI
+ * export. The old 32-value ceiling can truncate a regular long profile once
+ * its section headings and interests are visible. The collections below are
+ * still only ordinary visible profile data; they are not a schema or an
+ * identity interpretation.
+ */
+const MAX_VISIBLE_PROFILE_VALUES = 64;
 const MAX_STRUCTURED_PROFILE_PAIRS = 32;
+const MAX_PROFILE_SECTIONS = 32;
+const MAX_PROFILE_CHIPS = 64;
 
 function profileBodyTextNodes(nodes, container) {
   return nodes
@@ -251,6 +260,55 @@ function profileBodyTextNodes(nodes, container) {
       if (!descendantOf(node, container) || !within(node.bounds, container.bounds)) return false;
       return !hasClickableAncestor(node);
     })
+    .sort((left, right) => left.bounds.top - right.bounds.top || left.bounds.left - right.bounds.left);
+}
+
+function nearestClickableAncestor(node, container) {
+  let current = node;
+  while (current && current !== container) {
+    if (isClickable(current)) return current;
+    current = current.parent || null;
+  }
+  return null;
+}
+
+/*
+ * A profile chip is identified only from its ordinary compact clickable
+ * geometry, never from a translated label, a resource id, or a known
+ * interest name. Wide profile actions are not tags/chips.
+ */
+function isProfileChipTarget(target, container) {
+  if (!target?.bounds || !container?.bounds || !within(target.bounds, container.bounds)) return false;
+  const bounds = target.bounds;
+  return bounds.width >= 20
+    && bounds.height >= 20
+    && bounds.width <= Math.round(container.bounds.width * 0.72)
+    && bounds.height <= Math.max(120, Math.round(container.bounds.height * 0.2));
+}
+
+function profileChipTextNodes(nodes, container) {
+  const seen = new Set();
+  return nodes
+    .filter((node) => {
+      const text = visibleText(node);
+      if (!text || !node.bounds || !/(?:TextView|Chip)$/.test(className(node))) return false;
+      if (!descendantOf(node, container) || !within(node.bounds, container.bounds)) return false;
+      const target = nearestClickableAncestor(node, container);
+      if (!isProfileChipTarget(target, container)) return false;
+      // A directly-clickable TextView is a generic wide/narrow action with no
+      // regular chip container relationship. A material Chip itself remains a
+      // valid compact control, as does a text child of a clickable container.
+      if (target === node && /TextView$/.test(className(node))) return false;
+      const key = `${target.bounds.left},${target.bounds.top},${target.bounds.right},${target.bounds.bottom}:${text}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((left, right) => left.bounds.top - right.bounds.top || left.bounds.left - right.bounds.left);
+}
+
+function profileProjectedTextNodes(bodyNodes, chipNodes) {
+  return [...bodyNodes, ...chipNodes]
     .sort((left, right) => left.bounds.top - right.bounds.top || left.bounds.left - right.bounds.left);
 }
 
@@ -277,13 +335,79 @@ function isVisibleProfileLabel(node) {
     || node?.attributes?.["accessibility-heading"] === "true";
 }
 
-function structuredProfilePairs(bodyNodes) {
+function profileTextNeighbors(left, right) {
+  if (!left?.bounds || !right?.bounds || isVisibleProfileLabel(right)) return false;
+  const verticalGap = right.bounds.top - left.bounds.bottom;
+  const sameLine = Math.abs((left.bounds.top + left.bounds.bottom) - (right.bounds.top + right.bounds.bottom))
+    <= Math.max(40, left.bounds.height + right.bounds.height);
+  return sameLine || (verticalGap >= -8 && verticalGap <= Math.max(128, left.bounds.height * 3));
+}
+
+function profilePairGeometry(left, right) {
+  if (!left?.bounds || !right?.bounds) return false;
+  const verticalCentersClose = Math.abs(
+    (left.bounds.top + left.bounds.bottom) / 2 - (right.bounds.top + right.bounds.bottom) / 2
+  ) <= Math.max(40, left.bounds.height + right.bounds.height);
+  const horizontalNeighbor = verticalCentersClose && right.bounds.left >= left.bounds.left - 8;
+  const verticalNeighbor = right.bounds.top >= left.bounds.bottom - 8
+    && right.bounds.top - left.bounds.bottom <= Math.max(128, left.bounds.height * 3);
+  return horizontalNeighbor || verticalNeighbor;
+}
+
+function headerAgeNeighbor(nameNode, ageNode) {
+  if (!nameNode?.bounds || !ageNode?.bounds) return false;
+  const verticalCentersClose = Math.abs(
+    (nameNode.bounds.top + nameNode.bounds.bottom) / 2 - (ageNode.bounds.top + ageNode.bounds.bottom) / 2
+  ) <= Math.max(40, nameNode.bounds.height + ageNode.bounds.height);
+  return verticalCentersClose && ageNode.bounds.left >= nameNode.bounds.left - 8;
+}
+
+function containerTextPairs(bodyNodes, profileContainer) {
+  const pairs = [];
+  const seenContainers = new Set();
+  for (const node of bodyNodes) {
+    let current = node.parent || null;
+    while (current && current !== profileContainer) {
+      if (!current.bounds) {
+        current = current.parent || null;
+        continue;
+      }
+      const containerKey = `${current.bounds.left},${current.bounds.top},${current.bounds.right},${current.bounds.bottom}`;
+      if (seenContainers.has(containerKey)) {
+        current = current.parent || null;
+        continue;
+      }
+      seenContainers.add(containerKey);
+      const contained = bodyNodes.filter((candidate) => descendantOf(candidate, current)
+        && within(candidate.bounds, current.bounds));
+      // A small two-text layout is a regular label/value container. The
+      // complete ScrollView and media wrappers are excluded by cardinality and
+      // compact height, so a profile body is never promoted as one field.
+      if (contained.length === 2
+        && current.bounds.height <= Math.max(240, Math.round(profileContainer.bounds.height * 0.3))) {
+        const [left, right] = contained.slice().sort((first, second) => first.bounds.top - second.bounds.top
+          || first.bounds.left - second.bounds.left);
+        if (profilePairGeometry(left, right)) pairs.push({ labelNode: left, valueNode: right });
+      }
+      current = current.parent || null;
+    }
+  }
+  return pairs;
+}
+
+function structuredProfilePairs(bodyNodes, profileContainer) {
   const pairs = [];
   const seen = new Set();
-  for (let index = 0; index + 1 < bodyNodes.length && pairs.length < MAX_STRUCTURED_PROFILE_PAIRS; index += 1) {
+  const candidatePairs = [];
+  for (let index = 0; index + 1 < bodyNodes.length; index += 1) {
     const labelNode = bodyNodes[index];
     const valueNode = bodyNodes[index + 1];
-    if (!isVisibleProfileLabel(labelNode) || isVisibleProfileLabel(valueNode)) continue;
+    if (!isVisibleProfileLabel(labelNode) || !profileTextNeighbors(labelNode, valueNode)) continue;
+    candidatePairs.push({ labelNode, valueNode });
+  }
+  candidatePairs.push(...containerTextPairs(bodyNodes, profileContainer));
+  for (const { labelNode, valueNode } of candidatePairs) {
+    if (pairs.length >= MAX_STRUCTURED_PROFILE_PAIRS) break;
     const label = visibleText(labelNode);
     const value = visibleText(valueNode);
     if (!label || !value) continue;
@@ -295,7 +419,61 @@ function structuredProfilePairs(bodyNodes) {
   return pairs;
 }
 
-function profileAttributes(bodyTexts, pairs) {
+function profileSectionContexts(bodyNodes) {
+  const sections = [];
+  const seen = new Set();
+  for (const node of bodyNodes) {
+    if (!isVisibleProfileLabel(node)) continue;
+    const text = visibleText(node);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    sections.push(text);
+    if (sections.length >= MAX_PROFILE_SECTIONS) break;
+  }
+  return sections;
+}
+
+function escapeRegularExpression(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function ageText(value) {
+  const text = String(value || "").normalize("NFC").trim();
+  return /^\d{1,3}$/.test(text) ? text : null;
+}
+
+/*
+ * Tinder can expose the regular name/age header as one node or as two visual
+ * neighbours on the media surface. We only project it when that surface
+ * visibly confirms the direct-navigation name; a number elsewhere in the
+ * profile is never treated as an age.
+ */
+function profileHeaderProjection(bodyNodes, media, expectedDisplayName) {
+  if (!media?.bounds || !expectedDisplayName) return { name: null, age: null };
+  const expected = expectedDisplayName.normalize("NFC").trim();
+  const headerBandBottom = media.bounds.bottom + Math.max(96, Math.round(media.bounds.height * 0.16));
+  const candidates = bodyNodes.filter((node) => node.bounds.top <= headerBandBottom
+    && node.bounds.bottom >= media.bounds.top);
+  const named = [];
+  for (const node of candidates) {
+    const text = visibleText(node);
+    if (!text) continue;
+    if (text === expected) named.push({ node, age: null });
+    const combined = new RegExp(`^${escapeRegularExpression(expected)}\\s*[,\\u00b7]\\s*(\\d{1,3})$`, "u").exec(text);
+    if (combined) named.push({ node, age: combined[1] });
+  }
+  if (named.length !== 1) return { name: null, age: null };
+  const header = named[0];
+  if (header.age) return { name: expected, age: header.age };
+  const nearbyAges = candidates
+    .filter((node) => node !== header.node && headerAgeNeighbor(header.node, node))
+    .map((node) => ageText(visibleText(node)))
+    .filter(Boolean);
+  const uniqueAges = [...new Set(nearbyAges)];
+  return { name: expected, age: uniqueAges.length === 1 ? uniqueAges[0] : null };
+}
+
+function profileAttributes(bodyTexts, pairs, { header = {}, sections = [], chips = [] } = {}) {
   const attributes = {};
   for (const text of bodyTexts.slice(0, MAX_VISIBLE_PROFILE_VALUES)) {
     const key = `visible_profile_${String(Object.keys(attributes).length + 1).padStart(2, "0")}`;
@@ -305,6 +483,14 @@ function profileAttributes(bodyTexts, pairs) {
     const ordinal = String(index + 1).padStart(2, "0");
     attributes[`structured_profile_${ordinal}_label`] = pair.label;
     attributes[`structured_profile_${ordinal}_value`] = pair.value;
+  }
+  if (header.name) attributes.header_profile_name = header.name;
+  if (header.age) attributes.header_profile_age = header.age;
+  for (const [index, section] of sections.entries()) {
+    attributes[`profile_section_${String(index + 1).padStart(2, "0")}`] = section;
+  }
+  for (const [index, chip] of chips.entries()) {
+    attributes[`profile_chip_${String(index + 1).padStart(2, "0")}`] = chip;
   }
   return attributes;
 }
@@ -335,6 +521,31 @@ function profileStructuredPairs(profile) {
   return pairs.sort((left, right) => left.ordinal - right.ordinal);
 }
 
+function orderedProfileValues(profile, expression) {
+  const attributes = profile?.attributes || {};
+  return Object.entries(attributes)
+    .map(([key, value]) => ({ match: expression.exec(key), value }))
+    .filter(({ match, value }) => match && typeof value === "string")
+    .sort((left, right) => Number(left.match[1]) - Number(right.match[1]))
+    .map(({ value }) => value);
+}
+
+function profileSectionValues(profile) {
+  return orderedProfileValues(profile, /^profile_section_(\d{2})$/);
+}
+
+function profileChipValues(profile) {
+  return orderedProfileValues(profile, /^profile_chip_(\d{2})$/);
+}
+
+function profileHeaderValues(profile) {
+  const attributes = profile?.attributes || {};
+  return {
+    name: typeof attributes.header_profile_name === "string" ? attributes.header_profile_name : null,
+    age: typeof attributes.header_profile_age === "string" ? attributes.header_profile_age : null
+  };
+}
+
 function uniqueProfileValues(values, maximum, errorMessage) {
   const unique = [];
   for (const value of values) {
@@ -359,11 +570,19 @@ function uniqueProfilePairs(pairs) {
   return unique;
 }
 
+function mergedHeaderValue(current, observed, field) {
+  if (current && observed && current !== observed) {
+    throw new Error(`Tinder profile ${field} changed during its local read`);
+  }
+  return current || observed || null;
+}
+
 /*
  * Merge only ordinary visible profile values across directly continuous
  * profile scroll viewports. `visible_profile_*` remains the existing ordered
- * fallback; structured pairs are additive display metadata and are rebuilt
- * with stable local ordinals for the combined visible surface.
+ * fallback; structured pairs, section context and compact chips are additive
+ * display metadata and are rebuilt with stable local ordinals for the
+ * combined visible surface.
  */
 export function mergeProfileSnapshots(current, observed) {
   if (!current) return observed;
@@ -379,9 +598,25 @@ export function mergeProfileSnapshots(current, observed) {
     ...profileStructuredPairs(current),
     ...profileStructuredPairs(observed)
   ]);
+  const currentHeader = profileHeaderValues(current);
+  const observedHeader = profileHeaderValues(observed);
+  const header = {
+    name: mergedHeaderValue(currentHeader.name, observedHeader.name, "header name"),
+    age: mergedHeaderValue(currentHeader.age, observedHeader.age, "header age")
+  };
+  const sections = uniqueProfileValues(
+    [...profileSectionValues(current), ...profileSectionValues(observed)],
+    MAX_PROFILE_SECTIONS,
+    "Visible Tinder profile section context exceeds the existing product field capacity"
+  );
+  const chips = uniqueProfileValues(
+    [...profileChipValues(current), ...profileChipValues(observed)],
+    MAX_PROFILE_CHIPS,
+    "Visible Tinder profile chips exceed the existing product field capacity"
+  );
   return Object.freeze({
     display_name: current.display_name,
-    attributes: Object.freeze(profileAttributes(visible, pairs)),
+    attributes: Object.freeze(profileAttributes(visible, pairs, { header, sections, chips })),
     media_refs: Object.freeze([])
   });
 }
@@ -512,13 +747,20 @@ export function observeProfileFromXml(xml, {
   if (!container?.bounds || (!media?.bounds && !continuedProfileScroll)) return null;
   if (continuedProfileScroll && expectedScrollBounds && !sameScrollSurface(container.bounds, expectedScrollBounds)) return null;
   const bodyNodes = profileBodyTextNodes(nodes, container);
+  const chipNodes = profileChipTextNodes(nodes, container);
   // Keep the existing Block-2 product-profile field convention exactly:
-  // every ordinary visible value remains available in visual order under its
-  // `visible_profile_*` fallback key. Structured label/value pairs are
+  // every regular visible value, including compact clickable chips, remains
+  // available in visual order under its `visible_profile_*` fallback key.
+  // Structured pairs and the generic header/section/chip projection are
   // additive and never replace that compatible fallback.
   const attributes = profileAttributes(
-    profileBodyTexts(bodyNodes),
-    structuredProfilePairs(bodyNodes)
+    profileBodyTexts(profileProjectedTextNodes(bodyNodes, chipNodes)),
+    structuredProfilePairs(bodyNodes, container),
+    {
+      header: profileHeaderProjection(bodyNodes, media, expected),
+      sections: profileSectionContexts(bodyNodes),
+      chips: profileBodyTexts(chipNodes).slice(0, MAX_PROFILE_CHIPS)
+    }
   );
 
   return Object.freeze({
@@ -574,6 +816,26 @@ function hasClickableDescendant(node) {
   return found;
 }
 
+/*
+ * Inventory callers never need a tap surface. A live-profile runner does,
+ * but it may act only on one unambiguous currently-visible tile action. The
+ * bounds remain local to the current XML projection and are deliberately not
+ * part of the tile product data or its RAM continuity key.
+ */
+function matchTileActionTarget(node) {
+  const targets = new Map();
+  const visit = (current) => {
+    if (isClickable(current) && current.bounds && within(current.bounds, node.bounds)) {
+      const bounds = current.bounds;
+      const key = `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`;
+      if (!targets.has(key)) targets.set(key, bounds);
+    }
+    for (const child of current.children || []) visit(child);
+  };
+  visit(node);
+  return targets.size === 1 ? Object.freeze({ ...targets.values().next().value }) : null;
+}
+
 function visibleMatchTile(node, screen) {
   if (!node?.bounds || !screen || !within(node.bounds, screen)) return null;
   const texts = subtreeTexts(node);
@@ -598,6 +860,9 @@ function visibleMatchTile(node, screen) {
       attributes: Object.freeze(attributes),
       media_refs: Object.freeze([])
     }),
+    // This is intentionally optional: read-only Match inventory ignores it,
+    // while an action runner refuses a tile with more than one click surface.
+    tap_bounds: matchTileActionTarget(node),
     ram_key: JSON.stringify({
       left: node.bounds.left,
       top: node.bounds.top,

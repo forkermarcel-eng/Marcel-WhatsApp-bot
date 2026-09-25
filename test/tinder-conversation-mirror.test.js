@@ -645,7 +645,78 @@ test("profile observation adds deterministic visible heading-to-value pairs with
     structured_profile_01_label: "Visible section one",
     structured_profile_01_value: "Visible value one",
     structured_profile_02_label: "Visible section two",
-    structured_profile_02_value: "Visible value two"
+    structured_profile_02_value: "Visible value two",
+    profile_section_01: "Visible section one",
+    profile_section_02: "Visible section two"
+  });
+});
+
+test("generic profile projection retains header, section context, container fields, compact chips, and ordered raw fallback", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,980]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView text="Generic Person, 29" bounds="[36,510][360,556]" />
+            <android.widget.TextView heading="true" text="Generic context" bounds="[36,620][480,658]" />
+            <android.widget.TextView text="Generic section value" bounds="[36,666][500,706]" />
+            <android.widget.LinearLayout bounds="[24,724][552,790]">
+              <android.widget.TextView text="Generic label" bounds="[36,738][240,776]" />
+              <android.widget.TextView text="Generic value" bounds="[290,738][530,776]" />
+            </android.widget.LinearLayout>
+            <android.widget.FrameLayout clickable="true" bounds="[24,810][172,860]">
+              <android.widget.TextView text="Compact tag one" bounds="[38,820][158,850]" />
+            </android.widget.FrameLayout>
+            <android.widget.FrameLayout clickable="true" bounds="[184,810][342,860]">
+              <android.widget.TextView text="Compact tag two" bounds="[198,820][328,850]" />
+            </android.widget.FrameLayout>
+            <android.widget.TextView clickable="true" text="Wide non-profile control" bounds="[24,882][552,930]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Generic Person" });
+  assert.ok(observed);
+  assert.deepEqual(observed.profile.attributes, {
+    visible_profile_01: "Generic Person, 29",
+    visible_profile_02: "Generic context",
+    visible_profile_03: "Generic section value",
+    visible_profile_04: "Generic label",
+    visible_profile_05: "Generic value",
+    visible_profile_06: "Compact tag one",
+    visible_profile_07: "Compact tag two",
+    structured_profile_01_label: "Generic context",
+    structured_profile_01_value: "Generic section value",
+    structured_profile_02_label: "Generic label",
+    structured_profile_02_value: "Generic value",
+    header_profile_name: "Generic Person",
+    header_profile_age: "29",
+    profile_section_01: "Generic context",
+    profile_chip_01: "Compact tag one",
+    profile_chip_02: "Compact tag two"
+  });
+  assert.doesNotMatch(JSON.stringify(observed), /Wide non-profile control/);
+});
+
+test("generic profile projection accepts separate neighbouring name and age header nodes", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,760]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView text="Separate header" bounds="[36,510][300,556]" />
+            <android.widget.TextView text="31" bounds="[320,510][370,556]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Separate header" });
+  assert.ok(observed);
+  assert.deepEqual(observed.profile.attributes, {
+    visible_profile_01: "Separate header",
+    visible_profile_02: "31",
+    header_profile_name: "Separate header",
+    header_profile_age: "31"
   });
 });
 
@@ -687,11 +758,57 @@ test("directly continuous profile viewports retain ordered fallback values and s
     structured_profile_01_label: "Opening label",
     structured_profile_01_value: "Opening value",
     structured_profile_02_label: "Later label",
-    structured_profile_02_value: "Later value"
+    structured_profile_02_value: "Later value",
+    profile_section_01: "Opening label",
+    profile_section_02: "Later label"
   });
 });
 
-test("profile normalization admits the bounded fallback plus structured profile projection", () => {
+test("directly continuous profile viewports retain verified header and compact chips", () => {
+  const opening = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,760]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView text="Long profile, 33" bounds="[36,510][360,556]" />
+            <android.widget.FrameLayout clickable="true" bounds="[24,630][180,680]">
+              <android.widget.TextView text="Opening compact chip" bounds="[38,640][166,670]" />
+            </android.widget.FrameLayout>
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Long profile" });
+  const continued = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,760]">
+            <android.widget.FrameLayout clickable="true" bounds="[24,630][180,680]">
+              <android.widget.TextView text="Later compact chip" bounds="[38,640][166,670]" />
+            </android.widget.FrameLayout>
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, {
+    expectedDisplayName: "Long profile",
+    continuedProfileScroll: true,
+    expectedScrollBounds: { left: 0, top: 160, right: 576, bottom: 1120, width: 576, height: 960 }
+  });
+  assert.ok(opening);
+  assert.ok(continued);
+  assert.deepEqual(mergeProfileSnapshots(opening.profile, continued.profile).attributes, {
+    visible_profile_01: "Long profile, 33",
+    visible_profile_02: "Opening compact chip",
+    visible_profile_03: "Later compact chip",
+    header_profile_name: "Long profile",
+    header_profile_age: "33",
+    profile_chip_01: "Opening compact chip",
+    profile_chip_02: "Later compact chip"
+  });
+});
+
+test("profile normalization admits the expanded bounded generic profile projection", () => {
   const attributes = Object.fromEntries([
     ...Array.from({ length: 32 }, (_, index) => [
       `visible_profile_${String(index + 1).padStart(2, "0")}`,
@@ -712,10 +829,19 @@ test("profile normalization admits the bounded fallback plus structured profile 
     media_refs: []
   });
   assert.equal(Object.keys(normalized.attributes).length, 96);
+  const expanded = Object.fromEntries(Array.from({ length: 256 }, (_, index) => [
+    `generic_projection_${String(index + 1).padStart(3, "0")}`,
+    `Visible generic value ${index + 1}`
+  ]));
+  assert.equal(Object.keys(normalizeTinderProfile({
+    display_name: "Example Profile",
+    attributes: expanded,
+    media_refs: []
+  }).attributes).length, 256);
   assert.throws(
     () => normalizeTinderProfile({
       display_name: "Example Profile",
-      attributes: { ...attributes, extra_visible_value: "Beyond the bounded projection" },
+      attributes: { ...expanded, extra_visible_value: "Beyond the bounded projection" },
       media_refs: []
     }),
     (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"

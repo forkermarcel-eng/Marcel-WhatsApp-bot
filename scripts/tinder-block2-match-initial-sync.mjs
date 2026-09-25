@@ -359,6 +359,24 @@ async function resolveDeviceId(runtime, installedBridgeVersionCode) {
   return matching[0].device_id;
 }
 
+/*
+ * The local discovery worker reuses the existing read-only carousel inventory
+ * and ordinary Match ingress. It never taps or opens a Match tile.
+ */
+export async function createTinderLocalMatchDiscoveryRuntime(environment = process.env) {
+  const config = runtimeConfiguration(environment);
+  const runtime = createRuntime(config);
+  const deviceId = await resolveDeviceId(runtime, config.installedBridgeVersionCode);
+  return Object.freeze({
+    deviceId,
+    async readMatchDiscovery() {
+      const discovery = await discoverMatchInventory(runtime, { maxGestures: config.maxGestures });
+      await persistMatchInventory(runtime, { deviceId, inventory: discovery.inventory });
+      return Object.freeze({ outcome: "MATCH_UPDATED" });
+    }
+  });
+}
+
 export async function main(environment = process.env) {
   const config = runtimeConfiguration(environment);
   const runtime = createRuntime(config);

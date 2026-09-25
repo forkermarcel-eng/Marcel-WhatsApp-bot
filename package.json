@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "node index.js",
     "test:device-bridge": "node --test test/device-bridge-reset-routes.test.js",
@@ -19,6 +22,8 @@
     "test:tinder-match-live-profile": "node --test test/tinder-match-live-profile-runner.test.js",
     "test:tinder-profile-media": "node --test test/tinder-profile-media-runner.test.js",
     "test:tinder-change-dispatch": "node --test test/tinder-possible-change-dispatch.test.js",
+    "test:tinder-discovery-transport": "node --test test/tinder-pg-boss-transport.test.js test/tinder-pg-boss-migration.test.js",
+    "start:tinder-discovery-worker": "node scripts/tinder-discovery-worker.mjs",
     "test:shared-media": "node --test test/shared-media.test.js test/shared-media-image-pipeline.test.js test/shared-media-migration.test.js test/tinder-profile-media-ingest.test.js",
     "preflight:tinder-conversation-mirror": "node scripts/tinder-conversation-mirror-migration.js --preflight",
     "migrate:tinder-conversation-mirror": "node scripts/tinder-conversation-mirror-migration.js --apply",
@@ -26,9 +31,11 @@
     "migrate:tinder-block2-last-message-order": "node scripts/tinder-block2-last-message-order-migration.js --apply",
     "preflight:tinder-block2-matches": "node scripts/tinder-block2-matches-migration.js --preflight",
     "migrate:tinder-block2-matches": "node scripts/tinder-block2-matches-migration.js --apply",
+    "preflight:pgboss": "node scripts/pgboss-migration.js --preflight",
+    "migrate:pgboss": "node scripts/pgboss-migration.js --apply",
     "preflight:shared-media": "node scripts/shared-media-migration.js --preflight",
     "migrate:shared-media": "node scripts/shared-media-migration.js --apply",
-    "test": "npm run test:device-bridge && npm run test:brain-write && npm run test:web-ui && npm run test:presentation && npm run test:contact-identities && npm run test:tinder-mirror && npm run test:tinder-last-message-order-migration && npm run test:tinder-matches && npm run test:tinder-matches-migration && npm run test:tinder-match-initial-sync && npm run test:tinder-match-live-profile && npm run test:tinder-profile-media && npm run test:tinder-change-dispatch && npm run test:shared-media"
+    "test": "npm run test:device-bridge && npm run test:brain-write && npm run test:web-ui && npm run test:presentation && npm run test:contact-identities && npm run test:tinder-mirror && npm run test:tinder-last-message-order-migration && npm run test:tinder-matches && npm run test:tinder-matches-migration && npm run test:tinder-match-initial-sync && npm run test:tinder-match-live-profile && npm run test:tinder-profile-media && npm run test:tinder-change-dispatch && npm run test:tinder-discovery-transport && npm run test:shared-media"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.14",
@@ -36,6 +43,7 @@
     "html-entities": "2.6.0",
     "openai": "^5.0.0",
     "pg": "^8.16.3",
+    "pg-boss": "12.34.0",
     "pino": "^9.9.0",
     "sharp": "^0.35.4"
   }

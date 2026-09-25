@@ -33,18 +33,28 @@ function tinderPossibleChangeDispatcherCallback(dispatcher = null) {
   return (hint) => dispatcher.signal(hint);
 }
 
+function tinderDiscoveryEnqueuerCallback(enqueuer = null) {
+  if (enqueuer === null || enqueuer === undefined) return null;
+  if (typeof enqueuer !== "object" || typeof enqueuer.enqueue !== "function") {
+    throw new TypeError("tinderDiscoveryEnqueuer must expose enqueue()");
+  }
+  return (hint, { transactionClient }) => enqueuer.enqueue(hint, { transactionClient });
+}
+
 function registerDeviceBridgeResetRoutes({
   app,
   pool,
   dashboardApiReady,
   dashboardApiAuthorized,
   requireDeviceBridgeReady,
-  tinderPossibleChangeDispatcher = null
+  tinderPossibleChangeDispatcher = null,
+  tinderDiscoveryEnqueuer = null
 }) {
   const heartbeat = createResetHeartbeatHandler(pool);
   const commandAck = createResetCommandAckHandler(pool);
   const tinderPossibleChange = createTinderPossibleChangeHandler(pool, {
-    onAccepted: tinderPossibleChangeDispatcherCallback(tinderPossibleChangeDispatcher)
+    onAccepted: tinderPossibleChangeDispatcherCallback(tinderPossibleChangeDispatcher),
+    enqueueInTransaction: tinderDiscoveryEnqueuerCallback(tinderDiscoveryEnqueuer)
   });
   const listDevices = createResetAdminDeviceListHandler(pool);
   const deviceStatus = createResetAdminDeviceStatusHandler(pool);
@@ -71,5 +81,6 @@ function registerDeviceBridgeResetRoutes({
 
 export {
   registerDeviceBridgeResetRoutes,
-  tinderPossibleChangeDispatcherCallback
+  tinderPossibleChangeDispatcherCallback,
+  tinderDiscoveryEnqueuerCallback
 };

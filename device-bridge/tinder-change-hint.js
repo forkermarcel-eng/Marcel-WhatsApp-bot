@@ -13,9 +13,10 @@ TINDER POSSIBLE CHANGE — BEST-EFFORT DEVICE HINT
 
 This signed ingress is deliberately content-free.  It is only a wake-up
 hint for a separately local, source-of-truth Tinder inventory.  It neither
-creates work, grants an action, stores an Inbox snapshot, nor changes any
-Bridge/heartbeat state.  Delivery failure is intentionally harmless: the
-next ordinary source inventory remains authoritative.
+grants an action, stores an Inbox snapshot, nor changes any Bridge/heartbeat
+state.  When the transport is configured, its one coalesced job is committed
+atomically with this accepted hint; the next ordinary source inventory remains
+authoritative.
 ================================================== */
 
 const ROOT_FIELDS = new Set(["protocol_version", "sent_at", "event_type"]);
@@ -59,7 +60,16 @@ function response(now) {
   });
 }
 
-async function processTinderPossibleChangeTransaction(pool, auth, _hint, now = new Date()) {
+async function processTinderPossibleChangeTransaction(
+  pool,
+  auth,
+  _hint,
+  now = new Date(),
+  { enqueueInTransaction = null } = {}
+) {
+  if (enqueueInTransaction !== null && typeof enqueueInTransaction !== "function") {
+    throw new TypeError("enqueueInTransaction must be a function or null");
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -89,6 +99,16 @@ async function processTinderPossibleChangeTransaction(pool, auth, _hint, now = n
        VALUES ('TINDER_POSSIBLE_CHANGE_ACCEPTED',$1,$2,$3,'SUCCEEDED',200,'{}'::jsonb)`,
       [auth.requestId, auth.deviceId, auth.keyId]
     );
+    // The optional pg-boss producer runs on this exact PostgreSQL client. A
+    // confirmed commit therefore contains both the accepted signed hint and
+    // its content-free transport job. This is not a command/permit decision:
+    // the local worker still performs its own ordinary source observation.
+    if (enqueueInTransaction) {
+      await enqueueInTransaction(
+        Object.freeze({ device_id: auth.deviceId, event_type: EVENT_TYPE }),
+        Object.freeze({ transactionClient: client })
+      );
+    }
     await client.query("COMMIT");
     return response(now);
   } catch (error) {
@@ -99,15 +119,23 @@ async function processTinderPossibleChangeTransaction(pool, auth, _hint, now = n
   }
 }
 
-function createTinderPossibleChangeHandler(pool, { onAccepted = null } = {}) {
+function createTinderPossibleChangeHandler(pool, {
+  onAccepted = null,
+  enqueueInTransaction = null
+} = {}) {
   if (onAccepted !== null && typeof onAccepted !== "function") {
     throw new TypeError("onAccepted must be a function or null");
+  }
+  if (enqueueInTransaction !== null && typeof enqueueInTransaction !== "function") {
+    throw new TypeError("enqueueInTransaction must be a function or null");
   }
   return async function tinderPossibleChangeHandler(req, res) {
     try {
       const auth = await verifyAuthenticatedDeviceRequest({ req, pool, urlDeviceId: req.params.deviceId });
       const hint = parseAndValidateTinderPossibleChange(req);
-      const accepted = await processTinderPossibleChangeTransaction(pool, auth, hint);
+      const accepted = await processTinderPossibleChangeTransaction(pool, auth, hint, new Date(), {
+        enqueueInTransaction
+      });
       // A live local dispatcher may be attached by the local Appium host.
       // It is intentionally best-effort and cannot affect this response.
       if (onAccepted) {

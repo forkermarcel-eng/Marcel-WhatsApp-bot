@@ -8,6 +8,7 @@ useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 import P from "pino";
 import pg from "pg";
+import { PgBoss } from "pg-boss";
 import { DEVICE_BRIDGE_PROTOCOL } from "./device-bridge/protocol-v1.js";
 import { initializeResetDeviceBridgeDatabase } from "./device-bridge/reset-initialization.js";
 import {
@@ -23,6 +24,10 @@ import {
 import { createContactMediaService } from "./services/contact-media.js";
 import { createContactIdentityService } from "./services/contact-identities.js";
 import { registerTinderMirrorRoutes } from "./tinder-mirror/routes.js";
+import {
+  createTinderDiscoveryEnqueuer,
+  createTinderDiscoveryPgBoss
+} from "./tinder-mirror/pg-boss-discovery.js";
 
 const { Pool } = pg;
 
@@ -32,12 +37,36 @@ const pool = new Pool({
 connectionString: process.env.DATABASE_URL
 });
 
-// This Railway entry point has no co-resident Appium session.  A local host
-// that already owns one can inject its existing dispatcher at route
-// composition time; no network bridge, queue, or environment transport is
-// manufactured here.  Keeping the default null means a signed hint remains
-// a harmless committed audit event until such a local composition exists.
+// Railway produces only a content-free pg-boss transport job. The actual
+// Appium dispatcher stays on the existing local Windows executor.
 const coResidentTinderPossibleChangeDispatcher = null;
+const TINDER_DISCOVERY_TRANSPORT_ENABLED =
+String(process.env.TINDER_DISCOVERY_TRANSPORT_ENABLED || "false").toLowerCase() === "true";
+let tinderDiscoveryEnqueuer = null;
+
+const configuredTinderDiscoveryEnqueuer = TINDER_DISCOVERY_TRANSPORT_ENABLED
+  ? Object.freeze({
+      enqueue(hint, options) {
+        if (!tinderDiscoveryEnqueuer) {
+          throw new Error("Tinder discovery transport is not ready");
+        }
+        return tinderDiscoveryEnqueuer.enqueue(hint, options);
+      }
+    })
+  : null;
+
+async function initializeTinderDiscoveryTransport() {
+  if (!TINDER_DISCOVERY_TRANSPORT_ENABLED) return false;
+  const boss = createTinderDiscoveryPgBoss(PgBoss, {
+    connectionString: process.env.DATABASE_URL
+  });
+  // migrate/createSchema are explicitly false in the factory. The dedicated
+  // pg-boss migration must exist before this producer is enabled.
+  await boss.start();
+  tinderDiscoveryEnqueuer = createTinderDiscoveryEnqueuer({ boss });
+  console.log("Tinder discovery transport enabled (local worker polls pg-boss).");
+  return true;
+}
 
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 RAW BODY
@@ -8466,7 +8495,8 @@ registerDeviceBridgeResetRoutes({
   dashboardApiReady,
   dashboardApiAuthorized,
   requireDeviceBridgeReady,
-  tinderPossibleChangeDispatcher: coResidentTinderPossibleChangeDispatcher
+  tinderPossibleChangeDispatcher: coResidentTinderPossibleChangeDispatcher,
+  tinderDiscoveryEnqueuer: configuredTinderDiscoveryEnqueuer
 });
 
 // Block 2 is intentionally independent of device heartbeat/readiness.  The
@@ -19059,6 +19089,8 @@ console.log(
 try {
 
   await initDatabase();
+
+  await initializeTinderDiscoveryTransport();
 
 
 } catch (error) {

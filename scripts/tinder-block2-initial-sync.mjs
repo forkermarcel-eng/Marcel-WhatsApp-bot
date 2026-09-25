@@ -9,7 +9,11 @@
  */
 
 import { pathToFileURL } from "node:url";
-import { createTinderAppiumAdapter, createExistingDashboardBearerTransport } from "../tinder-mirror/appium-adapter.js";
+import {
+  createTinderAppiumAdapter,
+  createTinderAppiumDeltaAdapter,
+  createExistingDashboardBearerTransport
+} from "../tinder-mirror/appium-adapter.js";
 import {
   headerBackTargetFromXml,
   headerProfileTargetFromXml,
@@ -832,7 +836,19 @@ async function mirrorKnownUnchangedInboxRow({
   });
 }
 
-async function openReadAndMirror({ deviceId, row, inboxPosition, processedConversationIds }) {
+async function openReadAndMirror({
+  deviceId,
+  row,
+  inboxPosition,
+  processedConversationIds,
+  persistInboxOrder = true
+}) {
+  if (persistInboxOrder && (!Number.isInteger(inboxPosition) || inboxPosition < 0)) {
+    throw new Error("A non-negative Inbox position is required when Inbox order is persisted");
+  }
+  if (typeof persistInboxOrder !== "boolean") {
+    throw new Error("persistInboxOrder must be a boolean");
+  }
   const opened = await openFreshRow(row);
   const expectedDisplayName = opened.viewport.profile_display_name;
   if (!expectedDisplayName) throw new Error("Opened Tinder conversation has no verified visible header");
@@ -854,7 +870,7 @@ async function openReadAndMirror({ deviceId, row, inboxPosition, processedConver
   const resolution = await adapter.resolve();
   if (resolution?.action === "SKIP_HISTORY" && resolution?.conversation?.id) {
     const firstObservedInSweep = !processedConversationIds.has(resolution.conversation.id);
-    if (firstObservedInSweep) {
+    if (firstObservedInSweep && persistInboxOrder) {
       processedConversationIds.add(resolution.conversation.id);
       await transport.updateInboxOrder({
         deviceId,
@@ -866,8 +882,8 @@ async function openReadAndMirror({ deviceId, row, inboxPosition, processedConver
     const result = Object.freeze({
       action: "KNOWN_REVALIDATED",
       conversation_id: resolution.conversation.id,
-      inbox_position: firstObservedInSweep ? inboxPosition : null,
-      inbox_position_persisted: firstObservedInSweep,
+      inbox_position: firstObservedInSweep && persistInboxOrder ? inboxPosition : null,
+      inbox_position_persisted: firstObservedInSweep && persistInboxOrder,
       first_observed_in_sweep: firstObservedInSweep,
       last_message_visible_time_captured: firstObservedInSweep && lastMessageVisibleTime !== undefined,
       thread_opened: true,
@@ -918,7 +934,7 @@ async function openReadAndMirror({ deviceId, row, inboxPosition, processedConver
     throw new Error("Completed Tinder history was not accepted by the existing product mirror");
   }
   const firstObservedInSweep = !processedConversationIds.has(synced.conversation.id);
-  if (firstObservedInSweep) {
+  if (firstObservedInSweep && persistInboxOrder) {
     processedConversationIds.add(synced.conversation.id);
     await transport.updateInboxOrder({
       deviceId,
@@ -930,8 +946,8 @@ async function openReadAndMirror({ deviceId, row, inboxPosition, processedConver
   const result = Object.freeze({
     action: synced.created ? "NEW_MIRRORED" : "KNOWN_COMPLETED",
     conversation_id: synced.conversation.id,
-    inbox_position: firstObservedInSweep ? inboxPosition : null,
-    inbox_position_persisted: firstObservedInSweep,
+    inbox_position: firstObservedInSweep && persistInboxOrder ? inboxPosition : null,
+    inbox_position_persisted: firstObservedInSweep && persistInboxOrder,
     first_observed_in_sweep: firstObservedInSweep,
     last_message_visible_time_captured: firstObservedInSweep && lastMessageVisibleTime !== undefined,
     thread_opened: true,
@@ -1286,6 +1302,56 @@ async function processDiscoveredInboxInventory({
     });
   }
   throw new Error("The reachable Tinder Inbox Phase 2 end was not verified within the approved bound");
+}
+
+/*
+ * Reuses the proven Block-2 Appium controls for the local pg-boss worker.
+ * Unlike `main()`, this factory never starts an Inbox sweep: each operation
+ * receives one already revalidated current row from the RAM-only dispatcher.
+ */
+export async function createTinderLocalDiscoveryRuntime(environment = process.env) {
+  configureRuntime(environment);
+  const deviceId = await resolveDeviceId();
+  const transport = createExistingDashboardBearerTransport({ baseUrl: BACKEND_BASE_URL, bearerToken });
+
+  return Object.freeze({
+    deviceId,
+    readSourceXml: sourceXml,
+
+    async readKnownChanged({ row, conversationId }) {
+      const opened = await openFreshRow(row);
+      if (!opened?.viewport?.profile_display_name) {
+        throw new Error("A known Tinder delta requires a freshly verified conversation header");
+      }
+      const adapter = createTinderAppiumDeltaAdapter({ deviceId, conversationId, transport });
+      const lastMessageVisibleTime = row.last_message_visible_time ?? undefined;
+      await adapter.persistViewport({
+        messages: opened.viewport.messages,
+        ...(lastMessageVisibleTime === undefined ? {} : { lastMessageVisibleTime })
+      });
+      await returnToInbox();
+      return Object.freeze({ outcome: "KNOWN_CHANGED" });
+    },
+
+    async readNewThread({ row }) {
+      const result = await openReadAndMirror({
+        deviceId,
+        row,
+        // A source-change job sees one fresh row, not a completed global
+        // Inbox inventory. It must not invent or overwrite a global order.
+        inboxPosition: null,
+        processedConversationIds: new Set(),
+        persistInboxOrder: false
+      });
+      if (result.action !== "NEW_MIRRORED" || typeof result.conversation_id !== "string") {
+        return Object.freeze({ outcome: "AMBIGUOUS" });
+      }
+      return Object.freeze({
+        outcome: "NEW_THREAD",
+        conversation_id: result.conversation_id
+      });
+    }
+  });
 }
 
 export async function main(environment = process.env) {

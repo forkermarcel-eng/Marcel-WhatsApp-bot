@@ -219,6 +219,7 @@ test("active startup retains no retired product entrypoint and exposes only focu
     "test:tinder-match-initial-sync",
     "test:tinder-match-live-profile",
     "test:tinder-profile-media",
+    "test:tinder-change-dispatch",
     "preflight:tinder-conversation-mirror",
     "migrate:tinder-conversation-mirror",
     "preflight:tinder-block2-last-message-order",
@@ -235,6 +236,7 @@ test("active startup retains no retired product entrypoint and exposes only focu
   assert.equal(packageJson.scripts["test:tinder-matches-migration"], "node --test test/tinder-matches-migration.test.js");
   assert.equal(packageJson.scripts["test:tinder-match-live-profile"], "node --test test/tinder-match-live-profile-runner.test.js");
   assert.equal(packageJson.scripts["test:tinder-profile-media"], "node --test test/tinder-profile-media-runner.test.js");
+  assert.equal(packageJson.scripts["test:tinder-change-dispatch"], "node --test test/tinder-possible-change-dispatch.test.js");
   assert.equal(packageJson.scripts["test:tinder-match-initial-sync"], "node --test test/tinder-match-initial-sync.test.js");
   assert.match(packageJson.scripts["preflight:tinder-block2-matches"], /--preflight/);
   assert.match(packageJson.scripts["migrate:tinder-block2-matches"], /--apply/);

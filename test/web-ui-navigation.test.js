@@ -25,6 +25,14 @@ test("all inline page scripts parse as JavaScript", () => {
   }
 });
 
+test("Tinder keeps every stored compact profile chip visible beside structured profile rows", () => {
+  const html = pages.Tinder;
+  assert.match(html, /const chips = entries/);
+  assert.match(html, /\^profile_chip_\(\\d\{2\}\)\$/);
+  assert.match(html, /return \[\.\.\.headerAge, \.\.\.structured, \.\.\.chips\];/);
+  assert.match(html, /structured_profile\|profile_chip/);
+});
+
 test("central contacts uses real API data, channel filters and existing edit flows", () => {
   const html = pages.Kontakte;
   assert.match(html, /api\/dashboard\/contacts/);

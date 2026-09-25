@@ -73,6 +73,32 @@ function profileViewportXml(name, text, { opening = false } = {}) {
     </hierarchy>`;
 }
 
+function profileWithCollapsedInterestsXml(name, { expanded = false } = {}) {
+  const chips = Array.from({ length: expanded ? 9 : 8 }, (_, index) => {
+    const row = Math.floor(index / 3);
+    const column = index % 3;
+    const left = 28 + column * 176;
+    const top = 640 + row * 68;
+    const right = left + 154;
+    const bottom = top + 46;
+    return `<android.widget.FrameLayout bounds="[${left},${top}][${right},${bottom}]"><android.widget.TextView text="Interest ${index + 1}" bounds="[${left},${top}][${right},${bottom}]" /></android.widget.FrameLayout>`;
+  }).join("\n");
+  const expansion = expanded ? "" : `<android.widget.FrameLayout clickable="true" bounds="[24,854][552,910]"><android.widget.TextView text="Show all 9" bounds="[160,866][416,900]" /></android.widget.FrameLayout>`;
+  return `
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,1120]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView text="${name}, 29" bounds="[36,510][360,556]" />
+            ${chips}
+            ${expansion}
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`;
+}
+
 function matchConversationXml(name) {
   return `
     <hierarchy rotation="0">
@@ -282,6 +308,37 @@ test("the live-profile reader traverses continued vertical viewports to its veri
     header_profile_age: "29"
   });
   assert.equal(scrolls, 3);
+});
+
+test("the live-profile reader expands one verified numbered interest collection before its physical boundary", async () => {
+  let expanded = false;
+  let scrolls = 0;
+  const taps = [];
+  const profile = await readCompleteLiveMatchProfile({
+    async sourceXml() {
+      return profileWithCollapsedInterestsXml("C", { expanded });
+    },
+    async tap(bounds) {
+      taps.push(bounds);
+      expanded = true;
+    },
+    async scrollProfile() {
+      scrolls += 1;
+      return false;
+    }
+  }, "C", {
+    maxProfileGestures: 4,
+    settleMilliseconds: 0,
+    boundarySettleMilliseconds: 0
+  });
+  assert.deepEqual(taps, [{ left: 24, top: 854, right: 552, bottom: 910, width: 528, height: 56 }]);
+  assert.equal(scrolls, 2);
+  assert.deepEqual(
+    Object.entries(profile.attributes)
+      .filter(([key]) => /^profile_chip_\d{2}$/.test(key))
+      .map(([, value]) => value),
+    Array.from({ length: 9 }, (_, index) => `Interest ${index + 1}`)
+  );
 });
 
 test("zero fresh carousel candidates performs no tap, profile read, or Back", async () => {

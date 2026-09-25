@@ -102,13 +102,28 @@
           if (typeof field.label !== "string" || typeof field.value !== "string" || !field.label || !field.value) return [];
           return [{ label: decodeStoredTinderText(field.label), value: decodeStoredTinderText(field.value) }];
         });
+      // The regular profile header has a semantically distinct age value.
+      // It is rendered as an ordinary unlabeled value beside the product's
+      // explicit Name row, rather than inventing a Tinder field label.
+      const headerAge = entries
+        .filter(([key, value]) => key === "header_profile_age" && typeof value === "string" && value)
+        .map(([, value]) => ({ label: null, value: decodeStoredTinderText(value) }));
+      // Compact Tinder chips are ordinary visible values, not synthetic
+      // structured labels. Keep every stored chip visible even when the
+      // profile also has label/value rows; the raw fallback remains stored
+      // separately for compatibility and is not rendered as a technical key.
+      const chips = entries
+        .map(([key, value]) => ({ match: /^profile_chip_(\d{2})$/.exec(key), value }))
+        .filter(({ match, value }) => match && typeof value === "string" && value)
+        .sort((left, right) => Number(left.match[1]) - Number(right.match[1]))
+        .map(({ value }) => ({ label: null, value: decodeStoredTinderText(value) }));
 
       // A complete structured projection replaces technical fallback labels
       // in the dashboard only. The ordered raw fallback remains unchanged in
       // the stored profile payload for existing and future records.
-      if (structured.length) return structured;
+      if (structured.length) return [...headerAge, ...structured, ...chips];
       return entries.map(([key, value]) => ({
-        label: /^(?:visible_profile|structured_profile)_\d{2}(?:_(?:label|value))?$/.test(key) ? null : key.replaceAll("_", " "),
+        label: /^(?:visible_profile|structured_profile|profile_chip)_\d{2}(?:_(?:label|value))?$|^header_profile_age$/.test(key) ? null : key.replaceAll("_", " "),
         value: decodeStoredTinderText(value)
       }));
     }

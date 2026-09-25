@@ -62,10 +62,22 @@ test("Tinder profile presentation prefers deterministic structured rows and unla
     { label: null, value: "line one\nline two" },
     { label: null, value: "😊" }
   ]);
+  assert.deepEqual(profileRows({
+    structured_profile_01_label: "Visible field",
+    structured_profile_01_value: "Visible value",
+    header_profile_age: "36",
+    profile_chip_01: "Visible tag one",
+    profile_chip_02: "Visible tag two"
+  }), [
+    { label: null, value: "36" },
+    { label: "Visible field", value: "Visible value" },
+    { label: null, value: "Visible tag one" },
+    { label: null, value: "Visible tag two" }
+  ]);
   assert.match(tinder, /function profileDetailRows\(attributes\)/);
   assert.match(tinder, /\^structured_profile_\(\\d\{2\}\)_\(label\|value\)\$/);
-  assert.match(tinder, /if \(structured\.length\) return structured;/);
-  assert.match(tinder, /label: \/\^\(\?:visible_profile\|structured_profile\)/);
+  assert.match(tinder, /if \(structured\.length\) return \[\.\.\.headerAge, \.\.\.structured, \.\.\.chips\];/);
+  assert.match(tinder, /label: \/\^\(\?:visible_profile\|structured_profile\|profile_chip\)/);
   assert.match(tinder, /for \(const \{ label, value \} of profileDetailRows\(profile\.attributes\)\)/);
   assert.match(tinder, /definition\.classList\.add\("tinder-profile-fallback"\)/);
   assert.match(tinder, /term\.textContent = label/);

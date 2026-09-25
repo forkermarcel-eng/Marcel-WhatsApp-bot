@@ -368,6 +368,41 @@ async function profileProjection(runtime, expectedDisplayName, options) {
   return observation || null;
 }
 
+/*
+ * A collapsed interest collection can expose one regular, local "show all"
+ * row. Its bounds originate from the immediately preceding verified profile
+ * projection and are re-read before the one allowed in-profile expansion
+ * tap. This remains ordinary passive profile navigation; it has no durable
+ * state and is never sent to the backend.
+ */
+async function expandVisibleChipCollection(runtime, expectedDisplayName, current, {
+  settleMilliseconds,
+  expectedScrollBounds
+}) {
+  const target = current?.chip_expansion_bounds;
+  if (!target) return null;
+  if (typeof runtime?.tap !== "function") {
+    throw new TypeError("runtime.tap is required to expand a verified Tinder interest collection");
+  }
+  const fresh = await profileProjection(runtime, expectedDisplayName, {
+    continuedProfileScroll: true,
+    expectedScrollBounds
+  });
+  if (!fresh || !sameBounds(target, fresh.chip_expansion_bounds)) {
+    throw new Error("Tinder interest collection changed before its verified expansion action");
+  }
+  await runtime.tap(fresh.chip_expansion_bounds);
+  await wait(runtime, settleMilliseconds);
+  const expanded = await profileProjection(runtime, expectedDisplayName, {
+    continuedProfileScroll: true,
+    expectedScrollBounds
+  });
+  if (!expanded || sameBounds(fresh.chip_expansion_bounds, expanded.chip_expansion_bounds)) {
+    throw new Error("Tinder interest collection did not expand after its verified action");
+  }
+  return expanded;
+}
+
 async function waitForInitialProfile(runtime, expectedDisplayName, { settleMilliseconds }) {
   for (let attempt = 0; attempt < 14; attempt += 1) {
     await wait(runtime, settleMilliseconds);
@@ -442,8 +477,20 @@ export async function readCompleteLiveMatchProfile(runtime, expectedDisplayName,
   if (!current) throw new Error("Tinder Match profile changed before its scrollable surface was verified");
   profile = mergeProfileSnapshots(profile, current.profile);
   let noProgress = 0;
+  let expandedChipCollection = false;
 
   for (let gesture = 0; gesture < maxProfileGestures; gesture += 1) {
+    if (!expandedChipCollection && current.chip_expansion_bounds) {
+      const expanded = await expandVisibleChipCollection(runtime, expectedDisplayName, current, {
+        settleMilliseconds,
+        expectedScrollBounds: current.scroll_bounds
+      });
+      profile = mergeProfileSnapshots(profile, expanded.profile);
+      current = expanded;
+      expandedChipCollection = true;
+      noProgress = 0;
+      continue;
+    }
     const before = current;
     const canScrollMore = await runtime.scrollProfile(before.scroll_bounds);
     if (typeof canScrollMore !== "boolean") {

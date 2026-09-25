@@ -286,25 +286,153 @@ function isProfileChipTarget(target, container) {
     && bounds.height <= Math.max(120, Math.round(container.bounds.height * 0.2));
 }
 
+/*
+ * UiAutomator2 may expose a compact Tinder chip either as a TextView/Chip or
+ * as the directly clickable generic View carrying its visible text.  Keep the
+ * projection structural: a generic View is admitted only when it is a text
+ * leaf, so a container whose child supplies the same text is never counted a
+ * second time.
+ */
+function isChipTextNode(node) {
+  if (!visibleText(node)) return false;
+  const name = className(node);
+  if (/(?:TextView|Chip|Button)$/.test(name)) return true;
+  if (!/View$/.test(name)) return false;
+  return !(node.children || []).some((child) => visibleText(child));
+}
+
+function chipTargetKey(target) {
+  const bounds = target?.bounds;
+  return bounds ? `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}` : null;
+}
+
+function compactSingleTextParent(node, container) {
+  const parent = node?.parent;
+  if (!parent || parent === container || !isProfileChipTarget(parent, container)) return false;
+  return (parent.children || []).filter((child) => visibleText(child)).length === 1;
+}
+
+function profileChipTarget(node, container) {
+  const clickableTarget = nearestClickableAncestor(node, container);
+  if (isProfileChipTarget(clickableTarget, container)) {
+    return { target: clickableTarget, needsDenseCollection: false, collectionTarget: null };
+  }
+  // Current Tinder can put several compact text chips inside one wide
+  // clickable collection wrapper. The wrapper itself is not a chip-sized
+  // target, but each ordinary compact text leaf is. Require the same dense
+  // collection evidence as inert chips: a wide profile row with one text is
+  // not an interest just because it happens to be clickable.
+  if (clickableTarget && isProfileChipTarget(node, container)) {
+    return { target: node, needsDenseCollection: true, collectionTarget: clickableTarget };
+  }
+  // Tinder can also render inert text chips in compact one-text wrappers.
+  // Unlike interactive chips, those need a dense local collection (three or
+  // more members) so a normal solitary profile field or label/value pair is
+  // never promoted to an interest.
+  if (!clickableTarget && isProfileChipTarget(node, container) && compactSingleTextParent(node, container)) {
+    return { target: node, needsDenseCollection: true, collectionTarget: null };
+  }
+  return null;
+}
+
+/*
+ * A directly clickable text surface can be a regular compact tag in current
+ * Tinder layouts. Require it to be part of a three-member compact cluster,
+ * so a lone or paired profile action is not projected as an interest. Text
+ * children of a compact clickable wrapper remain valid on their own, as
+ * before.
+ */
+function directChipPeerCount(target, targets) {
+  if (!target?.bounds) return false;
+  return targets.filter((candidate) => {
+    if (candidate === target || !candidate?.bounds) return false;
+    const leftCenter = (target.bounds.top + target.bounds.bottom) / 2;
+    const rightCenter = (candidate.bounds.top + candidate.bounds.bottom) / 2;
+    const sameRow = Math.abs(leftCenter - rightCenter) <= Math.max(32, target.bounds.height, candidate.bounds.height);
+    const verticalGap = Math.max(candidate.bounds.top - target.bounds.bottom, target.bounds.top - candidate.bounds.bottom);
+    // Wrapped chips form a compact cluster.  A distant lone action below the
+    // collection must not borrow the preceding chip row as its peer.
+    const adjacentRows = verticalGap >= -8 && verticalGap <= Math.max(
+      48,
+      Math.min(80, Math.round(Math.max(target.bounds.height, candidate.bounds.height) * 1.5))
+    );
+    return sameRow || adjacentRows;
+  }).length;
+}
+
 function profileChipTextNodes(nodes, container) {
-  const seen = new Set();
-  return nodes
+  const candidates = nodes
     .filter((node) => {
+      if (!node.bounds || !isChipTextNode(node)) return false;
+      return descendantOf(node, container) && within(node.bounds, container.bounds);
+    })
+    .map((node) => ({ node, ...profileChipTarget(node, container) }))
+    .filter(({ target }) => Boolean(target));
+  const targets = [...new Map(candidates
+    .map(({ target }) => [chipTargetKey(target), target])
+    .filter(([key]) => key)).values()];
+  const collectionMemberCounts = new Map();
+  for (const { node, collectionTarget } of candidates) {
+    const key = chipTargetKey(collectionTarget);
+    if (!key) continue;
+    const members = collectionMemberCounts.get(key) || new Set();
+    members.add(`${node.bounds.left},${node.bounds.top},${node.bounds.right},${node.bounds.bottom}:${visibleText(node)}`);
+    collectionMemberCounts.set(key, members);
+  }
+  const seen = new Set();
+  return candidates
+    .filter(({ node, target, needsDenseCollection, collectionTarget }) => {
       const text = visibleText(node);
-      if (!text || !node.bounds || !/(?:TextView|Chip)$/.test(className(node))) return false;
-      if (!descendantOf(node, container) || !within(node.bounds, container.bounds)) return false;
-      const target = nearestClickableAncestor(node, container);
-      if (!isProfileChipTarget(target, container)) return false;
-      // A directly-clickable TextView is a generic wide/narrow action with no
-      // regular chip container relationship. A material Chip itself remains a
-      // valid compact control, as does a text child of a clickable container.
-      if (target === node && /TextView$/.test(className(node))) return false;
+      // A directly clickable TextView or generic View is accepted only as a
+      // member of a visible compact collection. A material Chip itself, or a
+      // text child of a compact clickable wrapper, remains independently
+      // valid because that wrapper is already the ordinary chip structure.
+      const peerCount = directChipPeerCount(target, targets);
+      const collectionCount = chipTargetKey(collectionTarget)
+        ? collectionMemberCounts.get(chipTargetKey(collectionTarget))?.size || 0
+        : 0;
+      if (needsDenseCollection && collectionTarget && collectionCount < 3) return false;
+      if (target === node && !/Chip$/.test(className(node))
+        && !collectionTarget && peerCount < 2) return false;
       const key = `${target.bounds.left},${target.bounds.top},${target.bounds.right},${target.bounds.bottom}:${text}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     })
+    .map(({ node }) => node)
     .sort((left, right) => left.bounds.top - right.bounds.top || left.bounds.left - right.bounds.left);
+}
+
+/*
+ * Tinder can initially collapse a dense visible interest collection behind a
+ * regular in-profile "show all N" control. It is not a field, an identity
+ * signal, or an external action. We accept it only when one numbered, wide
+ * clickable row immediately follows a dense compact chip cluster in the
+ * same verified profile scroll surface. The actual language is deliberately
+ * not inspected, so this stays valid across Tinder localisations.
+ */
+function profileChipExpansionBounds(nodes, container, chipNodes) {
+  if (!container?.bounds || chipNodes.length < 3) return null;
+  const chipBottom = Math.max(...chipNodes.map((node) => node.bounds.bottom));
+  const maximumGap = Math.max(96, Math.round(container.bounds.height * 0.18));
+  const seen = new Map();
+  for (const node of nodes) {
+    const text = visibleText(node);
+    if (!text || !/\p{N}/u.test(text) || !node.bounds) continue;
+    if (!descendantOf(node, container) || !within(node.bounds, container.bounds)) continue;
+    const target = nearestClickableAncestor(node, container);
+    if (!target?.bounds || !isClickable(target) || !within(target.bounds, container.bounds)) continue;
+    const wideRow = target.bounds.width >= Math.round(container.bounds.width * 0.72)
+      && target.bounds.height >= 28
+      && target.bounds.height <= Math.max(120, Math.round(container.bounds.height * 0.14));
+    const followsCollection = target.bounds.top >= chipBottom - 12
+      && target.bounds.top - chipBottom <= maximumGap;
+    if (!wideRow || !followsCollection) continue;
+    const key = chipTargetKey(target);
+    if (key) seen.set(key, target);
+  }
+  const targets = [...seen.values()];
+  return targets.length === 1 ? Object.freeze({ ...targets[0].bounds }) : null;
 }
 
 function profileProjectedTextNodes(bodyNodes, chipNodes) {
@@ -399,13 +527,20 @@ function structuredProfilePairs(bodyNodes, profileContainer) {
   const pairs = [];
   const seen = new Set();
   const candidatePairs = [];
+  const containerPairs = containerTextPairs(bodyNodes, profileContainer);
+  const containerLabels = new Set(containerPairs.map(({ labelNode }) => labelNode));
   for (let index = 0; index + 1 < bodyNodes.length; index += 1) {
     const labelNode = bodyNodes[index];
     const valueNode = bodyNodes[index + 1];
     if (!isVisibleProfileLabel(labelNode) || !profileTextNeighbors(labelNode, valueNode)) continue;
+    // A section heading can be immediately followed by the label of a
+    // separately structured field.  That field's compact two-text container
+    // is the more specific regular UI structure, so the section must not
+    // consume its label as a value merely because both are vertically close.
+    if (containerLabels.has(valueNode)) continue;
     candidatePairs.push({ labelNode, valueNode });
   }
-  candidatePairs.push(...containerTextPairs(bodyNodes, profileContainer));
+  candidatePairs.push(...containerPairs);
   for (const { labelNode, valueNode } of candidatePairs) {
     if (pairs.length >= MAX_STRUCTURED_PROFILE_PAIRS) break;
     const label = visibleText(labelNode);
@@ -448,17 +583,33 @@ function ageText(value) {
  * visibly confirms the direct-navigation name; a number elsewhere in the
  * profile is never treated as an age.
  */
-function profileHeaderProjection(bodyNodes, media, expectedDisplayName) {
-  if (!media?.bounds || !expectedDisplayName) return { name: null, age: null };
+function profileHeaderProjection(nodes, media, expectedDisplayName, screen) {
+  if (!media?.bounds || !expectedDisplayName || !screen) return { name: null, age: null };
   const expected = expectedDisplayName.normalize("NFC").trim();
+  const headerBandInset = Math.max(96, Math.round(media.bounds.height * 0.16));
+  const headerBandTop = Math.max(screen.top, media.bounds.top - headerBandInset);
   const headerBandBottom = media.bounds.bottom + Math.max(96, Math.round(media.bounds.height * 0.16));
-  const candidates = bodyNodes.filter((node) => node.bounds.top <= headerBandBottom
-    && node.bounds.bottom >= media.bounds.top);
+  /*
+   * Tinder may render the visible name/age overlay as a sibling of the
+   * profile ScrollView, inside a clickable media wrapper.  It is still the
+   * same regular header surface, but intentionally excluded from ordinary
+   * profile-body values.  Inspect only TextViews in the bounded media-header
+   * band and require the direct chat-name continuity below; no arbitrary
+   * number elsewhere in a profile can become an age.
+   */
+  const candidates = nodes.filter((node) => /TextView$/.test(className(node))
+    && visibleText(node)
+    && node.bounds
+    && within(node.bounds, screen)
+    && node.bounds.top <= headerBandBottom
+    && node.bounds.bottom >= headerBandTop);
   const named = [];
+  const nameWithTrailingSeparator = new RegExp(`^${escapeRegularExpression(expected)}\\s*[,\\u00b7]$`, "u");
   for (const node of candidates) {
     const text = visibleText(node);
     if (!text) continue;
     if (text === expected) named.push({ node, age: null });
+    if (nameWithTrailingSeparator.test(text)) named.push({ node, age: null });
     const combined = new RegExp(`^${escapeRegularExpression(expected)}\\s*[,\\u00b7]\\s*(\\d{1,3})$`, "u").exec(text);
     if (combined) named.push({ node, age: combined[1] });
   }
@@ -748,6 +899,7 @@ export function observeProfileFromXml(xml, {
   if (continuedProfileScroll && expectedScrollBounds && !sameScrollSurface(container.bounds, expectedScrollBounds)) return null;
   const bodyNodes = profileBodyTextNodes(nodes, container);
   const chipNodes = profileChipTextNodes(nodes, container);
+  const chipExpansionBounds = profileChipExpansionBounds(nodes, container, chipNodes);
   // Keep the existing Block-2 product-profile field convention exactly:
   // every regular visible value, including compact clickable chips, remains
   // available in visual order under its `visible_profile_*` fallback key.
@@ -757,7 +909,7 @@ export function observeProfileFromXml(xml, {
     profileBodyTexts(profileProjectedTextNodes(bodyNodes, chipNodes)),
     structuredProfilePairs(bodyNodes, container),
     {
-      header: profileHeaderProjection(bodyNodes, media, expected),
+      header: profileHeaderProjection(nodes, media, expected, screen),
       sections: profileSectionContexts(bodyNodes),
       chips: profileBodyTexts(chipNodes).slice(0, MAX_PROFILE_CHIPS)
     }
@@ -774,7 +926,10 @@ export function observeProfileFromXml(xml, {
     // They are never put into the profile projection, persistence payload, or
     // a durable media identifier; callers may use them only with the same
     // immediately obtained screen observation.
-    media_bounds: media?.bounds ? Object.freeze({ ...media.bounds }) : null
+    media_bounds: media?.bounds ? Object.freeze({ ...media.bounds }) : null,
+    // The optional in-profile expansion target is likewise an ephemeral
+    // same-screen control. It is never included in a profile payload.
+    chip_expansion_bounds: chipExpansionBounds
   });
 }
 

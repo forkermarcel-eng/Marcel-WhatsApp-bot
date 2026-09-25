@@ -167,6 +167,7 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
   const allowed = new Set([
     "continuation_conversation_id",
     "direct_continuity_repair",
+    "profile_refresh",
     "profile",
     "messages",
     "history_complete",
@@ -190,6 +191,28 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
       "direct continuity repair requires its selected existing conversation"
     );
   }
+  const profileRefresh = value.profile_refresh === true;
+  if (value.profile_refresh !== undefined && typeof value.profile_refresh !== "boolean") {
+    throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "profile refresh is invalid");
+  }
+  if (profileRefresh && !continuation) {
+    throw new TinderMirrorError(
+      "INVALID_TINDER_MIRROR_PAYLOAD",
+      "profile refresh requires its selected existing conversation"
+    );
+  }
+  if (profileRefresh && directContinuityRepair) {
+    throw new TinderMirrorError(
+      "INVALID_TINDER_MIRROR_PAYLOAD",
+      "profile refresh cannot be combined with direct continuity repair"
+    );
+  }
+  if (profileRefresh && (Object.hasOwn(value, "last_message_visible_time") || Object.hasOwn(value, "inbox_position"))) {
+    throw new TinderMirrorError(
+      "INVALID_TINDER_MIRROR_PAYLOAD",
+      "profile refresh cannot change Inbox ordering"
+    );
+  }
   if (!Array.isArray(value.messages) || value.messages.length < 1 || value.messages.length > MAX_MESSAGES) {
     throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "messages are invalid");
   }
@@ -205,6 +228,7 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
   return Object.freeze({
     continuation_conversation_id: continuation || null,
     direct_continuity_repair: directContinuityRepair,
+    profile_refresh: profileRefresh,
     profile: normalizeTinderProfile(value.profile),
     messages: Object.freeze(value.messages.map(normalizeTinderMessage)),
     history_complete: value.history_complete,
@@ -478,6 +502,11 @@ function messagesExactlyEqual(left, right) {
     && left.visible_status === right.visible_status;
 }
 
+function historiesExactlyEqual(left, right) {
+  return left.length === right.length
+    && left.every((message, index) => messagesExactlyEqual(message, right[index]));
+}
+
 function hasAmbiguousCompletedExactSingletonPair(candidates, observation) {
   if (observation.history_complete !== true || observation.messages.length !== 1) return false;
   const matches = candidates.filter((candidate) => Boolean(candidate.history_complete)
@@ -736,6 +765,12 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
         "Direct continuity repair is available only to the completed-history sync"
       );
     }
+    if (observation.profile_refresh) {
+      throw new TinderMirrorError(
+        "TINDER_PROFILE_REFRESH_SYNC_ONLY",
+        "Profile refresh is available only to the completed-history sync"
+      );
+    }
     const client = await pool.connect();
     try {
       await client.query("BEGIN READ ONLY");
@@ -770,8 +805,29 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
       // from creating two initial records before either can be recognized.
       await assertExistingDevice(client, deviceId, { lock: true });
       const directContinuityRepair = observation.direct_continuity_repair;
+      const profileRefresh = observation.profile_refresh;
       let conversation;
-      if (directContinuityRepair) {
+      if (profileRefresh) {
+        conversation = await loadContinuationConversation(
+          client,
+          deviceId,
+          observation.continuation_conversation_id,
+          { lock: true }
+        );
+        const storedProfile = conversation && normalizedStoredProfile(conversation.profile);
+        if (!conversation
+          || !storedProfile
+          || storedProfile.display_name !== observation.profile.display_name
+          || observation.history_complete !== true
+          || conversation.history_complete !== true
+          || !historiesExactlyEqual(conversation.messages, observation.messages)) {
+          throw new TinderMirrorError(
+            "TINDER_PROFILE_REFRESH_UNVERIFIED",
+            "The selected existing conversation no longer has the exact observed history and display name",
+            409
+          );
+        }
+      } else if (directContinuityRepair) {
         conversation = await loadContinuationConversation(
           client,
           deviceId,
@@ -845,13 +901,15 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
         created = true;
         historyChanged = true;
       } else {
-        const mergedProfile = mergeTinderProfile(conversation.profile, observation.profile);
+        const mergedProfile = profileRefresh
+          ? observation.profile
+          : mergeTinderProfile(conversation.profile, observation.profile);
         const mergedHistory = directContinuityRepair
           ? observation.messages
-          : mergeTinderHistory(conversation.messages, observation.messages);
+          : (profileRefresh ? conversation.messages : mergeTinderHistory(conversation.messages, observation.messages));
         const profileChanged = !profilesEqual(mergedProfile, conversation.profile);
-        historyChanged = !historiesEqual(mergedHistory, conversation.messages);
-        const completionChanged = Boolean(conversation.history_complete) !== observation.history_complete;
+        historyChanged = profileRefresh ? false : !historiesEqual(mergedHistory, conversation.messages);
+        const completionChanged = profileRefresh ? false : Boolean(conversation.history_complete) !== observation.history_complete;
         const nextVisibleTime = observation.has_last_message_visible_time
           ? observation.last_message_visible_time
           : conversation.last_message_visible_time ?? null;

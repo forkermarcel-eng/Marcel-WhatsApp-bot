@@ -675,6 +675,33 @@ test("profile observation adds deterministic visible heading-to-value pairs with
   });
 });
 
+test("profile section headings do not consume the following structured field label", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,900]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView heading="true" text="Visible section context" bounds="[40,620][500,660]" />
+            <android.widget.LinearLayout bounds="[24,670][552,772]">
+              <android.widget.TextView text="Visible field label" bounds="[40,682][500,718]" />
+              <android.widget.TextView text="Visible field value" bounds="[40,724][500,760]" />
+            </android.widget.LinearLayout>
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.ok(observed);
+  assert.deepEqual(observed.profile.attributes, {
+    visible_profile_01: "Visible section context",
+    visible_profile_02: "Visible field label",
+    visible_profile_03: "Visible field value",
+    structured_profile_01_label: "Visible field label",
+    structured_profile_01_value: "Visible field value",
+    profile_section_01: "Visible section context"
+  });
+});
+
 test("generic profile projection retains header, section context, container fields, compact chips, and ordered raw fallback", () => {
   const observed = observeProfileFromXml(`
     <hierarchy rotation="0">
@@ -722,6 +749,139 @@ test("generic profile projection retains header, section context, container fiel
   assert.doesNotMatch(JSON.stringify(observed), /Wide non-profile control/);
 });
 
+test("generic profile projection retains every compact direct-view chip in one visible collection", () => {
+  const chips = Array.from({ length: 9 }, (_, index) => {
+    const row = Math.floor(index / 3);
+    const column = index % 3;
+    const left = 28 + column * 176;
+    const top = 640 + row * 68;
+    const right = left + 154;
+    const bottom = top + 46;
+    return `<android.view.View clickable="true" text="Visible tag ${index + 1}" bounds="[${left},${top}][${right},${bottom}]" />`;
+  }).join("\n");
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,1120]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            ${chips}
+            <android.widget.TextView clickable="true" text="Lone compact action" bounds="[28,1032][184,1078]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.ok(observed);
+  const attributes = observed.profile.attributes;
+  assert.deepEqual(
+    Object.entries(attributes)
+      .filter(([key]) => /^profile_chip_\d{2}$/.test(key))
+      .map(([, value]) => value),
+    Array.from({ length: 9 }, (_, index) => `Visible tag ${index + 1}`)
+  );
+  assert.doesNotMatch(JSON.stringify(attributes), /Lone compact action/);
+});
+
+test("generic profile projection retains compact chip text inside a wide clickable collection wrapper", () => {
+  const chips = Array.from({ length: 9 }, (_, index) => {
+    const row = Math.floor(index / 3);
+    const column = index % 3;
+    const left = 28 + column * 176;
+    const top = 640 + row * 68;
+    const right = left + 154;
+    const bottom = top + 46;
+    return `<android.widget.TextView text="Visible wrapped tag ${index + 1}" bounds="[${left},${top}][${right},${bottom}]" />`;
+  }).join("\n");
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,1120]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.view.ViewGroup clickable="true" bounds="[20,628][556,860]">
+              ${chips}
+            </android.view.ViewGroup>
+            <android.view.ViewGroup clickable="true" bounds="[20,900][556,952]">
+              <android.widget.TextView text="Lone wrapped action" bounds="[28,908][184,946]" />
+            </android.view.ViewGroup>
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.ok(observed);
+  assert.deepEqual(
+    Object.entries(observed.profile.attributes)
+      .filter(([key]) => /^profile_chip_\d{2}$/.test(key))
+      .map(([, value]) => value),
+    Array.from({ length: 9 }, (_, index) => `Visible wrapped tag ${index + 1}`)
+  );
+  assert.doesNotMatch(JSON.stringify(observed.profile.attributes), /Lone wrapped action/);
+});
+
+test("generic profile projection retains an inert compact chip collection but excludes an isolated field", () => {
+  const chips = Array.from({ length: 9 }, (_, index) => {
+    const row = Math.floor(index / 3);
+    const column = index % 3;
+    const left = 28 + column * 176;
+    const top = 640 + row * 68;
+    const right = left + 154;
+    const bottom = top + 46;
+    return `<android.widget.FrameLayout bounds="[${left},${top}][${right},${bottom}]"><android.widget.TextView text="Visible inert tag ${index + 1}" bounds="[${left},${top}][${right},${bottom}]" /></android.widget.FrameLayout>`;
+  }).join("\n");
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,1120]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            ${chips}
+            <android.widget.FrameLayout bounds="[28,940][354,986]"><android.widget.TextView text="Isolated profile field" bounds="[28,940][354,986]" /></android.widget.FrameLayout>
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.ok(observed);
+  assert.deepEqual(
+    Object.entries(observed.profile.attributes)
+      .filter(([key]) => /^profile_chip_\d{2}$/.test(key))
+      .map(([, value]) => value),
+    Array.from({ length: 9 }, (_, index) => `Visible inert tag ${index + 1}`)
+  );
+  assert.doesNotMatch(
+    JSON.stringify(Object.fromEntries(Object.entries(observed.profile.attributes)
+      .filter(([key]) => /^profile_chip_\d{2}$/.test(key)))),
+    /Isolated profile field/
+  );
+});
+
+test("profile observation exposes only one local numbered expansion control directly below a dense compact chip collection", () => {
+  const chips = Array.from({ length: 8 }, (_, index) => {
+    const row = Math.floor(index / 3);
+    const column = index % 3;
+    const left = 28 + column * 176;
+    const top = 640 + row * 68;
+    const right = left + 154;
+    const bottom = top + 46;
+    return `<android.widget.FrameLayout bounds="[${left},${top}][${right},${bottom}]"><android.widget.TextView text="Visible collapsed tag ${index + 1}" bounds="[${left},${top}][${right},${bottom}]" /></android.widget.FrameLayout>`;
+  }).join("\n");
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,1120]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            ${chips}
+            <android.widget.FrameLayout clickable="true" bounds="[24,854][552,910]"><android.widget.TextView text="Show all 9" bounds="[160,866][416,900]" /></android.widget.FrameLayout>
+            <android.widget.FrameLayout clickable="true" bounds="[24,932][552,980]"><android.widget.TextView text="Normal profile action" bounds="[160,940][416,970]" /></android.widget.FrameLayout>
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "Example Profile" });
+  assert.ok(observed);
+  assert.deepEqual(observed.chip_expansion_bounds, { left: 24, top: 854, right: 552, bottom: 910, width: 528, height: 56 });
+  assert.equal(Object.keys(observed.profile.attributes).filter((key) => /^profile_chip_\d{2}$/.test(key)).length, 8);
+});
+
 test("generic profile projection accepts separate neighbouring name and age header nodes", () => {
   const observed = observeProfileFromXml(`
     <hierarchy rotation="0">
@@ -741,6 +901,28 @@ test("generic profile projection accepts separate neighbouring name and age head
     visible_profile_02: "31",
     header_profile_name: "Separate header",
     header_profile_age: "31"
+  });
+});
+
+test("generic profile projection reads a split media header outside the scrollable profile body", () => {
+  const observed = observeProfileFromXml(`
+    <hierarchy rotation="0">
+      <android.widget.FrameLayout bounds="[0,0][576,1280]">
+        <android.widget.TextView text="External header," bounds="[36,108][270,154]" />
+        <android.widget.TextView text="36" bounds="[290,108][340,154]" />
+        <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
+          <android.widget.FrameLayout bounds="[0,160][576,760]">
+            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <android.widget.TextView text="Visible profile detail" bounds="[40,620][500,666]" />
+          </android.widget.FrameLayout>
+        </androidx.core.widget.NestedScrollView>
+      </android.widget.FrameLayout>
+    </hierarchy>`, { expectedDisplayName: "External header" });
+  assert.ok(observed);
+  assert.deepEqual(observed.profile.attributes, {
+    visible_profile_01: "Visible profile detail",
+    header_profile_name: "External header",
+    header_profile_age: "36"
   });
 });
 
@@ -1097,6 +1279,111 @@ test("a selected existing continuation fails closed instead of creating a second
   );
   assert.equal((await mirror.list()).length, 1);
   assert.equal(pool.state.deleteMessageCalls, 0);
+});
+
+test("a selected exact profile refresh replaces only the selected profile JSON without writing messages", async () => {
+  const pool = createMemoryPool();
+  const fixedNow = new Date("2026-09-25T10:00:00.000Z");
+  const mirror = createTinderConversationMirror({ pool, now: () => fixedNow });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const storedProfile = profile({
+    structured_profile_01_label: "Old field label",
+    structured_profile_01_value: "Old field value",
+    structured_profile_02_label: "Stale ordinal label",
+    structured_profile_02_value: "Stale ordinal value"
+  });
+  const storedMessages = [
+    message("INBOUND", "Stored older", "Yesterday"),
+    message("OUTBOUND", "Stored newest", "Today")
+  ];
+  const created = await mirror.sync({
+    deviceId,
+    payload: { profile: storedProfile, messages: storedMessages, history_complete: true }
+  });
+  const conversationId = created.conversation.id;
+  const beforeMessages = structuredClone(pool.state.messages.get(conversationId));
+  const beforeConversation = structuredClone(pool.state.conversations.get(conversationId));
+  const statementCount = pool.state.statements.length;
+  const refreshedProfile = profile({
+    structured_profile_01_label: "Current field label",
+    structured_profile_01_value: "Current field value"
+  });
+
+  const result = await mirror.sync({
+    deviceId,
+    payload: {
+      continuation_conversation_id: conversationId,
+      profile_refresh: true,
+      profile: refreshedProfile,
+      messages: storedMessages,
+      history_complete: true
+    }
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(result.history_changed, false);
+  assert.equal(result.conversation.id, conversationId);
+  assert.deepEqual(pool.state.conversations.get(conversationId).profile, refreshedProfile);
+  assert.deepEqual(pool.state.messages.get(conversationId), beforeMessages);
+  assert.equal(pool.state.conversations.get(conversationId).history_complete, beforeConversation.history_complete);
+  assert.deepEqual(pool.state.conversations.get(conversationId).history_synced_at, beforeConversation.history_synced_at);
+  assert.equal(
+    pool.state.statements.slice(statementCount).some((statement) => /(?:INSERT INTO|UPDATE|DELETE FROM) tinder_conversation_messages/.test(statement)),
+    false
+  );
+});
+
+test("a profile refresh rejects any changed selected history, history state, display name, or missing continuation", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({ pool });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const initialProfile = profile({ structured_profile_01_label: "Existing", structured_profile_01_value: "Profile" });
+  const messages = [message("INBOUND", "One"), message("OUTBOUND", "Two")];
+  const created = await mirror.sync({
+    deviceId,
+    payload: { profile: initialProfile, messages, history_complete: true }
+  });
+  const conversationId = created.conversation.id;
+  const beforeConversation = structuredClone(pool.state.conversations.get(conversationId));
+  const beforeMessages = structuredClone(pool.state.messages.get(conversationId));
+  const refresh = (overrides = {}) => mirror.sync({
+    deviceId,
+    payload: {
+      continuation_conversation_id: conversationId,
+      profile_refresh: true,
+      profile: profile({ structured_profile_01_label: "Current", structured_profile_01_value: "Profile" }),
+      messages,
+      history_complete: true,
+      ...overrides
+    }
+  });
+
+  await assert.rejects(
+    refresh({ messages: [message("INBOUND", "Changed"), message("OUTBOUND", "Two")] }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_PROFILE_REFRESH_UNVERIFIED"
+  );
+  await assert.rejects(
+    refresh({ history_complete: false }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_HISTORY_NOT_COMPLETE"
+  );
+  await assert.rejects(
+    refresh({ profile: { ...profile(), display_name: "Different profile" } }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_PROFILE_REFRESH_UNVERIFIED"
+  );
+  await assert.rejects(
+    mirror.sync({
+      deviceId,
+      payload: {
+        profile_refresh: true,
+        profile: profile(),
+        messages,
+        history_complete: true
+      }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_MIRROR_PAYLOAD"
+  );
+  assert.deepEqual(pool.state.conversations.get(conversationId), beforeConversation);
+  assert.deepEqual(pool.state.messages.get(conversationId), beforeMessages);
 });
 
 test("a selected direct-continuity repair replaces only that existing conversation history in place", async () => {

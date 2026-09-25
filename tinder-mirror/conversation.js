@@ -212,6 +212,32 @@ export function normalizeTinderMirrorPayload(value, { requireCompleteHistory = f
   });
 }
 
+/*
+ * A delta is deliberately narrower than an initial/full-history observation.
+ * It carries one normal, chronological message viewport only.  In particular
+ * it has no profile or history-completion field, so this ingress cannot turn
+ * a targeted delta into a profile read or a full-history replacement.
+ */
+export function normalizeTinderConversationDeltaPayload(value) {
+  if (!plainObject(value)) {
+    throw new TinderMirrorError("INVALID_TINDER_DELTA_PAYLOAD", "delta must be an object");
+  }
+  const allowed = new Set(["messages", "last_message_visible_time", "inbox_position"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new TinderMirrorError("INVALID_TINDER_DELTA_PAYLOAD", "delta contains unsupported fields");
+  }
+  if (!Array.isArray(value.messages) || value.messages.length < 1 || value.messages.length > MAX_MESSAGES) {
+    throw new TinderMirrorError("INVALID_TINDER_DELTA_PAYLOAD", "delta messages are invalid");
+  }
+  const inboxOrder = normalizeTinderInboxOrder(
+    Object.fromEntries(Object.entries(value).filter(([key]) => key === "last_message_visible_time" || key === "inbox_position"))
+  );
+  return Object.freeze({
+    messages: Object.freeze(value.messages.map(normalizeTinderMessage)),
+    ...inboxOrder
+  });
+}
+
 function sameOptionalText(left, right) {
   return left === null || right === null || left === right;
 }
@@ -276,6 +302,44 @@ export function largestContiguousOverlap(left, right, { identityOnly = false } =
     }
   }
   return largest;
+}
+
+/*
+ * A normal live viewport is chronologically ordered.  It can extend an
+ * existing Conversation only when its prefix is exactly the stored tail.
+ * This is an ordered continuation check, not a profile/name/fingerprint
+ * lookup; the caller has already selected the device-bound Conversation.
+ */
+export function existingSuffixObservedPrefixOverlap(existing, observed) {
+  const maximum = Math.min(existing.length, observed.length);
+  for (let size = maximum; size > 0; size -= 1) {
+    if (sequenceMatchesAt(existing, observed.slice(0, size), existing.length - size, messagesEqual)) {
+      return size;
+    }
+  }
+  return 0;
+}
+
+function hasVisibleMessageIdentity(message) {
+  return message.visible_time !== null || message.visible_status !== null;
+}
+
+/*
+ * A single ordinary text/direction match is not enough to append a live
+ * viewport: the same short text can occur more than once in one thread.
+ * A delta therefore needs either two ordered matching messages, or one
+ * matching message with a regular Tinder-visible time or status on at least
+ * one side of that matched pair.  This remains a local ordered-continuity
+ * check for the already selected Conversation, not a durable identifier.
+ */
+function hasUnambiguousDeltaOverlap(existing, observed, overlap) {
+  if (overlap >= 2) return true;
+  if (overlap !== 1) return false;
+
+  const storedTail = existing.at(-1);
+  const observedPrefix = observed[0];
+  return messagesEqual(storedTail, observedPrefix)
+    && (hasVisibleMessageIdentity(storedTail) || hasVisibleMessageIdentity(observedPrefix));
 }
 
 /*
@@ -861,6 +925,99 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
   }
 
   /*
+   * Targeted live delta ingress is intentionally not a second reader.  The
+   * selected existing, device-bound Conversation supplies the only target;
+   * the observed viewport must start with its current ordered suffix and may
+   * then append a newer tail.  A missing overlap rolls the transaction back
+   * rather than guessing, creating a Conversation, touching its profile, or
+   * changing its history-complete state.
+   */
+  async function appendDelta({ deviceId, conversationId, payload }) {
+    if (!UUID_V4.test(deviceId || "")) {
+      throw new TinderMirrorError("INVALID_TINDER_DELTA_PAYLOAD", "device id is invalid");
+    }
+    if (!UUID_V4.test(conversationId || "")) {
+      throw new TinderMirrorError("INVALID_TINDER_DELTA_PAYLOAD", "conversation id is invalid");
+    }
+    const delta = normalizeTinderConversationDeltaPayload(payload);
+    const timestamp = now();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await assertExistingDevice(client, deviceId, { lock: true });
+      const conversation = await loadContinuationConversation(client, deviceId, conversationId, { lock: true });
+      if (!conversation) {
+        throw new TinderMirrorError(
+          "TINDER_CONVERSATION_NOT_FOUND",
+          "The selected Tinder conversation is unavailable for this device",
+          404
+        );
+      }
+
+      const overlap = existingSuffixObservedPrefixOverlap(conversation.messages, delta.messages);
+      if (!hasUnambiguousDeltaOverlap(conversation.messages, delta.messages, overlap)) {
+        throw new TinderMirrorError(
+          "TINDER_DELTA_OVERLAP_UNVERIFIED",
+          "The observed live viewport does not continue the selected conversation",
+          409
+        );
+      }
+
+      const appendedMessages = delta.messages.slice(overlap);
+      const nextVisibleTime = delta.has_last_message_visible_time
+        ? delta.last_message_visible_time
+        : conversation.last_message_visible_time ?? null;
+      const nextInboxPosition = delta.has_inbox_position
+        ? delta.inbox_position
+        : conversation.inbox_position ?? null;
+      const orderingChanged = nextVisibleTime !== (conversation.last_message_visible_time ?? null)
+        || nextInboxPosition !== (conversation.inbox_position ?? null);
+
+      if (appendedMessages.length > 0) {
+        await insertMessages(client, conversation.conversation_id, appendedMessages, {
+          startOrdinal: conversation.messages.length
+        });
+      }
+      if (appendedMessages.length > 0 || orderingChanged) {
+        await client.query(
+          `UPDATE tinder_conversations
+              SET updated_at=$7,
+                  last_message_visible_time=CASE WHEN $3 THEN $4 ELSE last_message_visible_time END,
+                  inbox_position=CASE WHEN $5 THEN $6 ELSE inbox_position END
+            WHERE conversation_id=$1 AND device_id=$2`,
+          [
+            conversation.conversation_id,
+            deviceId,
+            delta.has_last_message_visible_time,
+            nextVisibleTime,
+            delta.has_inbox_position,
+            nextInboxPosition,
+            timestamp
+          ]
+        );
+      }
+      await client.query("COMMIT");
+      const messages = [...conversation.messages, ...appendedMessages];
+      return Object.freeze({
+        appended_messages: appendedMessages.length,
+        ordering_changed: orderingChanged,
+        conversation: publicConversation({
+          ...conversation,
+          messages,
+          last_message_visible_time: nextVisibleTime,
+          inbox_position: nextInboxPosition,
+          updated_at: appendedMessages.length > 0 || orderingChanged ? timestamp : conversation.updated_at
+        }, messages.length)
+      });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw mapDatabaseError(error);
+    } finally {
+      client.release();
+    }
+  }
+
+  /*
    * A known, safely skipped conversation has no reason to submit its profile
    * or history again merely to refresh its current official Inbox position.
    * This deliberately updates only the two source-order product fields on an
@@ -966,5 +1123,5 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
     }
   }
 
-  return Object.freeze({ resolve, sync, updateInboxOrder, list, detail });
+  return Object.freeze({ resolve, sync, appendDelta, updateInboxOrder, list, detail });
 }

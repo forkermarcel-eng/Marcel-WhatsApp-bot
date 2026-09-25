@@ -1,4 +1,8 @@
-import { mergeTinderHistory, normalizeTinderMirrorPayload } from "./conversation.js";
+import {
+  mergeTinderHistory,
+  normalizeTinderConversationDeltaPayload,
+  normalizeTinderMirrorPayload
+} from "./conversation.js";
 
 /*
  * Appium/UiAutomator2 control deliberately stays outside this adapter.  The
@@ -86,6 +90,48 @@ export function createTinderAppiumAdapter({ deviceId, transport }) {
   return Object.freeze({ start, appendViewport, resolve, persistCompletedHistory, clear });
 }
 
+/*
+ * A live delta has no profile or history-reader state.  Keeping it separate
+ * from the initial/full-history adapter makes that boundary explicit: callers
+ * can submit only the freshly observed normal message viewport to an already
+ * selected Conversation.
+ */
+export function createTinderAppiumDeltaAdapter({ deviceId, conversationId, transport }) {
+  if (typeof deviceId !== "string" || !deviceId) throw new TypeError("deviceId is required");
+  if (typeof conversationId !== "string" || !conversationId) throw new TypeError("conversationId is required");
+  if (!transport || typeof transport.appendDelta !== "function") {
+    throw new TypeError("transport.appendDelta is required");
+  }
+
+  async function persistViewport(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new TypeError("A normal message viewport is required");
+    }
+    const allowed = new Set(["messages", "lastMessageVisibleTime", "inboxPosition"]);
+    if (Object.keys(input).some((key) => !allowed.has(key))) {
+      throw new TypeError("A live Tinder delta cannot include profile or history fields");
+    }
+    const {
+      messages,
+      lastMessageVisibleTime = undefined,
+      inboxPosition = undefined
+    } = input;
+    const normalized = normalizeTinderConversationDeltaPayload({
+      messages,
+      ...(lastMessageVisibleTime === undefined ? {} : { last_message_visible_time: lastMessageVisibleTime }),
+      ...(inboxPosition === undefined ? {} : { inbox_position: inboxPosition })
+    });
+    const {
+      has_last_message_visible_time: _hasLastMessageVisibleTime,
+      has_inbox_position: _hasInboxPosition,
+      ...delta
+    } = normalized;
+    return transport.appendDelta({ deviceId, conversationId, delta: Object.freeze(delta) });
+  }
+
+  return Object.freeze({ persistViewport });
+}
+
 export function createExistingDashboardBearerTransport({ baseUrl, bearerToken, fetchImpl = fetch }) {
   const origin = String(baseUrl || "").replace(/\/+$/, "");
   if (!origin || typeof bearerToken !== "string" || !bearerToken) {
@@ -117,6 +163,10 @@ export function createExistingDashboardBearerTransport({ baseUrl, bearerToken, f
       device_id: deviceId,
       observation
     }),
+    appendDelta: ({ deviceId, conversationId, delta }) => request(
+      `/dashboard-api/tinder/conversations/${encodeURIComponent(conversationId)}/delta`,
+      { device_id: deviceId, delta }
+    ),
     updateInboxOrder: ({ deviceId, conversationId, inboxPosition, lastMessageVisibleTime = undefined }) => request(
       `/dashboard-api/tinder/conversations/${encodeURIComponent(conversationId)}/inbox-order`,
       {

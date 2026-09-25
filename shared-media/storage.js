@@ -6,6 +6,7 @@ export const MEDIA_STORAGE_METHODS = Object.freeze([
   "put",
   "read",
   "exists",
+  "remove",
   "publicRef"
 ]);
 
@@ -112,10 +113,25 @@ export function createLocalFilesystemMediaStorage({ rootDirectory, publicBaseUrl
     }
   }
 
+  // Deletion is deliberately scoped to a validated storage key. It is used
+  // only as best-effort compensation when a just-written asset cannot be
+  // persisted in the repository.
+  async function remove(key) {
+    const target = targetFor(key);
+    try {
+      await unlink(target.target);
+      return true;
+    } catch (error) {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
   return Object.freeze({
     put,
     read,
     exists,
+    remove,
     publicRef(key) {
       return publicReference(publicBaseUrl, normalizeStorageKey(key));
     }

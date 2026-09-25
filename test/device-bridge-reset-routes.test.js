@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
+import { canonicalRequest, sha256Hex } from "../device-bridge/protocol-v1.js";
 import { parseAndValidateResetHeartbeat } from "../device-bridge/reset-heartbeat.js";
 import { RETAINED_COMMANDS } from "../device-bridge/reset-command-ack.js";
-import { registerDeviceBridgeResetRoutes } from "../device-bridge/reset-block-routes.js";
+import {
+  registerDeviceBridgeResetRoutes,
+  tinderPossibleChangeDispatcherCallback
+} from "../device-bridge/reset-block-routes.js";
 import {
   parseAndValidateTinderPossibleChange,
   processTinderPossibleChangeTransaction
@@ -56,10 +61,10 @@ function tinderPossibleChangeRequest(body) {
   };
 }
 
-function tinderPossibleChangeBody() {
+function tinderPossibleChangeBody(sentAt = STAMP) {
   return {
     protocol_version: 1,
-    sent_at: STAMP,
+    sent_at: sentAt,
     event_type: "TINDER_POSSIBLE_CHANGE"
   };
 }
@@ -79,6 +84,48 @@ function genericHeartbeatBody() {
     },
     bridge: { service_state: "RUNNING", started_at: null, last_successful_heartbeat_at: null },
     capabilities: ["COMMAND_PING_V1", "COMMAND_REQUEST_STATUS_V1"]
+  };
+}
+
+function signedTinderPossibleChangeRequest(publicKey, privateKey) {
+  const sentAt = new Date().toISOString();
+  const body = Buffer.from(JSON.stringify(tinderPossibleChangeBody(sentAt)), "utf8");
+  const requestId = "22222222-2222-4222-8222-222222222222";
+  const path = `/device-bridge/v1/devices/${DEVICE_ID}/tinder-change-hints`;
+  const contentSha256 = sha256Hex(body);
+  const canonical = canonicalRequest({
+    protocolVersion: 1,
+    method: "POST",
+    path,
+    timestamp: sentAt,
+    requestId,
+    contentSha256
+  });
+  const headers = {
+    "x-marcel-protocol-version": "1",
+    "x-marcel-device-id": DEVICE_ID,
+    "x-marcel-key-id": DEVICE_ID,
+    "x-marcel-timestamp": sentAt,
+    "x-marcel-request-id": requestId,
+    "x-marcel-content-sha256": contentSha256,
+    "x-marcel-signature": crypto.sign("sha256", Buffer.from(canonical, "utf8"), privateKey).toString("base64url")
+  };
+  return {
+    method: "POST",
+    originalUrl: path,
+    params: { deviceId: DEVICE_ID },
+    body,
+    get(name) { return headers[name.toLowerCase()]; },
+    publicKeyDer: publicKey.export({ format: "der", type: "spki" })
+  };
+}
+
+function responseRecorder() {
+  return {
+    statusCode: null,
+    jsonBody: null,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.jsonBody = body; return this; }
   };
 }
 
@@ -203,6 +250,77 @@ test("reset route registration retains only generic signed and admin bridge endp
     ["POST", "/dashboard-api/device-bridge/devices/:deviceId/revoke"],
     ["POST", "/dashboard-api/device-bridge/devices/:deviceId/commands"]
   ]);
+});
+
+test("a committed signed Tinder hint signals only an injected co-resident dispatcher", async () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const request = signedTinderPossibleChangeRequest(publicKey, privateKey);
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT d\.device_id/.test(sql)) {
+        return { rows: [{ device_id: DEVICE_ID, enrollment_state: "ACTIVE", revoked_at: null, key_id: DEVICE_ID, key_revoked_at: null }] };
+      }
+      if (/INSERT INTO device_bridge_request_nonces/.test(sql)
+        || /INSERT INTO device_bridge_audit_events/.test(sql)
+        || /^(BEGIN|COMMIT|ROLLBACK)$/.test(sql)) return { rows: [] };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+    release() { this.released = true; }
+  };
+  const pool = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/FROM device_bridge_devices d\s+LEFT JOIN device_bridge_keys/s.test(sql)) {
+        return {
+          rows: [{
+            device_id: DEVICE_ID,
+            enrollment_state: "ACTIVE",
+            device_revoked_at: null,
+            key_id: DEVICE_ID,
+            public_key_spki_der: request.publicKeyDer,
+            key_revoked_at: null
+          }]
+        };
+      }
+      throw new Error(`Unexpected pool SQL: ${sql}`);
+    },
+    async connect() { return client; }
+  };
+  const routes = new Map();
+  const app = {
+    get() {},
+    post(path, handler) { routes.set(path, handler); }
+  };
+  const signals = [];
+  registerDeviceBridgeResetRoutes({
+    app,
+    pool,
+    dashboardApiReady: () => true,
+    dashboardApiAuthorized: () => true,
+    requireDeviceBridgeReady: () => true,
+    tinderPossibleChangeDispatcher: {
+      signal(hint) { signals.push(hint); }
+    }
+  });
+
+  const response = responseRecorder();
+  await routes.get("/device-bridge/v1/devices/:deviceId/tinder-change-hints")(request, response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.jsonBody.delivery, "BEST_EFFORT");
+  assert.deepEqual(signals, [{ device_id: DEVICE_ID, event_type: "TINDER_POSSIBLE_CHANGE" }]);
+  assert.ok(calls.some(({ sql }) => /^COMMIT$/.test(sql)));
+  assert.equal(client.released, true);
+});
+
+test("the dispatcher seam is optional and refuses a non-dispatcher", () => {
+  assert.equal(tinderPossibleChangeDispatcherCallback(), null);
+  assert.throws(
+    () => tinderPossibleChangeDispatcherCallback({ signal: null }),
+    /must expose signal\(\)/
+  );
 });
 
 test("active startup retains no retired product entrypoint and exposes only focused Tinder mirror operations", () => {

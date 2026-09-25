@@ -135,6 +135,9 @@ test("local filesystem storage is persistent, key-scoped, and non-overwriting", 
     assert.equal(await storage.exists("media-assets/test/file.bin"), true);
     assert.deepEqual(await storage.read("media-assets/test/file.bin"), Buffer.from([1, 2, 3]));
     await assert.rejects(storage.put("media-assets/test/file.bin", Buffer.from([4])), { code: "MEDIA_STORAGE_KEY_EXISTS" });
+    assert.equal(await storage.remove("media-assets/test/file.bin"), true);
+    assert.equal(await storage.remove("media-assets/test/file.bin"), false);
+    assert.equal(await storage.exists("media-assets/test/file.bin"), false);
     assert.throws(() => storage.publicRef("../outside"), /storage key is invalid/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -147,6 +150,7 @@ test("asset service can represent an unavailable Tinder asset without writing by
     async put(...args) { calls.push(args); },
     async read() { return Buffer.alloc(0); },
     async exists() { return false; },
+    async remove() {},
     publicRef() { return null; }
   };
   const ids = [assetId, linkId];
@@ -176,6 +180,7 @@ test("asset service stores non-raster channel media through the same asset/link 
     async put(key, bytes) { writes.push([key, Buffer.from(bytes)]); },
     async read() { return Buffer.alloc(0); },
     async exists() { return false; },
+    async remove() {},
     publicRef() { return null; }
   };
   const ids = [assetId, linkId];
@@ -207,6 +212,112 @@ test("asset service stores non-raster channel media through the same asset/link 
     bytes: Buffer.from([1]),
     owners: [{ ownerType: "contact", ownerReference: "42" }]
   }), /must use ingestImage/);
+});
+
+test("asset service removes just-written objects when repository persistence fails", async () => {
+  const stored = new Map();
+  const removed = [];
+  const repositoryFailure = new Error("repository insert failed");
+  repositoryFailure.sharedMediaPersistenceOutcome = "ROLLED_BACK";
+  const storage = {
+    async put(key, bytes) { stored.set(key, Buffer.from(bytes)); },
+    async read(key) { return stored.get(key) ?? Buffer.alloc(0); },
+    async exists(key) { return stored.has(key); },
+    async remove(key) {
+      removed.push(key);
+      stored.delete(key);
+    },
+    publicRef() { return null; }
+  };
+  const ids = [assetId, linkId];
+  const service = createSharedMediaAssetService({
+    storage,
+    repository: {
+      async insertAssetWithLinks() { throw repositoryFailure; }
+    },
+    idFactory: () => ids.shift(),
+    now: () => new Date(createdAt),
+    imagePipeline: async () => ({
+      image: { bytes: Buffer.from([1, 2, 3]), mimeType: "image/webp", width: 3, height: 1 },
+      thumbnail: { bytes: Buffer.from([4]), mimeType: "image/webp", width: 1, height: 1 }
+    })
+  });
+
+  await assert.rejects(service.ingestImage({
+    sourceChannel: "tinder",
+    sourceReference: "profile:opaque",
+    bytes: Buffer.from([9]),
+    owners: [{
+      ownerType: "tinder_profile",
+      ownerReference: "profile:opaque",
+      relationshipType: "profile_media"
+    }]
+  }), (error) => error === repositoryFailure);
+
+  assert.deepEqual(removed, [
+    `media-assets/${assetId}/image.webp`,
+    `media-assets/${assetId}/thumbnail.webp`
+  ]);
+  assert.equal(stored.size, 0);
+});
+
+test("asset service preserves the repository failure when best-effort cleanup fails", async () => {
+  const repositoryFailure = new Error("repository insert failed");
+  repositoryFailure.sharedMediaPersistenceOutcome = "ROLLED_BACK";
+  const storage = {
+    async put() {},
+    async read() { return Buffer.alloc(0); },
+    async exists() { return false; },
+    async remove() { throw new Error("storage cleanup unavailable"); },
+    publicRef() { return null; }
+  };
+  const ids = [assetId, linkId];
+  const service = createSharedMediaAssetService({
+    storage,
+    repository: {
+      async insertAssetWithLinks() { throw repositoryFailure; }
+    },
+    idFactory: () => ids.shift(),
+    now: () => new Date(createdAt)
+  });
+
+  await assert.rejects(service.ingestBinary({
+    sourceChannel: "whatsapp",
+    mediaType: "audio",
+    bytes: Buffer.from([9]),
+    owners: [{ ownerType: "whatsapp_message", ownerReference: "message:opaque" }]
+  }), (error) => error === repositoryFailure);
+});
+
+test("asset service never deletes a just-written object after an unresolved repository commit outcome", async () => {
+  const stored = new Map();
+  const repositoryFailure = new Error("commit connection lost");
+  repositoryFailure.sharedMediaPersistenceOutcome = "UNRESOLVED";
+  const storage = {
+    async put(key, bytes) { stored.set(key, Buffer.from(bytes)); },
+    async read(key) { return stored.get(key) ?? Buffer.alloc(0); },
+    async exists(key) { return stored.has(key); },
+    async remove(key) { stored.delete(key); },
+    publicRef() { return null; }
+  };
+  const ids = [assetId, linkId];
+  const service = createSharedMediaAssetService({
+    storage,
+    repository: {
+      async insertAssetWithLinks() { throw repositoryFailure; }
+    },
+    idFactory: () => ids.shift(),
+    now: () => new Date(createdAt)
+  });
+
+  await assert.rejects(service.ingestBinary({
+    sourceChannel: "whatsapp",
+    mediaType: "audio",
+    bytes: Buffer.from([9]),
+    owners: [{ ownerType: "whatsapp_message", ownerReference: "message:opaque" }]
+  }), (error) => error === repositoryFailure);
+
+  assert.equal(stored.size, 1);
 });
 
 test("gallery adapter merges shared records without touching legacy item shape", () => {
@@ -279,4 +390,29 @@ test("repository uses only the shared tables and parameterized owner lookup", as
   assert.match(sql, /FROM media_asset_links l JOIN media_assets a/);
   assert.doesNotMatch(sql, /\bFROM media\b/);
   assert.deepEqual(statements.at(-1)[1], ["contacts", "contact", "42"]);
+});
+
+test("repository marks a confirmed rollback so storage compensation can be limited to safe failures", async () => {
+  const statements = [];
+  const failure = new Error("asset insert failed");
+  const client = {
+    async query(sql) {
+      const normalized = String(sql).replace(/\s+/g, " ").trim();
+      statements.push(normalized);
+      if (normalized.startsWith("INSERT INTO media_assets")) throw failure;
+      return { rows: [] };
+    },
+    release() {}
+  };
+  const repository = createSharedMediaRepository({
+    async connect() { return client; },
+    async query() { return { rows: [] }; }
+  });
+
+  await assert.rejects(
+    repository.insertAssetWithLinks({ asset: availableAsset(), links: [assetLink()] }),
+    (error) => error === failure && error.sharedMediaPersistenceOutcome === "ROLLED_BACK"
+  );
+  assert.deepEqual(statements, ["BEGIN", statements[1], "ROLLBACK"]);
+  assert.match(statements[1], /INSERT INTO media_assets/);
 });

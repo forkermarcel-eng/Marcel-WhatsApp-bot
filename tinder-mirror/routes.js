@@ -51,6 +51,27 @@ export function registerTinderMirrorRoutes({ app, pool, dashboardApiReady, dashb
     }
   });
 
+  // A selected known Conversation may accept only a normal chronological
+  // message viewport that demonstrably continues its stored tail.  This is a
+  // narrow authenticated product route: it cannot create a Conversation or
+  // submit profile/full-history fields.
+  app.post("/dashboard-api/tinder/conversations/:conversationId/delta", async (req, res) => {
+    if (!requireDashboardAccess(access, req, res)) return;
+    const deviceId = String(req.body?.device_id || "");
+    try {
+      return res.status(200).json({
+        ok: true,
+        ...(await mirror.appendDelta({
+          deviceId,
+          conversationId: req.params.conversationId,
+          payload: req.body?.delta
+        }))
+      });
+    } catch (error) {
+      return errorResponse(res, error);
+    }
+  });
+
   // Existing completed threads may refresh their current official Inbox
   // ordering without resubmitting a profile or history snapshot.
   app.post("/dashboard-api/tinder/conversations/:conversationId/inbox-order", async (req, res) => {

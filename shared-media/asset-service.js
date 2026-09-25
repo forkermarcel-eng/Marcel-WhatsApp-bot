@@ -20,20 +20,60 @@ function binaryBytes(value) {
   throw new TypeError("media bytes must be a Buffer or Uint8Array");
 }
 
+function mediaRepository(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value?.insertAssetWithLinks !== "function") {
+    throw new TypeError("media repository.insertAssetWithLinks must be a function");
+  }
+  return value;
+}
+
+function repositoryFailureCanBeCompensated(error) {
+  return error?.sharedMediaPersistenceOutcome === "NOT_STARTED"
+    || error?.sharedMediaPersistenceOutcome === "ROLLED_BACK";
+}
+
 /**
  * Produces insert-ready asset/link records while persisting only raster bytes
- * through the supplied storage adapter. Database persistence is deliberately
- * separate, so this has no startup or production migration side effect.
+ * through the supplied storage adapter. Database persistence remains opt-in:
+ * callers that provide the existing repository get best-effort cleanup of
+ * only the files written by this call when its insert rejects.
  */
 export function createSharedMediaAssetService({
   storage,
+  repository = null,
   idFactory = randomUUID,
   now = () => new Date(),
   imagePipeline = createImageDerivatives
 } = {}) {
   assertMediaStorage(storage);
+  const configuredRepository = mediaRepository(repository);
   if (typeof idFactory !== "function" || typeof now !== "function" || typeof imagePipeline !== "function") {
     throw new TypeError("idFactory, now, and imagePipeline must be functions");
+  }
+
+  async function writeThenPersist(writes, record) {
+    const writtenKeys = [];
+    let repositoryInsertStarted = false;
+    try {
+      for (const { key, bytes } of writes) {
+        await storage.put(key, bytes);
+        writtenKeys.push(key);
+      }
+      if (configuredRepository) {
+        repositoryInsertStarted = true;
+        await configuredRepository.insertAssetWithLinks(record);
+      }
+    } catch (error) {
+      // Storage-write failures can always remove the earlier keys from this
+      // call. A repository error is compensable only when its own transaction
+      // proved it never committed; an unknown COMMIT outcome must retain the
+      // bytes rather than risk deleting a live referenced asset.
+      if (!repositoryInsertStarted || repositoryFailureCanBeCompensated(error)) {
+        await Promise.all(writtenKeys.map((key) => storage.remove(key).catch(() => {})));
+      }
+      throw error;
+    }
   }
 
   async function ingestImage({
@@ -75,8 +115,10 @@ export function createSharedMediaAssetService({
       ownerChannel: owner.ownerChannel ?? sourceChannel
     }, { idFactory, now }));
 
-    await storage.put(originalKey, rendered.image.bytes);
-    await storage.put(thumbnailKey, rendered.thumbnail.bytes);
+    await writeThenPersist([
+      { key: originalKey, bytes: rendered.image.bytes },
+      { key: thumbnailKey, bytes: rendered.thumbnail.bytes }
+    ], { asset, links });
     return Object.freeze({ asset, links, image: Object.freeze({
       width: rendered.image.width,
       height: rendered.image.height,
@@ -125,7 +167,7 @@ export function createSharedMediaAssetService({
       createdAt,
       ownerChannel: owner.ownerChannel ?? sourceChannel
     }, { idFactory, now }));
-    await storage.put(storageKey, content);
+    await writeThenPersist([{ key: storageKey, bytes: content }], { asset, links });
     return Object.freeze({ asset, links });
   }
 

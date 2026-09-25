@@ -5,6 +5,27 @@ import {
 
 const PLACEHOLDER_UUID = "11111111-1111-4111-8111-111111111111";
 
+/*
+ * The storage adapter may safely compensate only a database failure whose
+ * outcome this repository itself can prove.  In particular, a connection
+ * failure while COMMIT is in flight is not evidence that the transaction
+ * rolled back: deleting its object could break a record that committed just
+ * before the connection was lost.  This is intentionally a small local
+ * outcome marker, not a retry queue or a new persistence protocol.
+ */
+function markPersistenceOutcome(error, outcome) {
+  try {
+    Object.defineProperty(error, "sharedMediaPersistenceOutcome", {
+      value: outcome,
+      configurable: true
+    });
+  } catch {
+    // Preserve the original repository failure even if an unusual Error-like
+    // object cannot carry the optional local marker.
+  }
+  return error;
+}
+
 function requirePool(pool) {
   if (!pool || typeof pool.connect !== "function" || typeof pool.query !== "function") {
     throw new TypeError("database pool.connect and pool.query are required");
@@ -75,6 +96,7 @@ export function createSharedMediaRepository(pool) {
 
     let client;
     let committed = false;
+    let commitAttempted = false;
     try {
       client = await pool.connect();
       await client.query("BEGIN");
@@ -121,12 +143,24 @@ export function createSharedMediaRepository(pool) {
           ]
         );
       }
+      commitAttempted = true;
       await client.query("COMMIT");
       committed = true;
       return Object.freeze({ asset: normalizedAsset, links: Object.freeze(normalizedLinks) });
     } catch (error) {
-      if (client && !committed) await client.query("ROLLBACK").catch(() => {});
-      throw error;
+      if (committed) throw error;
+      if (!client) throw markPersistenceOutcome(error, "NOT_STARTED");
+      // An exception while COMMIT is being attempted is deliberately
+      // unresolved.  Do not report it as rollback-safe merely because a
+      // follow-up rollback request happens to be accepted or ignored.
+      if (commitAttempted) throw markPersistenceOutcome(error, "UNRESOLVED");
+      try {
+        await client.query("ROLLBACK");
+        throw markPersistenceOutcome(error, "ROLLED_BACK");
+      } catch (rollbackError) {
+        if (rollbackError === error) throw rollbackError;
+        throw markPersistenceOutcome(error, "UNRESOLVED");
+      }
     } finally {
       client?.release();
     }

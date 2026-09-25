@@ -32,6 +32,13 @@ const pool = new Pool({
 connectionString: process.env.DATABASE_URL
 });
 
+// This Railway entry point has no co-resident Appium session.  A local host
+// that already owns one can inject its existing dispatcher at route
+// composition time; no network bridge, queue, or environment transport is
+// manufactured here.  Keeping the default null means a signed hint remains
+// a harmless committed audit event until such a local composition exists.
+const coResidentTinderPossibleChangeDispatcher = null;
+
 /* ==================================================
 DEVICE BRIDGE T0 — PROTOCOL V1 RAW BODY
 ================================================== */
@@ -8458,7 +8465,8 @@ registerDeviceBridgeResetRoutes({
   pool,
   dashboardApiReady,
   dashboardApiAuthorized,
-  requireDeviceBridgeReady
+  requireDeviceBridgeReady,
+  tinderPossibleChangeDispatcher: coResidentTinderPossibleChangeDispatcher
 });
 
 // Block 2 is intentionally independent of device heartbeat/readiness.  The

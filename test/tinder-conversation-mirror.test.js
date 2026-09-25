@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   TinderMirrorError,
   createTinderConversationMirror,
+  existingSuffixObservedPrefixOverlap,
   largestContiguousOverlap,
   mergeTinderHistory,
+  normalizeTinderConversationDeltaPayload,
   normalizeTinderInboxOrder,
   normalizeTinderMirrorPayload,
   normalizeTinderProfile,
@@ -16,7 +18,11 @@ import {
   migrateTinderConversationMirror,
   preflightTinderConversationMirror
 } from "../tinder-mirror/migration.js";
-import { createTinderAppiumAdapter } from "../tinder-mirror/appium-adapter.js";
+import {
+  createExistingDashboardBearerTransport,
+  createTinderAppiumAdapter,
+  createTinderAppiumDeltaAdapter
+} from "../tinder-mirror/appium-adapter.js";
 import {
   classifyBubbleDirection,
   classifyMessageTextNode,
@@ -31,6 +37,12 @@ import {
   observeInboxFromXml,
   observeProfileFromXml
 } from "../tinder-mirror/appium-conversation-reader.js";
+import {
+  createRamOnlyInitialSweepBinding,
+  executeInitialInboxPlanEntry,
+  planInitialInboxProcessing,
+  summarizeSameSweepReopens
+} from "../scripts/tinder-block2-initial-sync.mjs";
 
 const profile = (attributes = { city: "Example city" }) => ({
   display_name: "Example profile",
@@ -52,11 +64,13 @@ function createMemoryPool() {
     devices: new Set(["00000000-0000-4000-8000-000000000001"]),
     conversations: new Map(),
     messages: new Map(),
-    deleteMessageCalls: 0
+    deleteMessageCalls: 0,
+    statements: []
   };
   const rowsForConversation = (conversation) => conversation ? [{ ...conversation }] : [];
   async function query(sql, params = []) {
     const normalized = String(sql).replace(/\s+/g, " ").trim();
+    state.statements.push(normalized);
     if (/^(BEGIN|COMMIT|ROLLBACK)/.test(normalized)) return { rows: [] };
     if (normalized.startsWith("SELECT device_id FROM device_bridge_devices")) {
       return { rows: state.devices.has(params[0]) ? [{ device_id: params[0] }] : [] };
@@ -116,6 +130,15 @@ function createMemoryPool() {
       const row = (state.messages.get(conversationId) || []).find((item) => item.message_id === messageId);
       if (!row) throw new Error("message row not found");
       Object.assign(row, { ordinal, direction, message_text: text, visible_time: visibleTime, visible_status: visibleStatus });
+      return { rows: [] };
+    }
+    if (normalized.startsWith("UPDATE tinder_conversations SET updated_at=$7")) {
+      const [conversationId, deviceId, hasVisibleTime, visibleTime, hasInboxPosition, inboxPosition, timestamp] = params;
+      const existing = state.conversations.get(conversationId);
+      if (!existing || existing.device_id !== deviceId) throw new Error("conversation row not found");
+      if (hasVisibleTime) existing.last_message_visible_time = visibleTime;
+      if (hasInboxPosition) existing.inbox_position = inboxPosition;
+      existing.updated_at = timestamp;
       return { rows: [] };
     }
     if (normalized.startsWith("UPDATE tinder_conversations SET last_message_visible_time")) {
@@ -1266,6 +1289,8 @@ test("new mirror routes use existing dashboard transport without a bridge gate",
   assert.match(routes, /dashboardApiAuthorized/);
   assert.doesNotMatch(routes, /requireDeviceBridgeReady|registerAuthenticatedRequestReplay|verifyAuthenticatedDeviceRequest/);
   assert.match(routes, /\/dashboard-api\/tinder\/conversations/);
+  assert.match(routes, /\/dashboard-api\/tinder\/conversations\/:conversationId\/delta/);
+  assert.match(routes, /mirror\.appendDelta/);
   assert.match(routes, /\/inbox-order/);
   assert.match(routes, /updateInboxOrder/);
 });
@@ -1354,7 +1379,9 @@ test("normal initial mirror is a separate Appium Inbox loop with CTA exclusion, 
   assert.match(runner, /scrollTowardBottom\(before\.scroll_bounds, inboxScrollPercent\)/);
   assert.match(runner, /await returnToInbox\(\)/);
   assert.match(runner, /synced\.created \? "NEW_MIRRORED" : "KNOWN_COMPLETED"/);
-  assert.match(runner, /action: "KNOWN_SKIPPED"/);
+  assert.match(runner, /action: "KNOWN_UNCHANGED"/);
+  assert.match(runner, /action: "KNOWN_REVALIDATED"/);
+  assert.match(runner, /export function planInitialInboxProcessing/);
   assert.match(runner, /updateInboxOrder/);
   assert.match(runner, /last_message_visible_time_captured/);
   assert.doesNotMatch(runner, /mobile: swipeGesture|directContinuityRepair|TINDER_BLOCK2_DIRECT_REPAIR_CONVERSATION_ID/);
@@ -1380,12 +1407,368 @@ test("initial import discovers the full Inbox before it can open a thread, and c
   assert.match(processing, /const processedInventoryOrdinals = new Set\(\)/);
   assert.match(processing, /if \(processedInventoryOrdinals\.has\(planned\.inbox_position\)\)/);
   assert.match(processing, /sameTransientInboxRow\(row, planned\.observed_row\)/);
-  assert.match(processing, /await openReadAndMirror/);
+  assert.match(processing, /await executeInitialInboxPlanEntry/);
+  assert.match(processing, /threadOpens \+= Number\(result\.thread_opened\)/);
   assert.match(processing, /requireDirectContinuity: true/);
-  assert.match(processing, /same_sweep_reopens: 0/);
+  assert.match(processing, /const sameSweep = summarizeSameSweepReopens\(results\)/);
+  assert.match(processing, /same_sweep_reopens: sameSweep\.same_sweep_reopens/);
+  assert.match(processing, /same_sweep_reopens_verified: sameSweep\.same_sweep_reopens_verified/);
   assert.match(runner, /const discovery = await discoverInboxInventory\(\);/);
-  assert.match(runner, /const processing = await processDiscoveredInboxInventory\(\{ deviceId, inventory: discovery\.inventory \}\);/);
+  assert.match(runner, /const initialProcessingPlan = planInitialInboxProcessing\(/);
+  assert.match(runner, /initialProcessingPlan/);
   assert.match(runner, /discovery_thread_opens: 0/);
   assert.match(runner, /discovery_history_reads: 0/);
   assert.match(runner, /discovery_profile_reads: 0/);
+});
+
+function initialInboxInventoryRow(inboxPosition, displayName, visibleTime) {
+  return Object.freeze({
+    inbox_position: inboxPosition,
+    last_message_visible_time: visibleTime,
+    observed_row: Object.freeze({
+      ram_key: JSON.stringify({ texts: [displayName, "Visible latest message", visibleTime] })
+    })
+  });
+}
+
+test("100 RAM-bound unchanged Inbox rows take the order-only path with zero opens, profile reads, and history reads", async () => {
+  const inventory = Array.from({ length: 100 }, (_, index) => {
+    const visibleTime = `09:${String(index % 60).padStart(2, "0")}`;
+    return initialInboxInventoryRow(index, `Known ${index + 1}`, visibleTime);
+  });
+  const ramBindings = inventory.map((entry, index) => createRamOnlyInitialSweepBinding({
+    observedRow: entry.observed_row,
+    conversationId: `known-${index + 1}`
+  }));
+  const plan = planInitialInboxProcessing({ inventory, ramBindings });
+  assert.equal(plan.length, 100);
+  assert.ok(plan.every((entry) => entry.action === "KNOWN_UNCHANGED"));
+
+  const processedConversationIds = new Set();
+  const counters = { threadOpens: 0, profileReads: 0, historyReads: 0, orderUpdates: 0 };
+  for (const [index, entry] of inventory.entries()) {
+    const result = await executeInitialInboxPlanEntry({
+      plan: plan[index],
+      deviceId: "test-device",
+      row: entry.observed_row,
+      inboxPosition: entry.inbox_position,
+      processedConversationIds,
+      ramBindings,
+      openAndMirror: async () => {
+        counters.threadOpens += 1;
+        throw new Error("a known unchanged Inbox row must not open a thread");
+      },
+      mirrorKnownUnchanged: async ({ conversationId }) => {
+        counters.orderUpdates += 1;
+        processedConversationIds.add(conversationId);
+        return Object.freeze({
+          thread_opened: false,
+          initial_profile_reads: 0,
+          full_history_read: false,
+          same_sweep_reopen: false
+        });
+      }
+    });
+    counters.threadOpens += Number(result.thread_opened);
+    counters.profileReads += result.initial_profile_reads;
+    counters.historyReads += Number(result.full_history_read);
+  }
+  assert.deepEqual(counters, { threadOpens: 0, profileReads: 0, historyReads: 0, orderUpdates: 100 });
+  assert.equal(processedConversationIds.size, 100);
+});
+
+test("unbound persisted-looking and duplicate RAM rows cannot be called known unchanged", () => {
+  const inventory = [
+    initialInboxInventoryRow(0, "Same Name", "09:00"),
+    initialInboxInventoryRow(1, "Same Name", "09:00")
+  ];
+  // A caller can supply old product-shaped data, but it is not an explicit
+  // same-process capability and is ignored by the planner.
+  const plan = planInitialInboxProcessing({
+    inventory,
+    conversations: [
+      { id: "persisted-a", profile: { display_name: "Same Name" }, last_message_visible_time: "09:00" }
+    ]
+  });
+  assert.deepEqual(plan.map((entry) => entry.action), ["INITIAL_READ_REQUIRED", "INITIAL_READ_REQUIRED"]);
+
+  const duplicateProjectionBinding = createRamOnlyInitialSweepBinding({
+    observedRow: inventory[0].observed_row,
+    conversationId: "known-once"
+  });
+  const duplicatePlan = planInitialInboxProcessing({ inventory, ramBindings: [duplicateProjectionBinding] });
+  assert.deepEqual(duplicatePlan.map((entry) => entry.action), ["INITIAL_READ_REQUIRED", "INITIAL_READ_REQUIRED"]);
+  assert.throws(
+    () => planInitialInboxProcessing({
+      inventory: [inventory[0]],
+      ramBindings: [{ observed_row_ram_key: inventory[0].observed_row.ram_key, conversation_id: "forged" }]
+    }),
+    /in-process RAM-only binding/
+  );
+});
+
+test("a new Inbox row has exactly one initial profile-plus-full-history path", async () => {
+  const inventory = [initialInboxInventoryRow(0, "New profile", "09:30")];
+  const [plan] = planInitialInboxProcessing({ inventory });
+  assert.equal(plan.action, "INITIAL_READ_REQUIRED");
+
+  const processedConversationIds = new Set();
+  const counters = { initialPaths: 0, threadOpens: 0, profileReads: 0, historyReads: 0 };
+  const result = await executeInitialInboxPlanEntry({
+    plan,
+    deviceId: "test-device",
+    row: inventory[0].observed_row,
+    inboxPosition: 0,
+    processedConversationIds,
+    mirrorKnownUnchanged: async () => {
+      throw new Error("a new Inbox row must not use the known unchanged path");
+    },
+    openAndMirror: async () => {
+      counters.initialPaths += 1;
+      return Object.freeze({
+        thread_opened: true,
+        initial_profile_reads: 1,
+        full_history_read: true,
+        same_sweep_reopen: false
+      });
+    }
+  });
+  counters.threadOpens += Number(result.thread_opened);
+  counters.profileReads += result.initial_profile_reads;
+  counters.historyReads += Number(result.full_history_read);
+  assert.deepEqual(counters, { initialPaths: 1, threadOpens: 1, profileReads: 1, historyReads: 1 });
+
+  const runner = readFileSync(new URL("../scripts/tinder-block2-initial-sync.mjs", import.meta.url), "utf8");
+  const openStart = runner.indexOf("async function openReadAndMirror");
+  const openEnd = runner.indexOf("async function verifiedInboxTop", openStart);
+  const openPath = runner.slice(openStart, openEnd);
+  assert.equal((openPath.match(/await openInitialProfile\(expectedDisplayName\)/g) || []).length, 1);
+  assert.match(openPath, /readProfileToPhysicalBoundary\(expectedDisplayName, initialProfileState\)/);
+  assert.doesNotMatch(openPath, /secondProfileState/);
+});
+
+test("direct same-sweep row continuity skips without reopening, while an unresolved result cannot claim zero", async () => {
+  const row = initialInboxInventoryRow(0, "Continuous row", "09:45").observed_row;
+  const [plan] = planInitialInboxProcessing({
+    inventory: [{ inbox_position: 0, observed_row: row }]
+  });
+  const processedConversationIds = new Set(["continuous-conversation"]);
+  const binding = createRamOnlyInitialSweepBinding({ observedRow: row, conversationId: "continuous-conversation" });
+  let opened = 0;
+  const result = await executeInitialInboxPlanEntry({
+    plan,
+    deviceId: "test-device",
+    row,
+    inboxPosition: 0,
+    processedConversationIds,
+    ramBindings: [binding],
+    openAndMirror: async () => {
+      opened += 1;
+      throw new Error("a direct same-sweep continuity must never reopen");
+    }
+  });
+  assert.equal(opened, 0);
+  assert.equal(result.action, "SAME_SWEEP_CONTINUITY_SKIPPED");
+  assert.deepEqual(
+    summarizeSameSweepReopens([{ same_sweep_reopen: false }, result]),
+    { same_sweep_reopens: 0, same_sweep_reopens_verified: true }
+  );
+  assert.deepEqual(
+    summarizeSameSweepReopens([{ same_sweep_reopen: null }]),
+    { same_sweep_reopens: null, same_sweep_reopens_verified: false }
+  );
+});
+
+test("a selected known Conversation appends only an ordered live delta tail without changing profile or history state", async () => {
+  const pool = createMemoryPool();
+  const fixedNow = new Date("2026-09-25T10:00:00.000Z");
+  const mirror = createTinderConversationMirror({ pool, now: () => fixedNow });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const initial = await mirror.sync({
+    deviceId,
+    payload: {
+      profile: profile({ city: "Existing profile data" }),
+      messages: [message("INBOUND", "Stored older"), message("OUTBOUND", "Stored newest", "10:01")],
+      history_complete: true
+    }
+  });
+  const conversationId = initial.conversation.id;
+  const before = { ...pool.state.conversations.get(conversationId), profile: structuredClone(pool.state.conversations.get(conversationId).profile) };
+
+  const result = await mirror.appendDelta({
+    deviceId,
+    conversationId,
+    payload: {
+      messages: [message("OUTBOUND", "Stored newest", "10:01"), message("INBOUND", "New live message")],
+      last_message_visible_time: "Jetzt",
+      inbox_position: 0
+    }
+  });
+
+  assert.equal(existingSuffixObservedPrefixOverlap(
+    [message("INBOUND", "Stored older"), message("OUTBOUND", "Stored newest", "10:01")],
+    [message("OUTBOUND", "Stored newest", "10:01"), message("INBOUND", "New live message")]
+  ), 1);
+  assert.equal(result.appended_messages, 1);
+  assert.equal(result.ordering_changed, true);
+  assert.equal(result.conversation.id, conversationId);
+  assert.equal(result.conversation.history_complete, true);
+  assert.deepEqual(
+    pool.state.messages.get(conversationId).sort((left, right) => left.ordinal - right.ordinal)
+      .map((row) => ({ direction: row.direction, text: row.message_text })),
+    [
+      { direction: "INBOUND", text: "Stored older" },
+      { direction: "OUTBOUND", text: "Stored newest" },
+      { direction: "INBOUND", text: "New live message" }
+    ]
+  );
+  const after = pool.state.conversations.get(conversationId);
+  assert.deepEqual(after.profile, before.profile);
+  assert.equal(after.history_complete, before.history_complete);
+  assert.equal(after.profile_synced_at, before.profile_synced_at);
+  assert.equal(after.history_synced_at, before.history_synced_at);
+  assert.equal(after.last_message_visible_time, "Jetzt");
+  assert.equal(after.inbox_position, 0);
+  assert.equal(pool.state.conversations.size, 1);
+  assert.equal(pool.state.deleteMessageCalls, 0);
+});
+
+test("a repeated unlabeled one-message delta overlap fails closed without inserts", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({ pool });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const initial = await mirror.sync({
+    deviceId,
+    payload: {
+      profile: profile(),
+      messages: [message("INBOUND", "Same text"), message("INBOUND", "Same text")],
+      history_complete: true
+    }
+  });
+  const conversationId = initial.conversation.id;
+  const beforeMessages = structuredClone(pool.state.messages.get(conversationId));
+  const statementsBefore = pool.state.statements.length;
+
+  await assert.rejects(
+    mirror.appendDelta({
+      deviceId,
+      conversationId,
+      payload: {
+        messages: [message("INBOUND", "Same text"), message("OUTBOUND", "A later message")]
+      }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_DELTA_OVERLAP_UNVERIFIED"
+  );
+
+  assert.deepEqual(pool.state.messages.get(conversationId), beforeMessages);
+  assert.equal(
+    pool.state.statements.slice(statementsBefore).some((statement) => statement.startsWith("INSERT INTO tinder_conversation_messages")),
+    false
+  );
+});
+
+test("a two-message ordered live delta overlap remains sufficient without visible labels", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({ pool });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const initial = await mirror.sync({
+    deviceId,
+    payload: {
+      profile: profile(),
+      messages: [message("INBOUND", "Oldest"), message("OUTBOUND", "Prior"), message("INBOUND", "Newest")],
+      history_complete: true
+    }
+  });
+
+  const result = await mirror.appendDelta({
+    deviceId,
+    conversationId: initial.conversation.id,
+    payload: {
+      messages: [message("OUTBOUND", "Prior"), message("INBOUND", "Newest"), message("OUTBOUND", "New live message")]
+    }
+  });
+
+  assert.equal(result.appended_messages, 1);
+  assert.equal(pool.state.messages.get(initial.conversation.id).length, 4);
+});
+
+test("a targeted delta rejects profile/full-history fields and rolls back a viewport without an ordered stored suffix", async () => {
+  assert.throws(
+    () => normalizeTinderConversationDeltaPayload({
+      profile: profile(),
+      messages: [message("INBOUND", "Not a message-only delta")]
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "INVALID_TINDER_DELTA_PAYLOAD"
+  );
+
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({ pool });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const initial = await mirror.sync({
+    deviceId,
+    payload: {
+      profile: profile(),
+      messages: [message("INBOUND", "Stored older"), message("OUTBOUND", "Stored newest")],
+      history_complete: true
+    }
+  });
+  const conversationId = initial.conversation.id;
+  const beforeConversation = structuredClone(pool.state.conversations.get(conversationId));
+  const beforeMessages = structuredClone(pool.state.messages.get(conversationId));
+  const statementsBefore = pool.state.statements.length;
+
+  await assert.rejects(
+    mirror.appendDelta({
+      deviceId,
+      conversationId,
+      payload: { messages: [message("INBOUND", "Unrelated live message")] }
+    }),
+    (error) => error instanceof TinderMirrorError && error.code === "TINDER_DELTA_OVERLAP_UNVERIFIED"
+  );
+
+  assert.deepEqual(pool.state.conversations.get(conversationId), beforeConversation);
+  assert.deepEqual(pool.state.messages.get(conversationId), beforeMessages);
+  assert.equal(pool.state.conversations.size, 1);
+  assert.equal(pool.state.deleteMessageCalls, 0);
+  assert.ok(pool.state.statements.slice(statementsBefore).includes("ROLLBACK"));
+  assert.equal(
+    pool.state.statements.slice(statementsBefore).some((statement) => statement.startsWith("INSERT INTO tinder_conversation_messages")),
+    false
+  );
+});
+
+test("the Appium delta adapter and existing dashboard bearer transport carry only the narrow selected viewport", async () => {
+  const requests = [];
+  const transport = createExistingDashboardBearerTransport({
+    baseUrl: "https://dashboard.example",
+    bearerToken: "existing-dashboard-bearer",
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, json: async () => ({ ok: true, appended_messages: 1 }) };
+    }
+  });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const conversationId = "00000000-0000-4000-8000-000000000002";
+  const adapter = createTinderAppiumDeltaAdapter({ deviceId, conversationId, transport });
+  await adapter.persistViewport({
+    messages: [message("OUTBOUND", "Stored newest"), message("INBOUND", "New live message")],
+    lastMessageVisibleTime: "Jetzt",
+    inboxPosition: 0
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, `https://dashboard.example/dashboard-api/tinder/conversations/${conversationId}/delta`);
+  assert.equal(requests[0].options.headers.Authorization, "Bearer existing-dashboard-bearer");
+  const body = JSON.parse(requests[0].options.body);
+  assert.deepEqual(Object.keys(body).sort(), ["delta", "device_id"]);
+  assert.deepEqual(Object.keys(body.delta).sort(), ["inbox_position", "last_message_visible_time", "messages"]);
+  assert.equal(Object.hasOwn(body.delta, "profile"), false);
+  assert.equal(Object.hasOwn(body.delta, "history_complete"), false);
+  await assert.rejects(
+    adapter.persistViewport({
+      messages: [message("INBOUND", "No profile allowed")],
+      profile: profile()
+    }),
+    /cannot include profile or history fields/
+  );
 });

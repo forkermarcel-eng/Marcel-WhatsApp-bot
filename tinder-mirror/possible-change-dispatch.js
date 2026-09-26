@@ -113,15 +113,28 @@ function singleSequenceDelta(previous, current) {
     const differences = [];
     for (let index = 0; index < previous.length; index += 1) {
       if (previous[index] !== current[index]) differences.push(index);
-      if (differences.length > 1) return null;
     }
-    if (differences.length !== 1) return null;
-    return Object.freeze({
+    if (differences.length === 1) return Object.freeze({
       kind: "SOURCE_ROW_REVALIDATION_REQUIRED",
       source_change: "SINGLE_REPLACEMENT",
       previous_index: differences[0],
       current_index: differences[0]
     });
+    // A new inbound normally moves its row upwards. Compare the untouched
+    // ordered remainder, not the old row position, to locate one candidate.
+    // This does not identify the thread; the runtime still revalidates it.
+    const moves = [];
+    for (let before = 0; before < previous.length; before += 1) {
+      for (let after = 0; after < current.length; after += 1) {
+        if (previous[before] === current[after]) continue;
+        if (sameProjection(previous.filter((_, i) => i !== before), current.filter((_, i) => i !== after))) {
+          moves.push({ before, after });
+        }
+      }
+    }
+    if (moves.length !== 1) return null;
+    return Object.freeze({ kind: "SOURCE_ROW_REVALIDATION_REQUIRED", source_change: "SINGLE_REPLACEMENT",
+      previous_index: moves[0].before, current_index: moves[0].after });
   }
 
   if (current.length !== previous.length + 1) return null;
@@ -201,7 +214,8 @@ async function invokeCandidate(candidate, {
   }
 
   try {
-    const outcome = await callback(candidate);
+    const observed = await callback(candidate);
+    const outcome = typeof observed === "string" ? observed : observed?.outcome;
     if (candidate.source === "INBOX") {
       if (outcome === "KNOWN_CHANGED") {
         return {
@@ -234,7 +248,7 @@ async function invokeCandidate(candidate, {
 
     if (outcome === "AMBIGUOUS" || outcome === "UNCHANGED") {
       return {
-        actionMetrics: emptyActionMetrics(),
+        actionMetrics: { ...emptyActionMetrics(), threadOpens: observed?.thread_opens === 1 ? 1 : 0 },
         retryRequired: false,
         advanceBaseline: true
       };
@@ -277,6 +291,8 @@ function createTinderPossibleChangeDispatcher({
   let baseline = null;
   let timer = null;
   let pending = null;
+  let inspecting = false;
+  let changedWhileInspecting = false;
 
   async function inspect() {
     let current;
@@ -334,13 +350,25 @@ function createTinderPossibleChangeDispatcher({
   }
 
   function signal() {
-    if (pending) return pending;
-    pending = new Promise((resolve) => {
+    if (pending) {
+      if (inspecting) changedWhileInspecting = true;
+      return pending;
+    }
+    pending = new Promise((resolve, reject) => {
       timer = setTimeoutFn(async () => {
         timer = null;
+        inspecting = true;
         try {
-          resolve(await inspect());
+          let observed;
+          do {
+            changedWhileInspecting = false;
+            observed = await inspect();
+          } while (changedWhileInspecting);
+          resolve(observed);
+        } catch (error) {
+          reject(error);
         } finally {
+          inspecting = false;
           pending = null;
         }
       }, debounceMilliseconds);

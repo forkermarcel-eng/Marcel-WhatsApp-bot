@@ -25,7 +25,12 @@ export async function startLocalTinderDiscoveryWorker(environment = process.env)
     await boss.start();
     runtime = await createExistingLocalTinderDiscoveryRuntime(environment);
     const dispatcher = createLocalTinderDiscoveryExecutor({ runtime });
-    const worker = await startTinderDiscoveryWorker({ boss, dispatcher });
+    const initial = await dispatcher.initialize();
+    console.log(JSON.stringify({ worker_initial_discovery: initial }));
+    if (initial.status === "SOURCE_UNAVAILABLE") throw new Error("Initial Tinder Inbox unavailable");
+    const worker = await startTinderDiscoveryWorker({ boss, dispatcher,
+      onResult: result => console.log(JSON.stringify({ discovery_job_result: result }))
+    });
     return Object.freeze({
       async stop() {
         await worker.stop();

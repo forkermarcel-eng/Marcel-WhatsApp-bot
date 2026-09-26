@@ -30,6 +30,7 @@ function assertWorkerOptions(value) {
 export async function startTinderDiscoveryWorker({
   boss,
   dispatcher,
+  onResult = () => {},
   workerOptions = TINDER_DISCOVERY_WORKER_OPTIONS
 } = {}) {
   if (!boss || typeof boss.work !== "function" || typeof boss.offWork !== "function") {
@@ -48,7 +49,11 @@ export async function startTinderDiscoveryWorker({
     const payload = normalizeTinderDiscoveryJob(job?.data);
     // Awaiting the existing dispatcher lets pg-boss settle the transport job
     // only once that bounded local attempt has ended. No retry is configured.
-    await dispatcher.signal(payload);
+    const observed = await dispatcher.signal(payload);
+    onResult(observed);
+    if (observed?.status === "SOURCE_UNAVAILABLE" || observed?.status === "ACTION_RETRY_REQUIRED") {
+      throw new Error(`Tinder discovery attempt failed: ${observed.status}`);
+    }
   });
 
   return Object.freeze({

@@ -315,22 +315,36 @@
       }
     }
 
+    let detailRequest = 0;
+    let renderedDetail = null;
+    let refreshPending = false;
     async function loadConversation(id) {
+      const request = ++detailRequest;
       selectedConversationId = id;
       setStatus("Conversation wird geladen …");
       try {
         const response = await fetch(`/api/dashboard/tinder?id=${encodeURIComponent(id)}`, { cache: "no-store" });
         const data = await response.json();
+        if (request !== detailRequest || selectedConversationId !== id) return;
         if (!response.ok || !data?.ok) throw new Error(data?.error || "Conversation konnte nicht geladen werden.");
-        renderDetail(data);
+        const serialized = JSON.stringify(data);
+        if (serialized !== renderedDetail) {
+          const scroll = chatNode.scrollTop;
+          renderDetail(data);
+          chatNode.scrollTop = scroll;
+          renderedDetail = serialized;
+        }
         document.querySelectorAll("[data-conversation-id]").forEach((item) => item.setAttribute("aria-current", String(item.dataset.conversationId === selectedConversationId)));
         setStatus(`Letzte Synchronisierung: ${formatDate(data.conversation?.history_synced_at)}`);
       } catch (error) {
+        if (request !== detailRequest || selectedConversationId !== id) return;
         setStatus(error.message || "Conversation konnte nicht geladen werden.", true);
       }
     }
 
     async function loadConversations() {
+      if (refreshPending) return;
+      refreshPending = true;
       try {
         await loadMatches();
         const response = await fetch("/api/dashboard/tinder", { cache: "no-store" });
@@ -350,10 +364,17 @@
         empty(chatNode, "Keine Chatdaten verfügbar.");
         empty(profileNode, "Keine Profildaten verfügbar.");
         setStatus(error.message || "Tinder-Daten konnten nicht geladen werden.", true);
+      } finally {
+        refreshPending = false;
       }
     }
 
     loadConversations();
+    // Refresh only existing product GETs, never Android/Reader/AI actions.
+    setInterval(() => { if (!document.hidden) loadConversations(); }, 15000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) loadConversations();
+    });
   </script>
 </body>
 </html>

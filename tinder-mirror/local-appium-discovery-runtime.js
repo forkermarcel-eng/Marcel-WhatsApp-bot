@@ -94,6 +94,7 @@ export async function createExistingLocalTinderDiscoveryRuntime(environment = pr
       deviceId: inbox.deviceId,
       readSourceXml: inbox.readSourceXml,
       readKnownChanged: inbox.readKnownChanged,
+      readUnboundChanged: inbox.readUnboundChanged,
       readNewThread: inbox.readNewThread,
       readMatchDiscovery: matches.readMatchDiscovery
     });

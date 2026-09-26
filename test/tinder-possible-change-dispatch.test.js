@@ -302,6 +302,17 @@ test("CASE E: one exact Match delta updates only Match data and never opens a ti
   }]);
 });
 
+test("one changed row moving upwards is revalidated without treating its position as identity", async () => {
+  const sources = [source({ rowTexts: ["A", "B", "C"] }), source({ rowTexts: ["Changed C", "A", "B"] })];
+  const actions = [];
+  const dispatcher = createTinderPossibleChangeDispatcher({ readSourceXml: async () => sources.shift(),
+    onInboxSourceCandidate: async candidate => { actions.push(candidate); return "KNOWN_CHANGED"; } });
+  await dispatcher.inspect();
+  assert.equal((await dispatcher.inspect()).thread_opens, 1);
+  assert.equal(actions[0].previous_index, 2);
+  assert.equal(actions[0].current_index, 0);
+});
+
 test("reordered and multiply changed source rows are ambiguous and take no action", async () => {
   const actions = [];
   const reorderedSources = [
@@ -353,4 +364,32 @@ test("concurrent possible-change hints coalesce to one inspection without a retr
   assert.equal(first, second);
   await first;
   assert.equal(reads, 1);
+});
+
+test("hints during an active inspection coalesce into one serial follow-up", async () => {
+  let unblock;
+  const blocked = new Promise(resolve => { unblock = resolve; });
+  let entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  let reads = 0;
+  let active = 0;
+  const dispatcher = createTinderPossibleChangeDispatcher({
+    debounceMilliseconds: 0,
+    readSourceXml: async () => {
+      active += 1;
+      assert.equal(active, 1);
+      reads += 1;
+      if (reads === 1) { entered(); await blocked; }
+      active -= 1;
+      return source();
+    }
+  });
+  const first = dispatcher.signal();
+  await ready;
+  const next = dispatcher.signal();
+  assert.equal(first, next);
+  dispatcher.signal();
+  unblock();
+  await first;
+  assert.equal(reads, 2);
 });

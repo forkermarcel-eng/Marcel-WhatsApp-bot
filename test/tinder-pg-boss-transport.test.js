@@ -292,3 +292,32 @@ test("TEST G: a Match source change uses existing Match discovery and opens no t
   assert.equal(result.match_tile_opens, 0);
   assert.equal(actions.matches.length, 1);
 });
+
+test("restart revalidates one changed candidate through stored products, without initial profile/history", async () => {
+  const actions = { known: [], newThreads: [], matches: [] };
+  const runtime = localRuntime([source({ rows: ["A", "B", "C"] }), source({ rows: ["Changed C", "A", "B"] })], actions);
+  let recoveries = 0;
+  runtime.readUnboundChanged = async () => {
+    recoveries += 1;
+    return { outcome: "KNOWN_CHANGED", conversation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" };
+  };
+  const executor = createLocalTinderDiscoveryExecutor({ runtime, debounceMilliseconds: 0 });
+  await executor.initialize();
+  assert.equal(recoveries, 0);
+  const result = await executor.signal({ device_id: DEVICE_ID });
+  assert.equal(recoveries, 1);
+  assert.equal(result.thread_opens, 1);
+  assert.equal(result.profile_reads, 0);
+  assert.equal(result.history_reads, 0);
+  assert.equal(actions.newThreads.length, 0);
+  assert.equal(executor.localBindingCount(), 1);
+});
+
+test("failed discovery is not acknowledged as successful queue processing", async () => {
+  let handler;
+  await startTinderDiscoveryWorker({
+    boss: { work: async (_queue, _options, callback) => { handler = callback; return "worker"; }, offWork: async () => {} },
+    dispatcher: { signal: async () => ({ status: "SOURCE_UNAVAILABLE" }) }
+  });
+  await assert.rejects(handler([{ data: { device_id: DEVICE_ID } }]), /SOURCE_UNAVAILABLE/);
+});

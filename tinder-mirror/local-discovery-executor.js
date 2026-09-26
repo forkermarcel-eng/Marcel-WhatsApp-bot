@@ -38,8 +38,8 @@ function directCurrentRow(projection, candidate) {
 /*
  * This is the small composition missing from the old source comparator. It
  * retains only direct, in-process row continuity after this worker has itself
- * completed an initial read. It never reconstructs an identity from a name,
- * profile, time, database lookup, or a persisted key.
+ * completed an initial read or revalidated stored ordered Messages. No RAM
+ * binding is reconstructed from a name or an old Inbox position alone.
  */
 export function createLocalTinderDiscoveryExecutor({
   runtime,
@@ -72,31 +72,31 @@ export function createLocalTinderDiscoveryExecutor({
       const previousRow = previousInbox?.rows?.[candidate.previous_index] || null;
       const previousKey = bindingKey(previousRow);
       const conversationId = previousKey ? directBindings.get(previousKey) : null;
-      // A restart loses this Map by design. Do not guess a conversation from
-      // visible content; wait for a later independently verifiable path.
-      if (!conversationId) return "AMBIGUOUS";
+      if (!conversationId && typeof runtime.readUnboundChanged !== "function") return "AMBIGUOUS";
       const observed = assertCandidateOutcome(
-        await runtime.readKnownChanged({ row: currentRow, conversationId, candidate }),
+        conversationId
+          ? await runtime.readKnownChanged({ row: currentRow, conversationId, candidate })
+          : await runtime.readUnboundChanged({ row: currentRow, candidate }),
         new Set(["KNOWN_CHANGED", "AMBIGUOUS", "UNCHANGED"])
       );
-      if (observed.outcome !== "KNOWN_CHANGED") return observed.outcome;
+      if (observed.outcome !== "KNOWN_CHANGED") return observed;
       const currentKey = bindingKey(currentRow);
       directBindings.delete(previousKey);
-      directBindings.set(currentKey, conversationId);
+      directBindings.set(currentKey, conversationId || observed.conversation_id);
       return "KNOWN_CHANGED";
     }
 
     if (candidate.source_change === "SINGLE_INSERTION") {
       const observed = assertCandidateOutcome(
         await runtime.readNewThread({ row: currentRow, candidate }),
-        new Set(["NEW_THREAD", "AMBIGUOUS", "UNCHANGED"])
+        new Set(["NEW_THREAD", "KNOWN_CHANGED", "AMBIGUOUS", "UNCHANGED"])
       );
-      if (observed.outcome !== "NEW_THREAD") return observed.outcome;
+      if (observed.outcome !== "NEW_THREAD" && observed.outcome !== "KNOWN_CHANGED") return observed;
       if (typeof observed.conversation_id !== "string" || !observed.conversation_id) {
         throw new Error("A completed initial Tinder read requires its existing conversation ID");
       }
       directBindings.set(bindingKey(currentRow), observed.conversation_id);
-      return "NEW_THREAD";
+      return observed.outcome;
     }
 
     return "AMBIGUOUS";
@@ -131,6 +131,7 @@ export function createLocalTinderDiscoveryExecutor({
   }
 
   return Object.freeze({
+    initialize: () => dispatcher.inspect(),
     signal,
     // Test-only bounded visibility: count only ephemeral direct bindings, not
     // a persisted Tinder identity or database state.

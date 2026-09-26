@@ -13,6 +13,32 @@ const contactMedia = readFileSync(new URL("../services/contact-media.js", import
 const proxy = readFileSync(new URL("../api/dashboard/marcel-brain.js", import.meta.url), "utf8");
 const P = globalThis.MarcelPresentation;
 
+test("Tinder product refresh ignores stale selection responses and unchanged detail rendering", async () => {
+  const fragment = tinder.slice(tinder.indexOf("let detailRequest = 0;"), tinder.lastIndexOf("    loadConversations();"));
+  const pending = [];
+  const renders = [];
+  const load = new Function("fetch", "renderDetail", "document", "chatNode", "setStatus", "formatDate", `
+    let selectedConversationId = null;
+    ${fragment}
+    return loadConversation;
+  `)((url, options) => new Promise(resolve => { pending.push({ url, options, resolve }); }),
+    data => renders.push(data.conversation.id), { querySelectorAll: () => [] }, { scrollTop: 8 }, () => {}, () => "date");
+  const response = id => ({ ok: true, json: async () => ({ ok: true, conversation: { id } }) });
+  const old = load("older-selection");
+  const current = load("current-selection");
+  pending[1].resolve(response("current-selection"));
+  await current;
+  pending[0].resolve(response("older-selection"));
+  await old;
+  const unchanged = load("current-selection");
+  pending[2].resolve(response("current-selection"));
+  await unchanged;
+  assert.deepEqual(renders, ["current-selection"]);
+  assert.ok(pending.every(call => call.url.startsWith("/api/dashboard/tinder?id=") && call.options.cache === "no-store"));
+  assert.match(tinder, /setInterval\(\(\) => \{ if \(!document.hidden\) loadConversations\(\); \}, 15000\)/);
+  assert.match(tinder, /if \(refreshPending\) return/);
+});
+
 function dashboardDecoder() {
   const source = tinder.match(/function decodeStoredTinderText\(value\) \{[\s\S]*?\n    \}/)?.[0];
   assert.ok(source, "Tinder dashboard entity decoder is present");

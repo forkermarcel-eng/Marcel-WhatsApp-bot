@@ -23,6 +23,8 @@ import {
   mergeProfileSnapshots,
   sameObservedViewport
 } from "../tinder-mirror/appium-conversation-reader.js";
+import { readCompleteLiveMatchProfile } from "../tinder-mirror/appium-match-live-profile-runner.js";
+import { existingSuffixObservedPrefixOverlap, mergeTinderHistory } from "../tinder-mirror/conversation.js";
 
 const DEFAULT_APPIUM_BASE_URL = "http://127.0.0.1:4723/wd/hub";
 const DEFAULT_BACKEND_BASE_URL = "https://cooperative-kindness-production.up.railway.app";
@@ -858,8 +860,11 @@ async function openReadAndMirror({
   // This one initial profile open is also the start of the only full-profile
   // traversal. Do not open a compact profile merely to resolve a row and then
   // open it again before the required Full History path.
-  const initialProfileState = await openInitialProfile(expectedDisplayName);
-  const fullProfile = await readProfileToPhysicalBoundary(expectedDisplayName, initialProfileState);
+  await openInitialProfile(expectedDisplayName);
+  const fullProfile = await readCompleteLiveMatchProfile({
+    sourceXml, tap, sleep,
+    scrollProfile: bounds => scrollTowardBottom(bounds, profileScrollPercent)
+  }, expectedDisplayName, { maxProfileGestures, settleMilliseconds, boundarySettleMilliseconds });
   const chat = await returnToConversation(expectedDisplayName);
   const adapter = createTinderAppiumAdapter({ deviceId, transport });
   adapter.start({
@@ -1309,31 +1314,145 @@ async function processDiscoveredInboxInventory({
  * Unlike `main()`, this factory never starts an Inbox sweep: each operation
  * receives one already revalidated current row from the RAM-only dispatcher.
  */
+export function selectStoredDeltaConversation(candidates, viewport) {
+  // Reuse ordinary stored product data after a process restart. A name or
+  // Inbox index alone never selects a Conversation. Require an exact ordered
+  // multi-message tail (including direction and compatible visible metadata),
+  // and refuse every collision rather than assigning an identity score.
+  const matches = candidates.filter(candidate =>
+    candidate.conversation?.profile?.display_name === viewport.profile_display_name
+    && existingSuffixObservedPrefixOverlap(candidate.messages || [], viewport.messages) >= 2);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+export async function readBoundedKnownDelta({ knownMessages, initialViewport, readPrevious, maxGestures = 8 }) {
+  let messages = initialViewport.messages;
+  let viewport = initialViewport;
+  const requiredOverlap = Math.min(2, knownMessages.length);
+  if (requiredOverlap === 0) throw new Error("Known delta requires stored messages");
+  for (let gesture = 0; existingSuffixObservedPrefixOverlap(knownMessages, messages) < requiredOverlap; gesture += 1) {
+    if (gesture >= maxGestures) throw new Error("Tinder delta stored tail not reached within bounded viewports");
+    const { viewport: fresh, canScrollMore } = await readPrevious(viewport);
+    if (!fresh || fresh.profile_display_name !== initialViewport.profile_display_name) {
+      throw new Error("Tinder conversation changed during bounded delta read");
+    }
+    messages = mergeTinderHistory(messages, fresh.messages);
+    viewport = fresh;
+    if (!canScrollMore && existingSuffixObservedPrefixOverlap(knownMessages, messages) < requiredOverlap) {
+      throw new Error("Tinder delta reached boundary without the stored tail");
+    }
+  }
+  return messages;
+}
+
 export async function createTinderLocalDiscoveryRuntime(environment = process.env) {
   configureRuntime(environment);
   const deviceId = await resolveDeviceId();
   const transport = createExistingDashboardBearerTransport({ baseUrl: BACKEND_BASE_URL, bearerToken });
 
+  async function persistDelta(row, conversationId, messages) {
+    const adapter = createTinderAppiumDeltaAdapter({ deviceId, conversationId, transport });
+    const lastMessageVisibleTime = row.last_message_visible_time ?? undefined;
+    await adapter.persistViewport({ messages,
+      ...(lastMessageVisibleTime === undefined ? {} : { lastMessageVisibleTime }) });
+    await returnToInbox();
+    return Object.freeze({ outcome: "KNOWN_CHANGED", conversation_id: conversationId });
+  }
+
+  async function readUnboundChanged({ row }) {
+    const listing = await dashboard("/dashboard-api/tinder/conversations");
+    const opened = await openFreshRow(row);
+    const header = opened.viewport.profile_display_name;
+    const candidates = [];
+    // Display name is only a shortlist. The live ordered stored tail below
+    // must independently agree, and all matching stored records are checked.
+    for (const conversation of listing.conversations || []) {
+      if (conversation.profile?.display_name !== header) continue;
+      candidates.push(await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(conversation.id)}`));
+    }
+    let viewport = opened.viewport;
+    let messages = viewport.messages;
+    for (let gesture = 0; gesture <= 8; gesture += 1) {
+      const known = selectStoredDeltaConversation(candidates, { ...viewport, messages });
+      if (known) return persistDelta(row, known.conversation.id, messages);
+      // A singleton cannot supply the multi-message evidence needed after
+      // restart. Do not turn its uncertainty into a full-profile/history read.
+      if (!candidates.some(candidate => candidate.messages?.length >= 2) || gesture === 8) break;
+      const canScrollMore = await scrollTowardTop(viewport.scroll_bounds, chatScrollPercent);
+      await sleep(settleMilliseconds);
+      const fresh = observeConversationViewportFromXml(await sourceXml());
+      if (!fresh || fresh.profile_display_name !== header) throw new Error("Tinder changed during restart revalidation");
+      messages = mergeTinderHistory(messages, fresh.messages);
+      viewport = fresh;
+      if (!canScrollMore) {
+        const atBoundary = selectStoredDeltaConversation(candidates, { ...viewport, messages });
+        if (atBoundary) return persistDelta(row, atBoundary.conversation.id, messages);
+        break;
+      }
+    }
+    await returnToInbox();
+    return Object.freeze({ outcome: "AMBIGUOUS", thread_opens: 1 });
+  }
+
   return Object.freeze({
     deviceId,
-    readSourceXml: sourceXml,
+    readUnboundChanged,
+    async readSourceXml() {
+      await appium("/execute/sync", { method: "POST", body: {
+        script: "mobile: activateApp", args: [{ appId: "com.tinder" }]
+      } });
+      await sleep(700);
+      // This is the official dismiss control observed on the real ZTE, never
+      // the adjacent purchase/continue button. No coordinate guessing.
+      const dismiss = await appium("/elements", { method: "POST", body: {
+        using: "id", value: "com.tinder:id/paywall_close_button"
+      } });
+      if (dismiss.length === 1) {
+        const id = dismiss[0]["element-6066-11e4-a52e-4f735466cecf"];
+        await appium(`/element/${encodeURIComponent(id)}/click`, { method: "POST", body: {} });
+        await sleep(700);
+      }
+      let source = await sourceXml();
+      if (!observeInboxFromXml(source) && !observeConversationViewportFromXml(source)) {
+        const chatTabs = await appium("/elements", { method: "POST", body: {
+          using: "xpath",
+          value: '//*[@package="com.tinder" and @resource-id="com.tinder:id/navigation_bar_item_small_label_view" and @text="Chat"]'
+        } });
+        if (chatTabs.length !== 1) throw new Error("Official Tinder Chat tab is not uniquely available");
+        const id = chatTabs[0]["element-6066-11e4-a52e-4f735466cecf"];
+        await appium(`/element/${encodeURIComponent(id)}/click`, { method: "POST", body: {} });
+        await waitForInbox();
+      }
+      await initialVerifiedInbox(new Set());
+      return sourceXml();
+    },
 
     async readKnownChanged({ row, conversationId }) {
+      const known = await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(conversationId)}`);
       const opened = await openFreshRow(row);
-      if (!opened?.viewport?.profile_display_name) {
+      if (!opened?.viewport?.profile_display_name
+        || opened.viewport.profile_display_name !== known.conversation?.profile?.display_name) {
         throw new Error("A known Tinder delta requires a freshly verified conversation header");
       }
-      const adapter = createTinderAppiumDeltaAdapter({ deviceId, conversationId, transport });
-      const lastMessageVisibleTime = row.last_message_visible_time ?? undefined;
-      await adapter.persistViewport({
-        messages: opened.viewport.messages,
-        ...(lastMessageVisibleTime === undefined ? {} : { lastMessageVisibleTime })
+      // A bounded delta only: stop at the stored tail, never invoke the full
+      // history or profile reader for a selected known conversation.
+      const messages = await readBoundedKnownDelta({
+        knownMessages: known.messages, initialViewport: opened.viewport,
+        readPrevious: async viewport => {
+          const canScrollMore = await scrollTowardTop(viewport.scroll_bounds, chatScrollPercent);
+          await sleep(settleMilliseconds);
+          return { canScrollMore, viewport: observeConversationViewportFromXml(await sourceXml()) };
+        }
       });
-      await returnToInbox();
-      return Object.freeze({ outcome: "KNOWN_CHANGED" });
+      return persistDelta(row, conversationId, messages);
     },
 
     async readNewThread({ row }) {
+      const listing = await dashboard("/dashboard-api/tinder/conversations");
+      const rowTexts = JSON.parse(row.ram_key).texts;
+      if ((listing.conversations || []).some(conversation => rowTexts.includes(conversation.profile?.display_name))) {
+        return readUnboundChanged({ row });
+      }
       const result = await openReadAndMirror({
         deviceId,
         row,

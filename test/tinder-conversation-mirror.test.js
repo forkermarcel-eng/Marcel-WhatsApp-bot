@@ -41,6 +41,8 @@ import {
   createRamOnlyInitialSweepBinding,
   executeInitialInboxPlanEntry,
   planInitialInboxProcessing,
+  readBoundedKnownDelta,
+  selectStoredDeltaConversation,
   summarizeSameSweepReopens
 } from "../scripts/tinder-block2-initial-sync.mjs";
 
@@ -58,6 +60,53 @@ const message = (direction, text, visibleTime = null) => ({
 });
 
 const zteScreen = { left: 0, top: 0, right: 576, bottom: 1280, width: 576, height: 1280 };
+
+test("restart delta revalidation refuses name-only, direction mismatch, singleton and ambiguous stored tails", () => {
+  const messages = [message("inbound", "First"), message("outbound", "Second")];
+  const candidate = { conversation: { id: "existing", profile: { display_name: "Example" } }, messages };
+  const viewport = { profile_display_name: "Example", messages: [...messages, message("inbound", "New")] };
+  assert.equal(selectStoredDeltaConversation([candidate], viewport), candidate);
+  assert.equal(selectStoredDeltaConversation([candidate, { ...candidate, conversation: { ...candidate.conversation, id: "other" } }], viewport), null);
+  assert.equal(selectStoredDeltaConversation([candidate], { ...viewport, messages: [message("inbound", "Different")] }), null);
+  assert.equal(selectStoredDeltaConversation([candidate], { ...viewport, messages: messages.map(value => ({ ...value, direction: "inbound" })) }), null);
+  assert.equal(selectStoredDeltaConversation([{ ...candidate, messages: messages.slice(1) }], { ...viewport, messages: viewport.messages.slice(1) }), null);
+});
+
+test("live delta reads only to the stored ordered tail across bounded viewports", async () => {
+  const messages = Array.from({ length: 8 }, (_, index) => message(index % 2 ? "outbound" : "inbound", `Example ${index}`));
+  const viewport = values => ({ profile_display_name: "Example", messages: values });
+  let scrolls = 0;
+  const read = await readBoundedKnownDelta({
+    knownMessages: messages.slice(0, 3),
+    initialViewport: viewport(messages.slice(5)),
+    readPrevious: async () => ({
+      canScrollMore: true,
+      viewport: viewport(++scrolls === 1 ? messages.slice(3, 7) : messages.slice(1, 5))
+    })
+  });
+  assert.equal(scrolls, 2);
+  assert.deepEqual(read, messages.slice(1));
+  await readBoundedKnownDelta({
+    knownMessages: messages.slice(0, 3), initialViewport: viewport(messages.slice(1)),
+    readPrevious: async () => assert.fail("Stored tail already visible: no scroll")
+  });
+});
+
+test("live delta refuses header drift, missing stored tail and exhausted bound", async () => {
+  const knownMessages = [message("inbound", "Older A"), message("outbound", "Older B")];
+  const initialViewport = { profile_display_name: "Example", messages: [message("inbound", "Newer")] };
+  await assert.rejects(readBoundedKnownDelta({ knownMessages, initialViewport,
+    readPrevious: async () => ({ canScrollMore: true, viewport: { ...initialViewport, profile_display_name: "Different" } })
+  }), /conversation changed/);
+  await assert.rejects(readBoundedKnownDelta({ knownMessages, initialViewport,
+    readPrevious: async () => ({ canScrollMore: false, viewport: initialViewport })
+  }), /boundary without/);
+  let scrolls = 0;
+  await assert.rejects(readBoundedKnownDelta({ knownMessages, initialViewport, maxGestures: 2,
+    readPrevious: async () => { scrolls += 1; return { canScrollMore: true, viewport: initialViewport }; }
+  }), /bounded viewports/);
+  assert.equal(scrolls, 2);
+});
 
 function createMemoryPool() {
   const state = {
@@ -1830,7 +1879,7 @@ test("a new Inbox row has exactly one initial profile-plus-full-history path", a
   const openEnd = runner.indexOf("async function verifiedInboxTop", openStart);
   const openPath = runner.slice(openStart, openEnd);
   assert.equal((openPath.match(/await openInitialProfile\(expectedDisplayName\)/g) || []).length, 1);
-  assert.match(openPath, /readProfileToPhysicalBoundary\(expectedDisplayName, initialProfileState\)/);
+    assert.match(openPath, /readCompleteLiveMatchProfile\(/);
   assert.doesNotMatch(openPath, /secondProfileState/);
 });
 

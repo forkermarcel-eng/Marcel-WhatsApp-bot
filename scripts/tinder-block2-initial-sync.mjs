@@ -39,12 +39,10 @@ let maxProfileGestures;
 const chatScrollPercent = 0.45;
 // Keep a visible row overlap while traversing the ordinary Inbox so the
 // process can prove that it did not jump past a normal row between pages.
-// The Inbox RecyclerView has a much shorter effective row stride than the
-// chat RecyclerView.  On the real ZTE, 0.05 produces a physical Inbox move
-// while retaining the complete immediately-adjacent visible row sequence;
-// 0.10 and above jump past it.  Keep chat history at its separately verified
-// 0.45 value.
-const inboxScrollPercent = 0.05;
+// The current ZTE returns false without moving at 0.05. Targeting the
+// actual Inbox RecyclerView at 0.45 moved from 3 to 6 visible rows while
+// retaining all 3 prior rows. Keep the existing overlap/boundary checks.
+const inboxScrollPercent = 0.45;
 const profileScrollPercent = 0.62;
 const settleMilliseconds = 3000;
 const boundarySettleMilliseconds = 4500;
@@ -182,6 +180,21 @@ async function scroll(bounds, direction, percent) {
 // the visual top to load older history.
 const scrollTowardTop = (bounds, percent) => scroll(bounds, "up", percent);
 const scrollTowardBottom = (bounds, percent) => scroll(bounds, "down", percent);
+
+export async function scrollInbox(direction, request = appium) {
+  const elements = await request("/elements", { method: "POST", body: {
+    using: "id", value: "com.tinder:id/matchListRecycler"
+  } });
+  const elementId = elements?.length === 1
+    ? elements[0]["element-6066-11e4-a52e-4f735466cecf"] : null;
+  if (!elementId) throw new Error("Verified Tinder Inbox RecyclerView is not uniquely available");
+  const result = await request("/execute/sync", { method: "POST", body: {
+    script: "mobile: scrollGesture",
+    args: [{ elementId, direction, percent: inboxScrollPercent }]
+  } });
+  if (typeof result !== "boolean") throw new Error("Appium Inbox scroll did not report a physical boundary result");
+  return result;
+}
 
 function sameInbox(left, right) {
   return Boolean(left && right
@@ -975,7 +988,7 @@ async function verifiedInboxTop(initialInbox, viewportKeys) {
   for (let gesture = 0; gesture < maxInboxGestures; gesture += 1) {
     viewportKeys.add(inboxViewportKey(inbox));
     const before = inbox;
-    const canScrollMore = await scrollTowardTop(before.scroll_bounds, inboxScrollPercent);
+    const canScrollMore = await scrollInbox("up");
     await sleep(settleMilliseconds);
     const fresh = observeInboxFromXml(await sourceXml());
     if (!fresh) throw new Error("Tinder Inbox changed while its top was being verified");
@@ -1001,7 +1014,7 @@ async function verifiedInboxTop(initialInbox, viewportKeys) {
       continue;
     }
 
-    const confirmedAtTop = await scrollTowardTop(settled.scroll_bounds, inboxScrollPercent);
+    const confirmedAtTop = await scrollInbox("up");
     await sleep(settleMilliseconds);
     const confirmed = observeInboxFromXml(await sourceXml());
     if (!confirmed) throw new Error("Tinder Inbox changed while its top boundary was being confirmed");
@@ -1059,7 +1072,7 @@ async function discoverInboxInventory() {
     }
 
     const before = inbox;
-    const canScrollMore = await scrollTowardBottom(before.scroll_bounds, inboxScrollPercent);
+    const canScrollMore = await scrollInbox("down");
     await sleep(settleMilliseconds);
     const fresh = observeInboxFromXml(await sourceXml());
     if (!fresh) throw new Error("Tinder Inbox changed while being vertically traversed");
@@ -1101,7 +1114,7 @@ async function discoverInboxInventory() {
       continue;
     }
 
-    const confirmedAtBoundary = await scrollTowardBottom(settled.scroll_bounds, inboxScrollPercent);
+    const confirmedAtBoundary = await scrollInbox("down");
     await sleep(settleMilliseconds);
     const confirmed = observeInboxFromXml(await sourceXml());
     if (!confirmed) throw new Error("Tinder Inbox changed while its end was being confirmed");
@@ -1229,7 +1242,7 @@ async function processDiscoveredInboxInventory({
     }
 
     const before = inbox;
-    const canScrollMore = await scrollTowardBottom(before.scroll_bounds, inboxScrollPercent);
+    const canScrollMore = await scrollInbox("down");
     await sleep(settleMilliseconds);
     const fresh = observeInboxFromXml(await sourceXml());
     if (!fresh) throw new Error("Tinder Inbox changed while Phase 2 was being vertically traversed");
@@ -1268,7 +1281,7 @@ async function processDiscoveredInboxInventory({
       continue;
     }
 
-    const confirmedAtBoundary = await scrollTowardBottom(settled.scroll_bounds, inboxScrollPercent);
+    const confirmedAtBoundary = await scrollInbox("down");
     await sleep(settleMilliseconds);
     const confirmed = observeInboxFromXml(await sourceXml());
     if (!confirmed) throw new Error("Tinder Inbox changed while its Phase 2 end was being confirmed");
@@ -1421,7 +1434,7 @@ export async function createTinderLocalDiscoveryRuntime(environment = process.en
         const matches = inbox.rows.filter(row => sameTransientInboxRow(row, entry.observed_row));
         if (matches.length === 1) return matches[0];
         if (matches.length > 1) throw new Error("Current Inbox candidate is ambiguous");
-        const canScrollMore = await scrollTowardBottom(inbox.scroll_bounds, inboxScrollPercent);
+        const canScrollMore = await scrollInbox("down");
         await sleep(settleMilliseconds);
         const fresh = observeInboxFromXml(await sourceXml());
         if (!fresh) throw new Error("Inbox changed during current candidate lookup");

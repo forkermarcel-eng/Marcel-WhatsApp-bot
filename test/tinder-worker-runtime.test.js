@@ -4,6 +4,34 @@ import { prepareLocalAppiumRuntime, reconcileExistingTinderMirror } from "../tin
 import { workerConnectionString, startReconciliationTimer } from "../scripts/tinder-discovery-worker.mjs";
 import { planInboxReconciliation } from "../tinder-mirror/local-discovery-executor.js";
 import { createTinderPossibleChangeDispatcher } from "../tinder-mirror/possible-change-dispatch.js";
+import { scrollInbox } from "../scripts/tinder-block2-initial-sync.mjs";
+
+test("Inbox scroll freshly targets its RecyclerView with the physically verified distance", async () => {
+  for (const direction of ["up", "down"]) {
+    const calls = [];
+    const result = await scrollInbox(direction, async (path, options) => {
+      calls.push({ path, body: options.body });
+      return path === "/elements" ? [{ "element-6066-11e4-a52e-4f735466cecf": "fresh-inbox" }] : false;
+    });
+    assert.equal(result, false);
+    assert.deepEqual(calls, [
+      { path: "/elements", body: { using: "id", value: "com.tinder:id/matchListRecycler" } },
+      { path: "/execute/sync", body: { script: "mobile: scrollGesture",
+        args: [{ elementId: "fresh-inbox", direction, percent: 0.45 }] } }
+    ]);
+  }
+});
+
+test("Inbox scroll cannot treat a missing target or invalid scroll result as the end", async () => {
+  for (const elements of [[], [{}, {}], [{}]]) {
+    await assert.rejects(scrollInbox("down", async path => {
+      assert.equal(path, "/elements");
+      return elements;
+    }), /not uniquely available/);
+  }
+  await assert.rejects(scrollInbox("down", async path => path === "/elements"
+    ? [{ "element-6066-11e4-a52e-4f735466cecf": "fresh-inbox" }] : null), /physical boundary/);
+});
 
 const inventoryRow = (name, preview, position) => ({ inbox_position: position,
   observed_row: { ram_key: JSON.stringify({ texts: [name, preview] }) } });

@@ -1700,7 +1700,7 @@ test("normal initial mirror is a separate Appium Inbox loop with CTA exclusion, 
   assert.match(runner, /async function readProfileToPhysicalBoundary/);
   assert.match(runner, /async function readChatToVerifiedOldestBoundary/);
   assert.match(runner, /const chatScrollPercent = 0\.45/);
-  assert.match(runner, /const inboxScrollPercent = 0\.05/);
+  assert.match(runner, /const inboxScrollPercent = 0\.45/);
   assert.match(runner, /function nextInboxOverlap/);
   assert.match(runner, /function sameInboxRowSlots/);
   assert.match(runner, /function carryProcessedInboxRows/);
@@ -1712,7 +1712,7 @@ test("normal initial mirror is a separate Appium Inbox loop with CTA exclusion, 
   assert.match(runner, /const scrollTowardBottom/);
   assert.match(runner, /scrollTowardTop\(viewport\.scroll_bounds, chatScrollPercent\)/);
   assert.match(runner, /const confirmedAtBoundary = await scrollTowardTop\(viewport\.scroll_bounds, chatScrollPercent\)/);
-  assert.match(runner, /scrollTowardBottom\(before\.scroll_bounds, inboxScrollPercent\)/);
+  assert.match(runner, /scrollInbox\("down"\)/);
   assert.match(runner, /await returnToInbox\(\)/);
   assert.match(runner, /synced\.created \? "NEW_MIRRORED" : "KNOWN_COMPLETED"/);
   assert.match(runner, /action: "KNOWN_UNCHANGED"/);

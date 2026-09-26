@@ -247,7 +247,7 @@ function sameScrollSurface(left, right) {
  * still only ordinary visible profile data; they are not a schema or an
  * identity interpretation.
  */
-const MAX_VISIBLE_PROFILE_VALUES = 64;
+const MAX_VISIBLE_PROFILE_VALUES = 99;
 const MAX_STRUCTURED_PROFILE_PAIRS = 32;
 const MAX_PROFILE_SECTIONS = 32;
 const MAX_PROFILE_CHIPS = 64;

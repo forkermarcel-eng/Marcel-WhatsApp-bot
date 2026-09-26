@@ -11,40 +11,65 @@ function requiredEnvironment(value, name) {
 }
 
 /*
- * Run only on the Windows host which already owns the Appium session. Its
+ * Run only on the Windows host with the existing Appium server. Its
  * DATABASE_URL must point at the existing Railway SSH tunnel; this script
- * does not create a public database proxy, a tunnel, or an Android session.
+ * does not create a public database proxy or a tunnel. The existing local
+ * runtime reuses or creates a standard session on that same Appium server.
  */
 export async function startLocalTinderDiscoveryWorker(environment = process.env) {
-  const connectionString = requiredEnvironment(environment.DATABASE_URL, "DATABASE_URL");
+  const connectionString = workerConnectionString(environment);
   const boss = createTinderDiscoveryPgBoss(PgBoss, { connectionString });
-  await boss.start();
+  boss.on("error", () => console.error("Tinder discovery transport error (details suppressed)."));
+  let runtime;
   try {
-    const runtime = await createExistingLocalTinderDiscoveryRuntime(environment);
+    await boss.start();
+    runtime = await createExistingLocalTinderDiscoveryRuntime(environment);
     const dispatcher = createLocalTinderDiscoveryExecutor({ runtime });
     const worker = await startTinderDiscoveryWorker({ boss, dispatcher });
     return Object.freeze({
       async stop() {
         await worker.stop();
         await boss.stop();
+        await runtime.close();
       }
     });
   } catch (error) {
     await boss.stop().catch(() => {});
+    await runtime?.close().catch(() => {});
     throw error;
   }
+}
+
+// Change only host/port in RAM; retain credentials and all existing TLS options.
+export function workerConnectionString(environment) {
+  const original = requiredEnvironment(environment.DATABASE_URL, "DATABASE_URL");
+  if (!environment.TINDER_DATABASE_TUNNEL_PORT) return original;
+  const port = Number(environment.TINDER_DATABASE_TUNNEL_PORT);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid local database tunnel port");
+  const url = new URL(original);
+  url.hostname = "127.0.0.1";
+  url.port = String(port);
+  return url.href;
 }
 
 const invokedAsScript = process.argv[1]
   && pathToFileURL(process.argv[1]).href === import.meta.url;
 
 if (invokedAsScript) {
-  const running = await startLocalTinderDiscoveryWorker();
-  console.log("Tinder discovery worker started (polling the existing Railway SSH tunnel).");
-  const stop = async () => {
-    await running.stop();
-    process.exitCode = 0;
-  };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  let running;
+  try {
+    running = await startLocalTinderDiscoveryWorker();
+  } catch {
+    console.error("Tinder discovery worker startup failed (details suppressed).");
+    process.exitCode = 1;
+  }
+  if (running) {
+    console.log("Tinder discovery worker started (polling the existing Railway SSH tunnel).");
+    const stop = async () => {
+      await running.stop();
+      process.exitCode = 0;
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  }
 }

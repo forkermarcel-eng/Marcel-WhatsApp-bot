@@ -1397,6 +1397,39 @@ export async function createTinderLocalDiscoveryRuntime(environment = process.en
   return Object.freeze({
     deviceId,
     readUnboundChanged,
+    readInboxInventory: discoverInboxInventory,
+    async readStoredConversations() {
+      const listing = await dashboard("/dashboard-api/tinder/conversations");
+      const stored = [];
+      for (const conversation of listing.conversations || []) {
+        stored.push(await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(conversation.id)}`));
+      }
+      return stored;
+    },
+    async updateInboxPosition(conversation, entry) {
+      if (conversation.inbox_position === entry.inbox_position
+        && (entry.last_message_visible_time === undefined
+          || conversation.last_message_visible_time === entry.last_message_visible_time)) return false;
+      await transport.updateInboxOrder({ deviceId, conversationId: conversation.id,
+        inboxPosition: entry.inbox_position, lastMessageVisibleTime: entry.last_message_visible_time });
+      return true;
+    },
+    async locateInventoryRow(entry) {
+      let inbox = await initialVerifiedInbox(new Set());
+      for (let gesture = 0; gesture < maxInboxGestures; gesture += 1) {
+        inbox = await stableInboxProjection(inbox);
+        const matches = inbox.rows.filter(row => sameTransientInboxRow(row, entry.observed_row));
+        if (matches.length === 1) return matches[0];
+        if (matches.length > 1) throw new Error("Current Inbox candidate is ambiguous");
+        const canScrollMore = await scrollTowardBottom(inbox.scroll_bounds, inboxScrollPercent);
+        await sleep(settleMilliseconds);
+        const fresh = observeInboxFromXml(await sourceXml());
+        if (!fresh) throw new Error("Inbox changed during current candidate lookup");
+        if (!canScrollMore && sameInbox(inbox, fresh)) break;
+        inbox = fresh;
+      }
+      throw new Error("Current Inbox candidate changed before navigation");
+    },
     async readSourceXml() {
       await appium("/execute/sync", { method: "POST", body: {
         script: "mobile: activateApp", args: [{ appId: "com.tinder" }]

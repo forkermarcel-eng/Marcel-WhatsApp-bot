@@ -1,7 +1,80 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareLocalAppiumRuntime } from "../tinder-mirror/local-appium-discovery-runtime.js";
-import { workerConnectionString } from "../scripts/tinder-discovery-worker.mjs";
+import { prepareLocalAppiumRuntime, reconcileExistingTinderMirror } from "../tinder-mirror/local-appium-discovery-runtime.js";
+import { workerConnectionString, startReconciliationTimer } from "../scripts/tinder-discovery-worker.mjs";
+import { planInboxReconciliation } from "../tinder-mirror/local-discovery-executor.js";
+import { createTinderPossibleChangeDispatcher } from "../tinder-mirror/possible-change-dispatch.js";
+
+const inventoryRow = (name, preview, position) => ({ inbox_position: position,
+  observed_row: { ram_key: JSON.stringify({ texts: [name, preview] }) } });
+const storedConversation = (name, preview, id) => ({ conversation: { id, profile: { display_name: name } },
+  messages: [{ direction: "inbound", text: preview }] });
+
+test("mirror comparison after restart skips unchanged reordered rows, not name-only changed candidates", () => {
+  const stored = [storedConversation("A", "last A", "a"), storedConversation("B", "last B", "b")];
+  const plan = planInboxReconciliation([inventoryRow("B", "last B", 0), inventoryRow("A", "new A", 1), inventoryRow("C", "new C", 2)], stored);
+  assert.deepEqual(plan.map(item => item.action), ["UNCHANGED", "REVALIDATE", "INITIAL_READ"]);
+  assert.equal(plan[0].conversation.id, "b");
+  assert.equal(plan[1].conversation, undefined);
+  assert.equal(planInboxReconciliation([inventoryRow("A", "last A", 0)], [...stored, stored[0]])[0].action, "AMBIGUOUS");
+});
+
+test("unchanged reconciliation inventories both surfaces with zero detail reads", async () => {
+  const calls = [];
+  const inbox = {
+    readSourceXml: async () => calls.push("source"),
+    readInboxInventory: async () => ({ inventory: [inventoryRow("A", "tail", 0)] }),
+    readStoredConversations: async () => [storedConversation("A", "tail", "a")],
+    updateInboxPosition: async () => false,
+    locateInventoryRow: async () => assert.fail("No candidate should open")
+  };
+  const matches = { observeMatchInventory: async () => { calls.push("carousel"); return {}; },
+    reconcileMatchInventory: async () => ({ updates: 0, unresolved: 0 }) };
+  const result = await reconcileExistingTinderMirror(inbox, matches);
+  assert.deepEqual(calls, ["source", "carousel"]);
+  assert.equal(result.status, "RECONCILED");
+  for (const field of ["thread_opens", "profile_reads", "history_reads", "match_tile_opens"]) assert.equal(result[field], 0);
+});
+
+test("reconciliation calls only one existing delta routine and one existing new-thread routine", async () => {
+  const calls = [];
+  const inbox = { readSourceXml: async () => {},
+    readInboxInventory: async () => ({ inventory: [inventoryRow("A", "new tail", 0), inventoryRow("B", "new thread", 1)] }),
+    readStoredConversations: async () => [storedConversation("A", "old tail", "a")],
+    updateInboxPosition: async () => {}, locateInventoryRow: async entry => entry,
+    readUnboundChanged: async () => { calls.push("delta"); return { outcome: "KNOWN_CHANGED", conversation_id: "a" }; },
+    readNewThread: async () => { calls.push("initial"); return { outcome: "NEW_THREAD", conversation_id: "b" }; } };
+  const result = await reconcileExistingTinderMirror(inbox, { observeMatchInventory: async () => ({}),
+    reconcileMatchInventory: async () => ({ updates: 1, unresolved: 0 }) });
+  assert.deepEqual(calls, ["delta", "initial"]);
+  assert.equal(result.thread_opens, 2);
+  assert.equal(result.profile_reads, 1);
+  assert.equal(result.history_reads, 1);
+  assert.equal(result.match_tile_opens, 0);
+});
+
+test("timer is configurable, bounded, coalesced with hints, and cannot pile up slow inventory ticks", async () => {
+  let tick, interval, released;
+  let inspections = 0, active = 0, maxActive = 0;
+  const blocked = new Promise(resolve => { released = resolve; });
+  const dispatcher = createTinderPossibleChangeDispatcher({ readSourceXml: async () => "", debounceMilliseconds: 0,
+    reconcile: async () => { inspections += 1; active += 1; maxActive = Math.max(maxActive, active);
+      if (inspections === 1) await blocked;
+      active -= 1; return { status: "RECONCILED" }; } });
+  const timer = startReconciliationTimer({ dispatcher, deviceId: "test", environment: { TINDER_RECONCILIATION_INTERVAL_MS: "15000" },
+    setIntervalFn: (callback, ms) => { tick = callback; interval = ms; return 1; }, clearIntervalFn: () => {} });
+  tick();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  tick(); tick();
+  const hint = dispatcher.signal();
+  dispatcher.signal();
+  released();
+  await hint; await timer.stop();
+  assert.equal(interval, 15000);
+  assert.equal(inspections, 2);
+  assert.equal(maxActive, 1);
+  assert.throws(() => startReconciliationTimer({ environment: { TINDER_RECONCILIATION_INTERVAL_MS: "1" } }), /15000/);
+});
 
 function fixture({ devices = "local\tdevice", existing = null } = {}) {
   const calls = [];

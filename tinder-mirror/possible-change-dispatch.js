@@ -274,6 +274,7 @@ async function invokeCandidate(candidate, {
  */
 function createTinderPossibleChangeDispatcher({
   readSourceXml,
+  reconcile = null,
   onDiscovery = null,
   onInboxSourceCandidate = null,
   onMatchSourceCandidate = null,
@@ -282,6 +283,7 @@ function createTinderPossibleChangeDispatcher({
 } = {}) {
   if (typeof readSourceXml !== "function") throw new TypeError("readSourceXml is required");
   validateOptionalCallback(onDiscovery, "onDiscovery");
+  validateOptionalCallback(reconcile, "reconcile");
   validateOptionalCallback(onInboxSourceCandidate, "onInboxSourceCandidate");
   validateOptionalCallback(onMatchSourceCandidate, "onMatchSourceCandidate");
   if (!Number.isInteger(debounceMilliseconds) || debounceMilliseconds < 0 || debounceMilliseconds > 30_000) {
@@ -295,6 +297,7 @@ function createTinderPossibleChangeDispatcher({
   let changedWhileInspecting = false;
 
   async function inspect() {
+    if (reconcile) return reconcile();
     let current;
     try {
       current = sourceDiscoveryFromXml(await readSourceXml());

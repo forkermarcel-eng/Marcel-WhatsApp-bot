@@ -8,6 +8,37 @@ import {
   normalizeTinderDiscoveryJob
 } from "./pg-boss-discovery.js";
 
+const visibleText = value => String(value || "").normalize("NFC").replace(/\s+/gu, " ").trim();
+
+export function planInboxReconciliation(inventory, stored) {
+  return inventory.map(entry => {
+    const texts = JSON.parse(entry.observed_row.ram_key).texts.map(visibleText);
+    const possible = stored.filter(item => texts.includes(visibleText(item.conversation.profile?.display_name)));
+    const unchanged = possible.filter(item => {
+      const name = visibleText(item.conversation.profile?.display_name);
+      const tail = visibleText(item.messages?.at(-1)?.text);
+      if (!tail) return false;
+      if (entry.last_message_visible_time !== undefined
+        && entry.last_message_visible_time !== item.conversation.last_message_visible_time) return false;
+      return texts.some(text => {
+        if (text === name) return false;
+        if (/^[↩↪↶↷]/u.test(text) && item.messages.at(-1).direction !== "outbound") return false;
+        const preview = text.replace(/^[↩↪↶↷]\s*/u, "");
+        // Only an unchanged visible projection, not a durable identity or a
+        // claim about messages hidden behind Tinder's truncated preview.
+        return preview === tail || (/…$|\.{3}$/u.test(preview)
+          && preview.replace(/…$|\.{3}$/u, "").length >= 12
+          && tail.startsWith(preview.replace(/…$|\.{3}$/u, "")));
+      });
+    });
+    const identicalRows = inventory.filter(other =>
+      JSON.stringify(JSON.parse(other.observed_row.ram_key).texts.map(visibleText)) === JSON.stringify(texts)).length;
+    if (identicalRows !== 1 || unchanged.length > 1) return { entry, action: "AMBIGUOUS" };
+    if (unchanged.length === 1) return { entry, action: "UNCHANGED", conversation: unchanged[0].conversation };
+    return { entry, action: possible.length ? "REVALIDATE" : "INITIAL_READ" };
+  });
+}
+
 function assertRuntime(value) {
   if (!value || typeof value !== "object") throw new TypeError("A local Tinder runtime is required");
   const methods = ["readSourceXml", "readKnownChanged", "readNewThread", "readMatchDiscovery"];
@@ -116,6 +147,7 @@ export function createLocalTinderDiscoveryExecutor({
 
   const dispatcher = createTinderPossibleChangeDispatcher({
     readSourceXml,
+    reconcile: runtime.reconcile || null,
     onInboxSourceCandidate: processInboxCandidate,
     onMatchSourceCandidate: processMatchCandidate,
     debounceMilliseconds,

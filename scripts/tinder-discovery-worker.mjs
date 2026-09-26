@@ -10,6 +10,28 @@ function requiredEnvironment(value, name) {
   return value;
 }
 
+function reconciliationInterval(environment) {
+  const milliseconds = Number(environment.TINDER_RECONCILIATION_INTERVAL_MS || 20000);
+  if (!Number.isInteger(milliseconds) || milliseconds < 15000 || milliseconds > 30000) {
+    throw new Error("TINDER_RECONCILIATION_INTERVAL_MS must be 15000..30000");
+  }
+  return milliseconds;
+}
+
+export function startReconciliationTimer({ dispatcher, deviceId, environment = {}, onResult = () => {},
+  onError = () => {}, setIntervalFn = setInterval, clearIntervalFn = clearInterval }) {
+  const milliseconds = reconciliationInterval(environment);
+  let active = null;
+  const timer = setIntervalFn(() => {
+    // Slow inventories do not accumulate timer work. A real hint still uses
+    // the dispatcher's existing pending-change coalescing during this call.
+    if (active) return;
+    active = Promise.resolve().then(() => dispatcher.signal({ device_id: deviceId }))
+      .then(onResult).catch(onError).finally(() => { active = null; });
+  }, milliseconds);
+  return { milliseconds, async stop() { clearIntervalFn(timer); await active; } };
+}
+
 /*
  * Run only on the Windows host with the existing Appium server. Its
  * DATABASE_URL must point at the existing Railway SSH tunnel; this script
@@ -17,6 +39,7 @@ function requiredEnvironment(value, name) {
  * runtime reuses or creates a standard session on that same Appium server.
  */
 export async function startLocalTinderDiscoveryWorker(environment = process.env) {
+  reconciliationInterval(environment);
   const connectionString = workerConnectionString(environment);
   const boss = createTinderDiscoveryPgBoss(PgBoss, { connectionString });
   boss.on("error", () => console.error("Tinder discovery transport error (details suppressed)."));
@@ -31,8 +54,12 @@ export async function startLocalTinderDiscoveryWorker(environment = process.env)
     const worker = await startTinderDiscoveryWorker({ boss, dispatcher,
       onResult: result => console.log(JSON.stringify({ discovery_job_result: result }))
     });
+    const reconciliation = startReconciliationTimer({ dispatcher, deviceId: runtime.deviceId, environment,
+      onResult: result => console.log(JSON.stringify({ reconciliation_result: result })),
+      onError: () => console.error("Tinder reconciliation failed (details suppressed).") });
     return Object.freeze({
       async stop() {
+        await reconciliation.stop();
         await worker.stop();
         await boss.stop();
         await runtime.close();

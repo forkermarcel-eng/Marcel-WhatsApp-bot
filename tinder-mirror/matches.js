@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { TinderMirrorError, normalizeTinderProfile } from "./conversation.js";
 
 /*
@@ -99,7 +100,7 @@ export function normalizeTinderMatchPayload(value) {
   if (!plainObject(value)) {
     throw new TinderMirrorError("INVALID_TINDER_MATCH_PAYLOAD", "payload must be an object");
   }
-  const allowed = new Set(["tile", "carousel_position", "conversation_id"]);
+  const allowed = new Set(["tile", "carousel_position", "conversation_id", "match_id"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw new TinderMirrorError("INVALID_TINDER_MATCH_PAYLOAD", "payload contains unsupported fields");
   }
@@ -108,7 +109,8 @@ export function normalizeTinderMatchPayload(value) {
     // not a Match identity and not a full Profile crawl.
     tile: normalizeTinderProfile(value.tile),
     carousel_position: requiredNonNegativeInteger(value.carousel_position, "carousel_position"),
-    conversation_id: optionalUuid(value.conversation_id, "conversation_id")
+    conversation_id: optionalUuid(value.conversation_id, "conversation_id"),
+    ...(Object.hasOwn(value, "match_id") ? { match_id: optionalUuid(value.match_id, "match_id") } : {})
   });
 }
 
@@ -128,6 +130,27 @@ export function createTinderMatchMirror({ pool, now = () => new Date(), idFactor
       // It is not a heartbeat, permit, or readiness gate.
       await assertExistingDevice(client, deviceId, { lock: true });
       await assertVerifiedConversationLink(client, deviceId, match.conversation_id);
+
+      if (match.match_id) {
+        const existing = await client.query(
+          `SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at
+             FROM tinder_matches WHERE device_id=$1 AND match_id=$2 FOR UPDATE`, [deviceId, match.match_id]);
+        const row = existing.rows[0];
+        // This updates only the position of an unchanged ordinary tile. It
+        // cannot introduce or change a Conversation link or person identity.
+        if (!row || !isDeepStrictEqual(asTile(row.tile), match.tile)
+          || (row.conversation_id ?? null) !== match.conversation_id) {
+          throw new TinderMirrorError("TINDER_MATCH_CHANGED", "Stored Match tile changed during reconciliation", 409);
+        }
+        const changed = Number(row.carousel_position) !== match.carousel_position;
+        if (changed) {
+          await client.query(`UPDATE tinder_matches SET tile=$2::jsonb, carousel_position=$3, updated_at=$4 WHERE match_id=$1`,
+            [row.match_id, JSON.stringify(match.tile), match.carousel_position, timestamp]);
+        }
+        await client.query("COMMIT");
+        return Object.freeze({ created: false, match: publicMatch({ ...row, carousel_position: match.carousel_position,
+          updated_at: changed ? timestamp : row.updated_at }) });
+      }
 
       if (match.conversation_id) {
         const linked = await client.query(

@@ -9,6 +9,7 @@
  */
 
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { observeMatchCarouselFromXml } from "../tinder-mirror/appium-conversation-reader.js";
 
 const DEFAULT_APPIUM_BASE_URL = "http://127.0.0.1:4723/wd/hub";
@@ -359,6 +360,22 @@ async function resolveDeviceId(runtime, installedBridgeVersionCode) {
   return matching[0].device_id;
 }
 
+export function planMatchReconciliation(stored, inventory) {
+  const remaining = [...stored];
+  const changes = [];
+  for (const entry of inventory) {
+    // Match tiles are an inventory, not Conversation identities. Preserve
+    // multiplicity of equal tiles; never collapse two equal visible names.
+    const index = remaining.findIndex(match => isDeepStrictEqual(match.tile, entry.tile));
+    if (index < 0) { changes.push({ ...matchWirePayload(entry) }); continue; }
+    const [match] = remaining.splice(index, 1);
+    if (match.carousel_position !== entry.carousel_position) changes.push({
+      ...matchWirePayload(entry), match_id: match.id, conversation_id: match.conversation_id ?? null
+    });
+  }
+  return { changes, unmatchedStored: remaining.length };
+}
+
 /*
  * The local discovery worker reuses the existing read-only carousel inventory
  * and ordinary Match ingress. It never taps or opens a Match tile.
@@ -369,6 +386,23 @@ export async function createTinderLocalMatchDiscoveryRuntime(environment = proce
   const deviceId = await resolveDeviceId(runtime, config.installedBridgeVersionCode);
   return Object.freeze({
     deviceId,
+    async observeMatchInventory() {
+      return discoverMatchInventory(runtime, { maxGestures: config.maxGestures });
+    },
+    async reconcileMatchInventory(discovery) {
+      const listing = await runtime.dashboard("/dashboard-api/tinder/matches");
+      const stored = (listing.matches || []).filter(match => match.device_id === deviceId);
+      const plan = planMatchReconciliation(stored, discovery.inventory);
+      // No destructive removal or speculative remapping of disappeared
+      // tiles. Report the difference rather than hiding stale product rows.
+      if (plan.unmatchedStored) return { changed: false, unresolved: plan.unmatchedStored, created: 0, updates: 0 };
+      let created = 0;
+      for (const match of plan.changes) {
+        const result = await runtime.dashboard("/dashboard-api/tinder/matches", { method: "POST", body: { device_id: deviceId, match } });
+        if (result.created) created += 1;
+      }
+      return { changed: plan.changes.length > 0, unresolved: 0, created, updates: plan.changes.length };
+    },
     async readMatchDiscovery() {
       const discovery = await discoverMatchInventory(runtime, { maxGestures: config.maxGestures });
       await persistMatchInventory(runtime, { deviceId, inventory: discovery.inventory });

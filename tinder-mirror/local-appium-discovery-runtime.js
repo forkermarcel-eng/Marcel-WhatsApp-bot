@@ -3,6 +3,44 @@ import { createTinderLocalMatchDiscoveryRuntime } from "../scripts/tinder-block2
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
+import { planInboxReconciliation } from "./local-discovery-executor.js";
+
+export async function reconcileExistingTinderMirror(inbox, matches) {
+  const metrics = { status: "RECONCILED", thread_opens: 0, profile_reads: 0, history_reads: 0,
+    match_tile_opens: 0, match_updates: 0, candidates: 0, ambiguous: 0, inbox_rows: 0 };
+  await inbox.readSourceXml();
+  // Both inventories happen before any detail work or product writes.
+  const carousel = await matches.observeMatchInventory();
+  const discovery = await inbox.readInboxInventory();
+  const stored = await inbox.readStoredConversations();
+  const plan = planInboxReconciliation(discovery.inventory, stored);
+  metrics.inbox_rows = plan.length;
+  const matchResult = await matches.reconcileMatchInventory(carousel);
+  metrics.match_updates = matchResult.updates;
+  metrics.ambiguous += matchResult.unresolved;
+  const represented = new Set();
+  for (const item of plan) {
+    if (item.action === "AMBIGUOUS") { metrics.ambiguous += 1; continue; }
+    if (item.action === "UNCHANGED") {
+      represented.add(item.conversation.id);
+      await inbox.updateInboxPosition(item.conversation, item.entry);
+      continue;
+    }
+    metrics.candidates += 1;
+    const row = await inbox.locateInventoryRow(item.entry);
+    const result = item.action === "INITIAL_READ"
+      ? await inbox.readNewThread({ row }) : await inbox.readUnboundChanged({ row });
+    metrics.thread_opens += 1;
+    if (result.outcome === "NEW_THREAD") { metrics.profile_reads += 1; metrics.history_reads += 1; }
+    if (result.conversation_id) {
+      represented.add(result.conversation_id);
+      await inbox.updateInboxPosition({ id: result.conversation_id }, item.entry);
+    } else metrics.ambiguous += 1;
+  }
+  metrics.unrepresented_stored = stored.filter(item => !represented.has(item.conversation.id)).length;
+  if (metrics.ambiguous || metrics.unrepresented_stored) metrics.status = "RECONCILIATION_PARTIAL";
+  return Object.freeze(metrics);
+}
 
 // The existing Appium server owns Android control. This only supplies the
 // standard WebDriver session and installed Bridge metadata to both runners.
@@ -91,6 +129,7 @@ export async function createExistingLocalTinderDiscoveryRuntime(environment = pr
     }
     return Object.freeze({
       close: local.close,
+      reconcile: () => reconcileExistingTinderMirror(inbox, matches),
       deviceId: inbox.deviceId,
       readSourceXml: inbox.readSourceXml,
       readKnownChanged: inbox.readKnownChanged,

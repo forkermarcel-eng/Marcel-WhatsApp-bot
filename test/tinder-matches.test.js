@@ -4,6 +4,7 @@ import test from "node:test";
 import { TinderMirrorError } from "../tinder-mirror/conversation.js";
 import { createTinderMatchMirror, normalizeTinderMatchPayload } from "../tinder-mirror/matches.js";
 import { observeMatchCarouselFromXml } from "../tinder-mirror/appium-conversation-reader.js";
+import { planMatchReconciliation } from "../scripts/tinder-block2-match-initial-sync.mjs";
 
 const deviceA = "00000000-0000-4000-8000-000000000001";
 const deviceB = "00000000-0000-4000-8000-000000000002";
@@ -48,7 +49,8 @@ function createMatchPool() {
       return { rows: conversation?.device_id === params[1] ? [{ ...conversation }] : [] };
     }
     if (normalized.startsWith("SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at FROM tinder_matches WHERE")) {
-      const match = [...state.matches.values()].find((item) => item.device_id === params[0] && item.conversation_id === params[1]);
+      const match = [...state.matches.values()].find((item) => item.device_id === params[0]
+        && (normalized.includes("AND match_id=$2") ? item.match_id === params[1] : item.conversation_id === params[1]));
       return { rows: match ? [{ ...match }] : [] };
     }
     if (normalized.startsWith("INSERT INTO tinder_matches")) {
@@ -88,6 +90,34 @@ function createMatchPool() {
     query
   };
 }
+
+test("read-only Match inventory reuses unchanged tiles, preserves equal-tile multiplicity and plans only new/reordered entries", () => {
+  const stored = [{ id: "a", tile: tile("A"), carousel_position: 0 }, { id: "b", tile: tile("B"), carousel_position: 1 }];
+  const inventory = names => names.map((name, carousel_position) => ({ tile: tile(name), carousel_position }));
+  assert.deepEqual(planMatchReconciliation(stored, inventory(["A", "B"])), { changes: [], unmatchedStored: 0 });
+  const changed = planMatchReconciliation(stored, inventory(["C", "B", "A"]));
+  assert.equal(changed.changes.length, 2);
+  assert.equal(changed.changes[0].match_id, undefined);
+  assert.equal(changed.changes[1].match_id, "a");
+  const equal = planMatchReconciliation(stored, inventory(["A", "A", "B"]));
+  assert.equal(equal.changes.filter(item => !item.match_id).length, 1);
+  assert.equal(planMatchReconciliation(stored, inventory(["A"])).unmatchedStored, 1);
+});
+
+test("explicit device-bound Match position update is idempotent and cannot relink or change tile content", async () => {
+  const pool = createMatchPool();
+  const mirror = createTinderMatchMirror({ pool });
+  const first = await mirror.sync({ deviceId: deviceA, payload: payload(0) });
+  const update = { ...payload(2), match_id: first.match.id };
+  await mirror.sync({ deviceId: deviceA, payload: update });
+  await mirror.sync({ deviceId: deviceA, payload: update });
+  assert.equal(pool.state.matches.size, 1);
+  assert.equal(pool.state.matches.get(first.match.id).carousel_position, 2);
+  await assert.rejects(mirror.sync({ deviceId: deviceB, payload: update }), /changed during reconciliation/);
+  await assert.rejects(mirror.sync({ deviceId: deviceA, payload: { ...update, tile: tile("Different") } }), /changed during reconciliation/);
+  assert.equal(pool.state.conversationWrites, 0);
+  assert.equal(pool.state.messageWrites, 0);
+});
 
 test("Match payload is bounded visible tile state, not a Match identity", () => {
   assert.deepEqual(normalizeTinderMatchPayload(payload(0, { attributes: { visible_tile_01: "Visible state" } })), {

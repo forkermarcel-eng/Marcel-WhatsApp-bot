@@ -90,13 +90,13 @@ test("existing SSH process is restarted after loss, receives no Railway secrets,
   const children = [], calls = [], reports = []; let retry, cancelled = false;
   const tunnel = startWorkerTunnel({ TINDER_SSH_TARGET: "existing@ssh.railway.com",
     TINDER_SSH_IDENTITY_FILE: "existing-key", TINDER_DATABASE_TUNNEL_PORT: "15433",
-    DATABASE_URL: "secret", DASHBOARD_API_SECRET: "secret", SystemRoot: "C:\\Windows" }, {
+    DATABASE_URL: "secret", DASHBOARD_API_SECRET: "secret", SystemRoot: "C:\\Windows", ProgramData: "C:\\ProgramData" }, {
     spawnFn: (file, args, options) => { calls.push({ file, args, options });
       const child = new EventEmitter(); child.kill = () => child.emit("exit", 0); children.push(child); return child; },
     setTimeoutFn: (callback, ms) => { assert.equal(ms, 5000); retry = callback; return 1; },
     clearTimeoutFn: () => { cancelled = true; }, report: value => reports.push(value)
   });
-  assert.deepEqual(calls[0].options.env, { SystemRoot: "C:\\Windows" });
+  assert.deepEqual(calls[0].options.env, { SystemRoot: "C:\\Windows", ProgramData: "C:\\ProgramData" });
   assert.equal(calls[0].options.windowsHide, true);
   assert.ok(calls[0].args.includes("127.0.0.1:15433:127.0.0.1:5432"));
   assert.ok(calls[0].args.includes("StrictHostKeyChecking=yes"));

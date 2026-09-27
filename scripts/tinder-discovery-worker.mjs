@@ -21,7 +21,7 @@ export function startWorkerTunnel(environment, { spawnFn = spawn, setTimeoutFn =
     throw new Error("Invalid existing Railway SSH tunnel configuration");
   }
   const identity = requiredEnvironment(environment.TINDER_SSH_IDENTITY_FILE, "TINDER_SSH_IDENTITY_FILE");
-  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "PATHEXT", "USERPROFILE",
+  const env = Object.fromEntries(["SystemRoot", "WINDIR", "ProgramData", "PATH", "PATHEXT", "USERPROFILE",
     "HOME", "TEMP", "TMP"].filter(key => environment[key] !== undefined).map(key => [key, environment[key]]));
   let child, retry, stopped = false;
   function launch() {

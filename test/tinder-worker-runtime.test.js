@@ -47,6 +47,17 @@ test("mirror comparison after restart skips unchanged reordered rows, not name-o
   assert.equal(planInboxReconciliation([inventoryRow("A", "last A", 0)], [...stored, stored[0]])[0].action, "AMBIGUOUS");
 });
 
+test("unchanged outgoing preview accepts the production API direction vocabulary", () => {
+  const stored = storedConversation("A", "existing outgoing message", "a");
+  const row = inventoryRow("A", "↩existing outgoing message", 0);
+  for (const direction of ["OUTBOUND", "outbound"]) {
+    stored.messages[0].direction = direction;
+    assert.equal(planInboxReconciliation([row], [stored])[0].action, "UNCHANGED");
+  }
+  stored.messages[0].direction = "INBOUND";
+  assert.equal(planInboxReconciliation([row], [stored])[0].action, "REVALIDATE");
+});
+
 test("unchanged reconciliation inventories both surfaces with zero detail reads", async () => {
   const calls = [];
   const inbox = {

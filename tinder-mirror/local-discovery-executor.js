@@ -22,7 +22,7 @@ export function planInboxReconciliation(inventory, stored) {
         && entry.last_message_visible_time !== item.conversation.last_message_visible_time) return false;
       return texts.some(text => {
         if (text === name) return false;
-        if (/^[↩↪↶↷]/u.test(text) && item.messages.at(-1).direction !== "outbound") return false;
+        if (/^[↩↪↶↷]/u.test(text) && String(item.messages.at(-1).direction).toUpperCase() !== "OUTBOUND") return false;
         const preview = text.replace(/^[↩↪↶↷]\s*/u, "");
         // Only an unchanged visible projection, not a durable identity or a
         // claim about messages hidden behind Tinder's truncated preview.

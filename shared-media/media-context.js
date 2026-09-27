@@ -1,5 +1,7 @@
 // Read-side only: ordered messages and profile media share asset references,
 // not storage paths, native channel SDK objects or automatically inferred facts.
+import { mediaDeliveryUrl } from "./delivery.js";
+
 export function createMediaContextReader({ listAttachments }) {
   if (typeof listAttachments !== "function") throw new TypeError("attachment reader required");
   return Object.freeze({ async read({ contactId, channel, conversationReference=null, profileReference=null, messages, profileLimit = 4 }) {
@@ -16,11 +18,29 @@ export function createMediaContextReader({ listAttachments }) {
     const scoped = attachments.filter(item => item.context?.contactId === contactId
       && item.context.channel === channel && ((conversationReference&&item.context.conversationReference === conversationReference)
         ||(profileReference&&item.context.sourceType==="profile"&&item.context.profileReference===profileReference)));
-    const project = item => ({ assetId: item.asset.assetId, mediaType: item.asset.mediaType,
+    const owner = { ownerChannel: "contacts", ownerType: "contact", ownerReference: String(contactId) };
+    const project = item => {
+      const available = item.asset.availability === "AVAILABLE";
+      const analysis = Object.values(item.asset.metadata?.analyses || {});
+      const derivatives = ["display", "thumbnail"].flatMap(variant => {
+        const derivative = item.asset.metadata?.derivatives?.[variant];
+        if (!available || !derivative?.storageKey) return [];
+        return [{ variant, mimeType: derivative.mimeType, width: derivative.width,
+          height: derivative.height, mediaReference: mediaDeliveryUrl(item.asset.assetId, owner, variant) }];
+      });
+      return { assetId: item.asset.assetId, mediaType: item.asset.mediaType,
       mimeType: item.asset.mimeType, availability: item.asset.availability,
+      sourceType: item.context.sourceType, role: item.context.role ?? null,
+      profileReference: item.context.profileReference ?? null,
+      conversationReference: item.context.conversationReference ?? null,
+      messageReference: item.context.messageReference ?? null,
+      mediaReference: available && item.asset.storageKey ? mediaDeliveryUrl(item.asset.assetId, owner) : null,
+      derivatives,
       caption: item.context.caption, direction: item.context.direction,
       timestamp: item.context.timestamp, ordinal: item.context.ordinal,
-      analysis: Object.values(item.asset.metadata?.analyses || {}) });
+      analysisStatus: analysis.length ? "RESULTS_AVAILABLE" : "NOT_ANALYZED",
+      analysis };
+    };
     return {
       contactId, channel, conversationReference,...(profileReference?{profileReference}:{}),
       messages: messages.map(message => ({ ...message, attachments: scoped

@@ -88,6 +88,41 @@ test("context preserves Text A / Image B / Text C and separates profile media", 
   assert.equal(result.messages[1].attachments[0].assetId,result.profileMedia[0].assetId);
   assert.equal(result.profileMedia.length,1);
 });
+
+test("profile context exposes existing protected media and derivatives without adapter internals or storage paths", async () => {
+  const assetId="11111111-1111-4111-8111-111111111111";
+  const asset={assetId,mediaType:"image",mimeType:"image/png",availability:"AVAILABLE",storageKey:"private/original.png",
+    metadata:{derivatives:{display:{storageKey:"private/display.webp",mimeType:"image/webp",width:576,height:720},
+      thumbnail:{storageKey:"private/thumb.webp",mimeType:"image/webp",width:160,height:200}}}};
+  const context={contactId:98,channel:"tinder",sourceType:"profile",profileReference:"match",role:"profile_primary",ordinal:0,
+    provenance:{deviceId:"private-device",bounds:"private-adapter-state"}};
+  const reader=createMediaContextReader({listAttachments:async()=>[{asset,context}]});
+  const result=await reader.read({contactId:98,channel:"tinder",profileReference:"match",messages:[]});
+  const media=result.profileMedia[0];
+  assert.equal(media.assetId,assetId);
+  assert.equal(media.sourceType,"profile");
+  assert.equal(media.role,"profile_primary");
+  assert.equal(media.profileReference,"match");
+  assert.equal(media.analysisStatus,"NOT_ANALYZED");
+  assert.deepEqual(media.analysis,[]);
+  for(const ref of [media.mediaReference,...media.derivatives.map(d=>d.mediaReference)]) {
+    const url=new URL(ref,"https://dashboard.example");
+    assert.equal(url.searchParams.get("assetId"),assetId);
+    assert.equal(url.searchParams.get("ownerChannel"),"contacts");
+    assert.equal(url.searchParams.get("ownerReference"),"98");
+  }
+  assert.deepEqual(media.derivatives.map(d=>d.variant),["display","thumbnail"]);
+  assert.doesNotMatch(JSON.stringify(result),/private\/|private-device|bounds|storageKey/);
+});
+
+test("unavailable context never fabricates a usable delivery reference or derivatives", async () => {
+  const reader=createMediaContextReader({listAttachments:async()=>[{asset:{assetId:"unavailable",availability:"UNAVAILABLE",
+    storageKey:"old",metadata:{derivatives:{thumbnail:{storageKey:"old-thumb"}}}},
+    context:{contactId:7,channel:"whatsapp",sourceType:"profile",profileReference:"person"}}]});
+  const result=await reader.read({contactId:7,channel:"whatsapp",profileReference:"person",messages:[]});
+  assert.equal(result.profileMedia[0].mediaReference,null);
+  assert.deepEqual(result.profileMedia[0].derivatives,[]);
+});
 test("analysis stays disabled with no model registry, rejects binary job payloads", async () => {
   const handler = createMediaAnalysisHandler({ loadAsset() { assert.fail("must not load"); }, saveAnalysis() { assert.fail("must not save"); } });
   const data = { assetId: "11111111-1111-4111-8111-111111111111", analysisId: "22222222-2222-4222-8222-222222222222", analyzer: "vision" };

@@ -205,7 +205,13 @@ export function createLocalTinderDiscoveryExecutor({
     processMatch: job => {
       const payload=normalizeProcessMatchJob(job);
       if(payload.device_id!==runtime.deviceId||typeof runtime.processMatch!=="function")throw new Error("PROCESS_MATCH executor unavailable for device");
-      return dispatcher.runExclusive(()=>runtime.processMatch(payload));
+      return dispatcher.runExclusive(async()=>{
+        // Reconciliation can leave the Inbox below its Match carousel.
+        // Reuse the existing Inbox return/top navigation before fresh Match
+        // inventory; do not run a general reconciliation or open another row.
+        await runtime.readSourceXml();
+        return runtime.processMatch(payload);
+      });
     },
     // Test-only bounded visibility: count only ephemeral direct bindings, not
     // a persisted Tinder identity or database state.

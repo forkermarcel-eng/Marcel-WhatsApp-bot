@@ -14,6 +14,29 @@ const semanticProfile = (value, ordinal = "01") => ({ display_name: "Example", a
   [`structured_profile_${ordinal}_value`]: value, profile_chip_01: "Reading"
 } });
 
+test("PROCESS MATCH restores the existing Inbox top inside the serial executor before fresh Match inventory", async () => {
+  const deviceId="11111111-1111-4111-8111-111111111111";
+  const job={operation:"PROCESS_MATCH",device_id:deviceId,match_id:"22222222-2222-4222-8222-222222222222"};
+  const calls=[];
+  let release;
+  const top=new Promise(resolve=>{release=resolve;});
+  const runtime={deviceId,readSourceXml:async()=>{calls.push("inbox-top");await top;return "source";},
+    processMatch:async payload=>{assert.deepEqual(payload,job);calls.push("fresh-match-inventory");return {status:"PROFILE_CONTEXT_READY"};},
+    reconcile(){assert.fail("no general reconciliation");},
+    readKnownChanged(){assert.fail("no conversation open");},
+    readNewThread(){assert.fail("no initial sync");},readMatchDiscovery(){assert.fail("no bulk match sync");}};
+  const executor=createLocalTinderDiscoveryExecutor({runtime});
+  const result=executor.processMatch(job);
+  await Promise.resolve();
+  assert.deepEqual(calls,["inbox-top"]);
+  release();
+  assert.equal((await result).status,"PROFILE_CONTEXT_READY");
+  assert.deepEqual(calls,["inbox-top","fresh-match-inventory"]);
+  runtime.readSourceXml=async()=>{throw Error("top unavailable");};
+  await assert.rejects(executor.processMatch(job),/top unavailable/);
+  assert.equal(calls.length,2);
+});
+
 test("semantic profile comparison ignores ordinals and fallback projection, not semantic differences", () => {
   const a = semanticProfile("Text & chat"), b = semanticProfile("Text &amp; chat", "19");
   b.attributes.visible_profile_01 = "different projection";

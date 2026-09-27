@@ -15,33 +15,64 @@ const visibleText = value => String(value || "").normalize("NFC").replace(/\s+/g
 // do not rewrite Messages or decode the already-parsed live UI a second time.
 const storedVisibleText = value => visibleText(decode(String(value || ""), { level: "html5", scope: "strict" }));
 
-export function planInboxReconciliation(inventory, stored) {
-  return inventory.map(entry => {
+export function compareKnownInboxContent(entry, item) {
+  const texts = JSON.parse(entry.observed_row.ram_key).texts.map(visibleText);
+  const name = storedVisibleText(item.conversation.profile?.display_name);
+  const tail = storedVisibleText(item.messages?.at(-1)?.text);
+  if (!tail || !texts.some(text => text !== name)) return "CONTENT_UNKNOWN";
+  if (entry.last_message_visible_time !== undefined
+    && entry.last_message_visible_time !== item.conversation.last_message_visible_time) return "OBSERVED_CHANGED";
+  return inboxTailMatches(texts, item) ? "OBSERVED_UNCHANGED" : "OBSERVED_CHANGED";
+}
+
+function inboxTailMatches(texts, item) {
+  const name = storedVisibleText(item.conversation.profile?.display_name);
+  const tail = storedVisibleText(item.messages?.at(-1)?.text);
+  if (!tail) return false;
+  return texts.some(text => {
+    if (text === name) return false;
+    if (/^[↩↪↶↷]/u.test(text) && String(item.messages.at(-1).direction).toUpperCase() !== "OUTBOUND") return false;
+    const preview = text.replace(/^[↩↪↶↷]\s*/u, "");
+    return preview === tail || (/…$|\.{3}$/u.test(preview)
+      && preview.replace(/…$|\.{3}$/u, "").length >= 12
+      && tail.startsWith(preview.replace(/…$|\.{3}$/u, "")));
+  });
+}
+
+export function planInboxReconciliation(inventory, stored, directBindings = new Map()) {
+  const plan = inventory.map(entry => {
     const texts = JSON.parse(entry.observed_row.ram_key).texts.map(visibleText);
     const possible = stored.filter(item => texts.includes(storedVisibleText(item.conversation.profile?.display_name)));
-    const unchanged = possible.filter(item => {
-      const name = storedVisibleText(item.conversation.profile?.display_name);
-      const tail = storedVisibleText(item.messages?.at(-1)?.text);
-      if (!tail) return false;
-      if (entry.last_message_visible_time !== undefined
-        && entry.last_message_visible_time !== item.conversation.last_message_visible_time) return false;
-      return texts.some(text => {
-        if (text === name) return false;
-        if (/^[↩↪↶↷]/u.test(text) && String(item.messages.at(-1).direction).toUpperCase() !== "OUTBOUND") return false;
-        const preview = text.replace(/^[↩↪↶↷]\s*/u, "");
-        // Only an unchanged visible projection, not a durable identity or a
-        // claim about messages hidden behind Tinder's truncated preview.
-        return preview === tail || (/…$|\.{3}$/u.test(preview)
-          && preview.replace(/…$|\.{3}$/u, "").length >= 12
-          && tail.startsWith(preview.replace(/…$|\.{3}$/u, "")));
-      });
-    });
+    // Retain the existing combined name + directional stored-tail evidence.
+    // Time/order are content observations, never identity requirements.
+    const evidence = possible.filter(item => inboxTailMatches(texts, item));
     const identicalRows = inventory.filter(other =>
       JSON.stringify(JSON.parse(other.observed_row.ram_key).texts.map(visibleText)) === JSON.stringify(texts)).length;
-    if (identicalRows !== 1 || unchanged.length > 1) return { entry, action: "AMBIGUOUS" };
-    if (unchanged.length === 1) return { entry, action: "UNCHANGED", conversation: unchanged[0].conversation };
-    return { entry, action: possible.length ? "REVALIDATE" : "INITIAL_READ" };
+    const unknown = { entry, identity: "UNKNOWN", content: null };
+    if (identicalRows !== 1 || evidence.length > 1) return { ...unknown, action: "AMBIGUOUS" };
+    const boundId = directBindings.get(entry.observed_row.ram_key);
+    const bound = possible.find(item => item.conversation.id === boundId);
+    if (bound && evidence.length && evidence[0].conversation.id !== boundId) {
+      return { ...unknown, action: "AMBIGUOUS" };
+    }
+    const known = bound || evidence[0];
+    // No matching name is not proof of a new person. UNKNOWN uses only the
+    // existing bounded message revalidation, never an automatic initial read.
+    if (!known) return { ...unknown, action: "REVALIDATE" };
+    const content = compareKnownInboxContent(entry, known);
+    return { entry, identity: "KNOWN", content, conversation: known.conversation,
+      action: content === "OBSERVED_UNCHANGED" ? "UNCHANGED" : "KNOWN_DELTA" };
   });
+  // Two current rows cannot both claim one stored Conversation.
+  for (const item of plan) {
+    if (item.conversation && plan.filter(other => other.conversation?.id === item.conversation.id).length > 1) {
+      item.identity = "UNKNOWN";
+      item.content = null;
+      item.action = "AMBIGUOUS";
+    }
+  }
+  for (const item of plan) if (item.identity === "UNKNOWN") delete item.conversation;
+  return plan;
 }
 
 function assertRuntime(value) {
@@ -152,7 +183,7 @@ export function createLocalTinderDiscoveryExecutor({
 
   const dispatcher = createTinderPossibleChangeDispatcher({
     readSourceXml,
-    reconcile: runtime.reconcile || null,
+    reconcile: runtime.reconcile ? () => runtime.reconcile(directBindings) : null,
     onInboxSourceCandidate: processInboxCandidate,
     onMatchSourceCandidate: processMatchCandidate,
     debounceMilliseconds,

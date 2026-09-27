@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { prepareLocalAppiumRuntime, reconcileExistingTinderMirror } from "../tinder-mirror/local-appium-discovery-runtime.js";
 import { workerConnectionString, startReconciliationTimer } from "../scripts/tinder-discovery-worker.mjs";
-import { planInboxReconciliation } from "../tinder-mirror/local-discovery-executor.js";
+import { planInboxReconciliation, createLocalTinderDiscoveryExecutor } from "../tinder-mirror/local-discovery-executor.js";
 import { createTinderPossibleChangeDispatcher } from "../tinder-mirror/possible-change-dispatch.js";
 import { scrollInbox, sameInboxScrollSurface } from "../scripts/tinder-block2-initial-sync.mjs";
 
@@ -49,10 +49,121 @@ const inventoryRow = (name, preview, position) => ({ inbox_position: position,
 const storedConversation = (name, preview, id) => ({ conversation: { id, profile: { display_name: name } },
   messages: [{ direction: "inbound", text: preview }] });
 
+test("identity survives changed visible time; content changes independently of Inbox count/order", () => {
+  const known = storedConversation("A", "tail", "a");
+  known.conversation.last_message_visible_time = "gestern";
+  const row = { ...inventoryRow("A", "tail", 0), last_message_visible_time: "heute" };
+  const [item] = planInboxReconciliation([row], [known]);
+  assert.equal(item.identity, "KNOWN");
+  assert.equal(item.conversation.id, "a");
+  assert.equal(item.content, "OBSERVED_CHANGED");
+  assert.equal(item.action, "KNOWN_DELTA");
+  const [reordered] = planInboxReconciliation([{ ...row, inbox_position: 8 }], [known]);
+  assert.equal(reordered.conversation.id, "a");
+  assert.equal(reordered.content, "OBSERVED_CHANGED");
+});
+
+test("confirmed RAM continuity separates identity from changed content and is absent after restart", () => {
+  const known = storedConversation("A", "stored tail", "a");
+  const row = inventoryRow("A", "current changed preview", 0);
+  const bindings = new Map([[row.observed_row.ram_key, "a"]]);
+  assert.equal(planInboxReconciliation([row], [known], bindings)[0].content, "OBSERVED_CHANGED");
+  assert.equal(planInboxReconciliation([row], [known])[0].identity, "UNKNOWN");
+  const changed = inventoryRow("A", "another preview", 0);
+  assert.equal(planInboxReconciliation([changed], [known], bindings)[0].identity, "UNKNOWN");
+});
+
+test("identity collisions are UNKNOWN even with RAM continuity", () => {
+  const stored = [storedConversation("A", "tail", "a"), storedConversation("A", "other", "b")];
+  const row = inventoryRow("A", "tail", 0);
+  const bindings = new Map([[row.observed_row.ram_key, "b"]]);
+  assert.equal(planInboxReconciliation([row], stored, bindings)[0].identity, "UNKNOWN");
+  assert.ok(planInboxReconciliation([row, row], stored).every(item => item.identity === "UNKNOWN"));
+  const rows = [row, inventoryRow("A", "tail...", 1)];
+  const duplicateBindings = new Map(rows.map(entry => [entry.observed_row.ram_key, "a"]));
+  assert.ok(planInboxReconciliation(rows, stored, duplicateBindings).every(item => item.identity === "UNKNOWN"));
+});
+
+test("known row without observable content uses bounded delta, not an unchanged claim", () => {
+  const row = inventoryRow("A", "", 0);
+  row.observed_row.ram_key = JSON.stringify({ texts: ["A"] });
+  const [item] = planInboxReconciliation([row], [storedConversation("A", "tail", "a")],
+    new Map([[row.observed_row.ram_key, "a"]]));
+  assert.equal(item.identity, "KNOWN");
+  assert.equal(item.content, "CONTENT_UNKNOWN");
+  assert.equal(item.action, "KNOWN_DELTA");
+});
+
+test("UNKNOWN singleton does not prevent known delta, unchanged skip or Match reconciliation", async () => {
+  const stored = [storedConversation("S", "emoji", "s"), storedConversation("A", "tail", "a"),
+    storedConversation("B", "stable", "b")];
+  const rows = [inventoryRow("S", "different", 0),
+    { ...inventoryRow("A", "tail", 1), last_message_visible_time: "new label" }, inventoryRow("B", "stable", 2)];
+  const calls = [];
+  const bindings = new Map([["obsolete", "a"]]);
+  const inbox = { readSourceXml: async () => {}, readInboxInventory: async () => ({ inventory: rows }),
+    readStoredConversations: async () => stored, updateInboxPosition: async () => {},
+    locateInventoryRow: async entry => entry.observed_row,
+    readUnboundChanged: async () => { calls.push("unknown"); return { outcome: "AMBIGUOUS" }; },
+    readKnownChanged: async ({ conversationId }) => {
+      calls.push(conversationId); return { outcome: "KNOWN_CHANGED", conversation_id: conversationId };
+    } };
+  const matches = { observeMatchInventory: async () => ({}),
+    reconcileMatchInventory: async () => { calls.push("matches"); return { updates: 1, unresolved: 0 }; } };
+  const result = await reconcileExistingTinderMirror(inbox, matches, bindings);
+  assert.deepEqual(calls, ["matches", "unknown", "a"]);
+  assert.equal(result.status, "RECONCILIATION_PARTIAL");
+  assert.equal(result.known, 2);
+  assert.equal(result.unknown, 1);
+  assert.equal(result.thread_opens, 2);
+  assert.equal(result.profile_reads, 0);
+  assert.equal(result.history_reads, 0);
+  assert.equal(result.match_tile_opens, 0);
+  assert.equal(bindings.has("obsolete"), false);
+  assert.equal(bindings.get(rows[1].observed_row.ram_key), "a");
+  assert.equal(bindings.has(rows[0].observed_row.ram_key), false);
+});
+
+test("bounded changed/reordered revalidation keeps ID and next unchanged cycle has zero detail work", async () => {
+  const stored = [storedConversation("A", "old", "a"), storedConversation("B", "stable", "b")];
+  const rows = [inventoryRow("A", "new", 0), inventoryRow("B", "stable", 1)];
+  let opens = 0;
+  const inbox = { readSourceXml: async () => {}, readInboxInventory: async () => ({ inventory: rows }),
+    readStoredConversations: async () => stored, updateInboxPosition: async () => {},
+    locateInventoryRow: async entry => entry.observed_row,
+    readUnboundChanged: async () => { opens++; stored[0].messages.push({ direction: "INBOUND", text: "new" });
+      return { outcome: "KNOWN_CHANGED", conversation_id: "a" }; } };
+  const matches = { observeMatchInventory: async () => ({}), reconcileMatchInventory: async () => ({ updates: 0, unresolved: 0 }) };
+  const bindings = new Map();
+  const first = await reconcileExistingTinderMirror(inbox, matches, bindings);
+  const second = await reconcileExistingTinderMirror(inbox, matches, bindings);
+  assert.equal(first.thread_opens, 1);
+  assert.equal(second.thread_opens, 0);
+  assert.equal(second.observed_unchanged, 2);
+  assert.equal(second.status, "RECONCILED");
+  assert.equal(opens, 1);
+  assert.deepEqual(stored.map(item => item.conversation.id), ["a", "b"]);
+});
+
+test("executor passes the same existing RAM binding map into reconciliation, never into a new runtime", async () => {
+  const maps = [];
+  const runtime = { deviceId: "device", readSourceXml: async () => "", readKnownChanged() {}, readNewThread() {},
+    readMatchDiscovery() {}, reconcile: async bindings => { maps.push(bindings); return { status: "RECONCILED" }; } };
+  const executor = createLocalTinderDiscoveryExecutor({ runtime });
+  await executor.initialize();
+  maps[0].set("current", "a");
+  await executor.initialize();
+  assert.equal(maps[0], maps[1]);
+  assert.equal(executor.localBindingCount(), 1);
+  await createLocalTinderDiscoveryExecutor({ runtime }).initialize();
+  assert.notEqual(maps[2], maps[0]);
+  assert.equal(maps[2].size, 0);
+});
+
 test("mirror comparison after restart skips unchanged reordered rows, not name-only changed candidates", () => {
   const stored = [storedConversation("A", "last A", "a"), storedConversation("B", "last B", "b")];
   const plan = planInboxReconciliation([inventoryRow("B", "last B", 0), inventoryRow("A", "new A", 1), inventoryRow("C", "new C", 2)], stored);
-  assert.deepEqual(plan.map(item => item.action), ["UNCHANGED", "REVALIDATE", "INITIAL_READ"]);
+  assert.deepEqual(plan.map(item => item.action), ["UNCHANGED", "REVALIDATE", "REVALIDATE"]);
   assert.equal(plan[0].conversation.id, "b");
   assert.equal(plan[1].conversation, undefined);
   assert.equal(planInboxReconciliation([inventoryRow("A", "last A", 0)], [...stored, stored[0]])[0].action, "AMBIGUOUS");
@@ -97,20 +208,22 @@ test("unchanged reconciliation inventories both surfaces with zero detail reads"
   for (const field of ["thread_opens", "profile_reads", "history_reads", "match_tile_opens"]) assert.equal(result[field], 0);
 });
 
-test("reconciliation calls only one existing delta routine and one existing new-thread routine", async () => {
+test("UNKNOWN without a name candidate is bounded revalidation, not an invented new Conversation", async () => {
   const calls = [];
   const inbox = { readSourceXml: async () => {},
     readInboxInventory: async () => ({ inventory: [inventoryRow("A", "new tail", 0), inventoryRow("B", "new thread", 1)] }),
     readStoredConversations: async () => [storedConversation("A", "old tail", "a")],
     updateInboxPosition: async () => {}, locateInventoryRow: async entry => entry,
-    readUnboundChanged: async () => { calls.push("delta"); return { outcome: "KNOWN_CHANGED", conversation_id: "a" }; },
-    readNewThread: async () => { calls.push("initial"); return { outcome: "NEW_THREAD", conversation_id: "b" }; } };
+    readUnboundChanged: async ({ row }) => { calls.push("bounded"); return row.inbox_position === 0
+      ? { outcome: "KNOWN_CHANGED", conversation_id: "a" } : { outcome: "AMBIGUOUS" }; },
+    readNewThread: async () => assert.fail("UNKNOWN cannot create a Conversation") };
   const result = await reconcileExistingTinderMirror(inbox, { observeMatchInventory: async () => ({}),
     reconcileMatchInventory: async () => ({ updates: 1, unresolved: 0 }) });
-  assert.deepEqual(calls, ["delta", "initial"]);
+  assert.deepEqual(calls, ["bounded", "bounded"]);
   assert.equal(result.thread_opens, 2);
-  assert.equal(result.profile_reads, 1);
-  assert.equal(result.history_reads, 1);
+  assert.equal(result.profile_reads, 0);
+  assert.equal(result.history_reads, 0);
+  assert.equal(result.unknown, 1);
   assert.equal(result.match_tile_opens, 0);
 });
 

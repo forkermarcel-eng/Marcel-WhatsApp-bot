@@ -198,8 +198,12 @@ export async function readVerifiedTinderProfileMedia(runtime, {
     }
     const digest = await visibleMediaDigest(screenBytes, observation.media_bounds);
     if (digest === currentDigest || observation.media_pager.position === observedPosition) {
-      unchangedBoundaryObservations = digest === currentDigest
-        && observation.media_pager.position === observedPosition ? unchangedBoundaryObservations + 1 : 0;
+      // The terminal page may be animated/video. Once every advertised page
+      // was visited, repeated official last-page position proves the boundary;
+      // changing frame pixels must not keep that completed pager alive.
+      const terminal = observedPosition === total && capturedPages === total;
+      unchangedBoundaryObservations = observation.media_pager.position === observedPosition
+        && (terminal || digest === currentDigest) ? unchangedBoundaryObservations + 1 : 0;
       if (unchangedBoundaryObservations >= 2) return compactResult({
         status: observedPosition === total && capturedPages === total ? "MEDIA_READ" : "PAGER_NO_PROGRESS",
         capturedPages, pagerGestures: gestures,

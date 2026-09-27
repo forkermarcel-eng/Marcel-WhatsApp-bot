@@ -71,6 +71,17 @@ test("real PostgreSQL media DDL, unique digest, restart reuse, gallery and order
     assert.equal(expiredAgain.reused,true);
     assert.equal(expired.asset.metadata.sourceSha256,undefined);
     assert.equal(mixedGallery[0].contactId,7);
+    const avatarContext={channel:"tinder",sourceType:"avatar",conversationReference:"avatar-fixture",
+      role:"conversation_avatar",ordinal:0,provenance:{avatarObservedAt:"2026-09-28T10:00:00Z"}};
+    const avatarIngress=createSharedAttachmentIngress({repository,storage});
+    const avatar=await avatarIngress.ingest({input,context:avatarContext});
+    const againAvatar=await avatarIngress.ingest({input,context:{...avatarContext,
+      provenance:{avatarObservedAt:"2026-09-28T11:00:00Z"}}});
+    assert.equal(againAvatar.asset.assetId,avatar.asset.assetId);
+    assert.equal(againAvatar.reused,true);
+    const avatarRows=await repository.listAssetsForOwner({ownerChannel:"tinder",ownerType:"conversation",ownerReference:"avatar-fixture"},{includeContext:true});
+    assert.equal(avatarRows.length,1);
+    assert.equal(avatarRows[0].link.context.provenance.avatarObservedAt,"2026-09-28T11:00:00Z");
   } finally { await db.close(); }
 });
 

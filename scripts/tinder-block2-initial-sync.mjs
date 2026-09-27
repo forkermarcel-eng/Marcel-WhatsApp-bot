@@ -26,6 +26,7 @@ import {
 } from "../tinder-mirror/appium-conversation-reader.js";
 import { readCompleteLiveMatchProfile } from "../tinder-mirror/appium-match-live-profile-runner.js";
 import { createProfileMediaBuffer } from "../tinder-mirror/profile-media-buffer.js";
+import { createRuntime as createProfileControlRuntime } from "./tinder-block2-match-live-profile.mjs";
 import { ingestVisibleAvatar } from "../tinder-mirror/visible-avatar-media.js";
 import { existingSuffixObservedPrefixOverlap, mergeTinderHistory } from "../tinder-mirror/conversation.js";
 
@@ -890,8 +891,7 @@ async function openReadAndMirror({
     sourceXml, tap, sleep,
     ...(profileMedia ? {readInitialMedia: name => profileMedia.read({sourceXml,sleep,
       captureScreen:async()=>Buffer.from(await appium("/screenshot"),"base64"),
-      swipePager:bounds=>appium("/execute/sync",{method:"POST",body:{script:"mobile: scrollGesture",
-        args:[{left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height,direction:"right",percent:0.85}]}})
+      swipePager:createProfileControlRuntime({appiumBaseUrl:APPIUM_BASE_URL,sessionId}).swipePager
     },name)} : {}),
     scrollProfile: bounds => scrollTowardBottom(bounds, profileScrollPercent)
   }, expectedDisplayName, { maxProfileGestures, settleMilliseconds, boundarySettleMilliseconds });
@@ -971,7 +971,9 @@ async function openReadAndMirror({
   if (!synced?.conversation?.id || synced.conversation.history_complete !== true) {
     throw new Error("Completed Tinder history was not accepted by the existing product mirror");
   }
-  const profileMediaResult = profileMedia ? await profileMedia.flush({deviceId,conversationId:synced.conversation.id,transport}) : null;
+  // Only an accepted, actually CREATED initial Conversation may mint its
+  // Tinder-only Contact here. UNKNOWN/reopened records never enter this branch.
+  const profileMediaResult = await bindAndFlushInitialMedia({synced,deviceId,transport,profileMedia,enabled:sharedMediaEnabled});
   const firstObservedInSweep = !processedConversationIds.has(synced.conversation.id);
   if (firstObservedInSweep && persistInboxOrder) {
     processedConversationIds.add(synced.conversation.id);
@@ -1001,7 +1003,21 @@ async function openReadAndMirror({
   });
   adapter.clear();
   await returnToInbox();
+  if (synced.created && sharedMediaEnabled) {
+    await ingestVisibleAvatar({ownerType:"conversation",ramKey:row.ram_key,
+      runtime:{sourceXml,captureScreen:async()=>Buffer.from(await appium("/screenshot"),"base64")},
+      ingest:values=>transport.ingestMedia({deviceId,ownerId:synced.conversation.id,ownerType:"conversation",...values})});
+  }
   return result;
+}
+
+export async function bindAndFlushInitialMedia({synced,deviceId,transport,profileMedia,enabled}) {
+  if (!synced?.conversation?.id || synced.conversation.history_complete !== true) {
+    throw new Error("An accepted complete initial Conversation is required");
+  }
+  const conversationId=synced.conversation.id;
+  if (synced.created === true && enabled) await transport.bindContact({deviceId,conversationId});
+  return profileMedia ? profileMedia.flush({deviceId,conversationId,transport}) : null;
 }
 
 async function verifiedInboxTop(initialInbox, viewportKeys) {

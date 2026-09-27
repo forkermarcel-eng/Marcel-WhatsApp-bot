@@ -385,9 +385,9 @@ export function planMatchReconciliation(stored, inventory) {
  * The local discovery worker reuses the existing read-only carousel inventory
  * and ordinary Match ingress. It never taps or opens a Match tile.
  */
-export async function createTinderLocalMatchDiscoveryRuntime(environment = process.env) {
+export async function createTinderLocalMatchDiscoveryRuntime(environment = process.env, { runtimeFactory = createRuntime } = {}) {
   const config = runtimeConfiguration(environment);
-  const runtime = createRuntime(config);
+  const runtime = runtimeFactory(config);
   const deviceId = await resolveDeviceId(runtime, config.installedBridgeVersionCode);
   const avatars=environment.SHARED_MEDIA_ENABLED === "true" ? createMatchAvatarCollector({runtime}) : null;
   const observationRuntime=avatars?{...runtime,observeVisibleMedia:carousel=>avatars.observe(carousel)}:runtime;
@@ -403,9 +403,12 @@ export async function createTinderLocalMatchDiscoveryRuntime(environment = proce
       const plan = planMatchReconciliation(stored, discovery.inventory);
       // No destructive removal or speculative remapping of disappeared
       // tiles. Report the difference rather than hiding stale product rows.
-      if (plan.unmatchedStored) { avatars?.clear();return { changed: false, unresolved: plan.unmatchedStored, created: 0, updates: 0 }; }
+      // A missing old tile cannot veto media for independently revalidated
+      // present tiles or ordinary new unassigned tiles from the existing
+      // planner. Missing records remain untouched, never merged or deleted.
+      const changes=plan.changes;
       let created = 0;
-      for (const match of plan.changes) {
+      for (const match of changes) {
         const result = await runtime.dashboard("/dashboard-api/tinder/matches", { method: "POST", body: { device_id: deviceId, match } });
         if (result.created) created += 1;
       }
@@ -416,7 +419,7 @@ export async function createTinderLocalMatchDiscoveryRuntime(environment = proce
           upload:(id,sourceBytes)=>runtime.dashboard(`/dashboard-api/tinder/matches/${encodeURIComponent(id)}/media`,
             {method:"POST",body:{device_id:deviceId,kind:"avatar",ordinal:0,source_base64:sourceBytes.toString("base64")}})});
       }
-      return { changed: plan.changes.length > 0, unresolved: 0, created, updates: plan.changes.length,...(media?{media}: {}) };
+      return { changed: changes.length > 0, unresolved: plan.unmatchedStored, created, updates: changes.length,...(media?{media}: {}) };
     },
     async readMatchDiscovery() {
       const discovery = await this.observeMatchInventory();

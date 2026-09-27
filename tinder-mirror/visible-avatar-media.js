@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { createHash } from "node:crypto";
 import { observeInboxFromXml, observeMatchCarouselFromXml } from "./appium-conversation-reader.js";
 
 // No navigation capability is accepted. The caller supplies the RAM continuity
@@ -50,7 +51,10 @@ export function createMatchAvatarCollector({runtime,maxBytes=48*1024*1024}) {
         for(const [state,sourceBytes] of crops){
           const observed=inventory.filter(item=>key(item.tile)===state);
           const owners=stored.filter(item=>key(item.tile)===state);
-          if(observed.length!==1||owners.length!==1||owners[0].avatar_url){skipped++;continue;}
+          if(observed.length!==1||owners.length!==1){skipped++;continue;}
+          // Existing media content digest only; never used to identify a Match.
+          const digest=createHash("sha256").update(sourceBytes).digest("hex");
+          if(owners[0].avatar_source_sha256===digest){skipped++;continue;}
           try{await upload(owners[0].id||owners[0].match_id,sourceBytes);persisted++;}catch{failed++;}
         }
         return {persisted,skipped,failed};

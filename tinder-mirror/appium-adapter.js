@@ -155,6 +155,8 @@ export function createExistingDashboardBearerTransport({ baseUrl, bearerToken, f
     return data;
   }
   return Object.freeze({
+    bindContact: ({deviceId,conversationId}) => request(`/dashboard-api/tinder/conversations/${encodeURIComponent(conversationId)}/contact`,
+      {device_id:deviceId,confirmed:true}),
     ingestMedia: ({deviceId,ownerId,ownerType,kind,ordinal,sourceBytes,profileCollectionSize}) => {
       if (!["conversation","match"].includes(ownerType)) throw new TypeError("Invalid media owner");
       return request(`/dashboard-api/tinder/${ownerType === "match" ? "matches" : "conversations"}/${encodeURIComponent(ownerId)}/media`,

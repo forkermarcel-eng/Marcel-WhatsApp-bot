@@ -38,6 +38,31 @@ function recordingIngestor() {
 const screen = page => sharp({ create: { width: 576, height: 1280, channels: 3,
   background: ["red","blue","green"][page] } }).png().toBuffer();
 
+test("animated last media page completes by repeated official last position, not frozen pixels", async()=>{
+  let position=1,frame=0,gestures=0;
+  const ingestor=recordingIngestor();
+  const result=await readVerifiedTinderProfileMedia({sourceXml:async()=>profileXml(position,8),
+    captureScreen:()=>sharp({create:{width:576,height:1280,channels:3,background:{r:++frame*5,g:20,b:30}}}).png().toBuffer(),
+    swipePager:async()=>{gestures++;position=Math.min(position+1,8);}}, {
+    profileReference:"fixture",expectedDisplayName:"Visible profile",mediaIngestor:ingestor,
+    settleMilliseconds:0,boundarySettleMilliseconds:0});
+  assert.equal(result.end_actually_reached,true);
+  assert.equal(result.captured_pages,8);
+  assert.equal(gestures,9);
+  assert.equal(ingestor.calls.image.length,8);
+});
+
+test("animated nonterminal position cannot pretend to be the end and stays bounded",async()=>{
+  let frame=0;
+  const result=await readVerifiedTinderProfileMedia({sourceXml:async()=>profileXml(1,8),
+    captureScreen:()=>screen(++frame%3),swipePager:async()=>{}},{profileReference:"fixture",
+    expectedDisplayName:"Visible profile",mediaIngestor:recordingIngestor(),maxPagerGestures:4,
+    settleMilliseconds:0,boundarySettleMilliseconds:0});
+  assert.equal(result.end_actually_reached,false);
+  assert.equal(result.captured_pages,1);
+  assert.ok(result.pager_gestures<=4);
+});
+
 test("initial profile crops stay in RAM until accepted conversation ID, then clear without a second profile open", async () => {
   const buffer=createProfileMediaBuffer(),uploads=[];
   const outcome=await buffer.read({sourceXml:async()=>profileXml(),captureScreen:()=>screen(0),swipePager:async()=>false,sleep:async()=>{}},"Visible profile");

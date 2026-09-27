@@ -39,7 +39,8 @@ export function createTinderMediaService({ pool, media }) {
         role: kind === "profile" ? (ordinal === 0 ? "profile_primary" : "profile_photo")
           : ownerType === "match" ? "match_avatar" : "conversation_avatar",
         ordinal, provenance: { kind: "screenshot_crop", ownerType, deviceId,
-          ...(profileCollectionSize!==null?{profileCollectionSize}: {}) }
+          ...(profileCollectionSize!==null?{profileCollectionSize}: {}),
+          ...(kind === "avatar" ? {avatarObservedAt:new Date().toISOString()} : {}) }
       } });
       return { asset_id: result.asset.assetId, reused: result.reused };
     },
@@ -52,9 +53,12 @@ export function createTinderMediaService({ pool, media }) {
       const profileCollectionComplete=completeSizes.some(size=>Array.from({length:size},(_,ordinal)=>ordinal).every(ordinal=>
         available.some(row=>row.link.ordinal===ordinal && ["profile_primary","profile_photo"].includes(row.link.relationshipType)
           && row.link.context?.provenance?.profileCollectionSize===size)));
-      const avatar = available.find(row => row.link.relationshipType === `${ownerType}_avatar`)
+      const avatar = available.filter(row => row.link.relationshipType === `${ownerType}_avatar`)
+        .sort((a,b)=>String(b.link.context?.provenance?.avatarObservedAt || b.asset.createdAt || "")
+          .localeCompare(String(a.link.context?.provenance?.avatarObservedAt || a.asset.createdAt || "")))[0]
         || available.find(row => row.link.relationshipType === "profile_primary");
       return { avatar_url: avatar ? mediaDeliveryUrl(avatar.asset.assetId,owner,"thumbnail") : null,
+        avatar_source_sha256:avatar?.asset.metadata?.sourceSha256 ?? null,
         profile_collection_complete:profileCollectionComplete,
         media: available.map(row => ({ asset_id: row.asset.assetId, role: row.link.relationshipType,
           ordinal: row.link.ordinal, url: mediaDeliveryUrl(row.asset.assetId,owner,"display") })) };

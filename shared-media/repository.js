@@ -162,7 +162,8 @@ export function createSharedMediaRepository(pool) {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8${withContext ? ",$9::jsonb" : ""})
          ${withContext ? `ON CONFLICT (asset_id, owner_channel, owner_type, owner_reference, relationship_type, (COALESCE(ordinal, -1)))
            DO UPDATE SET context=jsonb_set(media_asset_links.context,'{provenance}',EXCLUDED.context->'provenance')
-           WHERE EXCLUDED.context->'provenance'->'profileCollectionSize' IS NOT NULL
+           WHERE (EXCLUDED.context->'provenance'->'profileCollectionSize' IS NOT NULL
+             OR EXCLUDED.context->'provenance'->'avatarObservedAt' IS NOT NULL)
              AND EXCLUDED.context->'provenance' IS DISTINCT FROM media_asset_links.context->'provenance'` : ""}`,
         [link.linkId, link.assetId, link.ownerChannel, link.ownerType,
           link.ownerReference, link.relationshipType, link.ordinal, link.createdAt,

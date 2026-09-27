@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
+import {createHash} from "node:crypto";
+import {createTinderLocalMatchDiscoveryRuntime} from "../scripts/tinder-block2-match-initial-sync.mjs";
+import {bindAndFlushInitialMedia} from "../scripts/tinder-block2-initial-sync.mjs";
+import {createExistingDashboardBearerTransport} from "../tinder-mirror/appium-adapter.js";
+import {readFileSync} from "node:fs";
 import { createTinderMediaService } from "../tinder-mirror/media.js";
 import { ingestVisibleAvatar, createMatchAvatarCollector } from "../tinder-mirror/visible-avatar-media.js";
 import { observeInboxFromXml, observeMatchCarouselFromXml } from "../tinder-mirror/appium-conversation-reader.js";
@@ -98,6 +103,66 @@ test("Match avatar inventory flush uses only one unambiguous persisted tile owne
   await collector.observe(carousel);
   assert.equal((await collector.flush({inventory:carousel.tiles,stored:[...stored,...stored],upload})).skipped,1);
   assert.equal(writes,1);
+});
+
+test("normal Match discovery fills known avatars despite missing old tile; unchanged skips; changed bytes update",async()=>{
+  const xml=inbox(),carousel=observeMatchCarouselFromXml(xml);
+  let color="blue",posts=0,opens=0;
+  const stored=[{id:ownerId,device_id:deviceId,tile:carousel.tiles[0].tile,carousel_position:0},
+    {id:"old-unresolved",device_id:deviceId,tile:{display_name:"missing"},carousel_position:1}];
+  const runtime={sourceXml:async()=>xml,sleep:async()=>{},scrollCarousel:async()=>false,
+    captureScreen:()=>sharp({create:{width:576,height:1280,channels:3,background:color}}).png().toBuffer(),
+    tap(){opens++;throw Error("no open");},dashboard:async(path,options)=>{
+      if(path.includes("device-bridge"))return {devices:[{device_id:deviceId,app_version_code:140}]};
+      if(options?.method==="POST"){
+        if(path==='/dashboard-api/tinder/matches'){
+          stored.push({id:ownerId,device_id:deviceId,...options.body.match});
+          return {ok:true,created:true};
+        }
+        assert.ok(path.endsWith('/media'));posts++;
+        const target=stored.find(item=>item.id===ownerId);
+        target.avatar_url="/protected";
+        target.avatar_source_sha256=createHash('sha256').update(Buffer.from(options.body.source_base64,'base64')).digest('hex');
+        return {ok:true};
+      }
+      return {matches:stored};
+    }};
+  const service=await createTinderLocalMatchDiscoveryRuntime({APPIUM_SESSION:"existing",DASHBOARD_API_SECRET:"fixture",TINDER_DEVICE_VERSION_CODE:"140",SHARED_MEDIA_ENABLED:"true"},{runtimeFactory:()=>runtime});
+  const run=async()=>service.reconcileMatchInventory(await service.observeMatchInventory());
+  const first=await run();assert.equal(first.unresolved,1);assert.equal(first.media.persisted,1);
+  assert.equal((await run()).media.persisted,0);
+  color="green";assert.equal((await run()).media.persisted,1);
+  assert.equal(posts,2);assert.equal(opens,0);assert.equal(stored.length,2);
+  stored.splice(0,1);
+  const newMatch=await run();assert.equal(newMatch.created,1);assert.equal(newMatch.unresolved,1);assert.equal(newMatch.media.persisted,1);
+  assert.equal((await run()).media.persisted,0);assert.equal(posts,3);assert.equal(opens,0);
+});
+
+test("avatar projection follows latest observation even when older shared bytes are reused",async()=>{
+  const rows=[
+    {asset:{assetId:"newer-binary",availability:"AVAILABLE",createdAt:"2026-09-28",metadata:{sourceSha256:"B"}},link:{relationshipType:"match_avatar",context:{provenance:{avatarObservedAt:"2026-09-28T10:00:00Z"}}}},
+    {asset:{assetId,availability:"AVAILABLE",createdAt:"2026-09-27",metadata:{sourceSha256:"A"}},link:{relationshipType:"match_avatar",context:{provenance:{avatarObservedAt:"2026-09-28T11:00:00Z"}}}}
+  ];
+  const service=createTinderMediaService({pool:{},media:{repository:{listAssetsForOwner:async()=>rows}}});
+  const result=await service.present("match",ownerId);
+  assert.equal(result.avatar_source_sha256,"A");assert.ok(result.avatar_url.includes(assetId));
+});
+
+test("accepted new initial Conversation binds once before buffered media; reused/UNKNOWN cannot mint a Contact",async()=>{
+  const calls=[];
+  const transport=createExistingDashboardBearerTransport({baseUrl:"http://fixture",bearerToken:"test",fetchImpl:async(url,options)=>{
+    const body=JSON.parse(options.body);assert.equal(body.confirmed,true);assert.equal(body.device_id,deviceId);
+    assert.ok(url.endsWith(`/${ownerId}/contact`));assert.equal(body.contact_id,undefined);calls.push("bind");
+    return {ok:true,json:async()=>({ok:true,contactId:7})};}});
+  const profileMedia={flush:async x=>{assert.equal(x.conversationId,ownerId);calls.push("media");return {persisted:8};}};
+  const input={synced:{created:true,conversation:{id:ownerId,history_complete:true}},deviceId,transport,profileMedia,enabled:true};
+  assert.equal((await bindAndFlushInitialMedia(input)).persisted,8);assert.deepEqual(calls,["bind","media"]);
+  calls.length=0;await bindAndFlushInitialMedia({...input,synced:{...input.synced,created:false}});assert.deepEqual(calls,["media"]);
+  await assert.rejects(()=>bindAndFlushInitialMedia({...input,synced:{action:"UNKNOWN"}}),/accepted complete/);
+  const source=readFileSync(new URL('../scripts/tinder-block2-initial-sync.mjs',import.meta.url),'utf8');
+  assert.match(source,/swipePager:createProfileControlRuntime/);
+  assert.match(source,/await bindAndFlushInitialMedia/);
+  assert.match(source,/await returnToInbox\(\);\s*if \(synced.created && sharedMediaEnabled\)\s*\{\s*await ingestVisibleAvatar/);
 });
 test("unassigned match avatar needs no artificial contact/conversation and presents protected media only", async () => {
   let context;

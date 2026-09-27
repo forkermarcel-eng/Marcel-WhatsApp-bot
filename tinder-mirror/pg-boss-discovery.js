@@ -83,6 +83,12 @@ export function normalizeTinderDiscoveryJob(value) {
   return Object.freeze({ device_id: value.device_id });
 }
 
+export function normalizeProcessMatchJob(value) {
+  if(!plainObject(value)||Object.keys(value).length!==3||value.operation!=="PROCESS_MATCH"
+    ||!validDeviceId(value.device_id)||!validDeviceId(value.match_id))throw new TypeError("A references-only PROCESS_MATCH job is required");
+  return Object.freeze({operation:"PROCESS_MATCH",device_id:value.device_id,match_id:value.match_id});
+}
+
 export function createPgBossTransactionDb(client) {
   if (!client || typeof client.query !== "function") {
     throw new TypeError("A PostgreSQL transaction client is required");
@@ -141,7 +147,11 @@ export function createTinderDiscoveryEnqueuer({
     );
   }
 
-  return Object.freeze({ enqueue });
+  async function enqueueProcessMatch(value) {
+    const payload=normalizeProcessMatchJob(value);
+    return boss.send(TINDER_DISCOVERY_QUEUE,payload,{...immutableOptions});
+  }
+  return Object.freeze({ enqueue, enqueueProcessMatch });
 }
 
 export function createTinderDiscoveryPgBoss(PgBoss, { connectionString } = {}) {

@@ -7,6 +7,66 @@ import {
   preflightSharedMedia
 } from "../shared-media/migration.js";
 import { runSharedMediaMigrationCli } from "../scripts/shared-media-migration.js";
+import { classifyMediaContentCatalog, MEDIA_CONTENT_DDL, applyMediaContent } from "../shared-media/content-migration.js";
+
+function contentCatalog(applied = false) {
+  const catalog = { relations: ["media_assets", "media_asset_links"].map(table_name => ({ table_name, relkind: "r" })),
+    columns: [...assetColumns, ...linkColumns], constraints: targetConstraints(), indexes: targetIndexes(), triggers: 0 };
+  if (applied) {
+    catalog.columns.push({ table_name: "media_asset_links", column_name: "context", udt_name: "jsonb", is_nullable: "NO", column_default: "'{}'::jsonb" });
+    catalog.constraints.push(check("media_assets", "media_assets_source_sha256_check",
+      "CHECK (((metadata ->> 'sourceSha256'::text) IS NULL) OR ((metadata ->> 'sourceSha256'::text) ~ '^[a-f0-9]{64}$'::text))"));
+    catalog.indexes.push(...[1,3].map((i,n) => ({ table_name: n ? "media_asset_links" : "media_assets",
+      indexname: n ? "media_asset_links_usage_unique" : "media_assets_source_sha256_unique", indexdef: MEDIA_CONTENT_DDL[i] })));
+  }
+  return structuredClone(catalog);
+}
+
+test("content extension accepts only exact baseline or complete additive target", () => {
+  assert.equal(classifyMediaContentCatalog(contentCatalog()), "ELIGIBLE_FOR_MIGRATION");
+  assert.equal(classifyMediaContentCatalog(contentCatalog(true)), "ALREADY_CANONICAL");
+  for (const change of [c => c.columns.at(-1).is_nullable = "YES",
+    c => c.indexes.at(-1).indexdef = c.indexes.at(-1).indexdef.replace("UNIQUE", ""),
+    c => c.constraints.at(-1).definition = "CHECK (true)", c => c.triggers = 1,
+    c => c.columns.shift(), c => c.indexes.pop()]) {
+    const drift = contentCatalog(true); change(drift);
+    assert.throws(() => classifyMediaContentCatalog(drift), /SCHEMA_DRIFT/);
+  }
+});
+
+test("content migration is atomic, repeatable and never consolidates existing rows", async () => {
+  for (const mode of ["apply", "repeat", "duplicate", "ddl-fail", "postcheck-fail", "commit-unknown"]) {
+    let applied = mode === "repeat", executed = 0;
+    const statements = [];
+    const client = { release() {}, async query(sql) {
+      statements.push(sql);
+      const catalog = contentCatalog(applied);
+      if (sql.includes("c.relname AS table_name")) return { rows: catalog.relations };
+      if (sql.includes("information_schema.columns")) return { rows: catalog.columns };
+      if (sql.includes("pg_get_constraintdef")) return { rows: catalog.constraints };
+      if (sql.includes("pg_get_indexdef")) return { rows: catalog.indexes };
+      if (sql.includes("pg_trigger")) return { rows: [{ count: 0 }] };
+      if (sql.includes("AS duplicates")) return { rows: [{ duplicates: mode === "duplicate" }] };
+      if (sql.includes("count(*)::int FROM media_assets")) return { rows: [{ assets: 2, links: 3, legacyMedia: 14, legacy: 14 }] };
+      if (MEDIA_CONTENT_DDL.includes(sql)) {
+        if (mode === "ddl-fail") throw Error("DDL_FAILED");
+        if (++executed === MEDIA_CONTENT_DDL.length && mode !== "postcheck-fail") applied = true;
+      }
+      if (sql === "COMMIT" && mode === "commit-unknown") throw Error("connection lost");
+      return { rows: [] };
+    } };
+    const run = () => applyMediaContent({ connect: async () => client });
+    if (["apply", "repeat"].includes(mode)) {
+      assert.equal((await run()).state, "COMMIT_CONFIRMED");
+      assert.equal(executed, mode === "repeat" ? 0 : 4);
+    } else {
+      await assert.rejects(run);
+      assert.equal(statements.includes("ROLLBACK"), mode !== "commit-unknown");
+      if (mode === "duplicate") assert.equal(executed, 0);
+    }
+    assert.equal(statements.some(sql => /^(UPDATE|DELETE|INSERT|DROP|TRUNCATE)\b/i.test(sql)), false);
+  }
+});
 
 const assetColumns = [
   ["asset_id", "uuid", "NO", null],

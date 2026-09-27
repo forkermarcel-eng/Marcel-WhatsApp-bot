@@ -227,7 +227,7 @@ function hasExpectedIndexes(indexes) {
       && canonicalIndexShape(row.indexdef) === shape).length === 1);
 }
 
-function catalogState(catalog) {
+export function catalogState(catalog) {
   if (catalog.relations.length === 0) return { state: "ELIGIBLE_FOR_MIGRATION", reason: null };
   const names = catalog.relations.map((row) => row.table_name).sort().join(",");
   if (names !== "media_asset_links,media_assets" || catalog.relations.some((row) => row.relkind !== "r")) {
@@ -258,7 +258,7 @@ async function assertLegacyMediaFoundation(client) {
   }
 }
 
-async function readCatalog(client) {
+export async function readSharedMediaCatalog(client) {
   const relations = await client.query(`
     SELECT c.relname AS table_name, c.relkind
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -332,7 +332,7 @@ async function counts(client, includeShared) {
 
 export async function inspectSharedMediaSchema(client) {
   await assertLegacyMediaFoundation(client);
-  const catalog = await readCatalog(client);
+  const catalog = await readSharedMediaCatalog(client);
   const state = catalogState(catalog);
   if (state.state === "INVALID") {
     fail("SHARED_MEDIA_SCHEMA_INVALID", "Shared media schema is neither the empty baseline nor the canonical target.", state.reason);

@@ -22,6 +22,8 @@ import {
   requireDeviceBridgeReady
 } from "./device-bridge/readiness.js";
 import { createContactMediaService } from "./services/contact-media.js";
+import { requireContactWhatsAppJid } from "./services/contact-channel.js";
+import { createSharedMediaRuntime } from "./shared-media/runtime.js";
 import { createContactIdentityService } from "./services/contact-identities.js";
 import { registerTinderMirrorRoutes } from "./tinder-mirror/routes.js";
 import {
@@ -51,6 +53,10 @@ const configuredTinderDiscoveryEnqueuer = TINDER_DISCOVERY_TRANSPORT_ENABLED
           throw new Error("Tinder discovery transport is not ready");
         }
         return tinderDiscoveryEnqueuer.enqueue(hint, options);
+      },
+      enqueueProcessMatch(job) {
+        if(!tinderDiscoveryEnqueuer)throw new Error("Tinder transport is not ready");
+        return tinderDiscoveryEnqueuer.enqueueProcessMatch(job);
       }
     })
   : null;
@@ -82,6 +88,7 @@ app.use("/device-bridge/v1", deviceBridgeRawBodyErrorMiddleware);
 
 app.use("/device-bridge/v1", deviceBridgeFoundationMiddleware);
 
+app.use(/^\/dashboard-api\/tinder\/(?:conversations|matches)\/[^/]+\/media$/, express.json({ limit: "12mb" }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -97,7 +104,8 @@ const openai = new OpenAI({
 apiKey: process.env.OPENAI_API_KEY
 });
 
-const { listContactMedia } = createContactMediaService(pool);
+const sharedMediaRuntime = createSharedMediaRuntime({ pool });
+const { listContactMedia } = createContactMediaService(pool, { sharedGallery: sharedMediaRuntime?.gallery });
 const {
   listContactIdentities,
   listContactIdentityMap,
@@ -1937,7 +1945,7 @@ await initializeResetDeviceBridgeDatabase(pool);
 await pool.query(`
 CREATE TABLE IF NOT EXISTS contacts (
   id SERIAL PRIMARY KEY,
-  whatsapp_jid TEXT UNIQUE NOT NULL,
+  whatsapp_jid TEXT UNIQUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 )
@@ -3739,6 +3747,8 @@ async function ensureContact(
 jid
 ) {
 
+requireContactWhatsAppJid({ whatsapp_jid: jid });
+
 const phone =
 (
   isTestJid(
@@ -4866,6 +4876,8 @@ jid,
 limit = 200
 ) {
 
+if (!jid) return [];
+
 const safeLimit =
 Math.max(
   1,
@@ -5360,6 +5372,8 @@ async function getDashboardMessageCount(
 jid
 ) {
 
+if (!jid) return 0;
+
 const result =
 await pool.query(
   `
@@ -5487,6 +5501,7 @@ normalizeForDuplicate(row.message_text) === normalizeForDuplicate(text)
 }
 
 async function importWhatsAppHistory({ contact, rawText, marcelSenderNames = [], senderMapping = null, dryRun = false, replaceExisting = false }) {
+requireContactWhatsAppJid(contact);
 const parsed = parseWhatsAppExport(rawText);
 if (!parsed.length) throw new Error("Keine WhatsApp-Nachrichten im unterstuetzten Exportformat erkannt.");
 
@@ -5757,6 +5772,7 @@ return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex")
 }
 
 async function buildWhatsAppDuplicateCleanupPlan({ contact, rawText, senderMapping }) {
+requireContactWhatsAppJid(contact);
 const parsed = parseWhatsAppExport(rawText);
 if (!parsed.length) throw new Error("Keine WhatsApp-Nachrichten im unterstuetzten Exportformat erkannt.");
 
@@ -8502,9 +8518,12 @@ registerDeviceBridgeResetRoutes({
 // Block 2 is intentionally independent of device heartbeat/readiness.  The
 // existing dashboard bearer protects the adapter transport; normal product
 // storage is device-bound by an ordinary foreign key only.
+sharedMediaRuntime?.registerRoutes(app, dashboardApiAuthorized);
 registerTinderMirrorRoutes({
   app,
   pool,
+  sharedMedia: sharedMediaRuntime,
+  processMatchEnqueuer: configuredTinderDiscoveryEnqueuer,
   dashboardApiReady,
   dashboardApiAuthorized
 });
@@ -11915,6 +11934,7 @@ try {
       contact => {
 
         const isProfileOnly =
+          contact.whatsapp_jid == null ||
           isProfileJid(
             contact.whatsapp_jid
           );
@@ -12387,9 +12407,7 @@ try {
         RETURNING *
       `,
       [
-        createProfileJid(
-          identityKey
-        ),
+        null,
         name,
         identityKey,
         phone,
@@ -16152,6 +16170,7 @@ try {
 
 
   const translatedFixedDisplay =
+    req.query.source_only === "1" ? fixedDisplaySource :
     (
       await translateDashboardValueListToGerman([
         {
@@ -16209,6 +16228,7 @@ try {
 
 
   const structuredDisplayValues =
+    req.query.source_only === "1" ? structuredDisplayRequests.map(entry => entry.value) :
     await translateDashboardStructuredValueListToGerman(
       structuredDisplayRequests
     );
@@ -16307,6 +16327,8 @@ try {
       totalMessages,
 
     contact: {
+
+      ...(sharedMediaRuntime ? await sharedMediaRuntime.projectContact(contact.id) : {}),
 
       id:
         contact.id,
@@ -16422,6 +16444,7 @@ try {
         true,
 
       profileOnly:
+        contact.whatsapp_jid == null ||
         isProfileJid(
           contact.whatsapp_jid
         ),
@@ -17394,6 +17417,9 @@ try{
     const contact
     of data.contacts || []
   ){
+
+    // This legacy selector routes WhatsApp messages, not central persons.
+    if (!contact.whatsapp_jid) continue;
 
     const option =
       document.createElement(

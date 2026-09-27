@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { planInboxReconciliation } from "./local-discovery-executor.js";
+import { createExistingProcessMatch } from "./local-process-match.js";
 
 // Observed UI state only, never a person/Conversation identifier. Geometry
 // and Inbox position deliberately do not make an unchanged row new work.
@@ -38,6 +39,12 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
   metrics.match_updates = matchResult.updates;
   metrics.ambiguous += matchResult.unresolved;
   const represented = new Set();
+  async function missingAvatar(entry,id) {
+    const detail=stored.find(item=>item.conversation.id===id);
+    if(detail?.media?.avatar_url || !inbox.captureConversationAvatar)return;
+    const result=await inbox.captureConversationAvatar(entry,id);
+    if(result)metrics.avatar_updates=(metrics.avatar_updates||0)+(result.status==="AVATAR_INGESTED"?1:0);
+  }
   // Reserve every confirmed ID before processing any UNKNOWN, regardless of
   // Inbox order. Candidates remain ordinary objects in this run's RAM only.
   const reserved = new Set(plan.filter(item => item.identity === "KNOWN").map(item => item.conversation.id));
@@ -53,6 +60,7 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
       metrics.observed_unchanged += 1;
       represented.add(item.conversation.id);
       await inbox.updateInboxPosition(item.conversation, item.entry);
+      await missingAvatar(item.entry,item.conversation.id);
       continue;
     }
     if (item.identity === "UNKNOWN" && checkedUnknown.has(state)) {
@@ -79,6 +87,7 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
       directBindings.set(item.entry.observed_row.ram_key, result.conversation_id);
       represented.add(result.conversation_id);
       await inbox.updateInboxPosition({ id: result.conversation_id }, item.entry);
+      await missingAvatar(item.entry,result.conversation_id);
     } else {
       if (result.outcome === "AMBIGUOUS" && states.filter(value => value === state).length === 1) {
         checkedUnknown.add(state);
@@ -182,11 +191,12 @@ export async function createExistingLocalTinderDiscoveryRuntime(environment = pr
       close: local.close,
       reconcile: directBindings => reconcileExistingTinderMirror(inbox, matches, directBindings, checkedUnknown),
       deviceId: inbox.deviceId,
+      processMatch:createExistingProcessMatch({environment:local.environment,deviceId:inbox.deviceId}),
       readSourceXml: inbox.readSourceXml,
       readKnownChanged: inbox.readKnownChanged,
       readUnboundChanged: inbox.readUnboundChanged,
       readNewThread: inbox.readNewThread,
-      readMatchDiscovery: matches.readMatchDiscovery
+      readMatchDiscovery: () => matches.readMatchDiscovery()
     });
   } catch (error) {
     await local.close();

@@ -265,7 +265,7 @@ function hasExpectedIndexes(indexes, target) {
     && expected.every(shape => indexes.filter(row => canonicalIndexShape(row.indexdef) === shape).length === 1);
 }
 
-function catalogState(catalog) {
+export function catalogState(catalog) {
   if (catalog.relations.length === 0) return { state: "BASELINE_MISSING", reason: "RELATIONS" };
   const relationNames = catalog.relations.map(row => row.table_name).sort();
   const hasBaselineRelations = relationNames.join(",") === "tinder_conversation_messages,tinder_conversations";
@@ -314,7 +314,7 @@ async function assertDeviceFoundation(client) {
   }
 }
 
-async function readCatalog(client) {
+export async function readCatalog(client) {
   const relations = await client.query(`
     SELECT c.relname AS table_name, c.relkind
     FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace

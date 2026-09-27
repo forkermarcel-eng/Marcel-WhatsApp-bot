@@ -73,16 +73,16 @@ test("image ingestion writes separate resized image and thumbnail under an asset
       }],
       imageOptions: { maxWidth: 30, maxHeight: 30, thumbnailWidth: 20, thumbnailHeight: 20 }
     });
-    assert.equal(result.asset.storageKey, `media-assets/${assetId}/image.webp`);
+    assert.equal(result.asset.storageKey, `media-assets/${assetId}/source.bin`);
     assert.equal(result.asset.thumbnailStorageKey, `media-assets/${assetId}/thumbnail.webp`);
     assert.equal(await storage.exists(result.asset.storageKey), true);
     assert.equal(await storage.exists(result.asset.thumbnailStorageKey), true);
     const fullMeta = await sharp(await storage.read(result.asset.storageKey)).metadata();
     const thumbMeta = await sharp(await storage.read(result.asset.thumbnailStorageKey)).metadata();
     assert.deepEqual({ width: fullMeta.width, height: fullMeta.height, format: fullMeta.format }, {
-      width: 25,
-      height: 30,
-      format: "webp"
+      width: 50,
+      height: 60,
+      format: "png"
     });
     assert.deepEqual({ width: thumbMeta.width, height: thumbMeta.height, format: thumbMeta.format }, {
       width: 17,
@@ -90,7 +90,44 @@ test("image ingestion writes separate resized image and thumbnail under an asset
       format: "webp"
     });
     assert.equal(result.links[0].ownerType, "tinder_profile");
+    assert.equal(result.asset.metadata.sourceProvenance, "screenshot_crop");
+    const display = await sharp(await storage.read(result.asset.metadata.derivatives.display.storageKey)).metadata();
+    assert.equal(display.width, 25);
+    assert.equal(display.format, "webp");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("uncropped original bytes including metadata stay intact; display derivatives strip EXIF", async () => {
+  const source = await sharp({ create: { width: 12, height: 8, channels: 3, background: "red" } })
+    .withExif({ IFD0: { Artist: "fixture only" } }).jpeg().toBuffer();
+  const result = await createImageDerivatives(source);
+  assert.deepEqual(result.source.bytes, source);
+  assert.equal(result.source.provenance, "supplied_bytes");
+  assert.ok((await sharp(source).metadata()).exif);
+  assert.equal((await sharp(result.image.bytes).metadata()).exif, undefined);
+  assert.equal((await sharp(result.thumbnail.bytes).metadata()).exif, undefined);
+});
+
+test("a verified crop retains only its pixels, never the full screen", async () => {
+  const source = await splitColourPng();
+  const result = await createImageDerivatives(source, { crop: { left: 50, top: 0, width: 50, height: 60 } });
+  assert.notDeepEqual(result.source.bytes, source);
+  const { data, info } = await sharp(result.source.bytes).raw().toBuffer({ resolveWithObject: true });
+  assert.equal(info.width, 50);
+  assert.equal(info.height, 60);
+  for (let offset = 0; offset < data.length; offset += info.channels) {
+    assert.ok(data[offset + 2] > data[offset] * 3);
+  }
+});
+
+test("animated original remains byte-exact while static preview is a separate derivative", async () => {
+  const source = await sharp(Buffer.from([255, 0, 0, 0, 0, 255]), {
+    raw: { width: 1, height: 2, channels: 3, pageHeight: 1 }
+  }).gif({ delay: [100, 100], loop: 0 }).toBuffer();
+  const result = await createImageDerivatives(source);
+  assert.deepEqual(result.source.bytes, source);
+  assert.equal(result.source.pages, 2);
+  assert.equal((await sharp(result.thumbnail.bytes).metadata()).pages || 1, 1);
 });

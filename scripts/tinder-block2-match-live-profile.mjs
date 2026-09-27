@@ -7,7 +7,9 @@
  */
 
 import { pathToFileURL } from "node:url";
-import { runMatchToLiveProfile } from "../tinder-mirror/appium-match-live-profile-runner.js";
+import { runMatchToLiveProfile, discoverFreshMatchCarousel, sameVisibleMatchTile } from "../tinder-mirror/appium-match-live-profile-runner.js";
+import { createProcessMatch } from "../tinder-mirror/match-profile.js";
+import { createProfileMediaBuffer } from "../tinder-mirror/profile-media-buffer.js";
 
 const DEFAULT_APPIUM_BASE_URL = "http://127.0.0.1:4723/wd/hub";
 
@@ -53,7 +55,7 @@ function runtimeConfiguration(environment = process.env) {
   });
 }
 
-function createRuntime(config, fetchImpl = fetch) {
+export function createRuntime(config, fetchImpl = fetch) {
   async function appium(path, { method = "GET", body } = {}) {
     const response = await fetchImpl(`${config.appiumBaseUrl}/session/${encodeURIComponent(config.sessionId)}${path}`, {
       method,
@@ -125,12 +127,39 @@ function createRuntime(config, fetchImpl = fetch) {
 
   return Object.freeze({
     sourceXml,
+    captureScreen:async()=>Buffer.from(await appium("/screenshot"),"base64"),
+    swipePager:bounds=>appium("/execute/sync",{method:"POST",body:{script:"mobile: scrollGesture",
+      args:[{left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height,direction:"right",percent:0.85}]}}),
     tap,
     scrollCarousel,
     scrollProfile,
     back: () => appium("/back", { method: "POST" }),
     sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
   });
+}
+
+// Called by the existing serialized executor, never starts another session or
+// timer. Storage and confirmed contact context use its existing backend transport.
+export async function processPersistedMatch({runtime,store,transport,target,ensureMediaContext,options={}}) {
+  const buffer=createProfileMediaBuffer();
+  try {
+    const process=createProcessMatch({store,
+      revalidate:async stored=>{
+        const discovered=await discoverFreshMatchCarousel(runtime,options);
+        const candidates=discovered.inventory.filter(entry=>sameVisibleMatchTile(entry.tile,stored.tile));
+        return {verified:candidates.length===1,unchanged:candidates.length===1&&target.refreshProfile!==true};
+      },
+      readFullProfile:stored=>runMatchToLiveProfile({...runtime,
+        readInitialMedia:name=>buffer.read(runtime,name)}, {tile:stored.tile},options),
+      ensureMediaContext:async context=>{
+        if(context.read) {
+          const media=await buffer.flush({...target,transport});
+          if(media.end_actually_reached!==true||media.status==="PROFILE_MEDIA_UPLOAD_FAILED")return {ready:false};
+        }
+        return ensureMediaContext(context);
+      }});
+    return await process.run(target);
+  } finally {buffer.clear();}
 }
 
 export async function main(environment = process.env, { fetchImpl = fetch, write = console.log } = {}) {

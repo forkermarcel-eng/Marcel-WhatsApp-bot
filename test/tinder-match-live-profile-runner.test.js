@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { processPersistedMatch } from "../scripts/tinder-block2-match-live-profile.mjs";
 import {
   discoverFreshMatchCarousel,
   directLiveCarouselOverlap,
@@ -179,6 +180,25 @@ function createFakeRuntime({
     }
   };
 }
+
+test("persisted PROCESS MATCH uses existing live runner once and reuses a valid full profile without detail opens",async()=>{
+  const runtime=createFakeRuntime({carouselPages:[["A","B"]]});
+  runtime.sleep=async()=>{};
+  let saved=null,writes=0;
+  const store={async get(){return {tile:requestedTile("A"),profile:saved};},
+    async saveComplete(value){writes++;saved=value.profile;return {profile:saved};}};
+  const options={settleMilliseconds:0,boundarySettleMilliseconds:0,maxCarouselGestures:5,maxProfileGestures:5};
+  const args={runtime,store,transport:{ingestMedia(){throw Error("no fixture media captured");}},
+    target:{deviceId:"d",matchId:"m"},options,ensureMediaContext:async()=>({ready:true})};
+  const first=await processPersistedMatch(args);
+  assert.equal(first.status,"PROFILE_MEDIA_PENDING");
+  assert.equal(writes,1);assert.equal(runtime.calls.tap.length,1);assert.equal(runtime.calls.back,1);
+  const priorScrolls=runtime.calls.profileScrolls;
+  const again=await processPersistedMatch({...args,ensureMediaContext:async()=>({ready:false})});
+  assert.equal(again.status,"PROFILE_MEDIA_PENDING");
+  assert.equal(again.profileRead,false);
+  assert.equal(writes,1);assert.equal(runtime.calls.tap.length,1);assert.equal(runtime.calls.profileScrolls,priorScrolls);
+});
 
 test("visible Match equality stays source-state-only and carousel overlap is local adjacency", () => {
   const a = requestedTile("A");

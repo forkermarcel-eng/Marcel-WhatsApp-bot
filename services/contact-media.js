@@ -47,7 +47,7 @@ function normalizeContactMediaItem(item) {
   };
 }
 
-function createContactMediaService(pool) {
+function createContactMediaService(pool, { sharedGallery = null } = {}) {
   async function listContactMedia(contactId) {
     const result = await pool.query(
       `SELECT id, contact_id, message_id, whatsapp_message_id,
@@ -62,7 +62,15 @@ function createContactMediaService(pool) {
       [contactId]
     );
 
-    return result.rows.map(normalizeContactMediaItem);
+    const legacy = result.rows.map(normalizeContactMediaItem);
+    if (!sharedGallery) return legacy;
+    const shared = await sharedGallery.listSharedItemsForContact(contactId);
+    // Only an explicit source-row relation or the exact same resource proves a
+    // legacy/shared duplicate. Names, captions and timestamps never merge media.
+    const retained=legacy.filter(item=>!shared.some(asset=>
+      (asset.metadata?.legacyMediaId!=null&&String(asset.metadata.legacyMediaId)===String(item.id))
+      ||(item.fileRef&&asset.fileRef===item.fileRef)));
+    return [...retained, ...shared].sort((a,b) => new Date(b.capturedAt) - new Date(a.capturedAt));
   }
 
   return Object.freeze({ listContactMedia });

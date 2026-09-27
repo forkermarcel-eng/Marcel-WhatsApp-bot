@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const MEDIA_STORAGE_METHODS = Object.freeze([
@@ -132,6 +132,15 @@ export function createLocalFilesystemMediaStorage({ rootDirectory, publicBaseUrl
     read,
     exists,
     remove,
+    async resolvePath(key) {
+      const target = targetFor(key);
+      const [resolvedRoot, resolvedFile] = await Promise.all([realpath(root), realpath(target.target)]);
+      const relative = path.relative(resolvedRoot, resolvedFile);
+      if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new TypeError("storage symlink resolves outside rootDirectory");
+      }
+      return resolvedFile;
+    },
     publicRef(key) {
       return publicReference(publicBaseUrl, normalizeStorageKey(key));
     }

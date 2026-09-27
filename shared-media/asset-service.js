@@ -91,7 +91,8 @@ export function createSharedMediaAssetService({
       throw new TypeError("ingestImage supports image and sticker media types");
     }
     const assetId = idFactory();
-    const originalKey = mediaStorageKeyForAsset(assetId, "image.webp");
+    const originalKey = mediaStorageKeyForAsset(assetId, "source.bin");
+    const imageKey = mediaStorageKeyForAsset(assetId, "image.webp");
     const thumbnailKey = mediaStorageKeyForAsset(assetId, "thumbnail.webp");
     const rendered = await imagePipeline(bytes, { ...imageOptions, crop });
     const asset = createMediaAsset({
@@ -99,13 +100,24 @@ export function createSharedMediaAssetService({
       sourceChannel,
       sourceReference,
       mediaType,
-      mimeType: rendered.image.mimeType,
+      mimeType: rendered.source.mimeType,
       storageKey: originalKey,
       thumbnailStorageKey: thumbnailKey,
-      byteSize: rendered.image.bytes.byteLength,
-      width: rendered.image.width,
-      height: rendered.image.height,
-      metadata,
+      byteSize: rendered.source.bytes.byteLength,
+      width: rendered.source.width,
+      height: rendered.source.height,
+      metadata: {
+        ...metadata,
+        sourceProvenance: rendered.source.provenance === "screenshot_crop"
+          ? "screenshot_crop" : metadata.sourceProvenance || rendered.source.provenance,
+        pages: rendered.source.pages,
+        derivatives: {
+          display: { storageKey: imageKey, mimeType: rendered.image.mimeType,
+            width: rendered.image.width, height: rendered.image.height },
+          thumbnail: { storageKey: thumbnailKey, mimeType: rendered.thumbnail.mimeType,
+            width: rendered.thumbnail.width, height: rendered.thumbnail.height }
+        }
+      },
       createdAt
     }, { idFactory, now });
     const links = owners(ownerValues).map((owner) => createMediaAssetLink({
@@ -116,7 +128,8 @@ export function createSharedMediaAssetService({
     }, { idFactory, now }));
 
     await writeThenPersist([
-      { key: originalKey, bytes: rendered.image.bytes },
+      { key: originalKey, bytes: rendered.source.bytes },
+      { key: imageKey, bytes: rendered.image.bytes },
       { key: thumbnailKey, bytes: rendered.thumbnail.bytes }
     ], { asset, links });
     return Object.freeze({ asset, links, image: Object.freeze({
@@ -139,6 +152,7 @@ export function createSharedMediaAssetService({
     width = null,
     height = null,
     durationMs = null,
+    poster = null,
     createdAt = now()
   } = {}) {
     if (["image", "sticker"].includes(mediaType)) {
@@ -147,6 +161,9 @@ export function createSharedMediaAssetService({
     const content = binaryBytes(bytes);
     const assetId = idFactory();
     const storageKey = mediaStorageKeyForAsset(assetId, "source.bin");
+    const thumbnailStorageKey = poster ? mediaStorageKeyForAsset(assetId, "poster.png") : null;
+    if (poster) metadata = { ...metadata, derivatives: { ...metadata.derivatives,
+      thumbnail: { storageKey: thumbnailStorageKey, mimeType: "image/png" } } };
     const asset = createMediaAsset({
       assetId,
       sourceChannel,
@@ -154,6 +171,7 @@ export function createSharedMediaAssetService({
       mediaType,
       mimeType,
       storageKey,
+      thumbnailStorageKey,
       byteSize: content.byteLength,
       width,
       height,
@@ -167,7 +185,8 @@ export function createSharedMediaAssetService({
       createdAt,
       ownerChannel: owner.ownerChannel ?? sourceChannel
     }, { idFactory, now }));
-    await writeThenPersist([{ key: storageKey, bytes: content }], { asset, links });
+    await writeThenPersist([{ key: storageKey, bytes: content },
+      ...(poster ? [{ key: thumbnailStorageKey, bytes: binaryBytes(poster) }] : [])], { asset, links });
     return Object.freeze({ asset, links });
   }
 

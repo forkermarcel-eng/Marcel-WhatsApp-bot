@@ -25,6 +25,8 @@ import {
   sameObservedViewport
 } from "../tinder-mirror/appium-conversation-reader.js";
 import { readCompleteLiveMatchProfile } from "../tinder-mirror/appium-match-live-profile-runner.js";
+import { createProfileMediaBuffer } from "../tinder-mirror/profile-media-buffer.js";
+import { ingestVisibleAvatar } from "../tinder-mirror/visible-avatar-media.js";
 import { existingSuffixObservedPrefixOverlap, mergeTinderHistory } from "../tinder-mirror/conversation.js";
 
 const DEFAULT_APPIUM_BASE_URL = "http://127.0.0.1:4723/wd/hub";
@@ -37,6 +39,7 @@ let installedBridgeVersionCode;
 let maxInboxGestures;
 let maxHistoryGestures;
 let maxProfileGestures;
+let sharedMediaEnabled = false;
 const chatScrollPercent = 0.45;
 // Keep a visible row overlap while traversing the ordinary Inbox so the
 // process can prove that it did not jump past a normal row between pages.
@@ -74,6 +77,7 @@ function configureRuntime(environment = process.env) {
   BACKEND_BASE_URL = runtimeText(environment.TINDER_MIRROR_BASE_URL || DEFAULT_BACKEND_BASE_URL).replace(/\/+$/, "");
   sessionId = configuredSessionId;
   bearerToken = configuredBearerToken;
+  sharedMediaEnabled = environment.SHARED_MEDIA_ENABLED === "true";
   installedBridgeVersionCode = configuredBridgeVersionCode;
   maxInboxGestures = boundedRuntimeInteger(environment.TINDER_BLOCK2_MAX_INBOX_GESTURES, {
     name: "TINDER_BLOCK2_MAX_INBOX_GESTURES",
@@ -881,8 +885,14 @@ async function openReadAndMirror({
   // traversal. Do not open a compact profile merely to resolve a row and then
   // open it again before the required Full History path.
   await openInitialProfile(expectedDisplayName);
+  const profileMedia = sharedMediaEnabled ? createProfileMediaBuffer() : null;
   const fullProfile = await readCompleteLiveMatchProfile({
     sourceXml, tap, sleep,
+    ...(profileMedia ? {readInitialMedia: name => profileMedia.read({sourceXml,sleep,
+      captureScreen:async()=>Buffer.from(await appium("/screenshot"),"base64"),
+      swipePager:bounds=>appium("/execute/sync",{method:"POST",body:{script:"mobile: scrollGesture",
+        args:[{left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height,direction:"right",percent:0.85}]}})
+    },name)} : {}),
     scrollProfile: bounds => scrollTowardBottom(bounds, profileScrollPercent)
   }, expectedDisplayName, { maxProfileGestures, settleMilliseconds, boundarySettleMilliseconds });
   const chat = await returnToConversation(expectedDisplayName);
@@ -894,6 +904,7 @@ async function openReadAndMirror({
   });
   const resolution = await adapter.resolve();
   if (resolution?.action === "SKIP_HISTORY" && resolution?.conversation?.id) {
+    const profileMediaResult = profileMedia ? await profileMedia.flush({deviceId,conversationId:resolution.conversation.id,transport}) : null;
     const firstObservedInSweep = !processedConversationIds.has(resolution.conversation.id);
     if (firstObservedInSweep && persistInboxOrder) {
       processedConversationIds.add(resolution.conversation.id);
@@ -906,6 +917,7 @@ async function openReadAndMirror({
     }
     const result = Object.freeze({
       action: "KNOWN_REVALIDATED",
+      ...(profileMediaResult ? {profile_media:profileMediaResult} : {}),
       conversation_id: resolution.conversation.id,
       inbox_position: firstObservedInSweep && persistInboxOrder ? inboxPosition : null,
       inbox_position_persisted: firstObservedInSweep && persistInboxOrder,
@@ -933,6 +945,7 @@ async function openReadAndMirror({
   });
   const synced = await adapter.persistCompletedHistory({ oldestBoundaryReached: read.oldest_boundary_reached });
   if (synced?.skipped_existing_ambiguous_singleton === true) {
+    profileMedia?.clear();
     const result = Object.freeze({
       action: "EXISTING_SINGLETON_DUPLICATE_UNCHANGED",
       conversation_id: null,
@@ -958,6 +971,7 @@ async function openReadAndMirror({
   if (!synced?.conversation?.id || synced.conversation.history_complete !== true) {
     throw new Error("Completed Tinder history was not accepted by the existing product mirror");
   }
+  const profileMediaResult = profileMedia ? await profileMedia.flush({deviceId,conversationId:synced.conversation.id,transport}) : null;
   const firstObservedInSweep = !processedConversationIds.has(synced.conversation.id);
   if (firstObservedInSweep && persistInboxOrder) {
     processedConversationIds.add(synced.conversation.id);
@@ -970,6 +984,7 @@ async function openReadAndMirror({
   }
   const result = Object.freeze({
     action: synced.created ? "NEW_MIRRORED" : "KNOWN_COMPLETED",
+    ...(profileMediaResult ? {profile_media:profileMediaResult} : {}),
     conversation_id: synced.conversation.id,
     inbox_position: firstObservedInSweep && persistInboxOrder ? inboxPosition : null,
     inbox_position_persisted: firstObservedInSweep && persistInboxOrder,
@@ -1455,6 +1470,15 @@ export async function createTinderLocalDiscoveryRuntime(environment = process.en
   return Object.freeze({
     deviceId,
     readUnboundChanged,
+    async captureConversationAvatar(entry, conversationId) {
+      if (!sharedMediaEnabled) return null;
+      try {
+        const row=await this.locateInventoryRow(entry);
+        return await ingestVisibleAvatar({ownerType:"conversation",ramKey:row.ram_key,
+          runtime:{sourceXml,captureScreen:async()=>Buffer.from(await appium("/screenshot"),"base64")},
+          ingest:values=>transport.ingestMedia({deviceId,ownerId:conversationId,ownerType:"conversation",...values})});
+      } catch {return {status:"AVATAR_UNAVAILABLE"};}
+    },
     readInboxInventory: discoverInboxInventory,
     async readStoredConversations() {
       const listing = await dashboard(`/dashboard-api/tinder/conversations?device_id=${encodeURIComponent(deviceId)}`);

@@ -28,12 +28,15 @@ function validUuid(value) {
 }
 
 /*
- * Read-only dashboard proxy.  Appium never sends observations through this
+ * Dashboard reads and explicitly confirmed contact binding. Appium never sends observations through this
  * browser endpoint; the thin host adapter uses the existing backend bearer
  * transport directly.
  */
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
+  const matchBinding=req.query?.resource==="match-contact";
+  const binding = req.method === "POST" && (req.query?.resource === "contact"||matchBinding);
+  const processing=req.method==="POST"&&req.query?.resource==="process-match";
+  if (req.method !== "GET" && !binding && !processing) {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ ok: false, error: "Methode nicht erlaubt." });
   }
@@ -48,7 +51,7 @@ export default async function handler(req, res) {
 
   const id = req.query?.id;
   const resource = req.query?.resource;
-  if (resource !== undefined && resource !== "matches") {
+  if (resource !== undefined && resource !== "matches" && !binding && !processing) {
     return res.status(400).json({ ok: false, error: "Ungültige Tinder-Ressource." });
   }
   if (resource === "matches" && id !== undefined) {
@@ -57,24 +60,33 @@ export default async function handler(req, res) {
   if (id !== undefined && !validUuid(id)) {
     return res.status(400).json({ ok: false, error: "Ungültige Conversation-ID." });
   }
-  const path = resource === "matches"
+  if(processing&&!validUuid(id))return res.status(400).json({ok:false,error:"Match-ID erforderlich."});
+  if(binding && (!validUuid(id)||req.body?.confirmed!==true
+    || (req.body.contact_id!=null && (!Number.isSafeInteger(req.body.contact_id)||req.body.contact_id<1)))){
+    return res.status(400).json({ok:false,error:"Bestätigte Kontaktzuordnung erforderlich."});
+  }
+  const path = processing ? `/dashboard-api/tinder/matches/${encodeURIComponent(id)}/process`
+    : binding ? `/dashboard-api/tinder/${matchBinding?"matches":"conversations"}/${encodeURIComponent(id)}/contact` : resource === "matches"
     ? "/dashboard-api/tinder/matches"
     : id
       ? `/dashboard-api/tinder/conversations/${encodeURIComponent(id)}`
       : "/dashboard-api/tinder/conversations";
   try {
     const response = await fetch(`${backendUrl}${path}`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" },
+      method: binding||processing ? "POST" : "GET",
+      headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json",...(binding||processing?{"Content-Type":"application/json"}:{}) },
+      ...(binding?{body:JSON.stringify({confirmed:true,contact_id:req.body.contact_id??null})}:{}),
+      ...(processing?{body:"{}"}:{}),
       cache: "no-store"
     });
     const data = await response.json().catch(() => null);
     if (!response.ok || !data) {
-      const status = response.status === 404 ? 404 : response.status === 400 ? 400 : 502;
+      const status = response.status === 404 ? 404 : response.status === 400 ? 400
+        : binding && response.status === 409 ? 409 : processing && response.status===503 ? 503 : 502;
       return res.status(status).json({ ok: false, error: data?.error || "Backend konnte Tinder-Daten nicht liefern." });
     }
     res.setHeader("Cache-Control", "no-store, max-age=0");
-    return res.status(200).json(data);
+    return res.status(processing?202:200).json(data);
   } catch {
     return res.status(502).json({ ok: false, error: "Backend ist momentan nicht erreichbar." });
   }

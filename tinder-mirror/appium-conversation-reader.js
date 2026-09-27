@@ -182,12 +182,24 @@ function inboxRecycler(nodes, screen) {
   return candidates[0];
 }
 
+function uniqueVisibleImageBounds(node) {
+  const images = [];
+  const visit = current => {
+    if (/ImageView$/.test(className(current)) && current.bounds && within(current.bounds,node.bounds)
+      && current.bounds.width >= 32 && current.bounds.height >= 32) images.push(current.bounds);
+    for (const child of current.children || []) visit(child);
+  };
+  visit(node);
+  return images.length === 1 ? Object.freeze({...images[0]}) : null;
+}
+
 function inboxRowObservation({ row, actionTarget }) {
   const texts = subtreeTexts(row);
   return {
     // The row container is retained only in the RAM continuity key below.
     // Appium physical input targets the freshly observed action surface.
     bounds: Object.freeze({ ...actionTarget.bounds }),
+    avatar_bounds: uniqueVisibleImageBounds(row),
     match_cta: isMatchCta(texts),
     last_message_visible_time: inboxTemporalLabel(texts),
     // This remains an opaque, process-local continuity key. It is never a
@@ -1040,6 +1052,7 @@ function visibleMatchTile(node, screen) {
     // This is intentionally optional: read-only Match inventory ignores it,
     // while an action runner refuses a tile with more than one click surface.
     tap_bounds: matchTileActionTarget(node),
+    avatar_bounds: uniqueVisibleImageBounds(node),
     ram_key: JSON.stringify({
       left: node.bounds.left,
       top: node.bounds.top,

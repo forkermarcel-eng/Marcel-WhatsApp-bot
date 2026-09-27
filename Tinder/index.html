@@ -161,6 +161,18 @@
       };
     }
 
+    function appendProtectedImage(parent, url, avatar = false) {
+      if (typeof url !== "string" || !url.startsWith("/api/dashboard/contacts?resource=media&")) return;
+      const image = document.createElement("img");
+      image.src = url;
+      image.alt = avatar ? "Profilbild" : "Profilfoto";
+      image.loading = "lazy";
+      image.style.cssText = avatar
+        ? "width:48px;height:48px;object-fit:cover;border-radius:50%"
+        : "max-width:100%;height:auto;border-radius:12px";
+      parent.append(image);
+    }
+
     function renderConversationList(conversations) {
       clear(conversationsNode);
       if (!conversations.length) {
@@ -173,6 +185,7 @@
         item.className = "tinder-item";
         item.dataset.conversationId = conversation.id;
         item.setAttribute("aria-current", String(conversation.id === selectedConversationId));
+        appendProtectedImage(item, conversation.avatar_url, true);
         const title = document.createElement("span");
         title.className = "tinder-title";
         title.textContent = profileName(conversation);
@@ -180,6 +193,29 @@
         meta.className = "tinder-meta";
         meta.textContent = `${conversation.message_count || 0} Nachrichten · ${conversation.history_complete ? "History vollständig" : "History offen"}`;
         item.append(title, meta);
+        const process=document.createElement("button");process.type="button";process.textContent="PROCESS MATCH";
+        process.addEventListener("click",async()=>{
+          process.disabled=true;
+          try {
+            const response=await fetch(`/api/dashboard/tinder?resource=process-match&id=${encodeURIComponent(match.id)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+            const result=await response.json();if(!response.ok||!result.ok)throw Error("Match-Verarbeitung nicht gestartet.");
+            process.textContent="Beauftragt";
+          }catch(error){setStatus(error.message);process.disabled=false;}
+        });
+        const bind=document.createElement("button");bind.type="button";bind.textContent="Kontakt zuordnen";
+        bind.addEventListener("click",async()=>{
+          const selected=prompt("Bestehende Contact-ID oder leer für einen neuen Tinder-only Kontakt.");if(selected===null)return;
+          const contactId=selected.trim()?Number(selected.trim()):null;
+          if(contactId!==null&&(!Number.isSafeInteger(contactId)||contactId<1)){setStatus("Ungültige Contact-ID.");return;}
+          if(!confirm("Zuordnung zu dieser Person bestätigen? Kein Namens-Merge."))return;
+          bind.disabled=true;
+          try {
+            const response=await fetch(`/api/dashboard/tinder?resource=match-contact&id=${encodeURIComponent(match.id)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmed:true,contact_id:contactId})});
+            const result=await response.json();if(!response.ok||!result.ok)throw Error("Kontaktzuordnung nicht möglich.");
+            const link=document.createElement("a");link.href=`/Kontakte/?id=${encodeURIComponent(result.contactId)}`;link.textContent="Zentralen Kontakt öffnen";bind.replaceWith(link);
+          }catch(error){setStatus(error.message);bind.disabled=false;}
+        });
+        item.append(process,bind);
         item.addEventListener("click", () => loadConversation(conversation.id));
         conversationsNode.append(item);
       }
@@ -196,6 +232,7 @@
       for (const match of matches) {
         const item = document.createElement("article");
         item.className = "tinder-item";
+        appendProtectedImage(item, match.avatar_url, true);
         const title = document.createElement("span");
         title.className = "tinder-title";
         title.textContent = matchName(match);
@@ -262,6 +299,32 @@
       ].filter((value) => normalizedProfileValue(value));
       header.textContent = profileHeader.join(` ${String.fromCodePoint(0x00b7)} `) || String.fromCodePoint(0x2013);
       profileNode.append(header);
+      if (data.contact_id) {
+        const contact=document.createElement("a");
+        contact.href=`/Kontakte/?id=${encodeURIComponent(data.contact_id)}`;
+        contact.textContent="Zentralen Kontakt öffnen";profileNode.append(contact);
+      } else {
+        const bind=document.createElement("button");bind.type="button";
+        bind.textContent="Kontakt zuordnen";
+        bind.addEventListener("click",async()=>{
+          const selected=prompt("Bestehende Contact-ID eingeben oder leer lassen, um einen neuen Tinder-only Kontakt anzulegen.");
+          if(selected===null)return;
+          const id=selected.trim()?Number(selected.trim()):null;
+          if(id!==null&&(!Number.isSafeInteger(id)||id<1)){setStatus("Ungültige Contact-ID.");return;}
+          if(!confirm(id===null?"Neue zentrale Person ohne WhatsApp-ID anlegen?":"Zuordnung zu dieser bestehenden Person bestätigen? Kein Namens-Merge."))return;
+          bind.disabled=true;
+          try {
+            const response=await fetch(`/api/dashboard/tinder?resource=contact&id=${encodeURIComponent(data.conversation.id)}`,{
+              method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contact_id:id,confirmed:true})});
+            const result=await response.json();if(!response.ok||!result.ok)throw Error("Kontaktzuordnung nicht möglich.");
+            await loadConversation(data.conversation.id);
+          } catch(error){setStatus(error.message);bind.disabled=false;}
+        });
+        profileNode.append(bind);
+      }
+      for (const media of data.media?.media || []) {
+        if (media.role === "profile_primary" || media.role === "profile_photo") appendProtectedImage(profileNode, media.url);
+      }
       for (const group of presentation.groups) {
         const section = document.createElement("section");
         section.className = "tinder-profile-section";

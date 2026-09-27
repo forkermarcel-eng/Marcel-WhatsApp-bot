@@ -296,7 +296,14 @@ function createTinderPossibleChangeDispatcher({
   let inspecting = false;
   let changedWhileInspecting = false;
 
-  async function inspect() {
+  let inspectionTail=Promise.resolve();
+  function runExclusive(work) {
+    const result=inspectionTail.then(work);
+    inspectionTail=result.catch(()=>{});
+    return result;
+  }
+  function inspect() {return runExclusive(inspectNow);}
+  async function inspectNow() {
     if (reconcile) return reconcile();
     let current;
     try {
@@ -379,7 +386,7 @@ function createTinderPossibleChangeDispatcher({
     return pending;
   }
 
-  return Object.freeze({ inspect, signal });
+  return Object.freeze({ inspect, signal, runExclusive });
 }
 
 export {

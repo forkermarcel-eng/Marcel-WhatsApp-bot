@@ -238,6 +238,8 @@ test("asset service removes just-written objects when repository persistence fai
     idFactory: () => ids.shift(),
     now: () => new Date(createdAt),
     imagePipeline: async () => ({
+      source: { bytes: Buffer.from([8]), mimeType: "image/png", width: 3, height: 1,
+        pages: 1, provenance: "supplied_bytes" },
       image: { bytes: Buffer.from([1, 2, 3]), mimeType: "image/webp", width: 3, height: 1 },
       thumbnail: { bytes: Buffer.from([4]), mimeType: "image/webp", width: 1, height: 1 }
     })
@@ -255,6 +257,7 @@ test("asset service removes just-written objects when repository persistence fai
   }), (error) => error === repositoryFailure);
 
   assert.deepEqual(removed, [
+    `media-assets/${assetId}/source.bin`,
     `media-assets/${assetId}/image.webp`,
     `media-assets/${assetId}/thumbnail.webp`
   ]);

@@ -73,7 +73,7 @@ function createMatchPool() {
       Object.assign(row, { tile: JSON.parse(rawTile), carousel_position: carouselPosition, updated_at: timestamp });
       return { rows: [] };
     }
-    if (normalized.startsWith("SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at FROM tinder_matches ORDER BY")) {
+    if (normalized.startsWith("SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at,") && normalized.includes("FROM tinder_matches ORDER BY")) {
       return { rows: [...state.matches.values()].sort((left, right) => left.carousel_position - right.carousel_position || left.match_id.localeCompare(right.match_id)).map((row) => ({ ...row })) };
     }
     if (/^(INSERT|UPDATE|DELETE) INTO tinder_conversations|^(INSERT|UPDATE|DELETE) INTO tinder_conversation_messages/.test(normalized)) {

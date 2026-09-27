@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import sharp from "sharp";
 import { readVerifiedTinderProfileMedia } from "../tinder-mirror/appium-profile-media-runner.js";
+import { createProfileMediaBuffer } from "../tinder-mirror/profile-media-buffer.js";
 
 function profileXml() {
   return `
@@ -32,13 +34,38 @@ function recordingIngestor() {
   };
 }
 
+const screen = page => sharp({ create: { width: 576, height: 1280, channels: 3,
+  background: ["red","blue","green"][page] } }).png().toBuffer();
+
+test("initial profile crops stay in RAM until accepted conversation ID, then clear without a second profile open", async () => {
+  const buffer=createProfileMediaBuffer(),uploads=[];
+  const outcome=await buffer.read({sourceXml:async()=>profileXml(),captureScreen:()=>screen(0),swipePager:async()=>false,sleep:async()=>{}},"Visible profile");
+  assert.equal(outcome.end_actually_reached,true);
+  const result=await buffer.flush({deviceId:"d",conversationId:"accepted-id",transport:{async ingestMedia(value){uploads.push(value);}}});
+  assert.equal(result.persisted,1);
+  assert.equal(uploads[0].ownerId,"accepted-id");
+  assert.equal(uploads[0].kind,"profile");
+  assert.equal((await sharp(uploads[0].sourceBytes).metadata()).height,440);
+  assert.equal((await buffer.flush({transport:{ingestMedia(){throw Error("must be cleared");}}})).persisted,0);
+});
+
+test("profile media failures remain explicit and never become a gate for the text mirror", async () => {
+  const buffer=createProfileMediaBuffer({maxBytes:1});
+  const runtime={sourceXml:async()=>profileXml(),captureScreen:()=>screen(0),swipePager:async()=>false,sleep:async()=>{}};
+  assert.equal((await buffer.read(runtime,"Visible profile")).status,"PROFILE_MEDIA_READ_FAILED");
+  const regular=createProfileMediaBuffer();await regular.read(runtime,"Visible profile");
+  const result=await regular.flush({conversationId:"accepted",transport:{ingestMedia(){throw Error("offline");}}});
+  assert.equal(result.status,"PROFILE_MEDIA_UPLOAD_FAILED");
+  assert.equal(result.persisted,0);
+});
+
 test("verified profile media runner captures the initial page and each physically advanced pager page", async () => {
   const ingestor = recordingIngestor();
   let page = 0;
   const pagerCalls = [];
   const result = await readVerifiedTinderProfileMedia({
     async sourceXml() { return profileXml(); },
-    async captureScreen() { return Buffer.from([page + 1]); },
+    async captureScreen() { return screen(page); },
     async swipePager(bounds, direction) {
       pagerCalls.push({ bounds, direction });
       if (page >= 2) return false;
@@ -130,7 +157,7 @@ test("a pager physical boundary is confirmed before the run reports the reachabl
   let pagerCalls = 0;
   const result = await readVerifiedTinderProfileMedia({
     async sourceXml() { return profileXml(); },
-    async captureScreen() { return Buffer.from([1]); },
+    async captureScreen() { return screen(0); },
     async swipePager() { pagerCalls += 1; return false; }
   }, {
     profileReference: "profile:opaque",
@@ -154,4 +181,16 @@ test("the local media pager runner has no device bridge, persistence, identity, 
   assert.match(source, /recordUnavailable/);
   assert.doesNotMatch(source, /(?:createTinderAppiumAdapter|fetch|executeScript|takeScreenshot|driver)\s*\(/i);
   assert.doesNotMatch(source, /^\s*import\s+.*(?:repository|device-bridge|heartbeat|permit|receipt|attestation|fingerprint)/im);
+});
+
+test("successful gestures with unchanged verified media never create duplicate pages or claim completion", async () => {
+  const ingestor = recordingIngestor();
+  const result = await readVerifiedTinderProfileMedia({ sourceXml: async () => profileXml(),
+    captureScreen: async () => screen(0), swipePager: async () => true }, {
+    profileReference: "profile:opaque", expectedDisplayName: "Visible profile", mediaIngestor: ingestor,
+    maxPagerGestures: 3, settleMilliseconds: 0, boundarySettleMilliseconds: 0 });
+  assert.equal(result.captured_pages,1);
+  assert.equal(result.end_actually_reached,false);
+  assert.equal(result.status,"PAGER_BOUND_NOT_REACHED");
+  assert.equal(ingestor.calls.image.length,1);
 });

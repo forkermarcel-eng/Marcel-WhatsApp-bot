@@ -1,4 +1,6 @@
 import { observeProfileFromXml } from "./appium-conversation-reader.js";
+import sharp from "sharp";
+import { createHash } from "node:crypto";
 
 /*
  * This is deliberately an explicit local media-read operation.  It has no
@@ -66,6 +68,14 @@ async function captureScreenBytes(runtime) {
   } catch {
     return null;
   }
+}
+
+async function visibleMediaDigest(bytes, bounds) {
+  const pixels = await sharp(bytes, { limitInputPixels: 64_000_000 }).extract({
+    left: bounds.left ?? bounds.x, top: bounds.top ?? bounds.y, width: bounds.width, height: bounds.height
+  }).raw().toBuffer();
+  // RAM-only exact pixel equality for pager movement; never a person identifier.
+  return createHash("sha256").update(pixels).digest("hex");
 }
 
 function compactResult({
@@ -153,6 +163,9 @@ export async function readVerifiedTinderProfileMedia(runtime, {
   }
   await ingestVerifiedPage(mediaIngestor, reference, screenBytes, observation, position);
   let capturedPages = 1;
+  let currentDigest = await visibleMediaDigest(screenBytes, observation.media_bounds);
+  const seenPages = new Set([currentDigest]);
+  let unchangedBoundaryObservations = 0;
 
   for (let gesture = 0; gesture < maximumGestures; gesture += 1) {
     const canAdvance = await runtime.swipePager(observation.media_bounds, "left");
@@ -161,54 +174,7 @@ export async function readVerifiedTinderProfileMedia(runtime, {
       throw new Error("Tinder profile media pager did not report a physical boundary result");
     }
 
-    if (!canAdvance) {
-      // A single false result is not enough to distinguish a momentarily
-      // unavailable pager from its physical end. Re-observe first, then make
-      // exactly one boundary confirmation in the same verified surface.
-      await wait(runtime, boundarySettle);
-      observation = await freshProfileObservation(runtime, expectedDisplayName);
-      if (!observation) return compactResult({
-        status: "PROFILE_CHANGED",
-        capturedPages,
-        pagerGestures: gestures
-      });
-      const confirmedAtBoundary = await runtime.swipePager(observation.media_bounds, "left");
-      gestures += 1;
-      if (typeof confirmedAtBoundary !== "boolean") {
-        throw new Error("Tinder profile media pager did not report a physical boundary result");
-      }
-      if (!confirmedAtBoundary) {
-        return compactResult({
-          status: "MEDIA_READ",
-          capturedPages,
-          pagerGestures: gestures,
-          endActuallyReached: true
-        });
-      }
-      await wait(runtime, settle);
-      observation = await freshProfileObservation(runtime, expectedDisplayName);
-      if (!observation) return compactResult({
-        status: "PROFILE_CHANGED",
-        capturedPages,
-        pagerGestures: gestures
-      });
-      screenBytes = await captureScreenBytes(runtime);
-      if (!screenBytes) {
-        await recordUnavailable(mediaIngestor, reference, position + 1, "SCREENSHOT_UNAVAILABLE");
-        return compactResult({
-          status: "MEDIA_UNAVAILABLE",
-          capturedPages,
-          unavailablePages: 1,
-          pagerGestures: gestures
-        });
-      }
-      position += 1;
-      await ingestVerifiedPage(mediaIngestor, reference, screenBytes, observation, position);
-      capturedPages += 1;
-      continue;
-    }
-
-    await wait(runtime, settle);
+    await wait(runtime, canAdvance ? settle : boundarySettle);
     observation = await freshProfileObservation(runtime, expectedDisplayName);
     if (!observation) return compactResult({
       status: "PROFILE_CHANGED",
@@ -225,6 +191,17 @@ export async function readVerifiedTinderProfileMedia(runtime, {
         pagerGestures: gestures
       });
     }
+    const digest = await visibleMediaDigest(screenBytes, observation.media_bounds);
+    if (digest === currentDigest) {
+      unchangedBoundaryObservations = canAdvance ? 0 : unchangedBoundaryObservations + 1;
+      if (unchangedBoundaryObservations >= 2) return compactResult({ status: "MEDIA_READ",
+        capturedPages, pagerGestures: gestures, endActuallyReached: true });
+      continue;
+    }
+    unchangedBoundaryObservations = 0;
+    if (seenPages.has(digest)) return compactResult({ status: "PAGER_CYCLE_DETECTED", capturedPages, pagerGestures: gestures });
+    seenPages.add(digest);
+    currentDigest = digest;
     position += 1;
     await ingestVerifiedPage(mediaIngestor, reference, screenBytes, observation, position);
     capturedPages += 1;

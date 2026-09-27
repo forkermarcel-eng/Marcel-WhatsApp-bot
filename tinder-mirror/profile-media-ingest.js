@@ -29,7 +29,27 @@ function profileOwner(profileReference, position) {
  * obtained from either an element screenshot or a freshly verified screen
  * region. The adapter turns those bytes into ordinary shared media records.
  */
-export function createTinderProfileMediaIngestor({ assetService } = {}) {
+export function createTinderProfileMediaIngestor({ assetService, ingress, context = {} } = {}) {
+  if (ingress) {
+    if (typeof ingress.ingest !== "function" || typeof ingress.unavailable !== "function") throw new TypeError("shared ingress required");
+    const attachment = (reference,position,kind) => ({ ...context, channel: "tinder", sourceType: "profile",
+      direction: null, profileReference: requiredProfileReference(reference), ordinal: positionValue(position),
+      role: position === 0 ? "profile_primary" : "profile_photo", provenance: { kind } });
+    return Object.freeze({
+      ingestElementScreenshot({ profileReference, imageBytes, position = null }) {
+        return ingress.ingest({ input: imageBytes, context: attachment(profileReference,position,"element_screenshot") });
+      },
+      ingestVerifiedScreenRegion({ profileReference, screenBytes, verifiedMediaBounds, observationReference, position = null }) {
+        if (typeof observationReference !== "string" || !observationReference.trim() || !verifiedMediaBounds) throw new TypeError("fresh media bounds required");
+        return ingress.ingest({ input: screenBytes, crop: verifiedMediaBounds,
+          context: attachment(profileReference,position,"screenshot_crop") });
+      },
+      recordUnavailable({ profileReference, position = null, reason }) {
+        return ingress.unavailable({ mediaType: "image", reason,
+          context: attachment(profileReference,position,"unavailable") });
+      }
+    });
+  }
   if (!assetService || typeof assetService.ingestImage !== "function"
     || typeof assetService.createUnavailableAsset !== "function") {
     throw new TypeError("shared media assetService is required");

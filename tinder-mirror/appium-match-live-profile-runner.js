@@ -469,6 +469,9 @@ export async function readCompleteLiveMatchProfile(runtime, expectedDisplayName,
     { minimum: 0, maximum: 10_000, name: "boundarySettleMilliseconds" }
   );
   const initial = await waitForInitialProfile(runtime, expectedDisplayName, { settleMilliseconds });
+  // Optional media work stays inside this one already-open initial profile.
+  // Normal text-only readers and unchanged reconciliation never invoke it.
+  if (runtime.readInitialMedia) await runtime.readInitialMedia(expectedDisplayName);
   let profile = initial.profile;
   let current = await profileProjection(runtime, expectedDisplayName, {
     continuedProfileScroll: true,

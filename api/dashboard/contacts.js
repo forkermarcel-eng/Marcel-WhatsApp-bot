@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { proxyDashboardMedia } from "../../shared-media/dashboard-proxy.js";
 
 
 /* ==================================================
@@ -255,6 +256,8 @@ req,
 res
 ) {
 
+if (req.query?.resource === "media") return proxyDashboardMedia(req, res, validDashboardSession);
+
 /* ==================================================
    METHOD
 ================================================== */
@@ -507,7 +510,8 @@ const railwayPath =
 const railwayUrl =
   railwayBackendUrl
   +
-  railwayPath;
+  railwayPath
+  + (req.method === "GET" && contactId && !resource && req.query.source_only === "1" ? "?source_only=1" : "");
 
 
 /* ==================================================

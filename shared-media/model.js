@@ -170,6 +170,7 @@ export function normalizeMediaAssetLink(value) {
     ownerReference: requiredText(value.ownerReference, "link.ownerReference", 2048),
     relationshipType: token(value.relationshipType ?? "attachment", "link.relationshipType"),
     ordinal,
+    context: jsonObject(value.context, "link.context"),
     createdAt: timestamp(value.createdAt, "link.createdAt")
   });
 }

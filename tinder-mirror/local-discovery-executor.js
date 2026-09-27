@@ -5,7 +5,8 @@ import {
 import { createTinderPossibleChangeDispatcher } from "./possible-change-dispatch.js";
 import {
   TINDER_POSSIBLE_CHANGE_EVENT_TYPE,
-  normalizeTinderDiscoveryJob
+  normalizeTinderDiscoveryJob,
+  normalizeProcessMatchJob
 } from "./pg-boss-discovery.js";
 import { canonicalTinderText } from "./conversation.js";
 
@@ -201,6 +202,11 @@ export function createLocalTinderDiscoveryExecutor({
   return Object.freeze({
     initialize: () => dispatcher.inspect(),
     signal,
+    processMatch: job => {
+      const payload=normalizeProcessMatchJob(job);
+      if(payload.device_id!==runtime.deviceId||typeof runtime.processMatch!=="function")throw new Error("PROCESS_MATCH executor unavailable for device");
+      return dispatcher.runExclusive(()=>runtime.processMatch(payload));
+    },
     // Test-only bounded visibility: count only ephemeral direct bindings, not
     // a persisted Tinder identity or database state.
     localBindingCount: () => directBindings.size

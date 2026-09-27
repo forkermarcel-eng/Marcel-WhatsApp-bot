@@ -77,6 +77,12 @@ export async function createImageDerivatives(bytes, options = {}) {
   const sourceWidth = positiveInteger(metadata.width, "source image width");
   const sourceHeight = positiveInteger(metadata.height, "source image height");
   const crop = optionalCrop(settings.crop, sourceWidth, sourceHeight);
+  // A screen crop is the available source, not the full device screenshot
+  // and not a Tinder CDN original. Never retain unrelated screen pixels.
+  const retainedBytes = crop
+    ? await sharp(input, { failOn: "error", limitInputPixels: 64_000_000 })
+      .extract(crop).png().toBuffer()
+    : input;
   const image = await renderWebp(input, crop, {
     width: settings.maxWidth,
     height: settings.maxHeight,
@@ -89,10 +95,13 @@ export async function createImageDerivatives(bytes, options = {}) {
   });
   return Object.freeze({
     source: Object.freeze({
-      width: sourceWidth,
-      height: sourceHeight,
-      format: metadata.format || null,
-      mimeType: metadata.format ? `image/${metadata.format === "jpg" ? "jpeg" : metadata.format}` : null
+      bytes: retainedBytes,
+      width: crop ? crop.width : sourceWidth,
+      height: crop ? crop.height : sourceHeight,
+      format: crop ? "png" : metadata.format || null,
+      mimeType: crop ? "image/png" : metadata.format ? `image/${metadata.format === "jpg" ? "jpeg" : metadata.format}` : null,
+      provenance: crop ? "screenshot_crop" : "supplied_bytes",
+      pages: crop ? 1 : metadata.pages || 1
     }),
     crop,
     image,

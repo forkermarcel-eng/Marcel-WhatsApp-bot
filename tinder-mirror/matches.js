@@ -47,6 +47,7 @@ function publicMatch(row) {
     device_id: row.device_id,
     conversation_id: row.conversation_id ?? null,
     tile: asTile(row.tile),
+    profile: row.profile == null ? null : asTile(row.profile),
     carousel_position: Number(row.carousel_position),
     created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
     updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null
@@ -201,7 +202,8 @@ export function createTinderMatchMirror({ pool, now = () => new Date(), idFactor
   async function list() {
     try {
       const result = await pool.query(
-        `SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at
+        `SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at,
+                to_jsonb(tinder_matches)->'profile' AS profile
            FROM tinder_matches
           ORDER BY carousel_position ASC, match_id ASC`
       );

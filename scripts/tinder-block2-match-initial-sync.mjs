@@ -11,6 +11,7 @@
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { observeMatchCarouselFromXml } from "../tinder-mirror/appium-conversation-reader.js";
+import { createMatchAvatarCollector } from "../tinder-mirror/visible-avatar-media.js";
 
 const DEFAULT_APPIUM_BASE_URL = "http://127.0.0.1:4723/wd/hub";
 const DEFAULT_BACKEND_BASE_URL = "https://cooperative-kindness-production.up.railway.app";
@@ -197,7 +198,8 @@ function createRuntime(config) {
     return result;
   }
 
-  return Object.freeze({ sourceXml, dashboard, scrollCarousel });
+  return Object.freeze({ sourceXml, dashboard, scrollCarousel,
+    captureScreen:async()=>Buffer.from(await appium("/screenshot"),"base64") });
 }
 
 async function freshCarousel(runtime) {
@@ -266,6 +268,7 @@ async function carouselAtLeadingEdge(runtime, { maxGestures }) {
  */
 export async function discoverMatchInventory(runtime, { maxGestures }) {
   let carousel = await carouselAtLeadingEdge(runtime, { maxGestures });
+  await runtime.observeVisibleMedia?.(carousel);
   const initialVisibleTiles = carousel.tiles.length;
   let inventory = appendCarouselInventory([], carousel);
   let horizontalMovements = 0;
@@ -285,6 +288,7 @@ export async function discoverMatchInventory(runtime, { maxGestures }) {
       horizontalMovements += 1;
       noProgress = 0;
       carousel = await stableCarousel(runtime, fresh);
+      await runtime.observeVisibleMedia?.(carousel);
       continue;
     }
     if (canScrollMore) {
@@ -304,6 +308,7 @@ export async function discoverMatchInventory(runtime, { maxGestures }) {
       horizontalMovements += 1;
       noProgress = 0;
       carousel = await stableCarousel(runtime, projection);
+      await runtime.observeVisibleMedia?.(carousel);
       continue;
     }
     if (confirmed) {
@@ -384,10 +389,13 @@ export async function createTinderLocalMatchDiscoveryRuntime(environment = proce
   const config = runtimeConfiguration(environment);
   const runtime = createRuntime(config);
   const deviceId = await resolveDeviceId(runtime, config.installedBridgeVersionCode);
+  const avatars=environment.SHARED_MEDIA_ENABLED === "true" ? createMatchAvatarCollector({runtime}) : null;
+  const observationRuntime=avatars?{...runtime,observeVisibleMedia:carousel=>avatars.observe(carousel)}:runtime;
   return Object.freeze({
     deviceId,
     async observeMatchInventory() {
-      return discoverMatchInventory(runtime, { maxGestures: config.maxGestures });
+      avatars?.clear();
+      return discoverMatchInventory(observationRuntime, { maxGestures: config.maxGestures });
     },
     async reconcileMatchInventory(discovery) {
       const listing = await runtime.dashboard("/dashboard-api/tinder/matches");
@@ -395,17 +403,24 @@ export async function createTinderLocalMatchDiscoveryRuntime(environment = proce
       const plan = planMatchReconciliation(stored, discovery.inventory);
       // No destructive removal or speculative remapping of disappeared
       // tiles. Report the difference rather than hiding stale product rows.
-      if (plan.unmatchedStored) return { changed: false, unresolved: plan.unmatchedStored, created: 0, updates: 0 };
+      if (plan.unmatchedStored) { avatars?.clear();return { changed: false, unresolved: plan.unmatchedStored, created: 0, updates: 0 }; }
       let created = 0;
       for (const match of plan.changes) {
         const result = await runtime.dashboard("/dashboard-api/tinder/matches", { method: "POST", body: { device_id: deviceId, match } });
         if (result.created) created += 1;
       }
-      return { changed: plan.changes.length > 0, unresolved: 0, created, updates: plan.changes.length };
+      let media;
+      if(avatars){
+        const current=await runtime.dashboard("/dashboard-api/tinder/matches");
+        media=await avatars.flush({inventory:discovery.inventory,stored:(current.matches||[]).filter(item=>item.device_id===deviceId),
+          upload:(id,sourceBytes)=>runtime.dashboard(`/dashboard-api/tinder/matches/${encodeURIComponent(id)}/media`,
+            {method:"POST",body:{device_id:deviceId,kind:"avatar",ordinal:0,source_base64:sourceBytes.toString("base64")}})});
+      }
+      return { changed: plan.changes.length > 0, unresolved: 0, created, updates: plan.changes.length,...(media?{media}: {}) };
     },
     async readMatchDiscovery() {
-      const discovery = await discoverMatchInventory(runtime, { maxGestures: config.maxGestures });
-      await persistMatchInventory(runtime, { deviceId, inventory: discovery.inventory });
+      const discovery = await this.observeMatchInventory();
+      await this.reconcileMatchInventory(discovery);
       return Object.freeze({ outcome: "MATCH_UPDATED" });
     }
   });

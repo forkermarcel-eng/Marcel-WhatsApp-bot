@@ -1,6 +1,7 @@
 import {
   TINDER_DISCOVERY_QUEUE,
-  normalizeTinderDiscoveryJob
+  normalizeTinderDiscoveryJob,
+  normalizeProcessMatchJob
 } from "./pg-boss-discovery.js";
 
 export const TINDER_DISCOVERY_WORKER_OPTIONS = Object.freeze({
@@ -46,10 +47,11 @@ export async function startTinderDiscoveryWorker({
       throw new Error("Tinder discovery worker requires exactly one serial job");
     }
     const job = jobs[0];
-    const payload = normalizeTinderDiscoveryJob(job?.data);
+    const processMatch=job?.data?.operation==="PROCESS_MATCH";
+    const payload = processMatch ? normalizeProcessMatchJob(job.data) : normalizeTinderDiscoveryJob(job?.data);
     // Awaiting the existing dispatcher lets pg-boss settle the transport job
     // only once that bounded local attempt has ended. No retry is configured.
-    const observed = await dispatcher.signal(payload);
+    const observed = processMatch ? await dispatcher.processMatch(payload) : await dispatcher.signal(payload);
     onResult(observed);
     if (observed?.status === "SOURCE_UNAVAILABLE" || observed?.status === "ACTION_RETRY_REQUIRED") {
       throw new Error(`Tinder discovery attempt failed: ${observed.status}`);

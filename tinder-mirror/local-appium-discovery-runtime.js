@@ -5,10 +5,18 @@ import { promisify } from "node:util";
 import { join } from "node:path";
 import { planInboxReconciliation } from "./local-discovery-executor.js";
 
-export async function reconcileExistingTinderMirror(inbox, matches, directBindings = new Map()) {
+// Observed UI state only, never a person/Conversation identifier. Geometry
+// and Inbox position deliberately do not make an unchanged row new work.
+const unresolvedRowState = entry => JSON.stringify({
+  texts: JSON.parse(entry.observed_row.ram_key).texts,
+  time: entry.last_message_visible_time ?? null
+});
+
+export async function reconcileExistingTinderMirror(inbox, matches, directBindings = new Map(), checkedUnknown = new Set()) {
   const metrics = { status: "RECONCILED", thread_opens: 0, profile_reads: 0, history_reads: 0,
     match_tile_opens: 0, match_updates: 0, candidates: 0, ambiguous: 0, inbox_rows: 0,
-    known: 0, unknown: 0, observed_unchanged: 0, observed_changed: 0, content_unknown: 0 };
+    known: 0, unknown: 0, observed_unchanged: 0, observed_changed: 0, content_unknown: 0,
+    unknown_unchanged_skipped: 0 };
   await inbox.readSourceXml();
   // Both inventories happen before any detail work or product writes.
   const carousel = await matches.observeMatchInventory();
@@ -21,12 +29,18 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
       || !stored.some(item => item.conversation.id === id)) directBindings.delete(key);
   }
   const plan = planInboxReconciliation(discovery.inventory, stored, directBindings);
+  const states = plan.map(item => unresolvedRowState(item.entry));
+  for (const state of checkedUnknown) {
+    if (states.filter(value => value === state).length !== 1) checkedUnknown.delete(state);
+  }
   metrics.inbox_rows = plan.length;
   const matchResult = await matches.reconcileMatchInventory(carousel);
   metrics.match_updates = matchResult.updates;
   metrics.ambiguous += matchResult.unresolved;
   const represented = new Set();
   for (const item of plan) {
+    const state = unresolvedRowState(item.entry);
+    if (item.identity === "KNOWN") checkedUnknown.delete(state);
     if (item.action === "AMBIGUOUS") {
       directBindings.delete(item.entry.observed_row.ram_key);
       metrics.ambiguous += 1; metrics.unknown += 1; continue;
@@ -38,6 +52,12 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
       await inbox.updateInboxPosition(item.conversation, item.entry);
       continue;
     }
+    if (item.identity === "UNKNOWN" && checkedUnknown.has(state)) {
+      metrics.unknown += 1;
+      metrics.ambiguous += 1;
+      metrics.unknown_unchanged_skipped += 1;
+      continue;
+    }
     metrics.candidates += 1;
     const row = await inbox.locateInventoryRow(item.entry);
     const result = item.identity === "KNOWN"
@@ -45,6 +65,7 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
       : await inbox.readUnboundChanged({ row });
     metrics.thread_opens += 1;
     if (result.conversation_id) {
+      checkedUnknown.delete(state);
       metrics.known += 1;
       if (item.content === "CONTENT_UNKNOWN") metrics.content_unknown += 1;
       else if (result.outcome === "UNCHANGED") metrics.observed_unchanged += 1;
@@ -53,6 +74,9 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
       represented.add(result.conversation_id);
       await inbox.updateInboxPosition({ id: result.conversation_id }, item.entry);
     } else {
+      if (result.outcome === "AMBIGUOUS" && states.filter(value => value === state).length === 1) {
+        checkedUnknown.add(state);
+      }
       directBindings.delete(item.entry.observed_row.ram_key);
       metrics.ambiguous += 1; metrics.unknown += 1;
     }
@@ -147,9 +171,10 @@ export async function createExistingLocalTinderDiscoveryRuntime(environment = pr
     if (inbox.deviceId !== matches.deviceId) {
       throw new Error("Existing local Tinder runners resolved different devices");
     }
+    const checkedUnknown = new Set();
     return Object.freeze({
       close: local.close,
-      reconcile: directBindings => reconcileExistingTinderMirror(inbox, matches, directBindings),
+      reconcile: directBindings => reconcileExistingTinderMirror(inbox, matches, directBindings, checkedUnknown),
       deviceId: inbox.deviceId,
       readSourceXml: inbox.readSourceXml,
       readKnownChanged: inbox.readKnownChanged,

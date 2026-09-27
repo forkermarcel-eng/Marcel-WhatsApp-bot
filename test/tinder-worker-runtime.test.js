@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { prepareLocalAppiumRuntime, reconcileExistingTinderMirror } from "../tinder-mirror/local-appium-discovery-runtime.js";
-import { workerConnectionString, startReconciliationTimer } from "../scripts/tinder-discovery-worker.mjs";
+import { workerConnectionString, startReconciliationTimer, startWorkerTunnel } from "../scripts/tinder-discovery-worker.mjs";
 import { planInboxReconciliation, createLocalTinderDiscoveryExecutor } from "../tinder-mirror/local-discovery-executor.js";
 import { createTinderPossibleChangeDispatcher } from "../tinder-mirror/possible-change-dispatch.js";
 import { scrollInbox, sameInboxScrollSurface } from "../scripts/tinder-block2-initial-sync.mjs";
@@ -48,6 +49,70 @@ const inventoryRow = (name, preview, position) => ({ inbox_position: position,
   observed_row: { ram_key: JSON.stringify({ texts: [name, preview] }) } });
 const storedConversation = (name, preview, id) => ({ conversation: { id, profile: { display_name: name } },
   messages: [{ direction: "inbound", text: preview }] });
+
+test("UNKNOWN unchanged state is checked once per runtime; changed preview/time and restart recheck", async () => {
+  let row = inventoryRow("S", "unresolved", 0), opens = 0;
+  const checked = new Set(), bindings = new Map();
+  const inbox = { readSourceXml: async () => {}, readInboxInventory: async () => ({ inventory: [row] }),
+    readStoredConversations: async () => [storedConversation("S", "other", "s")],
+    locateInventoryRow: async () => row, readUnboundChanged: async () => { opens++; return { outcome: "AMBIGUOUS" }; },
+    updateInboxPosition: async () => assert.fail("No identity assigned") };
+  const matches = { observeMatchInventory: async () => ({}), reconcileMatchInventory: async () => ({ updates: 0, unresolved: 0 }) };
+  const run = state => reconcileExistingTinderMirror(inbox, matches, bindings, state);
+  assert.equal((await run(checked)).thread_opens, 1);
+  row.inbox_position = 8;
+  const skipped = await run(checked);
+  assert.equal(skipped.thread_opens, 0);
+  assert.equal(skipped.unknown, 1);
+  assert.equal(skipped.known, 0);
+  assert.equal(skipped.unknown_unchanged_skipped, 1);
+  row = inventoryRow("S", "changed", 0);
+  assert.equal((await run(checked)).thread_opens, 1);
+  row.last_message_visible_time = "new time";
+  assert.equal((await run(checked)).thread_opens, 1);
+  assert.equal((await run(checked)).thread_opens, 0);
+  assert.equal((await run(new Set())).thread_opens, 1);
+  assert.equal(opens, 4);
+  assert.equal(bindings.size, 0);
+});
+
+test("failed bounded read is not remembered as a completed UNKNOWN check", async () => {
+  const checked = new Set();
+  const inbox = { readSourceXml: async () => {}, readInboxInventory: async () => ({ inventory: [inventoryRow("S", "new", 0)] }),
+    readStoredConversations: async () => [], locateInventoryRow: async () => ({}),
+    readUnboundChanged: async () => { throw new Error("navigation failed"); } };
+  const matches = { observeMatchInventory: async () => ({}), reconcileMatchInventory: async () => ({ updates: 0, unresolved: 0 }) };
+  await assert.rejects(reconcileExistingTinderMirror(inbox, matches, new Map(), checked), /navigation failed/);
+  assert.equal(checked.size, 0);
+});
+
+test("existing SSH process is restarted after loss, receives no Railway secrets, and stops with worker", () => {
+  const children = [], calls = [], reports = []; let retry, cancelled = false;
+  const tunnel = startWorkerTunnel({ TINDER_SSH_TARGET: "existing@ssh.railway.com",
+    TINDER_SSH_IDENTITY_FILE: "existing-key", TINDER_DATABASE_TUNNEL_PORT: "15433",
+    DATABASE_URL: "secret", DASHBOARD_API_SECRET: "secret", SystemRoot: "C:\\Windows" }, {
+    spawnFn: (file, args, options) => { calls.push({ file, args, options });
+      const child = new EventEmitter(); child.kill = () => child.emit("exit", 0); children.push(child); return child; },
+    setTimeoutFn: (callback, ms) => { assert.equal(ms, 5000); retry = callback; return 1; },
+    clearTimeoutFn: () => { cancelled = true; }, report: value => reports.push(value)
+  });
+  assert.deepEqual(calls[0].options.env, { SystemRoot: "C:\\Windows" });
+  assert.equal(calls[0].options.windowsHide, true);
+  assert.ok(calls[0].args.includes("127.0.0.1:15433:127.0.0.1:5432"));
+  assert.ok(calls[0].args.includes("StrictHostKeyChecking=yes"));
+  children[0].emit("exit", 255);
+  assert.equal(reports.length, 1);
+  retry();
+  assert.equal(children.length, 2);
+  children[1].emit("error", new Error("unavailable"));
+  children[1].emit("exit", 255);
+  assert.equal(reports.length, 2);
+  tunnel.stop();
+  assert.equal(cancelled, true);
+  retry();
+  assert.equal(children.length, 2);
+  assert.equal(startWorkerTunnel({}), null);
+});
 
 test("identity survives changed visible time; content changes independently of Inbox count/order", () => {
   const known = storedConversation("A", "tail", "a");

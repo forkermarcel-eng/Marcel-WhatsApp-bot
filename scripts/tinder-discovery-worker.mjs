@@ -1,5 +1,7 @@
 import { PgBoss } from "pg-boss";
 import { pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import { createExistingLocalTinderDiscoveryRuntime } from "../tinder-mirror/local-appium-discovery-runtime.js";
 import { createLocalTinderDiscoveryExecutor } from "../tinder-mirror/local-discovery-executor.js";
 import { createTinderDiscoveryPgBoss } from "../tinder-mirror/pg-boss-discovery.js";
@@ -8,6 +10,56 @@ import { startTinderDiscoveryWorker } from "../tinder-mirror/pg-boss-worker.js";
 function requiredEnvironment(value, name) {
   if (typeof value !== "string" || !value) throw new Error(`${name} is required`);
   return value;
+}
+
+export function startWorkerTunnel(environment, { spawnFn = spawn, setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout, report = console.log } = {}) {
+  if (!environment.TINDER_SSH_TARGET) return null;
+  const port = Number(environment.TINDER_DATABASE_TUNNEL_PORT);
+  if (!Number.isInteger(port) || port < 1 || port > 65535
+    || !/^[a-zA-Z0-9-]+@ssh\.railway\.com$/u.test(environment.TINDER_SSH_TARGET)) {
+    throw new Error("Invalid existing Railway SSH tunnel configuration");
+  }
+  const identity = requiredEnvironment(environment.TINDER_SSH_IDENTITY_FILE, "TINDER_SSH_IDENTITY_FILE");
+  const env = Object.fromEntries(["SystemRoot", "WINDIR", "PATH", "PATHEXT", "USERPROFILE",
+    "HOME", "TEMP", "TMP"].filter(key => environment[key] !== undefined).map(key => [key, environment[key]]));
+  let child, retry, stopped = false;
+  function launch() {
+    if (stopped) return;
+    const current = spawnFn("ssh.exe", ["-N", "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+      "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
+      "-i", identity, "-L", `127.0.0.1:${port}:127.0.0.1:5432`, environment.TINDER_SSH_TARGET],
+    { windowsHide: true, env, stdio: "ignore" });
+    child = current;
+    let ended = false;
+    function lost(code) {
+      if (ended) return;
+      ended = true;
+      if (child === current) child = null;
+      if (stopped) return;
+      report(JSON.stringify({ ssh_tunnel: "DISCONNECTED", exit_code: Number.isInteger(code) ? code : null }));
+      retry = setTimeoutFn(() => { retry = null; launch(); }, 5000);
+    }
+    current.once("error", () => lost(null));
+    current.once("exit", lost);
+  }
+  launch();
+  return { stop() { stopped = true; if (retry) clearTimeoutFn(retry); child?.kill(); } };
+}
+
+async function waitForTunnel(port) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const available = await new Promise(resolve => {
+      const socket = connect({ host: "127.0.0.1", port: Number(port) });
+      const finish = value => { socket.destroy(); resolve(value); };
+      socket.once("connect", () => finish(true));
+      socket.once("error", () => finish(false));
+      socket.setTimeout(500, () => finish(false));
+    });
+    if (available) return;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error("Existing Railway SSH tunnel unavailable");
 }
 
 function reconciliationInterval(environment) {
@@ -35,7 +87,8 @@ export function startReconciliationTimer({ dispatcher, deviceId, environment = {
 /*
  * Run only on the Windows host with the existing Appium server. Its
  * DATABASE_URL must point at the existing Railway SSH tunnel; this script
- * does not create a public database proxy or a tunnel. The existing local
+ * never creates a public database proxy. The optional existing SSH process
+ * is owned and restarted with this worker. The existing local
  * runtime reuses or creates a standard session on that same Appium server.
  */
 export async function startLocalTinderDiscoveryWorker(environment = process.env) {
@@ -44,7 +97,9 @@ export async function startLocalTinderDiscoveryWorker(environment = process.env)
   const boss = createTinderDiscoveryPgBoss(PgBoss, { connectionString });
   boss.on("error", () => console.error("Tinder discovery transport error (details suppressed)."));
   let runtime;
+  const tunnel = startWorkerTunnel(environment);
   try {
+    if (tunnel) await waitForTunnel(environment.TINDER_DATABASE_TUNNEL_PORT);
     await boss.start();
     runtime = await createExistingLocalTinderDiscoveryRuntime(environment);
     const dispatcher = createLocalTinderDiscoveryExecutor({ runtime });
@@ -54,6 +109,7 @@ export async function startLocalTinderDiscoveryWorker(environment = process.env)
     const worker = await startTinderDiscoveryWorker({ boss, dispatcher,
       onResult: result => console.log(JSON.stringify({ discovery_job_result: result }))
     });
+    console.log(JSON.stringify({ pgboss_consumer_registered: true }));
     const reconciliation = startReconciliationTimer({ dispatcher, deviceId: runtime.deviceId, environment,
       onResult: result => console.log(JSON.stringify({ reconciliation_result: result })),
       onError: () => console.error("Tinder reconciliation failed (details suppressed).") });
@@ -63,11 +119,13 @@ export async function startLocalTinderDiscoveryWorker(environment = process.env)
         await worker.stop();
         await boss.stop();
         await runtime.close();
+        tunnel?.stop();
       }
     });
   } catch (error) {
     await boss.stop().catch(() => {});
     await runtime?.close().catch(() => {});
+    tunnel?.stop();
     throw error;
   }
 }

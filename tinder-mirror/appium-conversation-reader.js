@@ -952,6 +952,7 @@ export function observeInboxFromXml(xml) {
     .filter((row) => !row.match_cta);
   return Object.freeze({
     rows: Object.freeze(rows),
+    scroll_resource_id: inbox.recycler.attributes["resource-id"] || null,
     scroll_bounds: Object.freeze({ ...inbox.recycler.bounds })
   });
 }

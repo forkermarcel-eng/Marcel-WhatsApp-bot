@@ -7,16 +7,21 @@ import {
   TINDER_POSSIBLE_CHANGE_EVENT_TYPE,
   normalizeTinderDiscoveryJob
 } from "./pg-boss-discovery.js";
+import { decode } from "html-entities";
 
 const visibleText = value => String(value || "").normalize("NFC").replace(/\s+/gu, " ").trim();
+// Legacy product text can still contain entities, exactly as handled by the
+// existing Dashboard renderer. Decode stored text once for UI comparison;
+// do not rewrite Messages or decode the already-parsed live UI a second time.
+const storedVisibleText = value => visibleText(decode(String(value || ""), { level: "html5", scope: "strict" }));
 
 export function planInboxReconciliation(inventory, stored) {
   return inventory.map(entry => {
     const texts = JSON.parse(entry.observed_row.ram_key).texts.map(visibleText);
-    const possible = stored.filter(item => texts.includes(visibleText(item.conversation.profile?.display_name)));
+    const possible = stored.filter(item => texts.includes(storedVisibleText(item.conversation.profile?.display_name)));
     const unchanged = possible.filter(item => {
-      const name = visibleText(item.conversation.profile?.display_name);
-      const tail = visibleText(item.messages?.at(-1)?.text);
+      const name = storedVisibleText(item.conversation.profile?.display_name);
+      const tail = storedVisibleText(item.messages?.at(-1)?.text);
       if (!tail) return false;
       if (entry.last_message_visible_time !== undefined
         && entry.last_message_visible_time !== item.conversation.last_message_visible_time) return false;

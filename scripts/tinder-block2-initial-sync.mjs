@@ -252,11 +252,17 @@ function adjacentInboxOverlap(previous, fresh) {
   return new Set();
 }
 
-function sameInboxScrollSurface(left, right) {
+export function sameInboxScrollSurface(left, right) {
   const a = left?.scroll_bounds;
   const b = right?.scroll_bounds;
+  // Tinder collapses its top area while scrolling the same Inbox Recycler.
+  // Its top moved 225 -> 135 on the ZTE with all previous rows overlapping.
+  // Compare the actual container, not that changing top inset. Row overlap
+  // is still checked separately before accepting the next inventory page.
+  const sameRecycler = left?.scroll_resource_id === "com.tinder:id/matchListRecycler"
+    && right?.scroll_resource_id === left.scroll_resource_id;
   return Boolean(a && b
-    && a.left === b.left && a.top === b.top
+    && a.left === b.left && (a.top === b.top || sameRecycler)
     && a.right === b.right && a.bottom === b.bottom);
 }
 

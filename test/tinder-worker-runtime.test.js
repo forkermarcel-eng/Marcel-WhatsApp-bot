@@ -4,7 +4,18 @@ import { prepareLocalAppiumRuntime, reconcileExistingTinderMirror } from "../tin
 import { workerConnectionString, startReconciliationTimer } from "../scripts/tinder-discovery-worker.mjs";
 import { planInboxReconciliation } from "../tinder-mirror/local-discovery-executor.js";
 import { createTinderPossibleChangeDispatcher } from "../tinder-mirror/possible-change-dispatch.js";
-import { scrollInbox } from "../scripts/tinder-block2-initial-sync.mjs";
+import { scrollInbox, sameInboxScrollSurface } from "../scripts/tinder-block2-initial-sync.mjs";
+
+test("same Inbox Recycler survives the observed collapsing top area without accepting another surface", () => {
+  const before = { scroll_resource_id: "com.tinder:id/matchListRecycler",
+    scroll_bounds: { left: 0, top: 225, right: 576, bottom: 1122 } };
+  const after = { ...before, scroll_bounds: { ...before.scroll_bounds, top: 135 } };
+  assert.equal(sameInboxScrollSurface(before, after), true);
+  assert.equal(sameInboxScrollSurface(after, before), true);
+  assert.equal(sameInboxScrollSurface(before, { ...after, scroll_resource_id: "other" }), false);
+  assert.equal(sameInboxScrollSurface(before, { ...after, scroll_resource_id: null }), false);
+  assert.equal(sameInboxScrollSurface(before, { ...after, scroll_bounds: { ...after.scroll_bounds, right: 500 } }), false);
+});
 
 test("Inbox scroll freshly targets its RecyclerView with the physically verified distance", async () => {
   for (const direction of ["up", "down"]) {
@@ -56,6 +67,17 @@ test("unchanged outgoing preview accepts the production API direction vocabulary
   }
   stored.messages[0].direction = "INBOUND";
   assert.equal(planInboxReconciliation([row], [stored])[0].action, "REVALIDATE");
+});
+
+test("unchanged legacy entities compare with live Unicode without rewriting stored Messages", () => {
+  const stored = storedConversation("A", "Hello &#x1F60A; &amp; goodbye", "a");
+  const original = JSON.stringify(stored);
+  assert.equal(planInboxReconciliation([inventoryRow("A", "Hello 😊 & goodbye", 0)], [stored])[0].action, "UNCHANGED");
+  assert.equal(planInboxReconciliation([inventoryRow("A", "Hello 😊 & changed", 0)], [stored])[0].action, "REVALIDATE");
+  assert.equal(planInboxReconciliation([inventoryRow("A", "Hello &#x1F60A; &amp; goodbye", 0)], [stored])[0].action, "REVALIDATE");
+  assert.equal(JSON.stringify(stored), original);
+  stored.messages[0].text = "Native 🫣 emoji";
+  assert.equal(planInboxReconciliation([inventoryRow("A", "Native 🫣 emoji", 0)], [stored])[0].action, "UNCHANGED");
 });
 
 test("unchanged reconciliation inventories both surfaces with zero detail reads", async () => {

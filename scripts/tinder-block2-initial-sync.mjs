@@ -21,6 +21,7 @@ import {
   observeInboxFromXml,
   observeProfileFromXml,
   mergeProfileSnapshots,
+  semanticProfileCompatible,
   sameObservedViewport
 } from "../tinder-mirror/appium-conversation-reader.js";
 import { readCompleteLiveMatchProfile } from "../tinder-mirror/appium-match-live-profile-runner.js";
@@ -1344,6 +1345,23 @@ export function selectStoredDeltaConversation(candidates, viewport) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+export async function revalidateChangedSingletonProfile({ candidates, viewport, readProfile, returnToThread }) {
+  // Message attachment establishes relevance only, never identity. No delta
+  // means no profile read. Never inspect another candidate's live profile.
+  const relevant = candidates.filter(candidate => candidate.messages?.length === 1
+    && viewport.messages.length > 1
+    && existingSuffixObservedPrefixOverlap(candidate.messages, viewport.messages) === 1);
+  if (!relevant.length) return null;
+  const profile = await readProfile();
+  const returned = await returnToThread();
+  if (!returned || returned.profile_display_name !== viewport.profile_display_name) {
+    throw new Error("Tinder changed during bounded profile revalidation");
+  }
+  const compatible = candidates.filter(candidate => semanticProfileCompatible(candidate.conversation.profile, profile));
+  if (compatible.length !== 1 || !relevant.includes(compatible[0])) return null;
+  return { candidate: compatible[0], viewport: returned };
+}
+
 export async function readBoundedKnownDelta({ knownMessages, initialViewport, readPrevious, maxGestures = 8 }) {
   let messages = initialViewport.messages;
   let viewport = initialViewport;
@@ -1378,17 +1396,20 @@ export async function createTinderLocalDiscoveryRuntime(environment = process.en
     return Object.freeze({ outcome: "KNOWN_CHANGED", conversation_id: conversationId });
   }
 
-  async function readUnboundChanged({ row }) {
-    const listing = await dashboard("/dashboard-api/tinder/conversations");
+  async function readUnboundChanged({ row, candidates: suppliedCandidates }) {
+    // Reconciliation supplies the already loaded, device-scoped remainder.
+    // Legacy callers may load only this device, never the global candidate set.
+    const candidates = suppliedCandidates ? [...suppliedCandidates] : [];
+    if (!suppliedCandidates) {
+      const listing = await dashboard(`/dashboard-api/tinder/conversations?device_id=${encodeURIComponent(deviceId)}`);
+      for (const conversation of listing.conversations || []) {
+        candidates.push(await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(conversation.id)}`));
+      }
+    }
     const opened = await openFreshRow(row);
     const header = opened.viewport.profile_display_name;
-    const candidates = [];
     // Display name is only a shortlist. The live ordered stored tail below
     // must independently agree, and all matching stored records are checked.
-    for (const conversation of listing.conversations || []) {
-      if (conversation.profile?.display_name !== header) continue;
-      candidates.push(await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(conversation.id)}`));
-    }
     let viewport = opened.viewport;
     let messages = viewport.messages;
     for (let gesture = 0; gesture <= 8; gesture += 1) {
@@ -1409,8 +1430,26 @@ export async function createTinderLocalDiscoveryRuntime(environment = process.en
         break;
       }
     }
+    let profileReads = 0;
+    const recovered = await revalidateChangedSingletonProfile({ candidates, viewport: { ...viewport, messages },
+      readProfile: async () => {
+        profileReads += 1;
+        await openInitialProfile(header);
+        return readCompleteLiveMatchProfile({ sourceXml, tap, sleep,
+          scrollProfile: bounds => scrollTowardBottom(bounds, profileScrollPercent)
+        }, header, { maxProfileGestures, settleMilliseconds, boundarySettleMilliseconds });
+      },
+      returnToThread: async () => (await returnToConversation(header)).viewport
+    });
+    if (recovered) {
+      const delta = await readBoundedKnownDelta({ knownMessages: recovered.candidate.messages,
+        initialViewport: recovered.viewport,
+        readPrevious: async () => { throw new Error("Profile return lost the bounded delta viewport"); }
+      });
+      return { ...await persistDelta(row, recovered.candidate.conversation.id, delta), profile_reads: profileReads };
+    }
     await returnToInbox();
-    return Object.freeze({ outcome: "AMBIGUOUS", thread_opens: 1 });
+    return Object.freeze({ outcome: "AMBIGUOUS", thread_opens: 1, profile_reads: profileReads });
   }
 
   return Object.freeze({
@@ -1418,7 +1457,7 @@ export async function createTinderLocalDiscoveryRuntime(environment = process.en
     readUnboundChanged,
     readInboxInventory: discoverInboxInventory,
     async readStoredConversations() {
-      const listing = await dashboard("/dashboard-api/tinder/conversations");
+      const listing = await dashboard(`/dashboard-api/tinder/conversations?device_id=${encodeURIComponent(deviceId)}`);
       const stored = [];
       for (const conversation of listing.conversations || []) {
         stored.push(await dashboard(`/dashboard-api/tinder/conversations/${encodeURIComponent(conversation.id)}`));

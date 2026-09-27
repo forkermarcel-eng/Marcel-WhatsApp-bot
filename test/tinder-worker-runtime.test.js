@@ -6,6 +6,55 @@ import { workerConnectionString, startReconciliationTimer, startWorkerTunnel } f
 import { planInboxReconciliation, createLocalTinderDiscoveryExecutor } from "../tinder-mirror/local-discovery-executor.js";
 import { createTinderPossibleChangeDispatcher } from "../tinder-mirror/possible-change-dispatch.js";
 import { scrollInbox, sameInboxScrollSurface } from "../scripts/tinder-block2-initial-sync.mjs";
+import { revalidateChangedSingletonProfile } from "../scripts/tinder-block2-initial-sync.mjs";
+import { semanticProfileCompatible } from "../tinder-mirror/appium-conversation-reader.js";
+
+const semanticProfile = (value, ordinal = "01") => ({ display_name: "Example", attributes: {
+  header_profile_age: "36", [`structured_profile_${ordinal}_label`]: "Communication",
+  [`structured_profile_${ordinal}_value`]: value, profile_chip_01: "Reading"
+} });
+
+test("semantic profile comparison ignores ordinals and fallback projection, not semantic differences", () => {
+  const a = semanticProfile("Text & chat"), b = semanticProfile("Text &amp; chat", "19");
+  b.attributes.visible_profile_01 = "different projection";
+  assert.equal(semanticProfileCompatible(a, b), true);
+  assert.equal(semanticProfileCompatible(a, semanticProfile("Calls")), false);
+  assert.equal(semanticProfileCompatible({ display_name: "Example" }, { display_name: "Example" }), false);
+});
+
+test("bounded profile fallback reads only the changed opened thread and refuses ambiguity or no delta", async () => {
+  const a = { conversation: { id: "a", profile: semanticProfile("Text") },
+    messages: [{ direction: "OUTBOUND", text: "A &amp; B" }] };
+  const b = { conversation: { id: "b", profile: semanticProfile("Calls") }, messages: a.messages };
+  const viewport = { profile_display_name: "Example", messages: [
+    { direction: "OUTBOUND", text: "A & B" }, { direction: "INBOUND", text: "New" }] };
+  let reads = 0, returns = 0;
+  const run = (candidates, current = viewport) => revalidateChangedSingletonProfile({ candidates, viewport: current,
+    readProfile: async () => { reads++; return semanticProfile("Text", "18"); },
+    returnToThread: async () => { returns++; return viewport; } });
+  assert.equal((await run([a, b])).candidate.conversation.id, "a");
+  assert.equal(reads, 1); assert.equal(returns, 1);
+  assert.equal(await run([a, { ...a, conversation: { ...a.conversation, id: "c" } }]), null);
+  const before = reads;
+  assert.equal(await run([a, b], { ...viewport, messages: viewport.messages.slice(0, 1) }), null);
+  assert.equal(await run([], viewport), null);
+  assert.equal(reads, before);
+});
+
+test("reconciliation passes only unrepresented candidate objects internally, never eliminating 2 by 2", async () => {
+  const stored = [storedConversation("Known", "tail", "k"), storedConversation("A", "old", "a"), storedConversation("B", "old", "b")];
+  const seen = [];
+  const inbox = { readSourceXml: async () => {}, readInboxInventory: async () => ({ inventory: [
+    inventoryRow("A", "new", 0), inventoryRow("Known", "tail", 1), inventoryRow("B", "new", 2)] }),
+    readStoredConversations: async () => stored, updateInboxPosition: async () => {},
+    locateInventoryRow: async entry => entry,
+    readUnboundChanged: async ({ candidates }) => { seen.push(candidates); return { outcome: "AMBIGUOUS" }; } };
+  const matches = { observeMatchInventory: async () => ({}), reconcileMatchInventory: async () => ({ updates: 0, unresolved: 0 }) };
+  const result = await reconcileExistingTinderMirror(inbox, matches);
+  assert.equal(result.known, 1); assert.equal(result.unknown, 2);
+  assert.deepEqual(seen.map(items => items.map(item => item.conversation.id)), [["a", "b"], ["a", "b"]]);
+  assert.equal(JSON.stringify(result).includes('"profile"'), false);
+});
 
 test("same Inbox Recycler survives the observed collapsing top area without accepting another surface", () => {
   const before = { scroll_resource_id: "com.tinder:id/matchListRecycler",
@@ -250,7 +299,7 @@ test("unchanged legacy entities compare with live Unicode without rewriting stor
   const original = JSON.stringify(stored);
   assert.equal(planInboxReconciliation([inventoryRow("A", "Hello 😊 & goodbye", 0)], [stored])[0].action, "UNCHANGED");
   assert.equal(planInboxReconciliation([inventoryRow("A", "Hello 😊 & changed", 0)], [stored])[0].action, "REVALIDATE");
-  assert.equal(planInboxReconciliation([inventoryRow("A", "Hello &#x1F60A; &amp; goodbye", 0)], [stored])[0].action, "REVALIDATE");
+  assert.equal(planInboxReconciliation([inventoryRow("A", "Hello &#x1F60A; &amp; goodbye", 0)], [stored])[0].action, "UNCHANGED");
   assert.equal(JSON.stringify(stored), original);
   stored.messages[0].text = "Native 🫣 emoji";
   assert.equal(planInboxReconciliation([inventoryRow("A", "Native 🫣 emoji", 0)], [stored])[0].action, "UNCHANGED");

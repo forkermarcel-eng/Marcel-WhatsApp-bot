@@ -101,7 +101,7 @@ export function registerTinderMirrorRoutes({ app, pool, dashboardApiReady, dashb
   app.get("/dashboard-api/tinder/conversations", async (req, res) => {
     if (!requireDashboardAccess(access, req, res)) return;
     try {
-      return res.status(200).json({ ok: true, conversations: await mirror.list() });
+      return res.status(200).json({ ok: true, conversations: await mirror.list(req.query?.device_id ?? null) });
     } catch (error) {
       return errorResponse(res, error);
     }

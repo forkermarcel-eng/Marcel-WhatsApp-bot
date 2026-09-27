@@ -7,13 +7,13 @@ import {
   TINDER_POSSIBLE_CHANGE_EVENT_TYPE,
   normalizeTinderDiscoveryJob
 } from "./pg-boss-discovery.js";
-import { decode } from "html-entities";
+import { canonicalTinderText } from "./conversation.js";
 
-const visibleText = value => String(value || "").normalize("NFC").replace(/\s+/gu, " ").trim();
+const visibleText = canonicalTinderText;
 // Legacy product text can still contain entities, exactly as handled by the
-// existing Dashboard renderer. Decode stored text once for UI comparison;
-// do not rewrite Messages or decode the already-parsed live UI a second time.
-const storedVisibleText = value => visibleText(decode(String(value || ""), { level: "html5", scope: "strict" }));
+// existing Dashboard renderer. Equality uses the same canonical representation
+// for either side; stored Messages are never rewritten by this comparison.
+const storedVisibleText = canonicalTinderText;
 
 export function compareKnownInboxContent(entry, item) {
   const texts = JSON.parse(entry.observed_row.ram_key).texts.map(visibleText);

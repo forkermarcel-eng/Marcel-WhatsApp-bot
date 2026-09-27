@@ -2003,6 +2003,32 @@ test("a repeated unlabeled one-message delta overlap fails closed without insert
   );
 });
 
+test("confirmed singleton appends only the canonical delta and repeated submission is idempotent", async () => {
+  const pool = createMemoryPool();
+  const mirror = createTinderConversationMirror({ pool });
+  const deviceId = "00000000-0000-4000-8000-000000000001";
+  const initial = await mirror.sync({ deviceId, payload: { profile: profile(),
+    messages: [message("OUTBOUND", "A &amp; B")], history_complete: true } });
+  const payload = { messages: [message("OUTBOUND", "A & B"), message("INBOUND", "New")] };
+  const first = await mirror.appendDelta({ deviceId, conversationId: initial.conversation.id, payload });
+  assert.equal(first.appended_messages, 1);
+  const second = await mirror.appendDelta({ deviceId, conversationId: initial.conversation.id, payload });
+  assert.equal(second.appended_messages, 0);
+  assert.equal(second.conversation.id, initial.conversation.id);
+  assert.equal(pool.state.messages.get(initial.conversation.id).length, 2);
+});
+
+test("device-scoped listing binds the requested existing device in SQL", async () => {
+  const calls = [];
+  const pool = { connect: async () => {}, query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; } };
+  const mirror = createTinderConversationMirror({ pool });
+  const device = "00000000-0000-4000-8000-000000000001";
+  await mirror.list(device);
+  assert.match(calls[0].sql, /c\.device_id=\$1/);
+  assert.deepEqual(calls[0].params, [device]);
+  await assert.rejects(mirror.list("invalid"));
+});
+
 test("a two-message ordered live delta overlap remains sufficient without visible labels", async () => {
   const pool = createMemoryPool();
   const mirror = createTinderConversationMirror({ pool });

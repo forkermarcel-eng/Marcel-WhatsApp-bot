@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import { decode } from "html-entities";
+
+export const canonicalTinderText = value => decode(String(value ?? ""), { level: "html5", scope: "strict" })
+  .normalize("NFC").replace(/\s+/gu, " ").trim();
 
 /*
  * Block 2 stores only ordinary Tinder product data.  It deliberately has no
@@ -268,7 +272,7 @@ function sameOptionalText(left, right) {
 
 export function messagesEqual(left, right) {
   return left.direction === right.direction
-    && left.text === right.text
+    && canonicalTinderText(left.text) === canonicalTinderText(right.text)
     && sameOptionalText(left.visible_time, right.visible_time)
     && sameOptionalText(left.visible_status, right.visible_status);
 }
@@ -281,7 +285,7 @@ export function messagesEqual(left, right) {
  * the ordinary message fields already persisted by the mirror.
  */
 export function messageIdentityEqual(left, right) {
-  return left.text === right.text
+  return canonicalTinderText(left.text) === canonicalTinderText(right.text)
     && sameOptionalText(left.visible_time, right.visible_time)
     && sameOptionalText(left.visible_status, right.visible_status);
 }
@@ -359,6 +363,9 @@ function hasVisibleMessageIdentity(message) {
 function hasUnambiguousDeltaOverlap(existing, observed, overlap) {
   if (overlap >= 2) return true;
   if (overlap !== 1) return false;
+  // This endpoint already targets one confirmed device-bound Conversation;
+  // it does not select an identity. A singleton has no second stored anchor.
+  if (existing.length === 1) return true;
 
   const storedTail = existing.at(-1);
   const observedPrefix = observed[0];
@@ -1140,7 +1147,10 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
     }
   }
 
-  async function list() {
+  async function list(deviceId = null) {
+    if (deviceId !== null && !UUID_V4.test(deviceId)) {
+      throw new TinderMirrorError("INVALID_TINDER_MIRROR_PAYLOAD", "device id is invalid");
+    }
     try {
       const result = await pool.query(
         `SELECT c.conversation_id, c.profile, c.history_complete, c.profile_synced_at,
@@ -1148,8 +1158,9 @@ export function createTinderConversationMirror({ pool, now = () => new Date(), i
                 c.created_at, c.updated_at, COUNT(m.message_id)::int AS message_count
            FROM tinder_conversations c
            LEFT JOIN tinder_conversation_messages m ON m.conversation_id=c.conversation_id
+          WHERE ($1::uuid IS NULL OR c.device_id=$1)
           GROUP BY c.conversation_id
-          ORDER BY c.inbox_position ASC NULLS LAST, c.conversation_id ASC`
+          ORDER BY c.inbox_position ASC NULLS LAST, c.conversation_id ASC`, [deviceId]
       );
       return result.rows.map((row) => publicConversation(row, row.message_count));
     } catch (error) {

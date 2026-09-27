@@ -38,6 +38,9 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
   metrics.match_updates = matchResult.updates;
   metrics.ambiguous += matchResult.unresolved;
   const represented = new Set();
+  // Reserve every confirmed ID before processing any UNKNOWN, regardless of
+  // Inbox order. Candidates remain ordinary objects in this run's RAM only.
+  const reserved = new Set(plan.filter(item => item.identity === "KNOWN").map(item => item.conversation.id));
   for (const item of plan) {
     const state = unresolvedRowState(item.entry);
     if (item.identity === "KNOWN") checkedUnknown.delete(state);
@@ -62,8 +65,11 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
     const row = await inbox.locateInventoryRow(item.entry);
     const result = item.identity === "KNOWN"
       ? await inbox.readKnownChanged({ row, conversationId: item.conversation.id })
-      : await inbox.readUnboundChanged({ row });
+      : await inbox.readUnboundChanged({ row,
+        candidates: stored.filter(candidate => !reserved.has(candidate.conversation.id)
+          && !represented.has(candidate.conversation.id)) });
     metrics.thread_opens += 1;
+    metrics.profile_reads += result.profile_reads || 0;
     if (result.conversation_id) {
       checkedUnknown.delete(state);
       metrics.known += 1;

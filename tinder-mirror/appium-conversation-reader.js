@@ -1,4 +1,4 @@
-import { messagesEqual } from "./conversation.js";
+import { messagesEqual, canonicalTinderText } from "./conversation.js";
 import {
   classifyMessageTextNode,
   flattenUiNodes,
@@ -931,6 +931,22 @@ export function observeProfileFromXml(xml, {
     // same-screen control. It is never included in a profile payload.
     chip_expansion_bounds: chipExpansionBounds
   });
+}
+
+// Reuse the reader's semantic fields, not projection ordinals or geometry.
+// Incomplete/changed semantic content is not silently treated as identity.
+export function semanticProfileCompatible(stored, observed) {
+  const a = profileHeaderValues(stored), b = profileHeaderValues(observed);
+  if (canonicalTinderText(stored?.display_name) !== canonicalTinderText(observed?.display_name)) return false;
+  if (!a.age || !b.age || canonicalTinderText(a.age) !== canonicalTinderText(b.age)) return false;
+  const values = profile => new Set([
+    ...profileStructuredPairs(profile).map(pair => JSON.stringify([
+      canonicalTinderText(pair.label), canonicalTinderText(pair.value)
+    ])),
+    ...profileChipValues(profile).map(value => JSON.stringify(["chip", canonicalTinderText(value)]))
+  ]);
+  const left = values(stored), right = values(observed);
+  return left.size > 0 && left.size === right.size && [...left].every(value => right.has(value));
 }
 
 /*

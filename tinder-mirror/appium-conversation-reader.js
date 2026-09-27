@@ -250,6 +250,16 @@ function profileMediaMarker(nodes, screen) {
   return candidates.length === 1 ? candidates[0] : null;
 }
 
+function profileMediaPosition(media) {
+  // Official ViewPager accessibility description, e.g. "Photo, 1 of 9".
+  // Position is transient navigation evidence, never a profile identifier.
+  const match = String(media?.attributes?.["content-desc"] || "").match(/\b(\d+)\D+(\d+)\s*$/u);
+  if (!match) return null;
+  const position = Number(match[1]), total = Number(match[2]);
+  return position >= 1 && position <= total && total <= 40
+    ? Object.freeze({ position, total }) : null;
+}
+
 function sameScrollSurface(left, right) {
   if (!left || !right) return false;
   const tolerance = 8;
@@ -946,6 +956,7 @@ export function observeProfileFromXml(xml, {
     // a durable media identifier; callers may use them only with the same
     // immediately obtained screen observation.
     media_bounds: media?.bounds ? Object.freeze({ ...media.bounds }) : null,
+    media_pager: profileMediaPosition(media),
     // The optional in-profile expansion target is likewise an ephemeral
     // same-screen control. It is never included in a profile payload.
     chip_expansion_bounds: chipExpansionBounds

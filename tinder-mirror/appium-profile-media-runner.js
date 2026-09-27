@@ -120,9 +120,9 @@ async function ingestVerifiedPage(ingestor, reference, screenBytes, observation,
 
 /*
  * Reads only the current profile's verified media pager.  It captures the
- * visible initial page and then follows physical pager movement.  A false
- * movement result is confirmed once on the same fresh pager before declaring
- * the reachable end.  No screen/text/image data is returned to callers.
+ * visible initial page and then follows observed pager position AND pixels.
+ * A gesture's return value is not an end-of-media signal. The official
+ * current/total description must confirm the last page before completion.
  */
 export async function readVerifiedTinderProfileMedia(runtime, {
   profileReference: suppliedProfileReference,
@@ -153,6 +153,10 @@ export async function readVerifiedTinderProfileMedia(runtime, {
 
   let observation = await freshProfileObservation(runtime, expectedDisplayName);
   if (!observation) return compactResult({ status: "PROFILE_NOT_VERIFIED" });
+  if (!observation.media_pager) return compactResult({ status: "PAGER_POSITION_UNAVAILABLE" });
+  if (observation.media_pager.position !== 1) return compactResult({ status: "PAGER_NOT_AT_START" });
+  const total = observation.media_pager.total;
+  let observedPosition = 1;
 
   let position = 0;
   let gestures = 0;
@@ -168,19 +172,20 @@ export async function readVerifiedTinderProfileMedia(runtime, {
   let unchangedBoundaryObservations = 0;
 
   for (let gesture = 0; gesture < maximumGestures; gesture += 1) {
-    const canAdvance = await runtime.swipePager(observation.media_bounds, "left");
+    await runtime.swipePager(observation.media_bounds, "left");
     gestures += 1;
-    if (typeof canAdvance !== "boolean") {
-      throw new Error("Tinder profile media pager did not report a physical boundary result");
-    }
 
-    await wait(runtime, canAdvance ? settle : boundarySettle);
+    await wait(runtime, observedPosition === total ? boundarySettle : settle);
     observation = await freshProfileObservation(runtime, expectedDisplayName);
     if (!observation) return compactResult({
       status: "PROFILE_CHANGED",
       capturedPages,
       pagerGestures: gestures
     });
+    if (!observation.media_pager || observation.media_pager.total !== total
+      || ![observedPosition, observedPosition + 1].includes(observation.media_pager.position)) {
+      return compactResult({ status: "PAGER_POSITION_CHANGED", capturedPages, pagerGestures: gestures });
+    }
     screenBytes = await captureScreenBytes(runtime);
     if (!screenBytes) {
       await recordUnavailable(mediaIngestor, reference, position + 1, "SCREENSHOT_UNAVAILABLE");
@@ -192,16 +197,20 @@ export async function readVerifiedTinderProfileMedia(runtime, {
       });
     }
     const digest = await visibleMediaDigest(screenBytes, observation.media_bounds);
-    if (digest === currentDigest) {
-      unchangedBoundaryObservations = canAdvance ? 0 : unchangedBoundaryObservations + 1;
-      if (unchangedBoundaryObservations >= 2) return compactResult({ status: "MEDIA_READ",
-        capturedPages, pagerGestures: gestures, endActuallyReached: true });
+    if (digest === currentDigest || observation.media_pager.position === observedPosition) {
+      unchangedBoundaryObservations = digest === currentDigest
+        && observation.media_pager.position === observedPosition ? unchangedBoundaryObservations + 1 : 0;
+      if (unchangedBoundaryObservations >= 2) return compactResult({
+        status: observedPosition === total && capturedPages === total ? "MEDIA_READ" : "PAGER_NO_PROGRESS",
+        capturedPages, pagerGestures: gestures,
+        endActuallyReached: observedPosition === total && capturedPages === total });
       continue;
     }
     unchangedBoundaryObservations = 0;
     if (seenPages.has(digest)) return compactResult({ status: "PAGER_CYCLE_DETECTED", capturedPages, pagerGestures: gestures });
     seenPages.add(digest);
     currentDigest = digest;
+    observedPosition = observation.media_pager.position;
     position += 1;
     await ingestVerifiedPage(mediaIngestor, reference, screenBytes, observation, position);
     capturedPages += 1;

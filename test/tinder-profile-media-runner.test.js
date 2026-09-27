@@ -4,14 +4,15 @@ import test from "node:test";
 import sharp from "sharp";
 import { readVerifiedTinderProfileMedia } from "../tinder-mirror/appium-profile-media-runner.js";
 import { createProfileMediaBuffer } from "../tinder-mirror/profile-media-buffer.js";
+import { createRuntime } from "../scripts/tinder-block2-match-live-profile.mjs";
 
-function profileXml() {
+function profileXml(position = 1, total = 1) {
   return `
     <hierarchy rotation="0">
       <android.widget.FrameLayout bounds="[0,0][576,1280]">
         <androidx.core.widget.NestedScrollView scrollable="true" bounds="[0,160][576,1120]">
           <android.widget.FrameLayout bounds="[0,160][576,780]">
-            <androidx.viewpager.widget.ViewPager bounds="[0,160][576,600]" />
+            <androidx.viewpager.widget.ViewPager content-desc="Profile Media, Photo, ${position} of ${total}" bounds="[0,160][576,600]" />
             <android.widget.TextView text="Visible profile, 29" bounds="[36,510][420,556]" />
             <android.widget.TextView heading="true" text="Visible section" bounds="[36,620][360,660]" />
             <android.widget.TextView text="Visible value" bounds="[36,670][500,716]" />
@@ -64,7 +65,7 @@ test("verified profile media runner captures the initial page and each physicall
   let page = 0;
   const pagerCalls = [];
   const result = await readVerifiedTinderProfileMedia({
-    async sourceXml() { return profileXml(); },
+    async sourceXml() { return profileXml(page + 1, 3); },
     async captureScreen() { return screen(page); },
     async swipePager(bounds, direction) {
       pagerCalls.push({ bounds, direction });
@@ -183,14 +184,47 @@ test("the local media pager runner has no device bridge, persistence, identity, 
   assert.doesNotMatch(source, /^\s*import\s+.*(?:repository|device-bridge|heartbeat|permit|receipt|attestation|fingerprint)/im);
 });
 
-test("successful gestures with unchanged verified media never create duplicate pages or claim completion", async () => {
+test("successful gestures with unchanged nonterminal media never create duplicate pages or claim completion", async () => {
   const ingestor = recordingIngestor();
-  const result = await readVerifiedTinderProfileMedia({ sourceXml: async () => profileXml(),
+  const result = await readVerifiedTinderProfileMedia({ sourceXml: async () => profileXml(1, 9),
     captureScreen: async () => screen(0), swipePager: async () => true }, {
     profileReference: "profile:opaque", expectedDisplayName: "Visible profile", mediaIngestor: ingestor,
     maxPagerGestures: 3, settleMilliseconds: 0, boundarySettleMilliseconds: 0 });
   assert.equal(result.captured_pages,1);
   assert.equal(result.end_actually_reached,false);
-  assert.equal(result.status,"PAGER_BOUND_NOT_REACHED");
+  assert.equal(result.status,"PAGER_NO_PROGRESS");
   assert.equal(ingestor.calls.image.length,1);
+});
+
+test("false scroll result at real Photo 1 of 9 is not a profile-media end", async () => {
+  const ingestor = recordingIngestor();
+  const result = await readVerifiedTinderProfileMedia({sourceXml:async()=>profileXml(1,9),
+    captureScreen:()=>screen(0),swipePager:async()=>false}, {
+    profileReference:"profile:opaque",expectedDisplayName:"Visible profile",mediaIngestor:ingestor,
+    settleMilliseconds:0,boundarySettleMilliseconds:0});
+  assert.equal(result.status,"PAGER_NO_PROGRESS");
+  assert.equal(result.end_actually_reached,false);
+  assert.equal(result.captured_pages,1);
+});
+
+test("missing pager position or a mid-profile start never claims a full collection", async () => {
+  for(const xml of [profileXml().replace(/content-desc="[^"]*"/,""),profileXml(2,9)]) {
+    const ingestor=recordingIngestor();
+    const result=await readVerifiedTinderProfileMedia({sourceXml:async()=>xml,
+      captureScreen(){throw Error("no capture");},swipePager(){throw Error("no gesture");}}, {
+      profileReference:"profile:opaque",expectedDisplayName:"Visible profile",mediaIngestor:ingestor});
+    assert.equal(result.end_actually_reached,false);
+    assert.equal(ingestor.calls.image.length,0);
+  }
+});
+
+test("profile pager uses real left swipe inside verified bounds, not scrollGesture return semantics", async () => {
+  const calls=[];
+  const runtime=createRuntime({appiumBaseUrl:"http://appium",sessionId:"existing"},async(url,options)=>{
+    calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({value:null})};
+  });
+  await runtime.swipePager({left:0,top:140,width:576,height:720},"left");
+  assert.equal(calls[0].script,"mobile: swipeGesture");
+  assert.deepEqual(calls[0].args,[{left:20,top:180,width:536,height:640,direction:"left",percent:0.85}]);
+  assert.throws(()=>runtime.swipePager({left:0,top:140,width:576,height:720},"down"),/Invalid profile pager direction/);
 });

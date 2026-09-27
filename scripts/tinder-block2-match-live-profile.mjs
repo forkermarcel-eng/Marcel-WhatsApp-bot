@@ -128,8 +128,11 @@ export function createRuntime(config, fetchImpl = fetch) {
   return Object.freeze({
     sourceXml,
     captureScreen:async()=>Buffer.from(await appium("/screenshot"),"base64"),
-    swipePager:bounds=>appium("/execute/sync",{method:"POST",body:{script:"mobile: scrollGesture",
-      args:[{left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height,direction:"right",percent:0.85}]}}),
+    swipePager:(bounds,direction)=> {
+      if (!["left","right"].includes(direction)) throw new TypeError("Invalid profile pager direction");
+      return appium("/execute/sync",{method:"POST",body:{script:"mobile: swipeGesture",
+        args:[{left:bounds.left+20,top:bounds.top+40,width:bounds.width-40,height:bounds.height-80,direction,percent:0.85}]}});
+    },
     tap,
     scrollCarousel,
     scrollProfile,

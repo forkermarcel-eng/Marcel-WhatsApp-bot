@@ -182,14 +182,21 @@ function inboxRecycler(nodes, screen) {
   return candidates[0];
 }
 
-function uniqueVisibleImageBounds(node) {
+function uniqueVisibleImageBounds(node, resourceId = null) {
   const images = [];
+  const identified = [];
   const visit = current => {
     if (/ImageView$/.test(className(current)) && current.bounds && within(current.bounds,node.bounds)
-      && current.bounds.width >= 32 && current.bounds.height >= 32) images.push(current.bounds);
+      && current.bounds.width >= 32 && current.bounds.height >= 32) {
+      images.push(current.bounds);
+      if (resourceId && current.attributes?.["resource-id"] === resourceId) identified.push(current.bounds);
+    }
     for (const child of current.children || []) visit(child);
   };
   visit(node);
+  // The real carousel exposes a shimmer placeholder alongside matchAvatar.
+  // Select the app's image resource, never the placeholder or a guessed area.
+  if (identified.length) return identified.length === 1 ? Object.freeze({...identified[0]}) : null;
   return images.length === 1 ? Object.freeze({...images[0]}) : null;
 }
 
@@ -1052,7 +1059,7 @@ function visibleMatchTile(node, screen) {
     // This is intentionally optional: read-only Match inventory ignores it,
     // while an action runner refuses a tile with more than one click surface.
     tap_bounds: matchTileActionTarget(node),
-    avatar_bounds: uniqueVisibleImageBounds(node),
+    avatar_bounds: uniqueVisibleImageBounds(node, "com.tinder:id/matchAvatar"),
     ram_key: JSON.stringify({
       left: node.bounds.left,
       top: node.bounds.top,

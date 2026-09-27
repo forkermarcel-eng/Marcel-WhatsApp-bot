@@ -53,6 +53,20 @@ test("visible row and Match crops require no opens, exclude Likes, and refuse ch
   assert.equal(observeInboxFromXml(ambiguous).rows[0].avatar_bounds,null);
   assert.equal(writes,2);
 });
+test("real Match avatar resource excludes shimmer without changing tile identity or opening it", () => {
+  const original=inbox();
+  const avatar='<android.widget.ImageView resource-id="com.tinder:id/matchAvatar" clickable="true" bounds="[122,304][220,402]"/>';
+  const xml=original.replace('<android.widget.ImageView clickable="true" bounds="[122,304][220,402]"/>',
+    '<android.widget.ImageView resource-id="com.tinder:id/shimmer_animation" bounds="[120,302][222,404]"/>'+avatar);
+  const before=observeMatchCarouselFromXml(original).tiles[0];
+  const after=observeMatchCarouselFromXml(xml).tiles[0];
+  assert.deepEqual(after.avatar_bounds,before.avatar_bounds);
+  assert.deepEqual(after.tile,before.tile);
+  assert.equal(after.ram_key,before.ram_key);
+  assert.equal(observeMatchCarouselFromXml(xml).tiles.length,1);
+  assert.equal(observeMatchCarouselFromXml(xml.replace(avatar,avatar+avatar)).tiles[0].avatar_bounds,null);
+});
+
 test("Tinder raster media reuses universal ingress and confirmed NULL-JID contact without changing conversation/messages", async () => {
   const calls = [], inputs = [];
   const service = createTinderMediaService({ pool: { async query(sql,args) {

@@ -1118,6 +1118,10 @@ export function observeMatchCarouselFromXml(xml) {
     &&within(node.bounds,inbox.recycler.bounds)&&node.attributes?.["displayed"]!=="false");
   const unreadable=(selected.children||[]).some(child=>child.bounds&&within(child.bounds,screen)
     &&within(child.bounds,selected.bounds)&&child.bounds.height>=72
+    // UiAutomator clips edge tiles to the viewport. The same minimum width
+    // used by visibleMatchTile distinguishes these fragments from a readable
+    // tile-sized loading placeholder; traversal reveals them at full width.
+    &&child.bounds.width>=Math.round(screen.width*0.12)
     &&!visibleMatchTile(child,screen)
     &&!subtreeTexts(child).some(text=>/\b(?:likes|gefällt)\b/iu.test(text)));
   return Object.freeze({

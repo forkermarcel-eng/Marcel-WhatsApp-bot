@@ -191,6 +191,14 @@ test("loading or unreadable carousel does not submit a complete inventory or lif
   }
 });
 
+test("narrow clipped edge tiles do not prevent normal carousel traversal, full-width placeholders still do",()=>{
+  const fragment=(left,right)=>`<android.view.ViewGroup bounds="[${left},300][${right},488]"><android.widget.ImageView bounds="[${left},304][${right},402]"/></android.view.ViewGroup>`;
+  const xml=inbox().replace('<android.widget.FrameLayout bounds="[0,300][106,488]">',
+    fragment(0,49)+fragment(526,576)+'<android.widget.FrameLayout bounds="[0,300][106,488]">');
+  assert.equal(observeMatchCarouselFromXml(xml).inventory_readable,true);
+  assert.equal(observeMatchCarouselFromXml(xml.replace(fragment(0,49),fragment(0,100))).inventory_readable,false);
+});
+
 test("verified terminal Likes-only carousel can report an empty inventory; absent carousel cannot",async()=>{
   const xml=inbox().replace(/<android.widget.FrameLayout bounds="\[118,300\]\[224,488\]">[\s\S]*?<\/android.widget.FrameLayout>/u,"");
   const result=await discoverMatchInventory({sourceXml:async()=>xml,scrollCarousel:async()=>false},{maxGestures:3});

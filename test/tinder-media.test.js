@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import sharp from "sharp";
 import {createHash} from "node:crypto";
-import {createTinderLocalMatchDiscoveryRuntime} from "../scripts/tinder-block2-match-initial-sync.mjs";
+import {createTinderLocalMatchDiscoveryRuntime,discoverMatchInventory} from "../scripts/tinder-block2-match-initial-sync.mjs";
 import {bindAndFlushInitialMedia} from "../scripts/tinder-block2-initial-sync.mjs";
 import {createExistingDashboardBearerTransport} from "../tinder-mirror/appium-adapter.js";
 import {readFileSync} from "node:fs";
@@ -105,10 +105,46 @@ test("Match avatar inventory flush uses only one unambiguous persisted tile owne
   assert.equal(writes,1);
 });
 
+test("Match collector replaces an edge-clipped crop with the fuller observed image without extra navigation",async()=>{
+  const full=inbox(),clipped=full.replace('bounds="[122,304][220,402]"','bounds="[122,304][180,402]"');
+  let xml=clipped;
+  const screen=await sharp({create:{width:576,height:1280,channels:3,background:"blue"}}).png().toBuffer();
+  const collector=createMatchAvatarCollector({runtime:{sourceXml:async()=>xml,captureScreen:async()=>screen}});
+  await collector.observe(observeMatchCarouselFromXml(xml));
+  xml=full;await collector.observe(observeMatchCarouselFromXml(xml));
+  xml=clipped;await collector.observe(observeMatchCarouselFromXml(xml));
+  const inventory=observeMatchCarouselFromXml(full).tiles;
+  let writes=0;
+  const result=await collector.flush({inventory,stored:[{id:ownerId,tile:inventory[0].tile}],upload:async(id,bytes)=>{
+    writes++;assert.equal(id,ownerId);assert.equal((await sharp(bytes).metadata()).width,98);
+  }});
+  assert.equal(result.persisted,1);assert.equal(writes,1);
+});
+
+test("normal carousel boundary observations retain a full avatar even when the tile list never changes",async()=>{
+  const full=inbox();let xml=full.replace('bounds="[122,304][220,402]"','bounds="[122,304][180,402]"');
+  const screen=await sharp({create:{width:576,height:1280,channels:3,background:"blue"}}).png().toBuffer();
+  const gestures=[];
+  const runtime={sourceXml:async()=>xml,captureScreen:async()=>screen,scrollCarousel:async(bounds,direction)=>{
+    gestures.push(direction);if(direction==="right")xml=full;return false;
+  }};
+  const collector=createMatchAvatarCollector({runtime});
+  const result=await discoverMatchInventory({...runtime,observeVisibleMedia:c=>collector.observe(c)},{maxGestures:4});
+  assert.equal(result.end_actually_reached,true);assert.deepEqual(gestures,["left","left","right","right"]);
+  let width;
+  await collector.flush({inventory:result.inventory,stored:[{id:ownerId,tile:result.inventory[0].tile}],upload:async(id,bytes)=>{
+    width=(await sharp(bytes).metadata()).width;
+  }});
+  assert.equal(width,98);
+});
+
 test("normal Match discovery fills known avatars despite missing old tile; unchanged skips; changed bytes update",async()=>{
   const xml=inbox(),carousel=observeMatchCarouselFromXml(xml);
   let color="blue",posts=0,opens=0;
-  const stored=[{id:ownerId,device_id:deviceId,tile:carousel.tiles[0].tile,carousel_position:0},
+  // PostgreSQL JSONB does not preserve the source object's key order.
+  const storedTile=Object.fromEntries(Object.entries(carousel.tiles[0].tile).reverse());
+  assert.notEqual(JSON.stringify(storedTile),JSON.stringify(carousel.tiles[0].tile));
+  const stored=[{id:ownerId,device_id:deviceId,tile:storedTile,carousel_position:0},
     {id:"old-unresolved",device_id:deviceId,tile:{display_name:"missing"},carousel_position:1}];
   const runtime={sourceXml:async()=>xml,sleep:async()=>{},scrollCarousel:async()=>false,
     captureScreen:()=>sharp({create:{width:576,height:1280,channels:3,background:color}}).png().toBuffer(),

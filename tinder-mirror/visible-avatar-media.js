@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { observeInboxFromXml, observeMatchCarouselFromXml } from "./appium-conversation-reader.js";
 
 // No navigation capability is accepted. The caller supplies the RAM continuity
@@ -36,11 +37,18 @@ export function createMatchAvatarCollector({runtime,maxBytes=48*1024*1024}) {
     async observe(carousel){
       for(const item of carousel.tiles){
         const state=key(item.tile);
-        if(crops.has(state)||!item.avatar_bounds)continue;
+        if(!item.avatar_bounds)continue;
+        const area=item.avatar_bounds.width*item.avatar_bounds.height;
+        if((crops.get(state)?.area||0)>=area)continue;
         try {
           await ingestVisibleAvatar({runtime,ownerType:"match",ramKey:item.ram_key,ingest:async({sourceBytes})=>{
-            if(bytes+sourceBytes.length>maxBytes)throw Error("AVATAR_RAM_LIMIT");
-            crops.set(state,sourceBytes);bytes+=sourceBytes.length;return {};
+            const dimensions=await sharp(sourceBytes).metadata();
+            const actualArea=dimensions.width*dimensions.height;
+            const previous=crops.get(state);
+            if((previous?.area||0)>=actualArea)return {};
+            const nextBytes=bytes-(previous?.sourceBytes.length||0)+sourceBytes.length;
+            if(nextBytes>maxBytes)throw Error("AVATAR_RAM_LIMIT");
+            crops.set(state,{sourceBytes,area:actualArea});bytes=nextBytes;return {};
           }});
         } catch { /* Optional media cannot stop normal Match discovery. */ }
       }
@@ -48,9 +56,10 @@ export function createMatchAvatarCollector({runtime,maxBytes=48*1024*1024}) {
     async flush({inventory,stored,upload}){
       let persisted=0,skipped=0,failed=0;
       try {
-        for(const [state,sourceBytes] of crops){
-          const observed=inventory.filter(item=>key(item.tile)===state);
-          const owners=stored.filter(item=>key(item.tile)===state);
+        for(const [state,{sourceBytes}] of crops){
+          const tile=JSON.parse(state);
+          const observed=inventory.filter(item=>isDeepStrictEqual(item.tile,tile));
+          const owners=stored.filter(item=>isDeepStrictEqual(item.tile,tile));
           if(observed.length!==1||owners.length!==1){skipped++;continue;}
           // Existing media content digest only; never used to identify a Match.
           const digest=createHash("sha256").update(sourceBytes).digest("hex");

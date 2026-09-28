@@ -205,6 +205,9 @@ function createRuntime(config) {
 async function freshCarousel(runtime) {
   const carousel = observeMatchCarouselFromXml(await runtime.sourceXml());
   if (!carousel) throw new Error("Tinder is not at a verified Inbox with a readable New-Matches carousel");
+  // The same tile list can move within the viewport. Include those already
+  // observed positions so edge-clipped images can become complete crops.
+  await runtime.observeVisibleMedia?.(carousel);
   return carousel;
 }
 

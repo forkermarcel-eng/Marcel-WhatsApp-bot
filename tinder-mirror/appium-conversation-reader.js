@@ -1099,21 +1099,30 @@ export function observeMatchCarouselFromXml(xml) {
     .filter((node) => /RecyclerView$/.test(className(node)) && node !== inbox.recycler && node.bounds)
     .map((carousel) => ({
       carousel,
+      hasLikesAggregate: (carousel.children||[]).some(child=>subtreeTexts(child).some(text=>/\b(?:likes|gefällt)\b/iu.test(text))),
       tiles: (carousel.children || []).map((child) => visibleMatchTile(child, screen)).filter(Boolean)
     }))
-    .filter(({ carousel, tiles }) => within(carousel.bounds, inbox.recycler.bounds)
+    .filter(({ carousel, tiles, hasLikesAggregate }) => within(carousel.bounds, inbox.recycler.bounds)
       && carousel.bounds.width >= Math.round(screen.width * 0.82)
       && carousel.bounds.height >= 96
       && carousel.bounds.height <= Math.round(screen.height * 0.36)
-      && tiles.length > 0)
+      && (tiles.length > 0||hasLikesAggregate))
     .sort((left, right) => right.tiles.length - left.tiles.length
       || (right.carousel.bounds.width * right.carousel.bounds.height) - (left.carousel.bounds.width * left.carousel.bounds.height));
   if (!candidates.length) return null;
   if (candidates.length > 1 && candidates[0].tiles.length === candidates[1].tiles.length
     && candidates[0].carousel.bounds.width * candidates[0].carousel.bounds.height
       === candidates[1].carousel.bounds.width * candidates[1].carousel.bounds.height) return null;
+  const selected=candidates[0].carousel;
+  const loading=nodes.some(node=>/ProgressBar$/.test(className(node))&&node.bounds
+    &&within(node.bounds,inbox.recycler.bounds)&&node.attributes?.["displayed"]!=="false");
+  const unreadable=(selected.children||[]).some(child=>child.bounds&&within(child.bounds,screen)
+    &&within(child.bounds,selected.bounds)&&child.bounds.height>=72
+    &&!visibleMatchTile(child,screen)
+    &&!subtreeTexts(child).some(text=>/\b(?:likes|gefällt)\b/iu.test(text)));
   return Object.freeze({
     tiles: Object.freeze(candidates[0].tiles),
+    inventory_readable: !loading&&!unreadable,
     scroll_bounds: Object.freeze({ ...candidates[0].carousel.bounds })
   });
 }

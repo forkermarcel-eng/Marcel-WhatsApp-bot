@@ -37,6 +37,7 @@ export async function reconcileExistingTinderMirror(inbox, matches, directBindin
   metrics.inbox_rows = plan.length;
   const matchResult = await matches.reconcileMatchInventory(carousel);
   metrics.match_updates = matchResult.updates;
+  if(matchResult.lifecycle)metrics.match_lifecycle=matchResult.lifecycle;
   metrics.ambiguous += matchResult.unresolved;
   const represented = new Set();
   async function missingAvatar(entry,id) {

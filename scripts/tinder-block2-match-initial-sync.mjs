@@ -204,7 +204,7 @@ function createRuntime(config) {
 
 async function freshCarousel(runtime) {
   const carousel = observeMatchCarouselFromXml(await runtime.sourceXml());
-  if (!carousel) throw new Error("Tinder is not at a verified Inbox with a readable New-Matches carousel");
+  if (!carousel||carousel.inventory_readable!==true) throw new Error("Tinder is not at a verified Inbox with a readable New-Matches carousel");
   // The same tile list can move within the viewport. Include those already
   // observed positions so edge-clipped images can become complete crops.
   await runtime.observeVisibleMedia?.(carousel);
@@ -270,6 +270,7 @@ async function carouselAtLeadingEdge(runtime, { maxGestures }) {
  * immediately adjacent carousel viewports of this one run.
  */
 export async function discoverMatchInventory(runtime, { maxGestures }) {
+  const startedAt=new Date().toISOString();
   let carousel = await carouselAtLeadingEdge(runtime, { maxGestures });
   await runtime.observeVisibleMedia?.(carousel);
   const initialVisibleTiles = carousel.tiles.length;
@@ -321,7 +322,10 @@ export async function discoverMatchInventory(runtime, { maxGestures }) {
       inventory: Object.freeze(inventory),
       initial_visible_tiles: initialVisibleTiles,
       horizontal_movements: horizontalMovements,
-      end_actually_reached: true
+      end_actually_reached: true,
+      inventory_complete: true,
+      started_at: startedAt,
+      finished_at: new Date().toISOString()
     });
   }
   throw new Error("The reachable Tinder New-Matches end was not verified within the approved bound");
@@ -401,20 +405,22 @@ export async function createTinderLocalMatchDiscoveryRuntime(environment = proce
       return discoverMatchInventory(observationRuntime, { maxGestures: config.maxGestures });
     },
     async reconcileMatchInventory(discovery) {
-      const listing = await runtime.dashboard("/dashboard-api/tinder/matches");
+      const listing = await runtime.dashboard("/dashboard-api/tinder/matches?include_inactive=1");
       const stored = (listing.matches || []).filter(match => match.device_id === deviceId);
       const plan = planMatchReconciliation(stored, discovery.inventory);
-      // No destructive removal or speculative remapping of disappeared
-      // tiles. Report the difference rather than hiding stale product rows.
-      // A missing old tile cannot veto media for independently revalidated
-      // present tiles or ordinary new unassigned tiles from the existing
-      // planner. Missing records remain untouched, never merged or deleted.
+      // Historical owners participate in reconciliation so a returning tile
+      // reactivates its existing record rather than creating a duplicate.
       const changes=plan.changes;
       let created = 0;
       for (const match of changes) {
         const result = await runtime.dashboard("/dashboard-api/tinder/matches", { method: "POST", body: { device_id: deviceId, match } });
         if (result.created) created += 1;
       }
+      const complete=discovery.inventory_complete===true&&discovery.end_actually_reached===true;
+      const lifecycle=await runtime.dashboard("/dashboard-api/tinder/matches/inventory",{method:"POST",body:{
+        device_id:deviceId,inventory:{complete,status:complete?"COMPLETE":"PARTIAL",
+          started_at:discovery.started_at,finished_at:discovery.finished_at,
+          tiles:discovery.inventory.map(entry=>entry.tile)}}});
       let media;
       if(avatars){
         const current=await runtime.dashboard("/dashboard-api/tinder/matches");
@@ -422,7 +428,8 @@ export async function createTinderLocalMatchDiscoveryRuntime(environment = proce
           upload:(id,sourceBytes)=>runtime.dashboard(`/dashboard-api/tinder/matches/${encodeURIComponent(id)}/media`,
             {method:"POST",body:{device_id:deviceId,kind:"avatar",ordinal:0,source_base64:sourceBytes.toString("base64")}})});
       }
-      return { changed: changes.length > 0, unresolved: plan.unmatchedStored, created, updates: changes.length,...(media?{media}: {}) };
+      return { changed: changes.length > 0||lifecycle.deactivated>0, unresolved: lifecycle.ambiguous||0,
+        created, updates: changes.length,lifecycle,...(media?{media}: {}) };
     },
     async readMatchDiscovery() {
       const discovery = await this.observeMatchInventory();

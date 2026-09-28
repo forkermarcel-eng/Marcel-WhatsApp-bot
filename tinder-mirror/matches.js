@@ -48,6 +48,10 @@ function publicMatch(row) {
     conversation_id: row.conversation_id ?? null,
     tile: asTile(row.tile),
     profile: row.profile == null ? null : asTile(row.profile),
+    is_active: row.is_active !== false,
+    consecutive_complete_misses: Number(row.consecutive_complete_misses ?? 0),
+    last_seen_at: row.last_seen_at ? new Date(row.last_seen_at).toISOString() : null,
+    last_inventory_at: row.last_inventory_at ? new Date(row.last_inventory_at).toISOString() : null,
     carousel_position: Number(row.carousel_position),
     created_at: row.created_at ? new Date(row.created_at).toISOString() : null,
     updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null
@@ -199,13 +203,18 @@ export function createTinderMatchMirror({ pool, now = () => new Date(), idFactor
     }
   }
 
-  async function list() {
+  async function list({includeInactive=false}={}) {
     try {
       const result = await pool.query(
         `SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at,
-                to_jsonb(tinder_matches)->'profile' AS profile
+                to_jsonb(tinder_matches)->'profile' AS profile,
+                COALESCE((to_jsonb(tinder_matches)->>'is_active')::boolean,TRUE) AS is_active,
+                to_jsonb(tinder_matches)->>'last_seen_at' AS last_seen_at,
+                to_jsonb(tinder_matches)->>'last_inventory_at' AS last_inventory_at,
+                to_jsonb(tinder_matches)->>'consecutive_complete_misses' AS consecutive_complete_misses
            FROM tinder_matches
-          ORDER BY carousel_position ASC, match_id ASC`
+          WHERE ($1::boolean OR COALESCE((to_jsonb(tinder_matches)->>'is_active')::boolean,TRUE))
+          ORDER BY carousel_position ASC, match_id ASC`,[includeInactive]
       );
       return result.rows.map(publicMatch);
     } catch (error) {

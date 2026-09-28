@@ -151,6 +151,10 @@ test("normal Match discovery fills known avatars despite missing old tile; uncha
     tap(){opens++;throw Error("no open");},dashboard:async(path,options)=>{
       if(path.includes("device-bridge"))return {devices:[{device_id:deviceId,app_version_code:140}]};
       if(options?.method==="POST"){
+        if(path==='/dashboard-api/tinder/matches/inventory') {
+          assert.equal(options.body.inventory.complete,true);
+          return {ok:true,ambiguous:0,deactivated:0};
+        }
         if(path==='/dashboard-api/tinder/matches'){
           stored.push({id:ownerId,device_id:deviceId,...options.body.match});
           return {ok:true,created:true};
@@ -165,13 +169,34 @@ test("normal Match discovery fills known avatars despite missing old tile; uncha
     }};
   const service=await createTinderLocalMatchDiscoveryRuntime({APPIUM_SESSION:"existing",DASHBOARD_API_SECRET:"fixture",TINDER_DEVICE_VERSION_CODE:"140",SHARED_MEDIA_ENABLED:"true"},{runtimeFactory:()=>runtime});
   const run=async()=>service.reconcileMatchInventory(await service.observeMatchInventory());
-  const first=await run();assert.equal(first.unresolved,1);assert.equal(first.media.persisted,1);
+  const first=await run();assert.equal(first.unresolved,0);assert.equal(first.media.persisted,1);
   assert.equal((await run()).media.persisted,0);
   color="green";assert.equal((await run()).media.persisted,1);
   assert.equal(posts,2);assert.equal(opens,0);assert.equal(stored.length,2);
   stored.splice(0,1);
-  const newMatch=await run();assert.equal(newMatch.created,1);assert.equal(newMatch.unresolved,1);assert.equal(newMatch.media.persisted,1);
+  const newMatch=await run();assert.equal(newMatch.created,1);assert.equal(newMatch.unresolved,0);assert.equal(newMatch.media.persisted,1);
   assert.equal((await run()).media.persisted,0);assert.equal(posts,3);assert.equal(opens,0);
+});
+
+test("loading or unreadable carousel does not submit a complete inventory or lifecycle mutation",async()=>{
+  for(const xml of [inbox().replace('<android.widget.TextView text="Match fixture"','<android.widget.TextView text=""'),
+    inbox('<android.widget.ProgressBar bounds="[200,650][240,690]"/>')]) {
+    let writes=0;
+    const runtime={sourceXml:async()=>xml,scrollCarousel:async()=>false,
+      dashboard:async(path,options)=>{if(options?.method==="POST")writes++;
+        return {devices:[{device_id:deviceId,app_version_code:140}]};}};
+    const service=await createTinderLocalMatchDiscoveryRuntime({APPIUM_SESSION:"existing",DASHBOARD_API_SECRET:"fixture",TINDER_DEVICE_VERSION_CODE:"140"},{runtimeFactory:()=>runtime});
+    await assert.rejects(()=>service.readMatchDiscovery(),/readable New-Matches carousel/);
+    assert.equal(writes,0);
+  }
+});
+
+test("verified terminal Likes-only carousel can report an empty inventory; absent carousel cannot",async()=>{
+  const xml=inbox().replace(/<android.widget.FrameLayout bounds="\[118,300\]\[224,488\]">[\s\S]*?<\/android.widget.FrameLayout>/u,"");
+  const result=await discoverMatchInventory({sourceXml:async()=>xml,scrollCarousel:async()=>false},{maxGestures:3});
+  assert.equal(result.inventory.length,0);assert.equal(result.inventory_complete,true);assert.equal(result.end_actually_reached,true);
+  assert.ok(Date.parse(result.started_at)<=Date.parse(result.finished_at));
+  await assert.rejects(()=>discoverMatchInventory({sourceXml:async()=>"<hierarchy/>",scrollCarousel:async()=>false},{maxGestures:3}),/readable New-Matches carousel/);
 });
 
 test("avatar projection follows latest observation even when older shared bytes are reused",async()=>{

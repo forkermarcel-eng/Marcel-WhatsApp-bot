@@ -1,5 +1,6 @@
 import { TinderMirrorError, createTinderConversationMirror } from "./conversation.js";
 import { createTinderMatchMirror } from "./matches.js";
+import { createMatchLifecycle } from "./match-lifecycle.js";
 import { createTinderContactBinding } from "./contact-binding.js";
 import { tinderContactReference } from "./contact-binding.js";
 import { createMatchProfileStore } from "./match-profile.js";
@@ -33,6 +34,7 @@ function requireDashboardAccess({ dashboardApiReady, dashboardApiAuthorized }, r
 export function registerTinderMirrorRoutes({ app, pool, dashboardApiReady, dashboardApiAuthorized, sharedMedia = null, processMatchEnqueuer=null }) {
   const mirror = createTinderConversationMirror({ pool });
   const matches = createTinderMatchMirror({ pool });
+  const matchLifecycle = createMatchLifecycle({pool});
   const matchProfiles = createMatchProfileStore({pool,transferMedia:sharedMedia?.repository.transferMatchMedia});
   const access = { dashboardApiReady, dashboardApiAuthorized };
   const media = sharedMedia ? createTinderMediaService({ pool,media: sharedMedia }) : null;
@@ -198,10 +200,19 @@ export function registerTinderMirrorRoutes({ app, pool, dashboardApiReady, dashb
     }
   });
 
+  app.post("/dashboard-api/tinder/matches/inventory",async(req,res)=>{
+    if(!requireDashboardAccess(access,req,res))return;
+    try {
+      const result=await matchLifecycle.observe({deviceId:req.body?.device_id,inventory:req.body?.inventory});
+      const transitions=result.ignored?{transitions:0}:await matchProfiles.reconcileBoundConversations({deviceId:req.body.device_id});
+      return res.status(200).json({ok:true,...result,...transitions});
+    }catch(error){return errorResponse(res,error);}
+  });
+
   app.get("/dashboard-api/tinder/matches", async (req, res) => {
     if (!requireDashboardAccess(access, req, res)) return;
     try {
-      const listing = await matches.list();
+      const listing = await matches.list({includeInactive:req.query?.include_inactive==="1"});
       return res.status(200).json({ ok: true, matches: media
         ? await Promise.all(listing.map(async match => ({ ...match,...await media.present("match",match.id) }))) : listing });
     } catch (error) {

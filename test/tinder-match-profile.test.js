@@ -5,6 +5,7 @@ import {TINDER_MIRROR_MIGRATION_STATEMENTS as base} from "../tinder-mirror/migra
 import {TINDER_LAST_MESSAGE_ORDER_MIGRATION_STATEMENTS as ordering} from "../tinder-mirror/last-message-order-migration.js";
 import {TINDER_MATCH_MIGRATION_STATEMENTS as matches} from "../tinder-mirror/matches-migration.js";
 import {preflightMatchProfile,migrateMatchProfile,MATCH_PROFILE_DDL} from "../tinder-mirror/match-profile-migration.js";
+import {migrateMatchLifecycle} from "../tinder-mirror/match-lifecycle-migration.js";
 import {createMatchProfileStore,createProcessMatch} from "../tinder-mirror/match-profile.js";
 import {createTinderContactBinding} from "../tinder-mirror/contact-binding.js";
 import {normalizeTinderProfile} from "../tinder-mirror/conversation.js";
@@ -124,6 +125,7 @@ test("match profile media repeat and conversation handoff share exact assets and
 }));
 test("confirmed match binding and verified transition preserve the one contact and normal conversation sync state",async()=>fixture(async(db,pool)=>{
   await migrateMatchProfile(pool);
+  await migrateMatchLifecycle(pool);
   await db.exec(`CREATE TABLE contacts(id SERIAL PRIMARY KEY,whatsapp_jid TEXT UNIQUE,display_name TEXT,source_platform TEXT,current_platform TEXT,auto_reply_enabled BOOLEAN,created_at TIMESTAMPTZ,updated_at TIMESTAMPTZ);
     CREATE TABLE contact_identifiers(contact_id INTEGER REFERENCES contacts(id),identifier_type TEXT,identifier_value TEXT,normalized_value TEXT UNIQUE,source_platform TEXT,is_primary BOOLEAN,human_verified BOOLEAN,created_at TIMESTAMPTZ,updated_at TIMESTAMPTZ);
     CREATE TABLE contact_memory_profiles(contact_id INTEGER PRIMARY KEY REFERENCES contacts(id));`);
@@ -133,8 +135,13 @@ test("confirmed match binding and verified transition preserve the one contact a
   const bound=await binding.bind({deviceId,matchId,confirmed:true});
   assert.equal((await binding.bind({deviceId,matchId,confirmed:true})).contactId,bound.contactId);
   await db.query("INSERT INTO tinder_conversations(conversation_id,device_id) VALUES ($1,$2)",[conversationId,deviceId]);
+  // Same visible name alone is not a relation. A confirmed existing binding is.
+  assert.equal((await store.reconcileBoundConversations({deviceId})).transitions,0);
+  await binding.bind({deviceId,conversationId,contactId:bound.contactId,confirmed:true});
+  assert.equal((await store.reconcileBoundConversations({deviceId})).transitions,1);
   const transferred=await store.handoffToConversation({deviceId,matchId,verifiedConversationId:conversationId});
-  assert.equal(transferred.contactId,bound.contactId);assert.equal(transferred.profileReused,true);
+  assert.equal(transferred.contactId,bound.contactId);assert.equal(transferred.profileReused,false);
+  assert.equal((await db.query("SELECT is_active FROM tinder_matches")).rows[0].is_active,false);
   assert.equal((await store.handoffToConversation({deviceId,matchId,verifiedConversationId:conversationId})).profileReused,false);
   assert.equal((await binding.bind({deviceId,conversationId,confirmed:true})).contactId,bound.contactId);
   assert.equal((await db.query("SELECT count(*)::int n FROM contacts")).rows[0].n,1);

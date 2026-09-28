@@ -14,6 +14,19 @@ const semanticProfile = (value, ordinal = "01") => ({ display_name: "Example", a
   [`structured_profile_${ordinal}_value`]: value, profile_chip_01: "Reading"
 } });
 
+test("normal reconciliation self-heals only a bound missing row avatar with zero detail opens",async()=>{
+  const known=storedConversation("Known","tail","k");
+  const captures=[];
+  const inbox={readSourceXml:async()=>{},readInboxInventory:async()=>({inventory:[inventoryRow("Known","tail",0)]}),
+    readStoredConversations:async()=>[known],updateInboxPosition:async()=>{},
+    captureConversationAvatar:async(entry,id)=>{captures.push(id);return {status:"AVATAR_INGESTED"};},
+    locateInventoryRow(){assert.fail("no detail target");},readKnownChanged(){assert.fail("no thread open");}};
+  const matches={observeMatchInventory:async()=>({}),reconcileMatchInventory:async()=>({updates:0,unresolved:0})};
+  const result=await reconcileExistingTinderMirror(inbox,matches);
+  assert.deepEqual(captures,["k"]);assert.equal(result.avatar_updates,1);
+  for(const key of ["thread_opens","profile_reads","history_reads","match_tile_opens"])assert.equal(result[key],0);
+});
+
 test("PROCESS MATCH restores the existing Inbox top inside the serial executor before fresh Match inventory", async () => {
   const deviceId="11111111-1111-4111-8111-111111111111";
   const job={operation:"PROCESS_MATCH",device_id:deviceId,match_id:"22222222-2222-4222-8222-222222222222"};

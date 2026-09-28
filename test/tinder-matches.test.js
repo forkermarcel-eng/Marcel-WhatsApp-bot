@@ -73,8 +73,8 @@ function createMatchPool() {
       Object.assign(row, { tile: JSON.parse(rawTile), carousel_position: carouselPosition, updated_at: timestamp });
       return { rows: [] };
     }
-    if (normalized.startsWith("SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at,") && normalized.includes("FROM tinder_matches ORDER BY")) {
-      return { rows: [...state.matches.values()].sort((left, right) => left.carousel_position - right.carousel_position || left.match_id.localeCompare(right.match_id)).map((row) => ({ ...row })) };
+    if (normalized.startsWith("SELECT match_id, device_id, conversation_id, tile, carousel_position, created_at, updated_at,") && normalized.includes("ORDER BY carousel_position ASC")) {
+      return { rows: [...state.matches.values()].filter(row=>params[0]||row.is_active!==false).sort((left, right) => left.carousel_position - right.carousel_position || left.match_id.localeCompare(right.match_id)).map((row) => ({ ...row })) };
     }
     if (/^(INSERT|UPDATE|DELETE) INTO tinder_conversations|^(INSERT|UPDATE|DELETE) INTO tinder_conversation_messages/.test(normalized)) {
       state.conversationWrites += /tinder_conversations/.test(normalized) ? 1 : 0;

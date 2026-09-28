@@ -32,7 +32,7 @@ export function createMatchProfileStore({pool,transferMedia=null}) {
   }
   // Only called after the existing controller established this exact relation.
   // Never creates a conversation, guesses identity, or overwrites a newer profile.
-  async function handoffToConversation({deviceId,matchId,verifiedConversationId}) {
+  async function handoffToConversation({deviceId,matchId,verifiedConversationId,requireExistingBinding=false}) {
     target({deviceId,matchId});
     const matchRef=tinderContactReference({deviceId,matchId});
     const conversationRef=tinderContactReference({deviceId,conversationId:verifiedConversationId});
@@ -45,6 +45,9 @@ export function createMatchProfileStore({pool,transferMedia=null}) {
       const bindings=(await client.query("SELECT normalized_value,contact_id,human_verified FROM contact_identifiers WHERE identifier_type='tinder_profile' AND normalized_value=ANY($1::text[]) FOR UPDATE",[[matchRef,conversationRef]])).rows;
       if(bindings.some(b=>b.human_verified!==true)||new Set(bindings.map(b=>String(b.contact_id))).size>1)
         throw new TinderMirrorError("CONTACT_BINDING_CONFLICT","No contact merge performed",409);
+      if(requireExistingBinding&&match.conversation_id!==verifiedConversationId
+        &&![matchRef,conversationRef].every(ref=>bindings.some(binding=>binding.normalized_value===ref)))
+        throw new TinderMirrorError("CONTACT_BINDING_CONFLICT","Existing transition binding changed",409);
       const contactId=bindings.length?Number(bindings[0].contact_id):null;
       if(contactId!==null)for(const ref of [matchRef,conversationRef]) {
         if(!bindings.some(b=>b.normalized_value===ref))await client.query(`INSERT INTO contact_identifiers
@@ -57,12 +60,33 @@ export function createMatchProfileStore({pool,transferMedia=null}) {
         await client.query("UPDATE tinder_conversations SET profile=$2::jsonb,profile_synced_at=NOW() WHERE conversation_id=$1",[verifiedConversationId,JSON.stringify(profile)]);
         profileReused=true;
       }
-      if(!match.conversation_id)await client.query("UPDATE tinder_matches SET conversation_id=$3,updated_at=NOW() WHERE match_id=$1 AND device_id=$2",[matchId,deviceId,verifiedConversationId]);
+      await client.query("UPDATE tinder_matches SET conversation_id=$3,is_active=FALSE WHERE match_id=$1 AND device_id=$2 AND (conversation_id IS NULL OR is_active=TRUE)",[matchId,deviceId,verifiedConversationId]);
       if(transferMedia)await transferMedia(client,{matchId,conversationId:verifiedConversationId,contactId});
       return {matchId,conversationId:verifiedConversationId,contactId,profileReused};
     });
   }
-  return Object.freeze({get,saveComplete,handoffToConversation});
+  async function reconcileBoundConversations({deviceId}) {
+    // Only existing, confirmed internal bindings. Disappearance plus a name
+    // never establishes a transition. Several possible counterparts remain
+    // unresolved; no contact is created or merged here.
+    const pairs=(await pool.query(`SELECT m.match_id,c.conversation_id FROM tinder_matches m
+      JOIN tinder_conversations c ON c.device_id=m.device_id AND (
+        c.conversation_id=m.conversation_id OR (m.conversation_id IS NULL AND EXISTS (
+          SELECT 1 FROM contact_identifiers mi JOIN contact_identifiers ci ON ci.contact_id=mi.contact_id
+          WHERE mi.identifier_type='tinder_profile' AND ci.identifier_type='tinder_profile'
+            AND mi.human_verified=TRUE AND ci.human_verified=TRUE
+            AND mi.normalized_value='mirror-match:'||m.device_id::text||':'||m.match_id::text
+            AND ci.normalized_value='mirror:'||c.device_id::text||':'||c.conversation_id::text)))
+      WHERE m.device_id=$1 AND (m.is_active=TRUE OR m.conversation_id IS NULL)`,[deviceId])).rows;
+    const results=[];
+    for(const pair of pairs) {
+      if(pairs.filter(p=>p.match_id===pair.match_id).length!==1
+        ||pairs.filter(p=>p.conversation_id===pair.conversation_id).length!==1)continue;
+      results.push(await handoffToConversation({deviceId,matchId:pair.match_id,verifiedConversationId:pair.conversation_id,requireExistingBinding:true}));
+    }
+    return {transitions:results.length};
+  }
+  return Object.freeze({get,saveComplete,handoffToConversation,reconcileBoundConversations});
 }
 
 // Reuses the existing full-profile runner supplied by the serialized Appium

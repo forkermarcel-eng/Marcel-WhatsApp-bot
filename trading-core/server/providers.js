@@ -68,7 +68,8 @@ export async function historyFromMassive(body,env=process.env,fetcher=fetch){
  invariant(Date.parse(end)<=Date.now(),'Historischer Endzeitpunkt darf nicht in der Zukunft liegen.');
  const path='/futures/v1/aggs/'+contract;
  let url=new URL(path,'https://api.massive.com');
- url.search=new URLSearchParams({resolution:'1min','window_start.gte':String(BigInt(Date.parse(start))*1000000n),'window_start.lt':String(BigInt(Date.parse(end))*1000000n),limit:'1000',sort:'window_start.asc'});
+ // Seven days contain at most 10,080 minute bars: avoid needless pagination on Basic.
+ url.search=new URLSearchParams({resolution:'1min','window_start.gte':String(BigInt(Date.parse(start))*1000000n),'window_start.lt':String(BigInt(Date.parse(end))*1000000n),limit:'10080',sort:'window_start.asc'});
  const headers={Authorization:'Bearer '+env.TRADING_MASSIVE_API_KEY},bars=new Map(),seen=new Set();
  for(let page=0;url;page++){
   invariant(page<12&&!seen.has(url.href),'Massive-Pagination unvollständig oder wiederholt.');

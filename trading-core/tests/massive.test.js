@@ -24,6 +24,7 @@ test('Massive exact futures endpoint, bearer, UTC nanoseconds, explicit half-ope
   const url=new URL(u);assert.equal(url.origin,'https://api.massive.com');assert.equal(url.pathname,'/futures/v1/aggs/MGCZ6');
   assert.equal(url.searchParams.get('resolution'),'1min');assert.equal(url.searchParams.get('window_start.gte'),row().window_start);
   assert.equal(url.searchParams.get('window_start.lt'),row(60).window_start);assert.equal(url.searchParams.get('sort'),'window_start.asc');
+  assert.equal(url.searchParams.get('limit'),'10080');
   assert.equal(url.searchParams.has('apiKey'),false);assert.equal(o.headers.Authorization,'Bearer '+env.TRADING_MASSIVE_API_KEY);assert.equal(o.redirect,'error');
   return response();
  });
@@ -33,6 +34,15 @@ test('Massive exact futures endpoint, bearer, UTC nanoseconds, explicit half-ope
 });
 test('numeric and string nanosecond timestamps normalize identically',()=>{
  assert.deepEqual(normalizeMassiveBars([row()],window),normalizeMassiveBars([{...row(),window_start:Number(row().window_start)}],window));
+});
+test('five-session history fits a single request for each supported cockpit future',async()=>{
+ const from='2026-09-07T00:00:00Z',to='2026-09-12T00:00:00Z';
+ for(const instrument of ['MGC','MNQ','MYM','MCL']){
+  const contract=instrument+'Z6';let calls=0;
+  const rows=Array.from({length:6900},(_,i)=>({...row(),ticker:contract,window_start:String(BigInt(Date.parse(from)+(Math.floor(i/1380)*1440+i%1380)*60000)*1000000n)}));
+  const result=await historyFromMassive({...request,instrument,contract,from,to},env,async u=>{calls++;assert.equal(new URL(u).searchParams.get('limit'),'10080');return response(rows);});
+  assert.equal(calls,1);assert.equal(result.bars.length,6900);assert.equal(new Set(result.bars.map(b=>b.time)).size,6900);assert.equal(result.contract,contract);
+ }
 });
 test('contract validation prevents continuous, GC substitution and XAU/USD',async()=>{
  for(const contract of ['GCZ6','MGC1!','XAU/USD','MGC.c.0','mgcz6','MGCZ6/evil'])await assert.rejects(()=>historyFromMassive({...request,contract},env,never));

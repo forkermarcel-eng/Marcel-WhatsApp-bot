@@ -15,7 +15,7 @@ Die Plattform speichert deine Entscheidungen, nicht deine Broker-Zugangsdaten. E
 2. Mit vorhandenem **Node.js 22+** unter Windows `trading-core/Start-Demo.cmd` doppelklicken. Alternativ im Repo: `node trading-core/server/standalone.js --demo`.
 3. Im Browser `http://127.0.0.1:3090/Trading/` öffnen. Das Konsolenfenster bleibt offen.
 
-Die Demo funktioniert ohne npm-Installation, DB oder API-Keys. Sie enthält **ausschließlich synthetische Beispiele** und zeigt einen auffälligen Hinweis. Eingaben in diesem Modus verschwinden beim Serverneustart. Die Demo bindet absichtlich nur localhost; auf einem anderen Gerät ist diese Adresse nicht der Rechner. Der reale iPad-Zugang erfolgt nach kontrollierter Bereitstellung über die vorhandene HTTPS-Webseite.
+Die Demo benötigt die installierten Projektabhängigkeiten (`npm ci`), aber keine DB oder API-Keys. Sie enthält **ausschließlich synthetische Beispiele** und zeigt einen auffälligen Hinweis. Eingaben in diesem Modus verschwinden beim Serverneustart. Die Demo bindet absichtlich nur localhost; auf einem anderen Gerät ist diese Adresse nicht der Rechner. Der reale iPad-Zugang erfolgt nach kontrollierter Bereitstellung über die vorhandene HTTPS-Webseite.
 
 ## Was das Produkt enthält
 
@@ -82,6 +82,17 @@ In Kürze: Update prüfen → Backup der Datenbank → ausschließlich die neue 
 Der bestehende gemeinsame Login bleibt. Ohne Migration/Datenzugänge zeigt die Anwendung den passenden Fehler-/Leerzustand statt Beispielwerte. PostgreSQL ist für den produktiven Betrieb vorgesehen; lokale Dateipersistenz ist ausdrücklich nur für einen lokalen Einzelprozess.
 
 ## Kurse und Kontext
+
+**Kostenloser Default-Kontext:** Treasury nominal/real, Fed H.10 Broad USD
+(nicht DXY) und Kalender von BLS, BEA, Fed/FOMC, Census, EIA und Treasury.
+FRED und Trading Economics bleiben optionale Ergänzungen. Bestehende RSS-News
+werden erhalten und regelbasiert nach Macro-/Geopolitik-Themen priorisiert.
+`POST resource=sync` verwendet den bestehenden Context-Pfad mit Quellen-Caches;
+Bootstrap berechnet erklärbaren Market Context aus gespeicherten Daten, ohne
+neuen Providerabruf. Kein Dauerworker wird durch diesen Release gestartet.
+Quellen, Lizenzen, Updatefrequenzen und Grenzen stehen in
+[DATEN-UND-GRENZEN.md](docs/DATEN-UND-GRENZEN.md) und
+[INSTALLATION.md](docs/INSTALLATION.md).
 
 **Zusätzliche Futures-Historie: Massive.** `TRADING_MASSIVE_ENABLED=true` und
 `TRADING_MASSIVE_API_KEY` werden ausschließlich serverseitig konfiguriert.

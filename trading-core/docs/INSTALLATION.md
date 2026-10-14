@@ -12,7 +12,7 @@ oder Bereitstellung ist durch die lokale Integration bereits erfolgt.
 
 ## 2. Vorhandenes Backend / PostgreSQL
 
-Die aktuelle Root-`package.json` verlangt Node >= 22.12.0. `pg` ist bereits enthalten. Keine neue Root-Abhängigkeit und keine Änderung am vorhandenen Startskript erforderlich.
+Die aktuelle Root-`package.json` verlangt Node >= 22.12.0. `pg` ist bereits enthalten. Der Context-Block ergänzt Cheerio, node-ical und Luxon; das vorhandene Startskript bleibt unverändert.
 
 Ein bestehendes, überprüfbares PostgreSQL-Backup anlegen. Dann **nur** Folgendes in der dafür vorgesehenen Backend-Umgebung ausführen:
 
@@ -109,14 +109,16 @@ Die Anzeige aktualisiert sich regelmäßig, solange die Seite sichtbar ist. **Ab
 
 ```text
 TRADING_NEWS_ENABLED=true
-TRADING_FRED_KEY=<FRED-Key>
-TRADING_ECONOMIC_CALENDAR_KEY=<Trading-Economics-Key>
+# OPTIONAL, nicht für den Default erforderlich:
+# TRADING_FRED_KEY=<FRED-Key>
+# TRADING_ECONOMIC_CALENDAR_KEY=<Trading-Economics-Key>
 ```
 
-- RSS: Federal Reserve, EZB, BBC Welt/Wirtschaft. Nur Titel, Original-Link und Zeitpunkte; kein Volltextarchiv und kein Reuters-Abonnement.
-- FRED: US 2Y/10Y, reale 10Y-Rendite, breiter Dollarindex. **Tageswerte, nicht Live-Renditen.** Breiter Dollarindex ausdrücklich nicht DXY.
-- DXY: manuelle Beobachtung mit Quelle/Zeit; keine erfundene kostenlose ICE-Lizenz.
-- Trading Economics: Kalender für die nächsten sieben Tage, Quellen-/Aktualitätsstatus. Ohne Key **„nicht konfiguriert“**, nicht „keine News“.
+- RSS: bestehende Federal Reserve, EZB, BBC Welt/Wirtschaft; zusätzlich Fed Monetary Policy, Fed Speeches, EIA und BoJ. Nur Titel, Original-Link und Zeitpunkte, keine Volltexte.
+- Ohne Key: Treasury nominal 2Y/5Y/10Y/30Y und real 10Y; Fed H.10 Nominal Broad Dollar. **Tageswerte, keine Live-Renditen; Broad USD ist nicht DXY.**
+- Ohne Key: BLS/BEA ICS, FOMC Jahreskalender plus offizieller Fed-Zeitkalender, Census, EIA inklusive publizierter Feiertagsausnahmen und Treasury-Auktionen ohne Bills.
+- Fehlende Uhrzeiten bleiben ausdrücklich unbekannt. Forecast/Actual/Previous bleiben null, wenn die Quelle sie nicht liefert. Interne Importance ist keine Behördenbewertung.
+- FRED bleibt optional mit getrennten `FRED_*`-Beobachtungen; überschreibt keine offiziellen Default-Serien. Trading Economics bleibt optional mit eigenem Quellenstatus und gegebenenfalls Konsenswerten.
 
 Der Button **Quellen aktualisieren** ist sofort nach ENV-Konfiguration nutzbar. Für regelmäßigen Abruf im Hintergrund einen unabhängigen Node-Service mit derselben DB und den Kontext-Keys starten:
 
@@ -124,7 +126,13 @@ Der Button **Quellen aktualisieren** ist sofort nach ENV-Konfiguration nutzbar. 
 node trading-core/workers/context.js
 ```
 
-Standard: 15 Minuten; Mindestintervall fünf Minuten. Alternativ kann ausschließlich der separate Standalone-Server mit `TRADING_CONTEXT_POLL=true` selbst pollen. Nicht beide Varianten doppelt betreiben. Fehler einer Quelle werden angezeigt und nicht mit synthetischem Ersatz überdeckt.
+Bestehender Worker unverändert nutzbar, kein neuer Service-Typ oder Scheduler. Standard-Tick: 15 Minuten; Mindestintervall fünf Minuten. Quellen-Caches liegen in bestehenden Trading-Settings: RSS 15 Minuten, Kalender sechs Stunden, Treasury 24 Stunden, H.10 Montag 16:30 Eastern mit Dienstag-Wiederprüfung für Feiertagsverzögerungen. Fehler erhalten alte Daten und werden frühestens nach 15 Minuten erneut versucht. Alternativ kann der Standalone-Server mit `TRADING_CONTEXT_POLL=true` pollen; nicht beide Varianten doppelt betreiben. Dieser Release startet keinen Dauerworker. Ein API-Sync ist ein einzelner Abruf, Bootstrap liest nur.
+
+Der regelbasierte `marketContext` wird im Bootstrap aus gespeicherten Beobachtungen,
+Events, Headlines und vorhandenen exakten Futures-Kontrakten berechnet. Der Sync
+schreibt nur `news`, `events`, `observations`, `settings` im bestehenden
+`marcel_trading`-Schema. Keine DDL, keine Candle-Imports, keine Änderungen an
+manuellem append-only Context, Plänen, Ausführungen oder Nicht-Trading-Daten.
 
 ## 6. Master Brain
 

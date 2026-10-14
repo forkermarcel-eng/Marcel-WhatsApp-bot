@@ -1,12 +1,13 @@
 import {officialJobs,CALENDAR_SOURCES,dedupeEvents,nextSourceAttempt} from './official-context.js';
 import {classifyNews} from './market-context.js';
+import {parseNewsSource} from './news-sources.js';
 
 /** Per-source persisted fetch cadence in the EXISTING settings collection. No scheduler/service. */
-export async function syncSources(repo,env,{read,parseRSS,feeds},now=new Date().toISOString()){
+export async function syncSources(repo,env,{read,readNews,parseRSS,feeds},now=new Date().toISOString()){
  const at=now,stamp=Date.parse(at),old=await repo.get('settings','contextSourceCache'),cache={...(old?.sources||{})};
  const reports=[],data={news:[],events:[],observations:[]};
  const jobs=officialJobs(at);
- if(env.TRADING_NEWS_ENABLED==='true')jobs.push(...feeds.map(feed=>({name:feed.name,kind:'news',ttl:900000,url:feed.url,parse:s=>{const rows=parseRSS(s,feed,at).map(classifyNews);if(!rows.length)throw Error('Kein gültiger RSS-Inhalt.');return rows;}})));
+ if(env.TRADING_NEWS_ENABLED==='true')jobs.push(...feeds.map(feed=>({name:feed.name,kind:'news',ttl:feed.ttl||600000,url:feed.url,parse:s=>{const rows=(feed.format?parseNewsSource(s,feed,at):parseRSS(s,feed,at)).map(classifyNews);if(!rows.length&&feed.format!=='gdelt')throw Error('Kein gültiger RSS-Inhalt.');return rows;}})));
  else reports.push({name:'News',kind:'news',status:'NOT_CONFIGURED',healthy:false,at});
  if(env.TRADING_ECONOMIC_CALENDAR_KEY){
   const url=new URL(`https://api.tradingeconomics.com/calendar/country/All/${at.slice(0,10)}/${new Date(stamp+7*86400000).toISOString().slice(0,10)}`);url.searchParams.set('c',env.TRADING_ECONOMIC_CALENDAR_KEY);url.searchParams.set('f','json');
@@ -21,22 +22,29 @@ export async function syncSources(repo,env,{read,parseRSS,feeds},now=new Date().
   const cacheKey=j.kind+':'+j.name,prev=cache[cacheKey];
   if(prev&&Date.parse(prev.nextAttemptAt)>stamp){reports.push({...prev.report,status:prev.report.healthy?'CACHED':prev.report.status,cached:true});return;}
   try{
-   const parsed=await j.parse(Array.isArray(j.url)?await Promise.all(j.url.map(read)):await read(j.url));
+   const response=j.kind==='news'&&readNews?await readNews(j.url,prev):null;
+   if(response?.notModified){
+    if(!prev?.ids?.length)throw Error('304 without cached rows');
+    const report={...prev.report,status:'NOT_MODIFIED',healthy:true,at,lastSuccessAt:at};reports.push(report);
+    cache[cacheKey]={...prev,report,failures:0,nextAttemptAt:new Date(stamp+j.ttl).toISOString()};return;
+   }
+   const parsed=await j.parse(response?response.raw:Array.isArray(j.url)?await Promise.all(j.url.map(read)):await read(j.url));
    const rows=j.kind==='events'?dedupeEvents(parsed).filter(e=>{const d=e.at||e.scheduled_date;return d>=new Date(stamp-7*86400000).toISOString().slice(0,10)&&d<=new Date(stamp+400*86400000).toISOString().slice(0,10);}):parsed;
    data[j.kind].push(...rows);
    const report={name:j.name,kind:j.kind,status:'OK',healthy:true,at,lastSuccessAt:at,count:rows.length};reports.push(report);
-   cache[cacheKey]={report,ids:rows.map(x=>x.id),nextAttemptAt:nextSourceAttempt(j.name,at,j.ttl)};
+   cache[cacheKey]={report,ids:rows.map(x=>x.id),etag:response?.etag||null,lastModified:response?.lastModified||null,failures:0,nextAttemptAt:nextSourceAttempt(j.name,at,j.ttl)};
   }catch(error){
    // Never expose optional-provider URL/query credentials in errors or logs.
-   const report={name:j.name,kind:j.kind,status:'ERROR',healthy:false,at,lastSuccessAt:prev?.report.lastSuccessAt||null,message:'Quellenabruf/Formatprüfung fehlgeschlagen; kein synthetischer Ersatz.',errorClass:error.name};reports.push(report);
-   cache[cacheKey]={report,ids:prev?.ids||[],nextAttemptAt:new Date(stamp+900000).toISOString()};
+   const report={name:j.name,kind:j.kind,status:error.httpStatus===429?'RATE_LIMITED':'ERROR',healthy:false,at,lastSuccessAt:prev?.report.lastSuccessAt||null,message:'Quellenabruf/Formatprüfung fehlgeschlagen; vorhandene Meldungen bleiben erhalten.',errorClass:error.name};reports.push(report);
+   const failures=Math.min(8,(prev?.failures||0)+1),delay=Math.max(error.retryMs||0,Math.min(86400000,Math.max(j.ttl,900000)*2**(failures-1)));
+   cache[cacheKey]={...prev,report,ids:prev?.ids||[],failures,nextAttemptAt:new Date(stamp+delay).toISOString()};
   }
  }));
  const calendarStatus=CALENDAR_SOURCES.every(name=>reports.some(r=>r.name===name&&r.kind==='events'&&r.healthy))?'OK':reports.some(r=>r.kind==='events'&&r.healthy)?'PARTIAL':'ERROR';
  const activeEventIds=[...new Set(Object.values(cache).filter(c=>c.report.kind==='events').flatMap(c=>c.ids))];
  await repo.transaction(async tx=>{
   for(const n of new Map(data.news.map(n=>[n.id,n])).values()){
-   const old=await tx.get('news',n.id);await tx.put('news',old?{...old,...n,createdAt:old.createdAt,observedAt:old.observedAt}:n,{update:true});
+   const old=await tx.get('news',n.id);await tx.put('news',old?{...old,...n,seen_at:old.seen_at||old.observedAt,createdAt:old.createdAt,observedAt:old.observedAt}:n,{update:true});
   }
   for(const e of dedupeEvents(data.events))await tx.put('events',e,{update:true});
   for(const o of data.observations)await tx.put('observations',o,{update:true});

@@ -34,7 +34,7 @@ export async function startServer({env=process.env,demo=false,port=Number(env.TR
  }
  const handler=createTradingHandler({repo,env:{...env,TRADING_DEMO:demo?'true':'false'},authorize:req=>new URL(req.url,'http://local').pathname==='/api/trading'&&session(req)});
  const root=fileURLToPath(new URL('../../',import.meta.url));
- const assets=new Set(['/Trading/index.html','/Trading/trading.js','/Trading/trading.css','/Trading/domain.js','/Trading/chart.js','/platform.css']);
+ const assets=new Set(['/Trading/index.html','/Trading/trading.js','/Trading/trading.css','/Trading/domain.js','/Trading/chart.js','/Trading/news-context.js','/platform.css']);
  const loginPage=`<!doctype html><html lang="de"><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Marcel Trading · Anmeldung</title><style>body{background:#101722;color:#eee;font:17px system-ui;display:grid;place-items:center;height:90vh}form{background:#18212e;padding:35px;border:1px solid #3a3f49;border-radius:18px;width:min(340px,80vw)}input,button{box-sizing:border-box;width:100%;padding:14px;margin:12px 0;background:#121923;color:#eee;border:1px solid #6b6050;border-radius:8px}button{background:#dfbc78;color:#151515;font-weight:bold}small{color:#a8b0ba}</style><form method="post" action="/local-login"><h2>Marcel Trading</h2><small>Separater lokaler Zugang. Keine Brokerverbindung.</small><label><input name="password" type="password" placeholder="Lokales Passwort" required autocomplete="current-password"></label><button>Anmelden</button></form></html>`;
  const server=http.createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://local');

@@ -1,6 +1,8 @@
 /** Explainable context, not a prediction or order signal. Missing inputs stay unknown. */
 import {DateTime} from 'luxon';
+import {sortedNews,newsTimestamp,newsRelevance,eventRelevance,MARKET_NAMES} from '../../Trading/news-context.js';
 const DAY=86400000;
+const recentHeadline=(n,stamp)=>{const at=n.published_date?Date.parse(n.published_date+'T00:00:00Z'):newsTimestamp(n);return Number.isFinite(at)&&at<=stamp&&stamp-at<2*DAY;};
 const TOPICS=[
  ['war/conflict',/\b(war|conflict|missile|airstrike|invasion|ceasefire|military strike)\b/i],
  ['sanctions',/\bsanctions?\b/i],['Middle East',/\b(Iran|Israel|Gaza|Lebanon|Middle East|Hormuz|Hamas|Hezbollah)\b/i],
@@ -17,16 +19,12 @@ const TOPICS=[
 const GEO=new Set(['war/conflict','sanctions','Middle East','Russia/Ukraine','China/Taiwan','North Korea','shipping','trade tariffs']);
 export function classifyNews(n){
  const input=n.title+' '+(/Federal Reserve|EZB|Bank of Japan/.test(n.source||'')?n.source:'');
- const topics=TOPICS.filter(([,r])=>r.test(input)).map(([t])=>t),geopolitical=topics.some(t=>GEO.has(t));
+ const topics=TOPICS.filter(([,r])=>r.test(input)).map(([t])=>t),geopolitical=newsRelevance(n).geopolitical;
  const relevance=topics.some(t=>['gold/precious metals','war/conflict','Fed/rates','inflation','banking stress','sovereign risk'].includes(t))?'HIGH':topics.length?'MEDIUM':'LOW';
  return {...n,topics,geopolitical,relevance,classification_basis:'INTERNAL_HEADLINE_RULES'};
 }
 export function prioritizeNews(news,now=new Date().toISOString()){
- const rank={HIGH:3,MEDIUM:2,LOW:1},seen=new Set();
- return news.map(classifyNews).filter(n=>{if(!n.url||seen.has(n.url))return false;seen.add(n.url);return true;}).sort((a,b)=>{
-  const fresh=x=>Number.isFinite(Date.parse(x.publishedAt))&&Date.parse(now)-Date.parse(x.publishedAt)<=3*DAY&&Date.parse(x.publishedAt)<=Date.parse(now);
-  return Number(fresh(b))-Number(fresh(a))||rank[b.relevance]-rank[a.relevance]||(b.publishedAt||'').localeCompare(a.publishedAt||'');
- });
+ return sortedNews(news.map(classifyNews));
 }
 export function eventBounds(e){
  if(e.at&&Number.isFinite(Date.parse(e.at)))return [Date.parse(e.at),Date.parse(e.at)];
@@ -45,9 +43,9 @@ export function buildMarketContext({observations=[],events=[],news=[],sync=null,
  const gold=freshMarket('MGC'),nasdaq=freshMarket('MNQ'),dow=freshMarket('MYM'),oil=freshMarket('MCL');
  if(!gold||!nasdaq||!dow||!oil)warnings.push('Cross-Asset-Kurse fehlen/veraltet; kein Livefeed vorausgesetzt.');
  const risk=nasdaq&&dow&&typeof nasdaq.change_pct==='number'&&typeof dow.change_pct==='number'?(nasdaq.change_pct>0&&dow.change_pct>0?'RISK-ON':nasdaq.change_pct<0&&dow.change_pct<0?'RISK-OFF':'MIXED'):'UNKNOWN';
- const reports=sync?.reports||[],newsReports=reports.filter(r=>r.kind==='news');
+ const reports=sync?.reports||[],newsReports=reports.filter(r=>r.kind==='news'&&r.name!=='GDELT Discovery');
  const newsHealthy=newsReports.some(r=>r.name==='BBC Welt')&&newsReports.every(r=>r.healthy===true&&stamp-Date.parse(r.lastSuccessAt)<1800000);
- const recent=prioritizeNews(news,now).filter(n=>n.geopolitical&&Date.parse(n.publishedAt)<=stamp&&stamp-Date.parse(n.publishedAt)<2*DAY);
+ const recent=prioritizeNews(news,now).filter(n=>n.geopolitical&&recentHeadline(n,stamp));
  // A headline mention is not proof of geopolitical severity. Flag the monitoring
  // category, with explicit evidence links, never claim verified conflict escalation.
  const activeConflict=recent.filter(n=>n.topics.includes('war/conflict')&&!/ceasefire|peace deal|truce|de-escalat/i.test(n.title));
@@ -72,6 +70,35 @@ export function buildMarketContext({observations=[],events=[],news=[],sync=null,
   nextHigh:events.filter(e=>e.impact==='HIGH'&&eventBounds(e)[1]>=stamp).sort((a,b)=>eventBounds(a)[0]-eventBounds(b)[0])[0]||null,
   geopoliticalEvidence:recent.slice(0,8).map(n=>({title:n.title,url:n.url,source:n.source})),
   methodology:'Regelbasiert; Renditen/Index Tagesvergleich, Futures UTC-Tagesabschlussvergleich. Keine Prognose, keine Handelsempfehlung.'};
+}
+export function buildInstrumentContexts(input,now=new Date().toISOString()){
+ const base=buildMarketContext(input,now),v=base.values,stamp=Date.parse(now);
+ const recent=prioritizeNews(input.news||[]).filter(n=>recentHeadline(n,stamp));
+ const output={};
+ for(const instrument of Object.keys(MARKET_NAMES)){
+  const signals=[],add=(sign,reason)=>signals.push({sign,reason});
+  const usd=()=>{if(v.usd?.change)add(v.usd.change<0?1:-1,`Broad USD ${v.usd.change<0?'schwächer':'stärker'}`);};
+  const rates=()=>{if(v.real?.change_bps)add(v.real.change_bps<0?1:-1,`Real 10Y ${v.real.change_bps<0?'fallend':'steigend'}`);};
+  const risk=()=>{if(['RISK-ON','RISK-OFF'].includes(base.risk))add(base.risk==='RISK-ON'?1:-1,`Tagesvergleich Nasdaq/Dow: ${base.risk}`);};
+  const relevant=recent.filter(n=>newsRelevance(n,instrument,stamp).relevance!=='LOW');
+  const evidence=regex=>relevant.find(n=>regex.test(n.title)&&!/\b(no|not|denies|avoids|averts|unlikely)\b/i.test(n.title));
+  const supply=evidence(/(?:attack\w*|disrupt\w*|shutdown|blockade).*(?:oil|refiner\w*|pipeline|tanker|Hormuz)|(?:oil|refiner\w*|pipeline|tanker|Hormuz).*(?:attack\w*|disrupt\w*|shutdown|blockade)/i);
+  const cuts=evidence(/OPEC.*(?:production|output|supply) cuts?|OPEC.*cut\w* (?:production|output|supply)/i);
+  const techRisk=evidence(/(?:chip|semiconductor|Taiwan|tech).*(?:ban|export control|attack)|export control.*(?:chip|semiconductor)/i);
+  const tariffs=evidence(/(?:raises?|increases?|imposes?|new).*(?:tariffs?|trade barriers?)/i);
+  if(instrument==='MGC'){rates();usd();if(['HIGH','ELEVATED'].includes(base.geopolitical))add(1,'Geopolitische Schlagzeilen: Safe-Haven-Kontext, nicht unabhängig bestätigt');if(base.risk==='RISK-OFF')add(1,'Tagesvergleich: Risk-off');if(base.risk==='RISK-ON')add(-1,'Tagesvergleich: Risk-on');}
+  if(instrument==='MCL'){usd();risk();if(supply)add(1,'Schlagzeile zu Lieferstörung: '+supply.title);if(cuts)add(1,'OPEC-Kürzungs-Schlagzeile: '+cuts.title);}
+  if(instrument==='MNQ'){rates();risk();if(techRisk)add(-1,'Tech-/Export-Risiko laut Schlagzeile: '+techRisk.title);}
+  if(instrument==='MYM'){risk();if(base.rates==='RISING')add(-1,'Steigende Renditen');if(base.rates==='FALLING')add(1,'Fallende Renditen');if(tariffs)add(-1,'Handelsbarrieren laut Schlagzeile: '+tariffs.title);if(base.oil==='RISING')add(-1,'Steigender Öl-Tagespreis: Kostenbelastung, kein gemessener Industrieeffekt');}
+  const positive=signals.filter(s=>s.sign>0).map(s=>s.reason),negative=signals.filter(s=>s.sign<0).map(s=>s.reason);
+  const complete=instrument==='MGC'?!!v.real&&!!v.usd:instrument==='MCL'?!!v.usd&&base.risk!=='UNKNOWN':instrument==='MNQ'?!!v.real&&base.risk!=='UNKNOWN':base.rates!=='UNKNOWN'&&base.risk!=='UNKNOWN';
+  const bias=complete&&signals.length>=2&&!(positive.length&&negative.length)?(positive.length?'BULLISH':'BEARISH'):'NEUTRAL';
+  const explanation=[positive.length?'Stützend: '+positive[0]+'.':null,negative.length?'Belastend: '+negative[0]+'.':null].filter(Boolean).join(' ')||'Keine ausreichenden aktuellen Treiber verfügbar.';
+  const regimes={MGC:[['Rates',base.rates],['Geopolitics',base.geopolitical]],MNQ:[['Rates',base.rates],['Risk regime',base.risk],['Tech context',techRisk?'HEADLINE RISK':'Keine bestätigte Richtungsinformation']],MYM:[['Rates',base.rates],['Growth / risk',base.risk],['Oil / energy',base.oil],['Industrial context','Keine gemessenen Aktivitätsdaten']],MCL:[['Inventories','Nicht verfügbar'],['Supply risk',supply?'HEADLINE RISK':'Nicht bestätigt'],['OPEC context',cuts?'CUT HEADLINE':'Keine aktuelle bestätigte Richtungsinformation'],['Growth / risk',base.risk]]}[instrument];
+  const ids={MGC:['DGS2','DGS10','DFII10','DTWEXBGS','T2S10S'],MNQ:['DGS2','DGS10','DFII10','DTWEXBGS'],MYM:['DGS2','DGS10','DTWEXBGS'],MCL:['DTWEXBGS']}[instrument];
+  output[instrument]={...base,instrument,name:MARKET_NAMES[instrument],bias,positive,negative,explanation,observationIds:ids,regimes,coverageComplete:complete,
+   nextHigh:(input.events||[]).filter(e=>eventRelevance(e,instrument)==='HIGH'&&eventBounds(e)[1]>=stamp).sort((a,b)=>eventBounds(a)[0]-eventBounds(b)[0])[0]||null};
+ }return output;
 }
 export async function marketInputs(repo,settings,series,now){
  const markets={};await Promise.all(['MGC','MNQ','MYM','MCL'].map(async root=>{

@@ -24,5 +24,8 @@ def mount(page):
  page.add_script_tag(content='window.TradingDomain=(()=>{'+domain.replace('export ','')+';return {'+','.join(names)+'}})();')
  chart=(root/'Trading/chart.js').read_text(encoding='utf-8').replace("import {ema} from './domain.js';",'const {ema}=TradingDomain;').replace('export class ','class ')
  page.add_script_tag(content='window.ChartModule=(()=>{'+chart+';return {TradingChart}})();')
+ news=(root/'Trading/news-context.js').read_text(encoding='utf-8');names=re.findall(r'export (?:const|function|class) (\w+)',news)
+ page.add_script_tag(content='window.NewsContext=(()=>{'+news.replace('export ','')+';return {'+','.join(names)+'}})();')
  app=(root/'Trading/trading.js').read_text(encoding='utf-8');app=re.sub(r"import \{([^}]+)\} from './domain.js';",r'const {\1}=TradingDomain;',app);app=app.replace("import {TradingChart} from './chart.js';",'const {TradingChart}=ChartModule;')
+ app=re.sub(r"import \{([^}]+)\} from './news-context.js';",r'const {\1}=NewsContext;',app)
  page.add_script_tag(content='(()=>{'+app+'})()');page.wait_for_selector('#chart-host canvas');page.wait_for_timeout(700)

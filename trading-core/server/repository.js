@@ -1,5 +1,9 @@
 import {readFile,writeFile,rename,mkdir} from 'node:fs/promises';
 import {dirname} from 'node:path';
+import {compareNews} from '../../Trading/news-context.js';
+const NEWS_TIME_KEYS=['published_at','publishedAt','seen_at','seenAt','fetched_at','fetchedAt','observedAt'];
+// PG16+ validates malformed legacy values before casting; explicit zones avoid session-TZ drift.
+const NEWS_ORDER='COALESCE('+NEWS_TIME_KEYS.map(k=>`CASE WHEN body->>'${k}' ~ '(Z|[+-][0-9]{2}:?[0-9]{2})$' AND pg_input_is_valid(body->>'${k}', 'timestamp with time zone') THEN (body->>'${k}')::timestamptz END`).join(',')+",'epoch'::timestamptz) DESC,id";
 export const KINDS=['plans','snapshots','executions','reviews','attachments','playbooks','context','observations','events','news','settings','drawings','estimates','proposals','audit','commands'];
 const IMMUTABLE=new Set(['plans','snapshots','executions','reviews','context','audit','commands']);
 const check=k=>{if(!KINDS.includes(k))throw Error('Unknown trading collection');return k;};
@@ -10,7 +14,7 @@ export class FileRepository{
  async health(){await this.ready;return {ready:true,mode:this.mode};}
  async transaction(fn){const task=this.queue.then(async()=>{await this.ready;const before=structuredClone(this.state);try{const result=await fn(this);if(this.path){await mkdir(dirname(this.path),{recursive:true});const tmp=this.path+'.tmp';await writeFile(tmp,JSON.stringify(this.state),{mode:0o600});await rename(tmp,this.path);}return result;}catch(e){this.state=before;throw e;}});this.queue=task.catch(()=>{});return task;}
  async get(k,id){await this.ready;return structuredClone(this.state.collections[check(k)][id]||null);}
- async list(k,limit=10000){await this.ready;return Object.values(this.state.collections[check(k)]).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,limit).map(x=>{if(k==='attachments'){const {data,...meta}=x;return structuredClone(meta);}return structuredClone(x);});}
+ async list(k,limit=10000){await this.ready;return Object.values(this.state.collections[check(k)]).sort(k==='news'?compareNews:(a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,limit).map(x=>{if(k==='attachments'){const {data,...meta}=x;return structuredClone(meta);}return structuredClone(x);});}
  async put(k,obj,{update=false}={}){check(k);const old=this.state.collections[k][obj.id];if(old&&(!update||IMMUTABLE.has(k)))throw duplicate();this.state.collections[k][obj.id]=structuredClone(obj);return structuredClone(obj);}
  async delete(k,id){if(IMMUTABLE.has(check(k)))throw Error('Immutable');delete this.state.collections[k][id];}
  async storeCandles({contract,source,resolution,bars}){for(const b of bars)this.state.candles[[contract,source,resolution,b.time].join('|')]={...b,contract,source,resolution,receivedAt:new Date().toISOString()};return bars.length;}
@@ -22,7 +26,7 @@ export class PgRepository{
  async health(){const r=await this.pool.query('SELECT version FROM marcel_trading.schema_versions ORDER BY version DESC LIMIT 1');return {ready:r.rows[0]?.version===1,mode:this.mode};}
  async transaction(fn){const c=await this.pool.connect();try{await c.query('BEGIN');await c.query("SET LOCAL lock_timeout = '5s'");await c.query("SET LOCAL statement_timeout = '20s'");await c.query("SELECT pg_advisory_xact_lock(781022163)");const out=await fn(new PgRepository(c));await c.query('COMMIT');return out;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}
  async get(k,id){return (await this.pool.query(`SELECT body FROM marcel_trading.${check(k)} WHERE id=$1`,[id])).rows[0]?.body||null;}
- async list(k,limit=10000){return (await this.pool.query(`SELECT ${k==='attachments'?"body - 'data' AS body":'body'} FROM marcel_trading.${check(k)} ORDER BY created_at DESC,id LIMIT $1`,[Math.min(100000,limit)])).rows.map(r=>r.body);}
+ async list(k,limit=10000){return (await this.pool.query(`SELECT ${k==='attachments'?"body - 'data' AS body":'body'} FROM marcel_trading.${check(k)} ORDER BY ${k==='news'?NEWS_ORDER:'created_at DESC,id'} LIMIT $1`,[Math.min(100000,limit)])).rows.map(r=>r.body);}
  async put(k,obj,{update=false}={}){check(k);if(IMMUTABLE.has(k))update=false;try{await this.pool.query(`INSERT INTO marcel_trading.${k}(id,body) VALUES($1,$2::jsonb)${update?' ON CONFLICT(id) DO UPDATE SET body=EXCLUDED.body':''}`,[obj.id,JSON.stringify(obj)]);return obj;}catch(e){if(e.code==='23505')throw duplicate();throw e;}}
  async delete(k,id){if(IMMUTABLE.has(check(k)))throw Error('Immutable');await this.pool.query(`DELETE FROM marcel_trading.${k} WHERE id=$1`,[id]);}
  async storeCandles({contract,source,resolution,bars}){if(!bars.length)return 0;await this.pool.query(`INSERT INTO marcel_trading.candles(contract,source,resolution,at,open,high,low,close,volume)

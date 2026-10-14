@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {syncSources} from './context-sync.js';
+import {EXTRA_NEWS,fetchNews} from './news-sources.js';
 import {invariant,iso,text,validateCandle,contractValid,INSTRUMENTS} from '../../Trading/domain.js';
 const hash=x=>createHash('sha256').update(x).digest('hex');
 export const NEWS_FEEDS=[
@@ -10,21 +11,28 @@ export const NEWS_FEEDS=[
  {name:'Fed Monetary Policy',url:'https://www.federalreserve.gov/feeds/press_monetary.xml',topic:'Fed/rates'},
  {name:'Fed Speeches',url:'https://www.federalreserve.gov/feeds/speeches.xml',topic:'Fed/rates'},
  {name:'EIA',url:'https://www.eia.gov/rss/todayinenergy.xml',topic:'energy supply'},
- {name:'Bank of Japan',url:'https://www.boj.or.jp/en/rss/whatsnew.xml',topic:'BoJ/JPY'}
+ {name:'Bank of Japan',url:'https://www.boj.or.jp/en/rss/whatsnew.xml',topic:'BoJ/JPY'},
+ {name:'EIA Press',url:'https://www.eia.gov/rss/press_rss.xml',topic:'energy supply'},
+ {name:'DOE',url:'https://www.energy.gov/rss/energygov/2193718',topic:'energy supply'},
+ {name:'UN News',url:'https://news.un.org/feed/subscribe/en/news/topic/peace-and-security/feed/rss.xml',topic:'Geopolitik'}
 ];
 export function providerStatus(env=process.env){return {news:{configured:env.TRADING_NEWS_ENABLED==='true',type:'RSS-Titel/Links · kein Volltextarchiv'},calendar:{configured:true,provider:'BLS / BEA / FOMC / Census / EIA / Treasury',optionalTradingEconomics:!!env.TRADING_ECONOMIC_CALENDAR_KEY},macro:{configured:true,provider:'U.S. Treasury / Fed H.10 · Tageswerte, nicht live',optionalFRED:!!env.TRADING_FRED_KEY},history:{configured:!!env.TRADING_DATABENTO_KEY&&env.TRADING_DATABENTO_ENABLED==='true',provider:'Databento · kostenpflichtig / Entitlement'},massive:{configured:!!env.TRADING_MASSIVE_API_KEY&&env.TRADING_MASSIVE_ENABLED==='true',provider:'Massive · Futures-Historie / Entitlement'},live:{configured:!!env.TRADING_INGEST_TOKEN,provider:'Separater Databento-Worker · letzter Datensatz entscheidet'},brain:{configured:!!env.TRADING_INTELLIGENCE_TOKEN,mode:'Read-only Export'},broker:{configured:false,mode:'KEINE VERBINDUNG'}};}
 export async function boundedFetch(url,options={},fetcher=fetch,maxBytes=2_000_000){const r=await fetcher(url,{...options,redirect:'error',signal:AbortSignal.timeout(12000)});if(!r.ok){const e=Error(`Datenanbieter antwortet HTTP ${r.status}.`);e.status=502;throw e;}if(Number(r.headers.get('content-length')||0)>maxBytes)throw Error('Datenanbieter-Antwort zu groß.');const chunks=[];let length=0;if(r.body?.getReader){const rd=r.body.getReader();try{for(;;){const {done,value}=await rd.read();if(done)break;length+=value.length;if(length>maxBytes){await rd.cancel();throw Error('Datenlimit überschritten.');}chunks.push(Buffer.from(value));}}finally{rd.releaseLock();}return Buffer.concat(chunks).toString('utf8');}const s=await r.text();if(Buffer.byteLength(s)>maxBytes)throw Error('Datenlimit überschritten.');return s;}
 export function safeURL(x){try{const u=new URL(x);return u.protocol==='https:'&&!u.username&&!u.password?u.toString():'';}catch{return '';}}
+const feedURL=(link,feed)=>{if(typeof link!=='string'||!link.trim())return '';try{return safeURL(new URL(link,feed.url).href);}catch{return safeURL(link);}};
 const decode=x=>String(x||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,'').replace(/&(amp|lt|gt|quot|apos);/g,(_,n)=>({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[n])).replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Math.min(0x10ffff,Number(n)))).trim();
 export function parseRSS(xml,feed,now=new Date().toISOString()){
  // BoJ publishes legacy HTTP links; their identical official HTTPS URLs were verified.
  if(feed.name==='Bank of Japan')xml=xml.replaceAll('http://www.boj.or.jp/','https://www.boj.or.jp/');
  if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw Error('RSS mit DTD/Entities wird nicht verarbeitet.');
  const items=[...xml.matchAll(/<(?:item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/(?:item|entry)>/gi)].slice(0,30);
- return items.map(m=>{const body=m[1],get=k=>decode(body.match(new RegExp(`<${k}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${k}>`,'i'))?.[1]);const title=get('title'),url=safeURL(get('link')||body.match(/<link[^>]+href=["']([^"']+)/i)?.[1]);const date=get('pubDate')||get('published')||get('updated');return {id:hash(url||title.toLowerCase()),title:text(title,350),url,source:feed.name,topic:feed.topic,publishedAt:Number.isFinite(Date.parse(date))?new Date(date).toISOString():null,observedAt:now,createdAt:now,verification:'SOURCE_REPORT',note:'Quellenmeldung, keine eigenständig verifizierte Tatsache.'};}).filter(x=>x.title&&x.url);
+ return items.map(m=>{const body=m[1],get=k=>decode(body.match(new RegExp(`<${k}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${k}>`,'i'))?.[1]);const title=get('title'),url=feedURL(get('link')||body.match(/<link[^>]+href=["']([^"']+)/i)?.[1],feed);const date=get('pubDate')||get('published')||get('updated');return {id:hash(url||title.toLowerCase()),title:text(title,350),url,source:feed.name,topic:feed.topic,publishedAt:Number.isFinite(Date.parse(date))?new Date(date).toISOString():null,observedAt:now,createdAt:now,verification:'SOURCE_REPORT',note:'Quellenmeldung, keine eigenständig verifizierte Tatsache.'};}).filter(x=>x.title&&x.url);
 }
+const pendingSyncs=new WeakMap();
 export async function syncContext(repo,env=process.env,fetcher=fetch){
- return syncSources(repo,env,{read:url=>boundedFetch(url,{},fetcher),parseRSS,feeds:NEWS_FEEDS});
+ if(pendingSyncs.has(repo))return pendingSyncs.get(repo);
+ const task=syncSources(repo,env,{read:url=>boundedFetch(url,{},fetcher),readNews:(url,prev)=>fetchNews(url,prev,fetcher),parseRSS,feeds:[...NEWS_FEEDS,...EXTRA_NEWS]});
+ pendingSyncs.set(repo,task);try{return await task;}finally{pendingSyncs.delete(repo);}
 }
 export function parseDatabentoJSON(raw){const records=raw.trim().startsWith('[')?JSON.parse(raw):raw.trim().split('\n').filter(Boolean).map(x=>JSON.parse(x));return records.map(x=>{let time=x.ts_event??x.hd?.ts_event;if(typeof time==='number'||/^\d+$/.test(String(time)))time=new Date(Number(BigInt(String(time))/1000000n)).toISOString();return validateCandle({...x,time});});}
 export async function historyFromDatabento(body,env=process.env,fetcher=fetch){invariant(env.TRADING_DATABENTO_ENABLED==='true'&&env.TRADING_DATABENTO_KEY,'Databento nicht konfiguriert/freigegeben.');const root=text(body.instrument,8),contract=text(body.contract,24);invariant(INSTRUMENTS[root]&&contractValid(root,contract),'Exakter Kontrakt fehlt.');const start=iso(body.from),end=iso(body.to);invariant(Date.parse(end)>Date.parse(start)&&Date.parse(end)-Date.parse(start)<=7*86400000,'Ein Abruf umfasst maximal sieben Tage.');invariant(Date.parse(end)<=Date.now(),'Historischer Endzeitpunkt darf nicht in der Zukunft liegen.');

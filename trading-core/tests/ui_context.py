@@ -1,6 +1,7 @@
 """Offline fixture-only context/calendar rendering; no Production requests/writes."""
 import json, os
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import ui_render_helpers as ui
@@ -19,6 +20,10 @@ def fixture(source,url,opts):
  data['events']=[{'id':str(i),'title':title,'at':iso(now+timedelta(hours=hours)) if hours is not None else None,'scheduled_date':iso(now)[:10],'country':'US','source':'OFFLINE FIXTURE','impact':impact,'actual':None,'forecast':None,'previous':None,'url':'https://example.org'} for i,(title,hours,impact) in enumerate([('CPI TEST',1,'HIGH'),('EIA TEST',48,'MEDIUM'),('Auction time unpublished',None,'MEDIUM')])]
  data['news']=[{'title':'Iran sanctions & gold <script>unsafe</script>','source':'OFFLINE FIXTURE','url':'https://example.org','publishedAt':iso(now),'topics':['sanctions','gold/precious metals'],'relevance':'HIGH'}]
  data['marketContext']={'goldBias':'NEUTRAL','rates':'MIXED','usd':'STRONGER','oil':'FALLING','risk':'RISK-OFF','geopolitical':'ELEVATED','calendar24h':'HIGH','reasons':['Mixed signals: neutral.'],'warnings':[],'nextHigh':data['events'][0]}
+ data['marketContexts']={key:{**data['marketContext'],'name':name,'bias':'NEUTRAL','explanation':name+' fixture explanation.','regimes':[['Rates','MIXED']]} for key,name in [('MGC','GOLD'),('MCL','OIL'),('MNQ','NASDAQ'),('MYM','DOW')]}
+ for event in data['events']:
+  if event['at'] is None:event['scheduled_date']=now.astimezone(ZoneInfo('Europe/Berlin')).date().isoformat()
+ data['news'] += [{'id':str(i),'title':'Oil supply and Fed rates '+str(i),'source':'EIA' if i%2 else 'BBC Welt','url':'https://example.org/'+str(i),'publishedAt':iso(now-timedelta(minutes=i+1))} for i in range(20)]
  data['sync']={'calendarStatus':'OK','lastSyncAt':iso(now),'reports':[]}
  result['body']=json.dumps(data);return result
 ui.bridge=fixture
@@ -32,6 +37,12 @@ with sync_playwright() as p:
  page.on('pageerror',lambda e:errors.append(str(e)));ui.mount(page)
  check('Broad USD ticker, not DXY ticker',page.locator('#tickers').inner_text().find('Broad USD Index')>=0)
  check('Rule based context visible','GOLD MACRO BIAS' in page.locator('#view').inner_text() and 'MIXED' in page.locator('#view').inner_text())
+ for key,name in [('MCL','OIL'),('MNQ','NASDAQ'),('MYM','DOW'),('MGC','GOLD')]:
+  page.locator('#chart-market').select_option(key);page.wait_for_timeout(200)
+  check(name+' context switch',name+' MACRO BIAS' in page.locator('#view').inner_text() and 'NEWS RADAR · '+name in page.locator('#view').inner_text())
+ check('15 headlines available',page.locator('.news-scroll .news-mini').count()==15)
+ check('Radar scroll container',page.locator('.news-scroll').evaluate('(e)=>getComputedStyle(e).overflowY')=='auto')
+ check('Multiple sources shown','EIA' in page.locator('.news-scroll').inner_text() and 'BBC' in page.locator('.news-scroll').inner_text())
  for width,height in [(1366,1024),(820,1180),(390,844)]:
   page.set_viewport_size({'width':width,'height':height});page.wait_for_timeout(200)
   check(str(width)+' context no page overflow',page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'))

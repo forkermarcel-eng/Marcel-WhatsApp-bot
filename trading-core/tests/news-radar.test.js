@@ -95,7 +95,7 @@ test('304 keeps first-seen and rows, ten minute cadence avoids repeat requests',
  const repo=new FileRepository(),feed={name:'fixture',url:'https://example.org/rss'};let calls=0;
  const deps={parseRSS,feeds:[feed],read:async()=>{throw Error('fixture offline');},readNews:async()=>{calls++;return calls===1?{raw:'<rss><item><title>Oil</title><link>https://example.org/oil</link></item></rss>',etag:'x'}:{notModified:true};}};
  await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,now);await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T10:05:00Z');assert.equal(calls,1);
- await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T10:10:00Z');assert.equal(calls,2);assert.equal((await repo.list('news'))[0].observedAt,now);
+ await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T10:09:59Z');assert.equal(calls,2,'one-second timer jitter must not delay news another ten minutes');assert.equal((await repo.list('news'))[0].observedAt,now);
 });
 test('Worker timer non-overlap, outage retry, stop and schema readiness',async()=>{
  let scheduled,delay,calls=0,release;const repo={health:async()=>({ready:true})};

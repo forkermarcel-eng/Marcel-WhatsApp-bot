@@ -48,6 +48,8 @@ Manual/API and scheduled sync share one in-flight promise per repository.
 Source cadence persists in existing settings.contextSourceCache: news 10 minutes,
 GDELT 1 hour, calendars 6 hours, Treasury daily, H.10 release cadence.
 ETag/Last-Modified/304; exponential outage/429 backoff including Retry-After.
+Healthy ten-minute feeds allow five seconds of timer jitter at their deadline;
+failure backoff and slower source deadlines are never shortened.
 No full response bodies persisted. No new queue, schema, service or credentials.
 Logs expose source status/timestamps/counts only. Old data survives outages.
 

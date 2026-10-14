@@ -20,7 +20,10 @@ export async function syncSources(repo,env,{read,readNews,parseRSS,feeds},now=ne
  }
  await Promise.all(jobs.map(async j=>{
   const cacheKey=j.kind+':'+j.name,prev=cache[cacheKey];
-  if(prev&&Date.parse(prev.nextAttemptAt)>stamp){reports.push({...prev.report,status:prev.report.healthy?'CACHED':prev.report.status,cached:true});return;}
+  // Timer jitter must not turn a ten-minute feed cadence into twenty minutes.
+  // Never shorten outage/429 backoff or the slower discovery/calendar cadence.
+  const dueTolerance=j.kind==='news'&&j.ttl<=600000&&prev?.report.healthy?5000:0;
+  if(prev&&Date.parse(prev.nextAttemptAt)>stamp+dueTolerance){reports.push({...prev.report,status:prev.report.healthy?'CACHED':prev.report.status,cached:true});return;}
   try{
    const response=j.kind==='news'&&readNews?await readNews(j.url,prev):null;
    if(response?.notModified){

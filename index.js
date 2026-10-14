@@ -1,4 +1,5 @@
 import express from "express";
+import { registerTradingRoutes } from "./trading-core/server/api.js";
 import crypto from "crypto";
 import OpenAI from "openai";
 import makeWASocket, {
@@ -91,6 +92,8 @@ app.use("/device-bridge/v1", deviceBridgeFoundationMiddleware);
 app.use(/^\/dashboard-api\/tinder\/(?:conversations|matches)\/[^/]+\/media$/, express.json({ limit: "12mb" }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
+// Opt-in Trading routes; isolated schema, no automatic migration or feed startup.
+registerTradingRoutes(app, pool);
 
 let sock = null;
 let whatsappStatus = "disabled";

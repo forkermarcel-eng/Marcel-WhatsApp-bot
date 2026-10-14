@@ -210,8 +210,10 @@ test("Brain write routes reuse one Vercel function and remain below the function
     .filter(file => String(file).endsWith(".js"));
   // Vercel also emits middleware.js as an output. Keep the complete output
   // count within the verified Hobby-plan cap of twelve.
-  assert.equal(functionFiles.length, 8);
-  assert.equal(functionFiles.length + 1, 9);
+  // Trading adds one isolated gateway; the existing Brain routes stay shared.
+  assert.equal(functionFiles.length, 9);
+  assert.equal(functionFiles.length + 1, 10);
+  assert.equal(functionFiles.includes("trading.js"), true);
   assert.equal(functionFiles.includes("dashboard\\marcel-brain\\facts.js"), false);
   assert.equal(functionFiles.includes("dashboard\\marcel-brain\\live-state.js"), false);
   assert.equal(functionFiles.includes("dashboard\\_brain-write-proxy.js"), false);

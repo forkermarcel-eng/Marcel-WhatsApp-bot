@@ -7,7 +7,7 @@ export const NEWS_FEEDS=[
  {name:'BBC Welt',url:'https://feeds.bbci.co.uk/news/world/rss.xml',topic:'Geopolitik'},
  {name:'BBC Wirtschaft',url:'https://feeds.bbci.co.uk/news/business/rss.xml',topic:'Makro'}
 ];
-export function providerStatus(env=process.env){return {news:{configured:env.TRADING_NEWS_ENABLED==='true',type:'RSS-Titel/Links · kein Volltextarchiv'},calendar:{configured:!!env.TRADING_ECONOMIC_CALENDAR_KEY,provider:'Trading Economics'},macro:{configured:!!env.TRADING_FRED_KEY,provider:'FRED · Tageswerte, nicht live'},history:{configured:!!env.TRADING_DATABENTO_KEY&&env.TRADING_DATABENTO_ENABLED==='true',provider:'Databento · kostenpflichtig / Entitlement'},live:{configured:!!env.TRADING_INGEST_TOKEN,provider:'Separater Databento-Worker · letzter Datensatz entscheidet'},brain:{configured:!!env.TRADING_INTELLIGENCE_TOKEN,mode:'Read-only Export'},broker:{configured:false,mode:'KEINE VERBINDUNG'}};}
+export function providerStatus(env=process.env){return {news:{configured:env.TRADING_NEWS_ENABLED==='true',type:'RSS-Titel/Links · kein Volltextarchiv'},calendar:{configured:!!env.TRADING_ECONOMIC_CALENDAR_KEY,provider:'Trading Economics'},macro:{configured:!!env.TRADING_FRED_KEY,provider:'FRED · Tageswerte, nicht live'},history:{configured:!!env.TRADING_DATABENTO_KEY&&env.TRADING_DATABENTO_ENABLED==='true',provider:'Databento · kostenpflichtig / Entitlement'},massive:{configured:!!env.TRADING_MASSIVE_API_KEY&&env.TRADING_MASSIVE_ENABLED==='true',provider:'Massive · Futures-Historie / Entitlement'},live:{configured:!!env.TRADING_INGEST_TOKEN,provider:'Separater Databento-Worker · letzter Datensatz entscheidet'},brain:{configured:!!env.TRADING_INTELLIGENCE_TOKEN,mode:'Read-only Export'},broker:{configured:false,mode:'KEINE VERBINDUNG'}};}
 export async function boundedFetch(url,options={},fetcher=fetch,maxBytes=2_000_000){const r=await fetcher(url,{...options,redirect:'error',signal:AbortSignal.timeout(12000)});if(!r.ok){const e=Error(`Datenanbieter antwortet HTTP ${r.status}.`);e.status=502;throw e;}if(Number(r.headers.get('content-length')||0)>maxBytes)throw Error('Datenanbieter-Antwort zu groß.');const chunks=[];let length=0;if(r.body?.getReader){const rd=r.body.getReader();try{for(;;){const {done,value}=await rd.read();if(done)break;length+=value.length;if(length>maxBytes){await rd.cancel();throw Error('Datenlimit überschritten.');}chunks.push(Buffer.from(value));}}finally{rd.releaseLock();}return Buffer.concat(chunks).toString('utf8');}const s=await r.text();if(Buffer.byteLength(s)>maxBytes)throw Error('Datenlimit überschritten.');return s;}
 export function safeURL(x){try{const u=new URL(x);return u.protocol==='https:'&&!u.username&&!u.password?u.toString():'';}catch{return '';}}
 const decode=x=>String(x||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,'').replace(/&(amp|lt|gt|quot|apos);/g,(_,n)=>({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[n])).replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Math.min(0x10ffff,Number(n)))).trim();
@@ -34,4 +34,61 @@ export async function historyFromDatabento(body,env=process.env,fetcher=fetch){i
  invariant(Number.isFinite(cost)&&cost>=0,'Datenkosten konnten nicht verifiziert werden; Abruf gestoppt.');const cap=Number(env.TRADING_HISTORY_MAX_COST_USD||0.5);invariant(cost<=cap,`Geschätzte Datenkosten ${cost} USD überschreiten Limit ${cap} USD.`);
  const url=new URL('https://hist.databento.com/v0/timeseries.get_range');for(const[k,v]of Object.entries({...args,encoding:'json',compression:'none',pretty_px:'true',pretty_ts:'true',limit:'11000'}))url.searchParams.set(k,v);
  return {contract,source:'databento-historical',resolution:60,bars:parseDatabentoJSON(await boundedFetch(url,{headers},fetcher,8_000_000)),estimatedCostUSD:cost};
+}
+
+// Explicit provider selection; omitted provider retains the existing Databento API contract.
+export async function historyFromProvider(body,env=process.env,fetcher=fetch){
+ const provider=body.provider??'databento';
+ invariant(provider==='databento'||provider==='massive','Unbekannter History-Provider.');
+ return provider==='massive'?historyFromMassive(body,env,fetcher):historyFromDatabento(body,env,fetcher);
+}
+
+export function normalizeMassiveBars(records,{contract,start,end}){
+ invariant(Array.isArray(records),'Massive-Antwort enthält keine Kerzenliste.');
+ return records.map(row=>{
+  invariant(row.ticker===contract,'Massive-Kontrakt stimmt nicht mit der Anfrage überein.');
+  const raw=row.window_start;
+  invariant((typeof raw==='number'&&Number.isInteger(raw))||(typeof raw==='string'&&/^\d+$/.test(raw)),'Massive-Zeitstempel ungültig.');
+  const ns=BigInt(raw);
+  invariant(ns>0n&&ns%60000000000n===0n,'Massive-Zeitstempel ist keine UTC-Minute.');
+  const ms=Number(ns/1000000n);
+  invariant(Number.isSafeInteger(ms)&&ms>=Date.parse(start)&&ms<Date.parse(end),'Massive-Kerze außerhalb des angefragten Zeitraums.');
+  invariant(row.volume!==null&&row.volume!==undefined,'Massive-Volumen fehlt.');
+  return validateCandle({...row,time:new Date(ms).toISOString()});
+ });
+}
+
+export async function historyFromMassive(body,env=process.env,fetcher=fetch){
+ invariant(env.TRADING_MASSIVE_ENABLED==='true'&&env.TRADING_MASSIVE_API_KEY,'Massive nicht konfiguriert/freigegeben.');
+ const root=text(body.instrument,8),contract=text(body.contract,24);
+ invariant(INSTRUMENTS[root]&&contractValid(root,contract),'Exakter Kontrakt fehlt.');
+ const start=iso(body.from),end=iso(body.to),duration=Date.parse(end)-Date.parse(start);
+ invariant(duration>0&&duration<=7*86400000,'Ein Abruf umfasst maximal sieben Tage.');
+ invariant(Date.parse(start)%60000===0&&Date.parse(end)%60000===0,'History-Zeitraum muss auf vollständigen UTC-Minuten liegen.');
+ invariant(Date.parse(end)<=Date.now(),'Historischer Endzeitpunkt darf nicht in der Zukunft liegen.');
+ const path='/futures/v1/aggs/'+contract;
+ let url=new URL(path,'https://api.massive.com');
+ url.search=new URLSearchParams({resolution:'1min','window_start.gte':String(BigInt(Date.parse(start))*1000000n),'window_start.lt':String(BigInt(Date.parse(end))*1000000n),limit:'1000',sort:'window_start.asc'});
+ const headers={Authorization:'Bearer '+env.TRADING_MASSIVE_API_KEY},bars=new Map(),seen=new Set();
+ for(let page=0;url;page++){
+  invariant(page<12&&!seen.has(url.href),'Massive-Pagination unvollständig oder wiederholt.');
+  seen.add(url.href);
+  let data;
+  try{data=JSON.parse(await boundedFetch(url,{headers},fetcher,8_000_000));}
+  catch(error){const safe=Error(/^Datenanbieter antwortet HTTP \d+\.$/.test(error.message)?error.message:'Massive-Abruf fehlgeschlagen; keine Daten gespeichert.');safe.status=502;throw safe;}
+  invariant(data.status==='OK','Massive meldet keinen erfolgreichen Abruf.');
+  for(const bar of normalizeMassiveBars(data.results,{contract,start,end})){
+   const old=bars.get(bar.time);
+   invariant(!old||JSON.stringify(old)===JSON.stringify(bar),'Widersprüchliche Massive-Kerzen zur gleichen Minute.');
+   bars.set(bar.time,bar);
+  }
+  invariant(bars.size<=10080,'Massive-Kerzenlimit überschritten.');
+  if(!data.next_url){url=null;continue;}
+  let next;try{next=new URL(data.next_url);}catch{invariant(false,'Massive-Pagination ungültig.');}
+  invariant(next.origin==='https://api.massive.com'&&next.pathname===path&&!next.username&&!next.password&&!next.hash,'Massive-Pagination verlässt den angefragten Endpunkt.');
+  // Never forward an API key from a returned URL or send our bearer to another host.
+  next.searchParams.delete('apiKey');next.searchParams.delete('api_key');
+  url=next;
+ }
+ return {contract,source:'massive-historical',resolution:60,bars:[...bars.values()].sort((a,b)=>a.time.localeCompare(b.time))};
 }

@@ -1,7 +1,7 @@
 import {createHash,randomUUID,timingSafeEqual} from 'node:crypto';
 import {INSTRUMENTS,DEFAULT_SETTINGS,DEFAULT_PLAYBOOK,validatePlan,risk,planWarnings,num,text,iso,invariant,contractValid,validateCandle,candleCSV,evaluatePlan,executionSummary,analytics,similarPlans,safeCSV} from '../../Trading/domain.js';
 import {PgRepository} from './repository.js';
-import {providerStatus,syncContext,historyFromDatabento,safeURL} from './providers.js';
+import {providerStatus,syncContext,historyFromProvider,safeURL} from './providers.js';
 export const RESOURCES=['health','bootstrap','plan','plans','review','execution','void-execution','attachment','attachments','candles','ingest','evaluate','settings','drawing','drawings','playbook','playbooks','context','news','event','observation','sync','history','export','report','similar','proposals','intelligence'];
 const id=()=>randomUUID(),now=()=>new Date().toISOString();
 export const sha=x=>createHash('sha256').update(typeof x==='string'?x:JSON.stringify(x)).digest('hex');
@@ -45,7 +45,7 @@ export function createTradingHandler({repo,env=process.env,fetcher=fetch,authori
    invariant(String(req.headers['content-type']||'').includes('application/json'),'Content-Type application/json erforderlich.');
    const body=await readBody(req);invariant(body&&typeof body==='object'&&!Array.isArray(body),'JSON-Objekt erforderlich.');
    if(resource==='sync'){if(syncing)return send(res,409,{ok:false,error:'Datenabruf läuft bereits.'});if(Date.now()-lastSync<60000)return send(res,429,{ok:false,error:'Kontext wurde gerade aktualisiert. Bitte eine Minute warten.'});lastSync=Date.now();syncing=syncContext(repo,env,fetcher);try{return send(res,200,{ok:true,...await syncing});}finally{syncing=null;}}
-   if(resource==='history'){const result=await historyFromDatabento(body,env,fetcher);await repo.transaction(tx=>tx.storeCandles(result));return send(res,200,{ok:true,count:result.bars.length,estimatedCostUSD:result.estimatedCostUSD});}
+   if(resource==='history'){const result=await historyFromProvider(body,env,fetcher);await repo.transaction(tx=>tx.storeCandles(result));return send(res,200,{ok:true,count:result.bars.length,contract:result.contract,source:result.source,resolution:result.resolution,estimatedCostUSD:result.estimatedCostUSD});}
    const requestId=text(req.headers['x-idempotency-key'],100);invariant(/^[a-zA-Z0-9_-]{12,100}$/.test(requestId),'Idempotency-Key fehlt.');const fingerprint=sha({method,resource,body});
    const out=await repo.transaction(async tx=>{
     const previous=await tx.get('commands',requestId);if(previous){invariant(previous.fingerprint===fingerprint,'Idempotency-Key bereits für andere Daten verwendet.');return previous.response;}

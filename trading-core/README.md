@@ -83,6 +83,23 @@ Der bestehende gemeinsame Login bleibt. Ohne Migration/Datenzugänge zeigt die A
 
 ## Kurse und Kontext
 
+**Zusätzliche Futures-Historie: Massive.** `TRADING_MASSIVE_ENABLED=true` und
+`TRADING_MASSIVE_API_KEY` werden ausschließlich serverseitig konfiguriert.
+`POST /trading-api?resource=history` akzeptiert explizit `provider: "massive"`
+mit `instrument`, exaktem `contract`, `from` und `to` (ISO mit Zeitzone).
+Das bestehende Cockpit bietet dieselbe Auswahl über `/api/trading`.
+Verwendet wird `/futures/v1/aggs/{ticker}`, `resolution=1min`, UTC-Nanosekunden
+mit inklusivem Start/exklusivem Ende. Zeiträume müssen auf Minuten liegen,
+sind höchstens sieben Tage lang und dürfen nicht in die Zukunft reichen.
+Pagination ist auf denselben HTTPS-Endpunkt und zwölf Seiten begrenzt.
+Die Quelle ist `massive-historical`, gespeichert wird ausschließlich in der
+bestehenden Candle-Tabelle. Identische Minuten werden dedupliziert; widersprüchliche
+Doppelwerte brechen den Abruf ab. Wiederholte Requests können erneut Provider-Kosten
+verursachen, erzeugen durch den bestehenden Unique-Key aber keine doppelten DB-Zeilen.
+Es gibt keine automatische Symbolübersetzung, keinen Massive-Liveworker und keine
+kostenlose Nutzungsgarantie. Ohne `provider` bleibt das bisherige Databento-Verhalten
+einschließlich Kostenprüfung erhalten; explizit `provider: "databento"` ist ebenfalls möglich.
+
 **Kurse:** Databento GLBX.MDP3 für exakt konfigurierte Futures-Monate. Historie per REST, fortlaufend abgeschlossene Ein-Minuten-Kerzen über einen separaten Python-Prozess. Livebars sind nicht Tickkurse. Kalender/FRED/RSS sind separate Quellen. DXY ist ohne eigenen ICE-Datenzugang eine ausdrücklich manuelle Beobachtung; der FRED-Breitdollarindex wird nicht DXY genannt.
 
 **Ohne bezahlten Feed:** reales Journal/Planung sofort nach Backend-Setup nutzbar; lizenzierte OHLCV-CSV manuell importierbar. Marktanzeige bleibt ansonsten leer. API-Keys allein sind kein Beleg für CME-Entitlements oder Weiterverteilungsrechte.

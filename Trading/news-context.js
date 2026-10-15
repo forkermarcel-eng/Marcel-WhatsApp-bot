@@ -1,5 +1,41 @@
 /** Shared server/browser headline rules. Scores select relevance, NEVER ordering. */
 export const MARKET_NAMES={MGC:'GOLD',MNQ:'NASDAQ',MYM:'DOW',MCL:'OIL'};
+export const CONTEXT_TIME_ZONE='Europe/Berlin';
+const berlinFormatters={
+ short:new Intl.DateTimeFormat('de-DE',{timeZone:CONTEXT_TIME_ZONE,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}),
+ full:new Intl.DateTimeFormat('de-DE',{timeZone:CONTEXT_TIME_ZONE,day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}),
+ clock:new Intl.DateTimeFormat('de-DE',{timeZone:CONTEXT_TIME_ZONE,hour:'2-digit',minute:'2-digit',hourCycle:'h23'})
+};
+export function explicitTimestamp(value){
+ if(typeof value!=='string'||!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value))return null;
+ const stamp=Date.parse(value);return Number.isFinite(stamp)?stamp:null;
+}
+export function berlinTime(value,mode='short'){
+ const stamp=typeof value==='number'&&Number.isFinite(value)?value:explicitTimestamp(value);
+ return stamp===null?'Zeit unbekannt':(berlinFormatters[mode]||berlinFormatters.short).format(new Date(stamp));
+}
+// A date-only source observation is not a publication instant. Never invent its time.
+export function sourceDateLabel(value){
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return 'Datum unbekannt';
+ const stamp=Date.parse(value+'T00:00:00Z');if(!Number.isFinite(stamp)||new Date(stamp).toISOString().slice(0,10)!==value)return 'Datum unbekannt';
+ return value.slice(8,10)+'.'+value.slice(5,7)+'.'+value.slice(0,4);
+}
+export function calendarTimestamp(e){
+ for(const key of ['scheduled_at_utc','at','scheduled_at']){const stamp=explicitTimestamp(e[key]);if(stamp!==null)return stamp;}
+ return null;
+}
+export function calendarTime(e){
+ const stamp=calendarTimestamp(e);return stamp!==null?berlinTime(stamp):sourceDateLabel(e.scheduled_date)+' · Uhrzeit nicht veröffentlicht';
+}
+export function compareCalendar(a,b){
+ // Date-only rows keep their nominal date position; this does not create an event time.
+ const key=e=>calendarTimestamp(e)??(sourceDateLabel(e.scheduled_date)!=='Datum unbekannt'?Date.parse(e.scheduled_date+'T00:00:00Z'):0);
+ return key(a)-key(b)||String(a.id||'').localeCompare(String(b.id||''));
+}
+export function newsTime(n){
+ const published=newsTimestamp({published_at:n.published_at,publishedAt:n.publishedAt}),stamp=newsTimestamp(n);
+ return stamp?(published?'':'Erfasst ')+berlinTime(stamp):'Zeit unbekannt';
+}
 const MACRO=/\b(Federal Reserve|FOMC|Fed|Powell|rates?|yields?|CPI|PCE|PPI|NFP|inflation|employment|payrolls?|unemployment|central banks?|Treasury|dollar|USD|ECB|EZB|Bank of Japan|BoJ|yen)\b/i;
 const GEO=/\b(war|conflict|missiles?|airstrikes?|invasion|sanctions?|ceasefire|military|export controls?|tariffs?|Hormuz|Red Sea|Suez|Houthi)\b/i;
 const ENERGY=/\b(oil|crude|WTI|Brent|OPEC|EIA|petroleum|inventor(?:y|ies)|production|refiner\w*|pipeline|tankers?|shipping|Hormuz|Red Sea|Suez|SPR|DOE|supply disruption|oil fields?|hurricane|energy infrastructure|Saudi Arabia|Iran|Iraq|Venezuela|Libya)\b/i;
@@ -9,8 +45,7 @@ const GLOBAL=/\b(war|invasion|FOMC|Federal Reserve|CPI|PCE|inflation|banking cri
 const OFFICIAL=/Fed|Federal Reserve|EZB|ECB|Bank of Japan|Treasury|OFAC|EIA|DOE|OPEC|IEA|NATO|UN News/i;
 export function newsTimestamp(n){
  for(const key of ['published_at','publishedAt','seen_at','seenAt','fetched_at','fetchedAt','observedAt']){
-  const value=n[key];if(typeof value!=='string'||!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value))continue;
-  const stamp=Date.parse(value);if(Number.isFinite(stamp))return stamp;
+  const stamp=explicitTimestamp(n[key]);if(stamp!==null)return stamp;
  }return 0;
 }
 export const compareNews=(a,b)=>newsTimestamp(b)-newsTimestamp(a)||String(a.id||a.url||'').localeCompare(String(b.id||b.url||''));

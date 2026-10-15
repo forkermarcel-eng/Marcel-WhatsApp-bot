@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {DateTime} from 'luxon';
 import {syncSources} from './context-sync.js';
 import {EXTRA_NEWS,fetchNews} from './news-sources.js';
 import {invariant,iso,text,validateCandle,contractValid,INSTRUMENTS} from '../../Trading/domain.js';
@@ -21,12 +22,22 @@ export async function boundedFetch(url,options={},fetcher=fetch,maxBytes=2_000_0
 export function safeURL(x){try{const u=new URL(x);return u.protocol==='https:'&&!u.username&&!u.password?u.toString():'';}catch{return '';}}
 const feedURL=(link,feed)=>{if(typeof link!=='string'||!link.trim())return '';try{return safeURL(new URL(link,feed.url).href);}catch{return safeURL(link);}};
 const decode=x=>String(x||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,'').replace(/&(amp|lt|gt|quot|apos);/g,(_,n)=>({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[n])).replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Math.min(0x10ffff,Number(n)))).trim();
+export function parsePublishedTime(value){
+ const raw=String(value||'').trim();let parsed;
+ // ISO requires an explicit offset; floating publisher/host-local time is not UTC.
+ if(/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)$/i.test(raw))parsed=DateTime.fromISO(raw,{setZone:true});
+ else if(/\s(?:[+-](?:[01]\d|2[0-3])[0-5]\d|UT|UTC|GMT|[ECMP][SD]T)$/i.test(raw)){
+  // RFC822/2822 defines these zone tokens; unknown abbreviations are not guessed.
+  const rfc=raw.replace(/\sUTC$/i,' GMT');parsed=DateTime.fromRFC2822(rfc,{setZone:true});
+ }
+ return parsed?.isValid?parsed.toUTC().toISO():null;
+}
 export function parseRSS(xml,feed,now=new Date().toISOString()){
  // BoJ publishes legacy HTTP links; their identical official HTTPS URLs were verified.
  if(feed.name==='Bank of Japan')xml=xml.replaceAll('http://www.boj.or.jp/','https://www.boj.or.jp/');
  if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw Error('RSS mit DTD/Entities wird nicht verarbeitet.');
  const items=[...xml.matchAll(/<(?:item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/(?:item|entry)>/gi)].slice(0,30);
- return items.map(m=>{const body=m[1],get=k=>decode(body.match(new RegExp(`<${k}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${k}>`,'i'))?.[1]);const title=get('title'),url=feedURL(get('link')||body.match(/<link[^>]+href=["']([^"']+)/i)?.[1],feed);const date=get('pubDate')||get('published')||get('updated');return {id:hash(url||title.toLowerCase()),title:text(title,350),url,source:feed.name,topic:feed.topic,publishedAt:Number.isFinite(Date.parse(date))?new Date(date).toISOString():null,observedAt:now,createdAt:now,verification:'SOURCE_REPORT',note:'Quellenmeldung, keine eigenständig verifizierte Tatsache.'};}).filter(x=>x.title&&x.url);
+ return items.map(m=>{const body=m[1],get=k=>decode(body.match(new RegExp(`<${k}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${k}>`,'i'))?.[1]);const title=get('title'),url=feedURL(get('link')||body.match(/<link[^>]+href=["']([^"']+)/i)?.[1],feed);const date=get('pubDate')||get('published')||get('updated');return {id:hash(url||title.toLowerCase()),title:text(title,350),url,source:feed.name,topic:feed.topic,publishedAt:parsePublishedTime(date),observedAt:now,createdAt:now,verification:'SOURCE_REPORT',note:'Quellenmeldung, keine eigenständig verifizierte Tatsache.'};}).filter(x=>x.title&&x.url);
 }
 const pendingSyncs=new WeakMap();
 export async function syncContext(repo,env=process.env,fetcher=fetch){

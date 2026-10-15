@@ -12,6 +12,7 @@ iso=lambda d:d.isoformat().replace('+00:00','Z')
 original=ui.bridge
 requests=[]
 refresh_count=0
+timezone_example=False
 def fixture(source,url,opts):
  global refresh_count
  requests.append(url)
@@ -21,6 +22,7 @@ def fixture(source,url,opts):
  data=json.loads(result['body'])
  if 'resource=bootstrap' in url:assert data.get('demo') and data.get('mode')=='MEMORY_TEST'
  else:refresh_count+=1
+ if 'settings' in data:data['settings']['timezone']='America/New_York'
  data['observations']=[{'id':key,'label':label,'value':value,'unit':unit,'at':iso(now),'observation_date':iso(now)[:10],'source':'OFFLINE FIXTURE','change_bps':-2 if unit=='%' else None,'change':-.2} for key,label,value,unit in [('DGS2','US 2Y',4.82,'%'),('DGS10','US 10Y',5.19,'%'),('DFII10','US Real 10Y',2.84,'%'),('DTWEXBGS','Fed Broad Dollar Index (nicht DXY)',121.6023,'Index')]]
  data['events']=[{'id':str(i),'title':title,'at':iso(now+timedelta(hours=hours)) if hours is not None else None,'scheduled_date':iso(now)[:10],'country':'US','source':'OFFLINE FIXTURE','impact':impact,'actual':None,'forecast':None,'previous':None,'url':'https://example.org'} for i,(title,hours,impact) in enumerate([('CPI TEST',1,'HIGH'),('EIA TEST',48,'MEDIUM'),('Auction time unpublished',None,'MEDIUM')])]
  data['news']=[{'title':'Iran sanctions & gold <script>unsafe</script>','source':'OFFLINE FIXTURE','url':'https://example.org','publishedAt':iso(now),'topics':['sanctions','gold/precious metals'],'relevance':'HIGH'}]
@@ -31,6 +33,8 @@ def fixture(source,url,opts):
  data['news'] += [{'id':str(i),'title':'Oil supply and Fed rates '+str(i),'source':'EIA' if i%2 else 'BBC Welt','url':'https://example.org/'+str(i),'publishedAt':iso(now-timedelta(minutes=i+1))} for i in range(20)]
  if refresh_count:
   data['news'].append({'id':'fresh','title':'NEW OIL FEED ITEM','source':'EIA','url':'https://example.org/fresh','publishedAt':iso(now+timedelta(seconds=1))})
+ if timezone_example:
+  data['news']=[{'id':str(i),'title':'Oil timezone sample '+t,'source':'EIA','url':'https://example.org/berlin/'+str(i),'publishedAt':'2026-10-15T'+t+':00Z'} for i,t in enumerate(['02:55','01:30','01:00'])]
  data['sync']={'calendarStatus':'OK','lastSyncAt':iso(now),'reports':[]}
  result['body']=json.dumps(data);return result
 ui.bridge=fixture
@@ -40,12 +44,19 @@ def check(name,condition):
  checks.append(name)
 with sync_playwright() as p:
  browser=p.chromium.launch(executable_path=os.environ['TRADING_TEST_CHROMIUM'],headless=True,args=['--no-sandbox'])
- page=browser.new_page(viewport={'width':1366,'height':1024},timezone_id='Europe/Berlin');errors=[]
+ page=browser.new_page(viewport={'width':1366,'height':1024},timezone_id='America/Los_Angeles');errors=[]
  page.on('pageerror',lambda e:errors.append(str(e)))
  page.evaluate('''() => {const timer=window.setInterval;window.setInterval=(fn,ms)=>{if(ms===60000)window.newsRefreshTest=fn;return timer(fn,ms);};}''')
  ui.mount(page)
  check('Broad USD ticker, not DXY ticker',page.locator('#tickers').inner_text().find('Broad USD Index')>=0)
  check('Rule based context visible','GOLD MACRO BIAS' in page.locator('#view').inner_text() and 'MIXED' in page.locator('#view').inner_text())
+ for key in ['news','market','calendar']:
+  check(key+' Berlin label', 'Zeiten: Berlin' in page.locator('[data-context-panel="'+key+'"]').inner_text())
+ expected_news=now.astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m., %H:%M')
+ check('News Berlin despite LA browser and NY preference',expected_news in page.locator('.news-mini small').first.inner_text())
+ expected_event=(now+timedelta(hours=1)).astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m., %H:%M')
+ check('Calendar Berlin despite LA browser and NY preference',expected_event in page.locator('[data-context-panel="calendar"]').inner_text())
+ check('Market context event Berlin',expected_event in page.locator('[data-context-panel="market"]').inner_text())
  for key,name in [('MCL','OIL'),('MNQ','NASDAQ'),('MYM','DOW'),('MGC','GOLD')]:
   page.locator('#chart-market').select_option(key);page.wait_for_timeout(200)
   check(name+' context switch',name+' MACRO BIAS' in page.locator('#view').inner_text() and 'NEWS RADAR · '+name in page.locator('#view').inner_text())
@@ -80,5 +91,11 @@ with sync_playwright() as p:
  check('Headline escaped',page.locator('#view script').count()==0 and '<script>unsafe</script>' in body)
  check('News no mobile page overflow',page.evaluate('document.documentElement.scrollWidth<=innerWidth+2'))
  page.screenshot(path=str(out/'context-calendar-mobile.png'),full_page=True)
+ timezone_example=True
+ page.evaluate('async()=>{await window.newsRefreshTest();}')
+ labels=page.locator('.news-mini small[title]').all_text_contents()
+ check('OIL 04:55 03:30 03:00 Berlin screenshot case',all(t in labels[i] for i,t in enumerate(['15.10., 04:55','15.10., 03:30','15.10., 03:00'])))
+ check('UTC original tooltip',page.locator('.news-mini small[title]').first.get_attribute('title')=='UTC: 2026-10-15T02:55:00.000Z')
+ page.set_viewport_size({'width':1366,'height':1024});page.screenshot(path=str(out/'oil-berlin-timezone.png'),full_page=True)
  check('No JS errors',not errors);browser.close()
 print(json.dumps({'passed':len(checks),'checks':checks}))

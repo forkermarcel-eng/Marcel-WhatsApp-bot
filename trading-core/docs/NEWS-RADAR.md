@@ -14,6 +14,19 @@ Geopolitics, up to 15 scrollable headlines. Berlin display, UTC comparison.
 Missing publication times are labelled “Erfasst”; date-only index labels remain
 metadata, not fabricated precise publication times.
 
+All News/Calendar/Market Context clocks use IANA Europe/Berlin, de-DE and a
+24-hour clock, independent of browser/server zone and journal/chart preferences.
+Panels say “Zeiten: Berlin”; headline tooltips expose the original UTC instant.
+Sorting uses UTC instants, never formatted German clock strings. Date-only
+observations/events remain dates (German format), not fabricated midnight times.
+RSS/Atom requires explicit ISO offsets or valid RFC822/2822 zones; missing or
+unknown zones and invalid dates leave publishedAt null and use labelled seen time.
+The existing official US calendar parsers retain America/New_York conversions,
+including weeks when US and European DST differ. Trading Economics is a
+source-specific documented UTC exception even without a suffix:
+https://docs.tradingeconomics.com/economic_calendar/schema/ (Date field).
+No timezone assumption is inferred from the reader host or publisher name.
+
 Same URL is deduplicated. Same publisher/day normalized headlines collapse
 punctuation and Breaking/Update prefixes. Different publishers and meaningful
 wording differences remain. No historical DB rows are deleted.

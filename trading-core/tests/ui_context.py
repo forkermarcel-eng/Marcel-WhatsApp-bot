@@ -10,12 +10,17 @@ out=Path(os.environ['TRADING_TEST_OUTPUT']);out.mkdir(parents=True,exist_ok=True
 now=datetime.now(timezone.utc)
 iso=lambda d:d.isoformat().replace('+00:00','Z')
 original=ui.bridge
+requests=[]
+refresh_count=0
 def fixture(source,url,opts):
+ global refresh_count
+ requests.append(url)
  if opts.get('method','GET')!='GET':raise AssertionError('Context render test is read-only')
  result=original(source,url,opts)
- if 'resource=bootstrap' not in url:return result
+ if 'resource=bootstrap' not in url and 'resource=news' not in url:return result
  data=json.loads(result['body'])
- assert data.get('demo') and data.get('mode')=='MEMORY_TEST'
+ if 'resource=bootstrap' in url:assert data.get('demo') and data.get('mode')=='MEMORY_TEST'
+ else:refresh_count+=1
  data['observations']=[{'id':key,'label':label,'value':value,'unit':unit,'at':iso(now),'observation_date':iso(now)[:10],'source':'OFFLINE FIXTURE','change_bps':-2 if unit=='%' else None,'change':-.2} for key,label,value,unit in [('DGS2','US 2Y',4.82,'%'),('DGS10','US 10Y',5.19,'%'),('DFII10','US Real 10Y',2.84,'%'),('DTWEXBGS','Fed Broad Dollar Index (nicht DXY)',121.6023,'Index')]]
  data['events']=[{'id':str(i),'title':title,'at':iso(now+timedelta(hours=hours)) if hours is not None else None,'scheduled_date':iso(now)[:10],'country':'US','source':'OFFLINE FIXTURE','impact':impact,'actual':None,'forecast':None,'previous':None,'url':'https://example.org'} for i,(title,hours,impact) in enumerate([('CPI TEST',1,'HIGH'),('EIA TEST',48,'MEDIUM'),('Auction time unpublished',None,'MEDIUM')])]
  data['news']=[{'title':'Iran sanctions & gold <script>unsafe</script>','source':'OFFLINE FIXTURE','url':'https://example.org','publishedAt':iso(now),'topics':['sanctions','gold/precious metals'],'relevance':'HIGH'}]
@@ -24,6 +29,8 @@ def fixture(source,url,opts):
  for event in data['events']:
   if event['at'] is None:event['scheduled_date']=now.astimezone(ZoneInfo('Europe/Berlin')).date().isoformat()
  data['news'] += [{'id':str(i),'title':'Oil supply and Fed rates '+str(i),'source':'EIA' if i%2 else 'BBC Welt','url':'https://example.org/'+str(i),'publishedAt':iso(now-timedelta(minutes=i+1))} for i in range(20)]
+ if refresh_count:
+  data['news'].append({'id':'fresh','title':'NEW OIL FEED ITEM','source':'EIA','url':'https://example.org/fresh','publishedAt':iso(now+timedelta(seconds=1))})
  data['sync']={'calendarStatus':'OK','lastSyncAt':iso(now),'reports':[]}
  result['body']=json.dumps(data);return result
 ui.bridge=fixture
@@ -34,12 +41,28 @@ def check(name,condition):
 with sync_playwright() as p:
  browser=p.chromium.launch(executable_path=os.environ['TRADING_TEST_CHROMIUM'],headless=True,args=['--no-sandbox'])
  page=browser.new_page(viewport={'width':1366,'height':1024},timezone_id='Europe/Berlin');errors=[]
- page.on('pageerror',lambda e:errors.append(str(e)));ui.mount(page)
+ page.on('pageerror',lambda e:errors.append(str(e)))
+ page.evaluate('''() => {const timer=window.setInterval;window.setInterval=(fn,ms)=>{if(ms===60000)window.newsRefreshTest=fn;return timer(fn,ms);};}''')
+ ui.mount(page)
  check('Broad USD ticker, not DXY ticker',page.locator('#tickers').inner_text().find('Broad USD Index')>=0)
  check('Rule based context visible','GOLD MACRO BIAS' in page.locator('#view').inner_text() and 'MIXED' in page.locator('#view').inner_text())
  for key,name in [('MCL','OIL'),('MNQ','NASDAQ'),('MYM','DOW'),('MGC','GOLD')]:
   page.locator('#chart-market').select_option(key);page.wait_for_timeout(200)
   check(name+' context switch',name+' MACRO BIAS' in page.locator('#view').inner_text() and 'NEWS RADAR · '+name in page.locator('#view').inner_text())
+ page.locator('#chart-market').select_option('MCL');page.wait_for_timeout(200)
+ page.locator('[data-action="news-filter"][data-id="all"]').click();page.wait_for_timeout(200)
+ page.evaluate('''() => {window.chartBeforeRefresh=document.querySelector('#chart-host canvas');document.querySelector('.news-scroll').scrollTop=150;}''')
+ scroll=page.locator('.news-scroll').evaluate('(e)=>e.scrollTop');request_start=len(requests)
+ page.evaluate('async()=>{await window.newsRefreshTest();}')
+ check('60s refresh requests saved news only',requests[request_start:]==['/api/trading?resource=news'])
+ check('Chart canvas survives refresh',page.evaluate("window.chartBeforeRefresh===document.querySelector('#chart-host canvas')"))
+ check('Instrument retained',page.locator('#chart-market').input_value()=='MCL')
+ check('News filter retained',page.locator('[data-action="news-filter"][data-id="all"]').get_attribute('class')=='selected')
+ check('Radar scroll retained',abs(page.locator('.news-scroll').evaluate('(e)=>e.scrollTop')-scroll)<2)
+ check('Newest item stays first',page.locator('.news-mini a').first.inner_text()=='NEW OIL FEED ITEM')
+ check('No duplicate refreshed item',page.locator('.news-mini a').filter(has_text='NEW OIL FEED ITEM').count()==1)
+ page.evaluate('async()=>{await window.newsRefreshTest();}')
+ check('Repeated refresh no duplicates',page.locator('.news-mini a').filter(has_text='NEW OIL FEED ITEM').count()==1)
  check('15 headlines available',page.locator('.news-scroll .news-mini').count()==15)
  check('Radar scroll container',page.locator('.news-scroll').evaluate('(e)=>getComputedStyle(e).overflowY')=='auto')
  check('Multiple sources shown','EIA' in page.locator('.news-scroll').inner_text() and 'BBC' in page.locator('.news-scroll').inner_text())

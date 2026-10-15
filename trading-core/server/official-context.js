@@ -180,10 +180,10 @@ export function officialJobs(now){
   {name:'Treasury Nominal',kind:'observations',ttl:86400000,url:nominal,parse:s=>parseTreasury(s,'nominal',now,nominal)},
   {name:'Treasury Real',kind:'observations',ttl:86400000,url:real,parse:s=>parseTreasury(s,'real',now,real)},
   {name:'Fed H10',kind:'observations',ttl:7*86400000,url:SOURCES.h10,parse:s=>parseH10(s,now)},
-  ...['BLS','BEA'].map(name=>({name,kind:'events',ttl:21600000,url:SOURCES[name.toLowerCase()],parse:s=>parseICS(s,name,now)})),
-  {name:'FOMC',kind:'events',ttl:21600000,url:[SOURCES.fomc,'https://www.federalreserve.gov/json/calendar.json'],parse:([annual,timed])=>mergeFedCalendar(parseFOMC(annual,now),timed,now)},
-  {name:'Census',kind:'events',ttl:21600000,url:SOURCES.census+'-'+year+'.html',parse:s=>parseCensus(s,now)},
-  {name:'EIA',kind:'events',ttl:21600000,url:SOURCES.eia,parse:s=>parseEIA(s,now)},
-  {name:'Treasury Auctions',kind:'events',ttl:21600000,url:SOURCES.auctions,parse:s=>parseAuctions(s,now)}
+  ...['BLS','BEA'].map(name=>({name,kind:'events',ttl:1800000,url:SOURCES[name.toLowerCase()],parse:s=>parseICS(s,name,now)})),
+  {name:'FOMC',kind:'events',ttl:1800000,url:[SOURCES.fomc,'https://www.federalreserve.gov/json/calendar.json'],parse:([annual,timed])=>mergeFedCalendar(parseFOMC(annual,now),timed,now)},
+  {name:'Census',kind:'events',ttl:1800000,url:SOURCES.census+'-'+year+'.html',parse:s=>parseCensus(s,now)},
+  {name:'EIA',kind:'events',ttl:1800000,url:SOURCES.eia,parse:s=>parseEIA(s,now)},
+  {name:'Treasury Auctions',kind:'events',ttl:1800000,url:SOURCES.auctions,parse:s=>parseAuctions(s,now)}
  ];
 }

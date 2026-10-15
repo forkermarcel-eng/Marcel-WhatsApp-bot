@@ -91,15 +91,15 @@ test('Source outage/429 retains persisted news and backs off across worker resta
  await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T11:00:00Z');
  assert.equal((await repo.get('settings','contextSourceCache')).sources['news:GDELT Discovery'].nextAttemptAt,'2026-10-15T13:00:00.000Z');
 });
-test('304 keeps first-seen and rows, ten minute cadence avoids repeat requests',async()=>{
+test('304 keeps first-seen and rows, four minute cadence avoids repeat requests',async()=>{
  const repo=new FileRepository(),feed={name:'fixture',url:'https://example.org/rss'};let calls=0;
  const deps={parseRSS,feeds:[feed],read:async()=>{throw Error('fixture offline');},readNews:async()=>{calls++;return calls===1?{raw:'<rss><item><title>Oil</title><link>https://example.org/oil</link></item></rss>',etag:'x'}:{notModified:true};}};
- await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,now);await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T10:05:00Z');assert.equal(calls,1);
- await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T10:09:59Z');assert.equal(calls,2,'one-second timer jitter must not delay news another ten minutes');assert.equal((await repo.list('news'))[0].observedAt,now);
+ await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,now);await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T10:02:00Z');assert.equal(calls,1);
+ await syncSources(repo,{TRADING_NEWS_ENABLED:'true'},deps,'2026-10-15T10:03:59Z');assert.equal(calls,2,'one-second timer jitter must not delay news another worker tick');assert.equal((await repo.list('news'))[0].observedAt,now);
 });
 test('Worker timer non-overlap, outage retry, stop and schema readiness',async()=>{
  let scheduled,delay,calls=0,release;const repo={health:async()=>({ready:true})};
  const worker=startContextWorker({repo,immediate:false,setTimer:(fn,ms)=>{scheduled=fn;delay=ms;return 1;},clearTimer:()=>{},log:()=>{},sync:async()=>{calls++;await new Promise(r=>release=r);return {reports:[],at:now};}});
- assert.equal(delay,600000);const first=scheduled();await new Promise(r=>setImmediate(r));const duplicate=scheduled();assert.equal(calls,1);release();await first;await duplicate;
+ assert.equal(delay,60000);const first=scheduled();await new Promise(r=>setImmediate(r));const duplicate=scheduled();assert.equal(calls,1);release();await first;await duplicate;
  const second=scheduled();await new Promise(r=>setImmediate(r));assert.equal(calls,2);release();await second;await worker.stop();await scheduled();assert.equal(calls,2);
 });

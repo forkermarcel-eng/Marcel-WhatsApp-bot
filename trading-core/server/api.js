@@ -14,6 +14,16 @@ const ref=async(tx,k,key)=>{invariant(typeof key==='string'&&key.length<=100,'Un
 function effective(executions,reviews){const voids=new Set(reviews.filter(r=>r.kind==='EXECUTION_VOID').map(r=>r.executionId));return executions.filter(e=>!voids.has(e.id));}
 function trimAttachment(a){const {data,...meta}=a;return meta;}
 async function allState(repo){const types=['plans','executions','reviews','snapshots','playbooks','context','observations','news','events','drawings','estimates','proposals'];const state={};await Promise.all(types.map(async k=>state[k]=await repo.list(k,10000)));state.executions=effective(state.executions,state.reviews);state.settings={...DEFAULT_SETTINGS,...await repo.get('settings','main')};if(!state.playbooks.length)state.playbooks=[DEFAULT_PLAYBOOK];state.sync=await repo.get('settings','providerSync');state.attachments=(await repo.list('attachments')).map(trimAttachment);state.series=await repo.series();state.metrics=analytics(state.plans,state.executions,state.estimates);state.news=prioritizeNews(state.news);if(state.sync?.activeEventIds){const active=new Set(state.sync.activeEventIds);state.events=state.events.filter(e=>!e.id.startsWith('official-')||active.has(e.id));}const inputs={...state,markets:await marketInputs(repo,state.settings,state.series,now())};state.marketContext=buildMarketContext(inputs);state.marketContexts=buildInstrumentContexts(inputs);return state;}
+async function newsState(repo){
+ const [news,events,observations,context,sync,savedSettings,series]=await Promise.all([
+  repo.list('news',10000),repo.list('events',10000),repo.list('observations',10000),repo.list('context',10000),
+  repo.get('settings','providerSync'),repo.get('settings','main'),repo.series()
+ ]);
+ const active=sync?.activeEventIds?new Set(sync.activeEventIds):null;
+ const state={news:prioritizeNews(news),events:events.filter(e=>!active||!e.id.startsWith('official-')||active.has(e.id)),observations,context,sync};
+ const inputs={...state,markets:await marketInputs(repo,{...DEFAULT_SETTINGS,...savedSettings},series,now())};
+ return {...state,marketContext:buildMarketContext(inputs),marketContexts:buildInstrumentContexts(inputs)};
+}
 async function estimate(tx,p,series){const s=series.filter(s=>s.contract===p.contract).sort((a,b)=>a.resolution-b.resolution||b.last.localeCompare(a.last))[0];if(!s)return {status:'NO_DATA',planId:p.id};const reviews=await tx.list('reviews');const stop=reviews.filter(r=>r.planId===p.id&&['CANCELLED','NO_FILL'].includes(r.kind)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0];const end=stop&&stop.createdAt<p.expiresAt?stop.createdAt:p.expiresAt;const bars=await tx.candles(p.contract,{source:s.source,resolution:s.resolution,from:p.plannedAt,to:end,limit:50000});const result=evaluatePlan({...p,expiresAt:end},bars,{resolution:s.resolution,source:s.source,contract:s.contract});const obj={...result,id:p.id,planId:p.id,createdAt:now(),candleDigest:sha(bars),barCount:bars.length};await tx.put('estimates',obj,{update:true});return obj;}
 export function createTradingHandler({repo,env=process.env,fetcher=fetch,authorize=null}={}){
  if(!repo)throw Error('Trading repository required');let lastSync=0,syncing=null;const limits=new Map();
@@ -33,6 +43,7 @@ export function createTradingHandler({repo,env=process.env,fetcher=fetch,authori
    if(!health.ready)return send(res,503,{ok:false,error:'Trading-Schema fehlt oder Datenbank nicht erreichbar. Nur die Trading-Migration ausführen.',code:'TRADING_NOT_READY'});
    if(method==='GET'){
     if(resource==='bootstrap'){const state=await allState(repo);return send(res,200,{ok:true,...state,providers:providerStatus(env),at:now(),mode:repo.mode,demo:env.TRADING_DEMO==='true'});}
+    if(resource==='news')return send(res,200,{ok:true,...await newsState(repo),at:now()});
     if(resource==='candles'){const contract=text(url.searchParams.get('contract'),24);invariant(/^[A-Z0-9]{3,24}$/.test(contract),'Exakten Kontrakt wählen.');return send(res,200,{ok:true,bars:await repo.candles(contract,{source:url.searchParams.get('source'),resolution:Number(url.searchParams.get('resolution'))||undefined,from:url.searchParams.get('from')?iso(url.searchParams.get('from')):undefined,to:url.searchParams.get('to')?iso(url.searchParams.get('to')):undefined,limit:20000})});}
     if(resource==='attachment'){const a=await ref(repo,'attachments',url.searchParams.get('id'));res.setHeader('Content-Disposition','inline; filename="chart.'+(a.mime==='image/png'?'png':'jpg')+'"');return send(res,200,Buffer.from(a.data,'base64'),a.mime);}
     if(resource==='similar'){const p=await ref(repo,'plans',url.searchParams.get('id'));const state=await allState(repo);return send(res,200,{ok:true,matches:similarPlans(p,state.plans,state.executions),note:'Regelbasierter Ähnlichkeitsvergleich; keine trainierte Vorhersage.'});}

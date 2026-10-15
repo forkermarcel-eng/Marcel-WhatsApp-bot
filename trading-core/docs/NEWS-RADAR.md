@@ -38,20 +38,32 @@ GDELT returned 429 in live read-only verification; existing news is retained.
 
 ## Existing worker, no new service
 
-Railway inventory: one running cooperative-kindness backend; no context worker.
+Railway inventory: one cooperative-kindness backend; no separate worker service.
 The existing workers/context.js now exports its timer and remains CLI-compatible.
 registerTradingRoutes starts it when the existing TRADING_ENABLED and
-TRADING_NEWS_ENABLED are true. Default 10 minutes, bounded 5–10 minutes.
-First backend tick after the interval permits the controlled initial sync.
+TRADING_NEWS_ENABLED are true. Its fixed 60-second tick checks source deadlines;
+it is not a 60-second download interval. First backend tick is after one minute.
 Manual/API and scheduled sync share one in-flight promise per repository.
 
-Source cadence persists in existing settings.contextSourceCache: news 10 minutes,
-GDELT 1 hour, calendars 6 hours, Treasury daily, H.10 release cadence.
+Source cadence persists in existing settings.contextSourceCache: official news
+120 seconds, normal RSS 240 seconds, GDELT 1 hour, calendars 30 minutes,
+Treasury daily, H.10 release cadence. At most four concurrent requests, including
+multi-URL calendars; completed news sources commit before the slowest source ends.
 ETag/Last-Modified/304; exponential outage/429 backoff including Retry-After.
-Healthy ten-minute feeds allow five seconds of timer jitter at their deadline;
+Healthy news feeds allow five seconds of timer jitter at their deadline;
 failure backoff and slower source deadlines are never shortened.
+Source state includes last_checked_at, last_success_at, last_new_item_at,
+last_http_status, etag, last_modified, consecutive_failures, next_allowed_poll_at.
+HTTP 304 does not parse or write product rows; only source-state settings update.
+Entirely cached ticks do not write anything. Repeated identical HTTP 200 news
+does not rewrite unchanged headlines or advance last_new_item_at.
 No full response bodies persisted. No new queue, schema, service or credentials.
-Logs expose source status/timestamps/counts only. Old data survives outages.
+Logs expose source status/timestamps/counts/duration only. Old data survives outages.
+
+The visible frontend reads saved GET resource=news every 60 seconds; it does not
+trigger source fetches or reload bootstrap/chart/journal. Only context panels are
+replaced, preserving instrument, news/calendar filters and scroll. Modal editing
+and hidden tabs defer refresh. Publication order remains independent of relevance.
 
 ## Context interpretation
 

@@ -2,8 +2,8 @@ import {load} from 'cheerio';
 import {createHash} from 'node:crypto';
 const id=url=>createHash('sha256').update(url).digest('hex');
 export const EXTRA_NEWS=[
- {name:'IEA',url:'https://www.iea.org/news',topic:'energy supply',format:'index',ttl:600000},
- {name:'Treasury OFAC',url:'https://ofac.treasury.gov/recent-actions',topic:'sanctions',format:'index',ttl:600000},
+ {name:'IEA',url:'https://www.iea.org/news',topic:'energy supply',format:'index',ttl:120000},
+ {name:'Treasury OFAC',url:'https://ofac.treasury.gov/recent-actions',topic:'sanctions',format:'index',ttl:120000},
  {name:'GDELT Discovery',url:'https://api.gdeltproject.org/api/v2/doc/doc?query=(oil%20OR%20%22Federal%20Reserve%22%20OR%20sanctions%20OR%20semiconductor)&mode=artlist&format=json&maxrecords=50&timespan=24h&sort=datedesc',format:'gdelt',ttl:3600000,topic:'Discovery'}
 ];
 function headline(title,url,source,now,publishedAt=null,extra={}){
@@ -32,11 +32,11 @@ export function parseNewsSource(raw,feed,now){
 }
 /** Conditional bounded GET. Cache validators only; never store article bodies. */
 export async function fetchNews(url,previous={},fetcher=fetch){
- const headers={};if(previous.etag)headers['If-None-Match']=previous.etag;if(previous.lastModified)headers['If-Modified-Since']=previous.lastModified;
+ const headers={};if(previous.etag)headers['If-None-Match']=previous.etag;if((previous.last_modified||previous.lastModified))headers['If-Modified-Since']=previous.last_modified||previous.lastModified;
  const r=await fetcher(url,{headers,redirect:'error',signal:AbortSignal.timeout(12000)});
- if(r.status===304)return {notModified:true,etag:previous.etag,lastModified:previous.lastModified};
+ if(r.status===304)return {notModified:true,httpStatus:304,etag:r.headers.get('etag')||previous.etag,lastModified:r.headers.get('last-modified')||previous.last_modified||previous.lastModified};
  if(!r.ok){const e=Error('News provider unavailable');e.httpStatus=r.status;const retry=r.headers.get('retry-after');e.retryMs=/^\d+$/.test(retry||'')?Number(retry)*1000:Math.max(0,Date.parse(retry)-Date.now())||0;throw e;}
  const cap=2_000_000;if(Number(r.headers.get('content-length')||0)>cap)throw Error('News response too large');
  let raw='';if(r.body?.getReader){const reader=r.body.getReader(),chunks=[];let size=0;try{for(;;){const x=await reader.read();if(x.done)break;size+=x.value.length;if(size>cap){await reader.cancel();throw Error('News response too large');}chunks.push(Buffer.from(x.value));}raw=Buffer.concat(chunks).toString('utf8');}finally{reader.releaseLock();}}else{raw=await r.text();if(Buffer.byteLength(raw)>cap)throw Error('News response too large');}
- return {raw,etag:r.headers.get('etag')?.slice(0,512)||null,lastModified:r.headers.get('last-modified')?.slice(0,128)||null};
+ return {raw,httpStatus:r.status,etag:r.headers.get('etag')?.slice(0,512)||null,lastModified:r.headers.get('last-modified')?.slice(0,128)||null};
 }

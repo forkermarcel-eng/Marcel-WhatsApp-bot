@@ -1,0 +1,17 @@
+3D model: 3DPX-003765 3DModel of Brain Nevit Dilmen (2016)
+Copyright Nevit Dilmen. Used under CC BY-SA 3.0 Unported.
+Author: https://commons.wikimedia.org/wiki/User:Nevit
+Source: https://commons.wikimedia.org/wiki/File:3DPX-003765_3DModel_of_Brain_Nevit_Dilmen.stl
+License: https://creativecommons.org/licenses/by-sa/3.0/
+Full license: CC-BY-SA-3.0.txt in this directory.
+
+Changes: converted STL to indexed JSON geometry, lower spinal-cord tail cropped for presentation, centered, scaled, axes
+reoriented, vertices welded. The mobile mesh was simplified by vertex
+clustering. These derived geometry assets remain CC BY-SA 3.0.
+Visual materials and lighting are artistic. This model is not Marcel's
+brain, medical advice, or a representation of real AI/neural activity.
+No endorsement by the author is implied.
+
+Renderer: Three.js r180 / 0.180.0, MIT, copyright 2010-2025 Three.js authors.
+License and pinned source manifest: ../vendor/THREE-LICENSE.txt and manifest.json.
+No React, hosted model service, CDN request, or AI call is required.

@@ -1,0 +1,36 @@
+﻿MARCEL BRAIN 3D EXPERIENCE V1 — LOCAL DESIGN REVIEW
+
+Files: index.html retains the existing Brain controls and API handlers.
+experience.css and experience.js implement the presentation and drawer state.
+scene.js is a separate Three.js scene, independent of model/API providers.
+Existing chat, learning, knowledge, Memory, auth and backend modules are reused.
+Only a review-count presentation event was added to the existing memory renderer.
+
+Interaction: drag horizontally (touch), drag in both axes (mouse), arrow keys,
+Home or the center button. Motion can pause; prefers-reduced-motion starts paused.
+The quiet idle movement is decorative. Retrieval light follows actual chat busy
+state; errors follow the existing chat error state. No neural telemetry is shown.
+Animation stops for hidden tabs/pages. Frame rate and device pixel ratio are capped.
+Mobile uses a smaller mesh; WebGL failure falls back to an inline SVG.
+Only Brain is registered; no News, Trading, Avatar or Media placeholder is exposed.
+
+Third-party assets: locally served Three.js 0.180.0 / r180 (MIT), see vendor/.
+Brain surface by Nevit Dilmen, CC BY-SA 3.0; see assets/ATTRIBUTION.txt,
+CC-BY-SA-3.0.txt and manifest.json. Normalized/cropped geometry and its simplified
+mobile variant retain CC BY-SA 3.0. No endorsement or medical claim is implied.
+Build: node scripts/build-brain-scene-assets.mjs PATH_TO_ORIGINAL_STL
+The builder verifies the published source SHA-1 before converting it.
+
+Preview from repository root: node test/brain-experience.preview.mjs
+Open http://127.0.0.1:4591/Brain/ . APIs in this preview are synthetic, in-memory
+fixtures, not production knowledge. Do not expose this preview server publicly.
+Focused browser checks: runBrainExperienceChecks() and
+runBrainSceneFallbackCheck() from test/brain-experience.browser.js, evaluated
+in that local browser page. Fallback check deliberately loses WebGL context;
+reload afterward. No production database or paid API is involved.
+
+Review viewports: desktop 1440 x 1000; mobile 390 x 844.
+Actual iPhone/Safari hardware performance and final material/camera preferences
+remain part of Marcel's optical acceptance. Reference images 3/4 were not supplied.
+No push, deployment, database migration or production data change is authorized
+by this frontend implementation task.

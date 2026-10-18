@@ -1,0 +1,25 @@
+{
+  "title": "3DPX-003765 3DModel of Brain Nevit Dilmen",
+  "author": "Nevit Dilmen",
+  "source": "https://commons.wikimedia.org/wiki/File:3DPX-003765_3DModel_of_Brain_Nevit_Dilmen.stl",
+  "download": "https://upload.wikimedia.org/wikipedia/commons/3/36/3DPX-003765_3DModel_of_Brain_Nevit_Dilmen.stl",
+  "sourceSha1": "81855d6ea07fd3eef1c102b315f52a9e0d76a362",
+  "license": "CC-BY-SA-3.0",
+  "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0/",
+  "commercialUse": true,
+  "modifications": "Converted from STL, lower spinal-cord tail cropped for presentation, centered, scaled, axes reoriented, vertices welded; mobile version simplified by vertex clustering. Presentation materials and lighting added. Not a medical viewer or a depiction of Marcel.",
+  "files": {
+    "brain-surface.json": {
+      "vertices": 39757,
+      "triangles": 81089,
+      "bytes": 2382481,
+      "sha256": "673625fb880a521874dfe4f0cd6a9f7e4a1539be84f4fc7400d8550376c079b8"
+    },
+    "brain-surface-mobile.json": {
+      "vertices": 14138,
+      "triangles": 31813,
+      "bytes": 847604,
+      "sha256": "82b7c31f49553685dd182b0a27b7bcd8e11d638daa448b5aefcec8fea9a8bc28"
+    }
+  }
+}

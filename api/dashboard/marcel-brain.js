@@ -66,7 +66,7 @@ function getCookie(req, name) {
   DASHBOARD SESSION
 ================================================== */
  
-function validDashboardSession(req) {
+export function validDashboardSession(req) {
  
  const password =
    process.env
@@ -408,6 +408,10 @@ export default async function handler(
    railwayPath +=
      "/live-state";
 
+ } else if (resource === "chat") {
+   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
+   railwayPath += "/chat";
+   if (typeof req.query?.id === "string") railwayPath += "?id=" + encodeURIComponent(req.query.id);
  } else if (resource === "knowledge") {
    if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
    railwayPath += "/knowledge";
@@ -508,6 +512,18 @@ export default async function handler(
        }
      );
  
+   if (resource === "chat" && railwayResponse.ok && railwayResponse.headers?.get("content-type")?.includes("text/event-stream")) {
+     res.setHeader("Cache-Control", "no-store, private");
+     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+     res.flushHeaders?.();
+     try {
+       for await (const chunk of railwayResponse.body) {
+         if (res.destroyed) { await railwayResponse.body.cancel?.().catch(() => {}); break; }
+         res.write(chunk);
+       }
+     } finally { res.end(); }
+     return;
+   }
    const rawText =
      await railwayResponse.text();
  
@@ -669,6 +685,11 @@ export default async function handler(
  } catch (
    error
  ) {
+   if (res.headersSent) {
+     if (!res.destroyed) res.write('event: error\ndata: {"error":"Die Verbindung zum Brain wurde unterbrochen."}\n\n');
+     res.end();
+     return;
+   }
  
    console.error(
      "Verbindung zu Railway für Marcel Brain fehlgeschlagen:",

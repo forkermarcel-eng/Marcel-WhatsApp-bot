@@ -1,4 +1,5 @@
 import { registerKnowledgeRoutes } from "./brain-knowledge/routes.js";
+import { registerBrainChatRoutes } from "./brain-chat/routes.js";
 import express from "express";
 import { registerTradingRoutes } from "./trading-core/server/api.js";
 import crypto from "crypto";
@@ -8524,6 +8525,7 @@ registerDeviceBridgeResetRoutes({
 // storage is device-bound by an ordinary foreign key only.
 sharedMediaRuntime?.registerRoutes(app, dashboardApiAuthorized);
 registerKnowledgeRoutes({ app, pool, dashboardApiAuthorized });
+registerBrainChatRoutes({app,pool,openai,model:MODEL,authorized:dashboardApiAuthorized});
 registerTinderMirrorRoutes({
   app,
   pool,

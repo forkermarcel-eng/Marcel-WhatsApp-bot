@@ -44,7 +44,9 @@
     "migrate:contacts-channel-neutral": "node scripts/contact-channel-migration.js --apply",
     "test": "npm run test:knowledge && npm run test:device-bridge && npm run test:brain-write && npm run test:web-ui && npm run test:presentation && npm run test:contact-identities && npm run test:tinder-mirror && npm run test:tinder-last-message-order-migration && npm run test:tinder-matches && npm run test:tinder-matches-migration && npm run test:tinder-match-initial-sync && npm run test:tinder-match-live-profile && npm run test:tinder-profile-media && npm run test:tinder-change-dispatch && npm run test:tinder-discovery-transport && npm run test:shared-media",
     "test:knowledge": "node --test test/brain-knowledge.test.js",
-    "knowledge": "node scripts/import-brain-knowledge.mjs"
+    "knowledge": "node scripts/import-brain-knowledge.mjs",
+    "brain:chat": "node scripts/start-brain-chat.mjs",
+    "test:brain-chat": "node --test test/brain-chat.test.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.14",

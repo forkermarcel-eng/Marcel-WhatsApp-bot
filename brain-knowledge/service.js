@@ -60,12 +60,14 @@ export function createKnowledgeService(repository) {
       if(!options.project&&/\bluxe\b/i.test(options.question||''))options.project='luxe';
       if(!options.domain&&/\bgold\b|nasdaq|nas100|topstep|\btrading\b/i.test(options.question||''))options.domain='TRADING';
       if(!options.domain&&/instagram|tiktok|social.media/i.test(options.question||''))options.domain='SOCIAL_MEDIA';
+      if(!options.domain&&/media.ai|videos? bearbeiten|videoschnitt/i.test(options.question||''))options.domain='MEDIA_AI';
+      if(!options.domain&&/architektur|architecture/i.test(options.question||''))options.domain='MASTER_BRAIN_ARCHITECTURE';
       if(!options.project&&options.domain==='SOCIAL_MEDIA')options.project='marcel';
       if(options.domain&&!DOMAINS.includes(options.domain))throw error('Unknown knowledge domain');
       const [entries,documents,evidence]=await Promise.all([repository.list('entries'),repository.list('documents'),repository.list('evidence')]);
       const byId=new Map(documents.map(d=>[d.id,d]));
       const matches=rankEntries(options.project?entries:entries.filter(e=>e.project!=='luxe'),options);
-      const results=matches.map(({entry,score})=>({id:entry.id,text:entry.text,kind:entry.kind,status:entry.status,domains:entry.domains,project:entry.project,version:entry.version,score,sources:evidence.filter(e=>e.entryId===entry.id).slice(0,5).map(e=>({documentId:e.documentId,title:byId.get(e.documentId)?.title,version:byId.get(e.documentId)?.contentHash,locator:e.locator,section:e.section,effectiveDate:byId.get(e.documentId)?.effectiveDate}))}));
+      const results=matches.map(({entry,score})=>({id:entry.id,text:entry.text,kind:entry.kind,status:entry.status,knowledgeLayer:entry.knowledgeLayer||(entry.kind==='historical'?'PROJECT_HISTORY':entry.personal?'MARCEL_MEMORY':'KNOWLEDGE_LIBRARY'),domains:entry.domains,project:entry.project,version:entry.version,score,sources:evidence.filter(e=>e.entryId===entry.id).slice(0,5).map(e=>({documentId:e.documentId,title:byId.get(e.documentId)?.title,version:byId.get(e.documentId)?.contentHash,locator:e.locator,section:e.section,effectiveDate:byId.get(e.documentId)?.effectiveDate}))}));
       const missingSources=documents.filter(d=>['missing','unreadable'].includes(d.status)).map(d=>d.title);
       return {answer:results.length?results.map((r,i)=>`[${i+1}] ${r.kind==='plan'?'Geplant: ':r.kind==='opinion'?'Meinung: ':r.kind==='historical'?'Historisch: ':'Dokumentiert: '}${r.text}`).join('\n\n'):'In den freigegebenen lokalen Quellen ist dazu keine ausreichend passende Information vorhanden.',results,missingSources,searchMethod:SEARCH_METHOD,externalAI:false,notice:'Quellenbasierte Auszüge; dokumentierte Aussagen sind kein Nachweis des heutigen Livezustands. Ungeprüfte persönliche Angaben und ungeprüfte Trading-Parameter sind ausgeschlossen.'};
     },

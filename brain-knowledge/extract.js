@@ -53,11 +53,17 @@ export function contextualBlocks(blocks) {
 }
 export function extractBytes(bytes, extension, { includeAssistant=false }={}) {
   if(extension==='.docx'||extension===''){
-    const document=zipEntries(bytes).find(e=>e.name==='word/document.xml');if(!document)throw Error('Word document.xml missing');
+    const archive=zipEntries(bytes),document=archive.find(e=>e.name==='word/document.xml');if(!document)throw Error('Word document.xml missing');
+    const relations=archive.find(e=>e.name==='word/_rels/document.xml.rels')?.read().toString('utf8')||'',links=new Map();
+    if(/<!DOCTYPE|<!ENTITY/i.test(relations))throw Error('External XML declarations are not accepted');
+    for(const relation of relations.matchAll(/<Relationship\b([^>]*)\/?\s*>/g)){
+      const attrs=Object.fromEntries([...relation[1].matchAll(/([\w:]+)="([^"]*)"/g)].map(m=>[m[1],decode(m[2],{level:'xml'})]));
+      if(/\/hyperlink$/.test(attrs.Type||'')&&/^https?:\/\//i.test(attrs.Target||''))links.set(attrs.Id,attrs.Target);
+    }
     const xml=document.read().toString('utf8');if(/<!DOCTYPE|<!ENTITY/i.test(xml))throw Error('External XML declarations are not accepted');const blocks=[];let section='',i=0;
     for(const paragraph of xml.matchAll(/<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g)){const text=normalize([...paragraph[1].matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map(m=>decode(m[1],{level:'xml'})).join(''));const style=paragraph[1].match(/<w:pStyle\b[^>]*w:val="([^"]+)"/)?.[1]||'';
       if(/heading|überschrift|title/i.test(style)||/^\d+(?:\.\d+)*[.)]?\s.{5,130}$/.test(text))section=text;
-      if(text)blocks.push(...splitLong(text,`paragraph:${i+1}`,section));i++;
+      if(text){const urls=[...paragraph[1].matchAll(/<w:hyperlink\b[^>]*r:id="([^"]+)"/g)].map(m=>links.get(m[1])).filter(Boolean);blocks.push(...splitLong(text+([...new Set(urls)].filter(url=>!text.includes(url)).map(url=>' '+url).join('')),`paragraph:${i+1}`,section));}i++;
     }return blocks;
   }
   const text=bytes.toString('utf8');

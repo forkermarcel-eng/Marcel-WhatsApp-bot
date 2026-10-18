@@ -13,6 +13,16 @@ import { extractBytes } from '../brain-knowledge/extract.js';
 function source(text,{project='marcel',domain='MASTER_BRAIN_ARCHITECTURE',subjectKey=null,...rest}={}){return {id:hash([text,project]),path:'/fixture/source.md',title:'Fixture source',contentHash:hash(text),project,domain,status:'processed',blocks:[{text,locator:'line:7',subjectKey}],...rest};}
 async function fixture(fn){const repo=await openLocalKnowledge(':memory:');try{await fn(createKnowledgeService(repo),repo);}finally{repo.close();}}
 
+test('provided documents preserve layers and never turn dated task lists into live decisions',()=>fixture(async(service,repo)=>{
+ const personal=source('Marcel bevorzugt einen direkten humorvollen Kommunikationsstil ohne ständige Anreden.',{domains:['MARCEL_DNA','PERSONAL_KNOWLEDGE'],knowledgeLayer:'MARCEL_MEMORY'});
+ const history=source('Die lokale Brain Architektur hatte noch offene Entscheidungen zum alten Deployment.',{historical:true,knowledgeLayer:'PROJECT_HISTORY'});
+ const plan=source('Ein zentrales Brain soll später portabel auf einem eigenen lokalen Rechner laufen.',{kind:'plan',knowledgeLayer:'KNOWLEDGE_LIBRARY'});
+ await service.ingest([personal,history,plan]);
+ const entries=await repo.list('entries');assert.equal(entries.find(e=>e.personal).status,'pending');assert.equal(entries.find(e=>e.kind==='historical').knowledgeLayer,'PROJECT_HISTORY');
+ assert.equal((await service.ask({question:'Welche Entscheidungen sind noch offen?'})).results.length,0);
+ const answer=await service.ask({question:'Welche Architektur ist für das lokale Master Brain vorgesehen?'});assert.equal(answer.results[0].knowledgeLayer,'KNOWLEDGE_LIBRARY');assert.equal(answer.results[0].kind,'plan');
+}));
+
 test('repeat import deduplicates entries and evidence while preserving source versions',()=>fixture(async(service)=>{
  const a=source('Die lokale Brain Architektur verwendet eine gemeinsame Datenbank und getrennte Channel Adapter.');
  const first=await service.ingest([a]),second=await service.ingest([a]);assert.equal(first.created,1);assert.equal(second.created,0);assert.equal(second.evidence,0);

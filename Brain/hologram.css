@@ -1,0 +1,32 @@
+/* Every existing-element override is limited to the Brain scene. */
+.brain-hologram,.brain-energy{display:none}
+.experience[data-scene=brain]{background:radial-gradient(ellipse at 42% 39%,#09234178,transparent 52%),radial-gradient(ellipse at 84% 31%,#19295555,transparent 39%),linear-gradient(145deg,#020914,#040b1b 55%,#030916)}
+.experience[data-scene=brain] .observatory{background:radial-gradient(ellipse at 39% 43%,#123b5c44,transparent 52%),radial-gradient(ellipse at 80% 25%,#472c7628,transparent 40%)}
+.experience[data-scene=brain] .observatory-window{opacity:.16;filter:blur(1px)}
+.experience[data-scene=brain] .observatory-floor{opacity:.32}
+.experience[data-scene=brain] .observatory-column{opacity:.1}
+.experience[data-scene=brain] .brain-energy{display:block;position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:hidden}
+.experience[data-scene=brain] .energy-spark{filter:drop-shadow(0 0 5px #43baff)}
+.experience[data-scene=brain] .globe-panel{padding:0;border-color:transparent;background:transparent;box-shadow:none;backdrop-filter:none;overflow:visible}
+.experience[data-scene=brain] .globe-panel::before,.experience[data-scene=brain] .globe-panel::after{display:none}
+.experience[data-scene=brain] .globe-panel>:not(.brain-hologram){display:none!important}
+.experience[data-scene=brain] .brain-hologram{position:relative;display:block;height:424.8px;isolation:isolate}
+.experience[data-scene=brain] .brain-hologram::before{content:'';position:absolute;inset:22% -10% 6%;border-radius:50%;background:radial-gradient(ellipse,#0c96e31c,transparent 68%);filter:blur(15px);pointer-events:none}
+.experience[data-scene=brain] .holo-heading{position:absolute;top:12px;left:18px;z-index:2;pointer-events:none}
+.experience[data-scene=brain] .holo-heading>span{font-size:8px;letter-spacing:2px;color:#76bedb}
+.experience[data-scene=brain] .holo-heading h3{font-size:18px;font-weight:450;color:#d7eeff;letter-spacing:.1px;margin:7px 0 0}
+.experience[data-scene=brain] .holo-open{position:absolute;inset:48px 0 35px;display:block;width:100%;height:calc(100% - 83px);min-height:0;padding:0;border:0;border-radius:50%;background:transparent!important;box-shadow:none;cursor:pointer;touch-action:manipulation;transition:filter .5s,transform .5s;isolation:isolate}
+.experience[data-scene=brain] .holo-open:hover,.experience[data-scene=brain] .holo-open:focus-visible{filter:drop-shadow(0 0 13px #0c9cdb44);outline-offset:-12px}
+.experience[data-scene=brain] .holo-open:active{transform:scale(1.02)}
+.experience[data-scene=brain] .holo-open canvas{display:block;width:100%;height:100%;position:absolute;inset:0;pointer-events:none}
+.experience[data-scene=brain] .holo-orbit{position:absolute;pointer-events:none;width:76%;height:24%;left:12%;top:62%;border-radius:50%;border:1px solid #487aff40;box-shadow:0 0 12px #3e90f40d;transform:rotate(-17deg);z-index:-1}
+.experience[data-scene=brain] .holo-orbit::after{content:'';position:absolute;inset:-17px -13px;border:1px solid #9878ed20;border-radius:50%}
+.experience[data-scene=brain] .holo-caption{position:absolute;bottom:13px;left:21px;right:18px;display:flex;justify-content:space-between;align-items:center;color:#93c5e5;font-size:11px;letter-spacing:.2px;pointer-events:none}
+.experience[data-scene=brain] .holo-caption>span:last-child{width:29px;height:29px;display:grid;place-items:center;border:1px solid #2a6c964d;border-radius:50%;color:#9ddfff;background:#0b24402b;font-size:17px}
+.experience[data-scene=brain] .holo-status{position:absolute;bottom:-4px;right:20px;font-size:8px;color:#7da3c3}
+.experience[data-scene=brain] .holo-opening .holo-open{filter:brightness(1.5) drop-shadow(0 0 20px #3dbfff88);transform:scale(1.055);transition:filter .22s,transform .22s}
+.experience[data-scene=brain] .memory-panel{background:linear-gradient(135deg,#0a223645,#040e1bc2);border-color:#6aaee329;box-shadow:inset 0 1px #b3e5ff0d,0 15px 35px #0002;backdrop-filter:blur(15px)}
+.experience[data-scene=brain] .scene-switch,.experience[data-scene=brain] .region{box-shadow:inset 0 1px #cbeeff15,0 8px 28px #0003;backdrop-filter:blur(16px)}
+@media(max-width:1200px) and (min-width:721px){.experience[data-scene=brain] .brain-hologram{height:424.8px}.experience[data-scene=brain] .holo-heading{left:11px}.experience[data-scene=brain] .holo-heading h3{font-size:16px}}
+@media(max-width:720px){.experience[data-scene=brain] .brain-hologram{height:350px}.experience[data-scene=brain] .holo-heading{top:4px;left:12px}.experience[data-scene=brain] .holo-heading h3{font-size:18px}.experience[data-scene=brain] .holo-open{inset:36px 0 30px;height:calc(100% - 66px)}.experience[data-scene=brain] .holo-caption{bottom:5px;left:14px}.experience[data-scene=brain] .brain-energy path,.experience[data-scene=brain] .energy-spark{display:none}.experience[data-scene=brain] .brain-energy{opacity:.65}}
+@media(prefers-reduced-motion:reduce){.experience[data-scene=brain] .holo-open{transition:none}.experience[data-scene=brain] .holo-opening .holo-open{transform:none}}

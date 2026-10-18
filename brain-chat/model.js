@@ -1,7 +1,10 @@
 // Reuses the application's OpenAI client. Inject this one interface for a later
 // local model; neither the UI nor the knowledge store depends on a provider.
-export function createBrainModel({client,model}) {
+export function createBrainModel({client,model,environment=process.env}) {
   return async function* generate({instructions,messages,signal}) {
+    // Check immediately before every provider call, even if another caller
+    // accidentally bypasses the route's knowledge-mode selection.
+    if(environment.BRAIN_CHAT_PAID_API_ENABLED!=='true')throw Object.assign(Error('Kostenpflichtige Brain-KI ist serverseitig gesperrt. Wissensmodus verwenden.'),{status:403});
     if(!client)throw Object.assign(Error('Die KI ist lokal noch nicht konfiguriert. OPENAI_API_KEY serverseitig setzen.'),{status:503});
     const stream=await client.responses.create({model,instructions,input:messages,stream:true,store:false,max_output_tokens:3000},{signal,timeout:90000,maxRetries:0});
     let completed=false;

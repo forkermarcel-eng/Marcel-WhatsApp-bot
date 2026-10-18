@@ -3,7 +3,7 @@ import {secretRisk,sensitive} from '../brain-knowledge/model.js';
 
 export function createBrainRetrieval({repository,readMemory=async()=>[],readLiveState=async()=>null}) {
   let snapshot,loadedAt=0;
-  return async function retrieve({text,history=[],allowPersonal=false}) {
+  return async function retrieve({text,history=[],allowPersonal=false,domain=null,project=null,literal=false}) {
     if(!snapshot||Date.now()-loadedAt>15000){
       const [entries,documents,evidence]=await Promise.all(['entries','documents','evidence'].map(n=>repository.list(n)));
       snapshot={entries,documents:new Map(documents.map(d=>[d.id,d])),evidence};loadedAt=Date.now();
@@ -22,9 +22,15 @@ export function createBrainRetrieval({repository,readMemory=async()=>[],readLive
     if(/luxe/i.test(query))add('BUSINESS',query,'luxe');
     if(/barber/i.test(query))add('BUSINESS',query,'barber');
     if(!specs.length)add(null);
+    if(domain||project){specs.length=0;add(domain,query,project);}
     const eligible=snapshot.entries.filter(e=>!secretRisk(e.text)&&(!e.personal||allowPersonal&&e.reviewedBy==='owner')&&(!publicText||!e.personal&&!sensitive(e.text))&&!/intimate|third.party/.test(e.sensitivity||''));
     const found=new Map();
-    for(const spec of specs)for(const {entry,score}of rankEntries(eligible,spec))if(!found.has(entry.id))found.set(entry.id,{entry,score});
+    if(literal){
+      const words=text.toLowerCase().trim().split(/\s+/).filter(w=>w.length>=2);
+      for(const entry of eligible.filter(e=>e.status==='active'&&!e.reviewRequired&&(!domain||e.domains.includes(domain))&&(!project||e.project===project))){
+        if(words.length&&words.every(w=>entry.text.toLowerCase().includes(w)))found.set(entry.id,{entry,score:1});if(found.size>=12)break;
+      }
+    }else for(const spec of specs){if(spec.question.length<3)continue;for(const {entry,score}of rankEntries(eligible,spec))if(!found.has(entry.id))found.set(entry.id,{entry,score});}
     const sources=[];let used=0;
     for(const {entry}of found.values()){
       const text=entry.text.slice(0,1700);if(sources.length>=12||used+text.length>14000)break;

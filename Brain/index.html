@@ -23,6 +23,15 @@
     <div class="tabs"><button class="tab active" data-tab="brainChat">Chat</button><button class="tab" data-tab="knowledge">Mein Wissen</button><button class="tab" data-tab="state">Aktueller Zustand</button><button class="tab" data-tab="projectKnowledge">Dokumentenwissen</button><button class="tab" data-tab="review">Vorschläge &amp; Review</button></div>
     <section class="panel" id="knowledge"><div class="brain-stats" id="brainStats"></div><div class="topic-list" id="knowledgeGrid"><div class="empty">Brain wird geladen …</div></div></section>
     <section class="panel active" id="brainChat">
+      <p id="chatModeBanner" class="notice">Wissensmodus · API-KI AUS. Originalstellen statt generierter Antworten.</p>
+      <details class="chat-learning"><summary>Exportieren und Wissen ergänzen</summary>
+        <p class="muted">Gespräch oder markierte Abschnitte als TXT bearbeiten. Nur ausdrücklich markierte Korrekturen und Lernregeln werden zur Prüfung vorgeschlagen.</p>
+        <button id="chatExport" class="secondary">TXT exportieren</button>
+        <label class="field">Bearbeiteten Lernexport oder Wissensdatei wählen<input id="chatImportFile" type="file" accept=".txt,.md,.docx,.json"></label>
+        <p class="muted">TXT, Markdown, DOCX, JSON bis 1 MB. PDF bleibt über den bestehenden lokalen Import mit pdftotext möglich.</p>
+        <button id="chatImportPreview" class="secondary">Importvorschau</button><button id="chatImportConfirm" hidden>Als offene Review-Vorschläge importieren</button><button id="chatOpenReview" class="secondary">Wissensprüfung öffnen</button>
+        <div id="chatImportStatus" role="status"></div><pre id="chatImportItems" class="chat-import-items"></pre>
+      </details>
       <div class="brain-chat">
         <aside class="chat-sidebar" aria-label="Unterhaltungen"><button id="chatNew">＋ Neue Unterhaltung</button><div id="chatList" class="chat-list"></div></aside>
         <div class="chat-main">
@@ -30,7 +39,8 @@
           <div id="chatStatus" class="chat-status" role="status" aria-live="polite">Brain Chat wird geladen …</div>
           <form id="chatComposer" class="chat-composer">
             <label for="chatInput" class="muted">Nachricht an dein Brain</label><textarea id="chatInput" placeholder="Zum Beispiel: Welche Projekte passen auf meine Homepage?" maxlength="6000" required></textarea>
-            <label class="chat-privacy"><input id="chatPersonal" type="checkbox">Bestätigte persönliche Angaben für diese Antwort an den konfigurierten KI-Anbieter übermitteln. Offene Reviews bleiben ausgeschlossen.</label>
+            <div class="chat-search-tools"><select id="chatDomain" class="control" aria-label="Wissensbereich"><option value="">Alle Wissensbereiche</option></select><label class="chat-privacy"><input id="chatLiteral" type="checkbox">Volltextsuche (alle Suchwörter)</label></div>
+            <label class="chat-privacy"><input id="chatPersonal" type="checkbox"><span id="chatPersonalDescription">Bestätigte persönliche Angaben in dieser privaten Wissenssuche verwenden. Offene Reviews bleiben ausgeschlossen.</span></label>
             <div class="chat-compose-tools"><small>Enter senden · Umschalt+Enter neue Zeile</small><button id="chatSend" type="submit">Senden</button></div>
           </form>
         </div>
@@ -76,7 +86,7 @@
 <div class="modal" id="reviewModal"><div class="dialog"><h2 id="reviewTitle">Brain-Eintrag</h2><div id="reviewValue"></div><textarea class="control" id="correction" placeholder="Korrektur auf Deutsch"></textarea><div id="reviewResult"></div><div class="dialog-actions"><button class="secondary" id="reviewClose">Abbrechen</button><button class="reject" id="reject">Ablehnen</button><button class="correct" id="correct">Korrigieren</button><button id="confirm">Bestätigen</button></div></div></div>
 
 <div class="modal" id="knowledgeReviewModal" role="dialog" aria-label="Dokumentenwissen prüfen"><div class="dialog"><h2>Dokumentenwissen prüfen</h2><textarea class="control" id="knowledgeCorrection"></textarea><label class="check"><input type="checkbox" id="knowledgePersonalApproval">Persönliche Angaben für lokale Antworten ausdrücklich freigeben</label><label class="check"><input type="checkbox" id="knowledgeConflictApproval">Vorliegenden Widerspruch bewusst auflösen</label><div id="knowledgeReviewStatus" role="status"></div><div class="dialog-actions"><button class="secondary" id="knowledgeReviewClose">Abbrechen</button><button class="reject" data-knowledge-action="reject">Ablehnen</button><button class="correct" data-knowledge-action="correct">Korrigieren</button><button data-knowledge-action="confirm">Bestätigen</button></div></div></div>
-<script src="/Brain/chat.js" defer></script><script src="/Brain/knowledge.js" defer></script><script src="/presentation.js"></script><script>
+<script src="/Brain/learning.js" defer></script><script src="/Brain/chat.js" defer></script><script src="/Brain/knowledge.js" defer></script><script src="/presentation.js"></script><script>
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const P=MarcelPresentation;let brain={items:[]},selected=null,writeKind="fact",conflict=null,candidates=[];

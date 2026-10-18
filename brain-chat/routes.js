@@ -3,6 +3,9 @@ import {openLocalKnowledge,createPgKnowledgeRepository} from '../brain-knowledge
 import {createBrainRetrieval} from './retrieval.js';
 import {createBrainChat} from './service.js';
 import {createBrainModel} from './model.js';
+import {createLocalBrainModel} from './local-model.js';
+import {createLearningImport,exportConversationTXT} from './learning.js';
+import {createDocumentImport} from './document-import.js';
 
 export function createMemoryReaders(pool){
   const required=()=>{if(!pool)throw Error('Memory database unavailable');};
@@ -24,7 +27,10 @@ export function registerBrainChatRoutes({app,pool,openai,model,authorized,enviro
         }else repo=createPgKnowledgeRepository(pool);
       }
       const retrieve=createBrainRetrieval({repository:repo,...(readers||createMemoryReaders(pool))});
-      return createBrainChat({repository:repo,retrieve,generate:generate||createBrainModel({client:openai,model})});
+      const requested=environment.BRAIN_CHAT_MODE||'knowledge';
+      const mode=requested==='paid'&&environment.BRAIN_CHAT_PAID_API_ENABLED==='true'?'model':requested==='local'&&environment.BRAIN_CHAT_LOCAL_APPROVED==='true'?'local':'knowledge';
+      const chat=createBrainChat({repository:repo,retrieve,mode,generate:generate||(mode==='local'?createLocalBrainModel({environment}):createBrainModel({client:openai,model,environment}))});
+      return {chat,learning:createLearningImport({repository:repo,chat}),documents:createDocumentImport(repo),mode};
     })().catch(e=>{initialized=null;throw e;});
     return initialized;
   };
@@ -34,13 +40,27 @@ export function registerBrainChatRoutes({app,pool,openai,model,authorized,enviro
     const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});
     const event=(event,data)=>{if(!res.destroyed)res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);};
     try{
-      const chat=await api();
+      const {chat,learning,documents,mode}=await api();
       if(req.method==='GET'){
         if(req.query.id)return res.json({ok:true,conversation:await chat.get(req.query.id)});
-        return res.json({ok:true,conversations:await chat.list()});
+        return res.json({ok:true,mode,paidApiEnabled:environment.BRAIN_CHAT_PAID_API_ENABLED==='true',conversations:await chat.list()});
       }
       if(req.method!=='POST')return res.status(405).json({ok:false,error:'Methode nicht erlaubt.'});
       if(req.body?.op==='create')return res.status(201).json({ok:true,conversation:await chat.create()});
+      if(req.body?.op==='export'){
+        const conversation=await chat.get(req.body.conversationId);
+        res.setHeader('Content-Type','text/plain; charset=utf-8');res.setHeader('Content-Disposition','attachment; filename="marcel-brain-chat.txt"');return res.send(exportConversationTXT(conversation,req.body.turnIds||null));
+      }
+      if(req.body?.op==='learning-preview')return res.json({ok:true,...await learning.preview(req.body.text)});
+      if(req.body?.op==='learning-import'){
+        if(req.body.confirm!==true)return res.status(400).json({ok:false,error:'Import bitte nach Vorschau ausdrücklich bestätigen.'});
+        return res.json({ok:true,...await learning.import(req.body)});
+      }
+      if(req.body?.op==='document-preview')return res.json({ok:true,...await documents.preview(req.body)});
+      if(req.body?.op==='document-import'){
+        if(req.body.confirm!==true)return res.status(400).json({ok:false,error:'Import bitte nach Vorschau ausdrücklich bestätigen.'});
+        return res.json({ok:true,...await documents.import(req.body)});
+      }
       if(req.body?.op!=='send')return res.status(400).json({ok:false,error:'Unbekannte Chat-Aktion.'});
       res.setHeader('Content-Type','text/event-stream; charset=utf-8');res.setHeader('X-Accel-Buffering','no');res.flushHeaders?.();
       const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(': waiting\n\n');},10000);

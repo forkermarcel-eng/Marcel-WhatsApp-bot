@@ -1,5 +1,28 @@
 # Marcel Brain Chat V1
 
+Default: **Wissensmodus, API-KI aus**. Responses are labelled original excerpts,
+not generated conversation. Keyword/full-text search, domain filters, source
+inspection and durable transcripts work without a model or API key. A configured
+OpenAI key alone never activates Brain model calls. Other channel models are unchanged.
+
+Only `BRAIN_CHAT_MODE=paid` **and** `BRAIN_CHAT_PAID_API_ENABLED=true` activate the
+existing paid client. The provider call-site checks that flag on every request.
+No background LLM, embeddings, extraction API, retries or paid fallback is used.
+For an explicitly approved existing local server, use `BRAIN_CHAT_MODE=local`,
+`BRAIN_CHAT_LOCAL_APPROVED=true`, `BRAIN_CHAT_LOCAL_URL=http://127.0.0.1:11434/v1/`
+and `BRAIN_CHAT_LOCAL_MODEL=<installed-local-model>`. Only loopback is accepted;
+Cloud-tagged models/redirects are rejected. Local failure returns knowledge mode.
+
+TXT export can include all or selected turns. Edit the empty `[KORREKTUR]` or
+`[LERNREGEL]` blocks outside the system and reimport through preview + confirmation.
+Quoted questions/answers never become facts automatically. Explicit corrections
+with `BEZUG-ID` are linked review conflicts; confirmed facts are untouched.
+New TXT/MD/DOCX/JSON files up to 1 MB also use preview and pending review, without
+AI calls. PDF remains supported by the existing local CLI with `pdftotext`.
+Source/version/audit information uses the existing knowledge collections.
+
+See [release preparation](RELEASE.md) and [open-source decisions](OPEN_SOURCE.md).
+
 The Chat tab extends `/Brain/`. It reuses the existing authenticated Brain
 function, OpenAI Responses client/model, knowledge repository and review service.
 The dating reply persona is intentionally not used for the owner's assistant.
@@ -22,7 +45,7 @@ the model must disclose the lack of current verification.
 ## Local start
 
 Use Node 24 (the existing import uses `node:sqlite`). In a new local terminal set
-`DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, and `OPENAI_API_KEY` in the environment
+`DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` in the environment
 or use Node's `--env-file` with an ignored private file. Never paste keys in Git.
 The existing `OPENAI_MODEL` is reused; `BRAIN_CHAT_MODEL` is an optional override.
 
@@ -54,8 +77,8 @@ retries with the same request ID do not duplicate complete answers or API cost.
 
 `test/brain-chat.browser.js` explicitly simulates provider responses for UI
 checks. Passing those checks does not prove a real API response. A live model
-smoke check requires the server-side API key; without it the UI shows a clear
-configuration error, not a fabricated answer.
+smoke check is not performed while API calls are disabled. Model-generation
+checks require separately approved local or paid mode; knowledge mode remains usable.
 
 Streaming protocol follows the official OpenAI documentation:
 https://developers.openai.com/api/docs/guides/streaming-responses

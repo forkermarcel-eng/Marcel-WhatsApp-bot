@@ -512,6 +512,10 @@ export default async function handler(
        }
      );
  
+   if (resource === "chat" && railwayResponse.ok && railwayResponse.headers?.get("content-type")?.includes("text/plain")) {
+     res.setHeader("Cache-Control", "no-store, private");res.setHeader("Content-Type", "text/plain; charset=utf-8");
+     res.setHeader("Content-Disposition", 'attachment; filename="marcel-brain-chat.txt"');return res.status(200).send(await railwayResponse.text());
+   }
    if (resource === "chat" && railwayResponse.ok && railwayResponse.headers?.get("content-type")?.includes("text/event-stream")) {
      res.setHeader("Cache-Control", "no-store, private");
      res.setHeader("Content-Type", "text/event-stream; charset=utf-8");

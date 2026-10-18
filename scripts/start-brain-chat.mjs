@@ -17,7 +17,7 @@ const file=resolve(process.env.BRAIN_KNOWLEDGE_FILE||resolve(root,'.local-knowle
 if(!existsSync(file))throw Error('Der vorhandene lokale Wissensimport fehlt.');
 const repository=await openLocalKnowledge(file),app=express();
 const environment={...process.env,BRAIN_CHAT_ENABLED:'true',BRAIN_KNOWLEDGE_ENABLED:'true',BRAIN_KNOWLEDGE_WRITES:'true'};
-app.disable('x-powered-by');app.use(express.json({limit:'32kb'}));
+app.disable('x-powered-by');app.use(express.json({limit:'2mb'}));
 const authorized=validDashboardSession;
 app.post('/api/login',login);
 // Keep the same authenticated API surface as Vercel, without a Railway proxy.

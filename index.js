@@ -1,3 +1,4 @@
+import { registerWorldRoutes } from "./brain-world/routes.js";
 import { registerKnowledgeRoutes } from "./brain-knowledge/routes.js";
 import { registerBrainChatRoutes } from "./brain-chat/routes.js";
 import express from "express";
@@ -8526,6 +8527,7 @@ registerDeviceBridgeResetRoutes({
 sharedMediaRuntime?.registerRoutes(app, dashboardApiAuthorized);
 registerKnowledgeRoutes({ app, pool, dashboardApiAuthorized });
 registerBrainChatRoutes({app,pool,openai,model:MODEL,authorized:dashboardApiAuthorized});
+registerWorldRoutes({app,pool,authorized:dashboardApiAuthorized});
 registerTinderMirrorRoutes({
   app,
   pool,

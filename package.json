@@ -8,6 +8,8 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "pretest": "npm run test:brain-world",
+    "test:brain-world": "node --test test/brain-world.test.js",
     "start": "node index.js",
     "test:device-bridge": "node --test test/device-bridge-reset-routes.test.js",
     "test:brain-write": "node --test test/marcel-brain-manual-write.test.js",
@@ -61,7 +63,8 @@
     "pg": "^8.16.3",
     "pg-boss": "12.34.0",
     "pino": "^9.9.0",
-    "sharp": "^0.35.4"
+    "sharp": "0.35.5",
+    "tz-lookup": "6.1.25"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8"

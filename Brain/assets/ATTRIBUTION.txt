@@ -15,3 +15,13 @@ No endorsement by the author is implied.
 Renderer: Three.js r180 / 0.180.0, MIT, copyright 2010-2025 Three.js authors.
 License and pinned source manifest: ../vendor/THREE-LICENSE.txt and manifest.json.
 No React, hosted model service, CDN request, or AI call is required.
+
+Neural redesign: existing surface coordinates are used only as a guide for
+shader-driven light paths and a translucent rim; the opaque anatomical mesh
+is not rendered. The derived guide asset remains CC BY-SA 3.0.
+Globe coastlines: Natural Earth, Public Domain.
+Source and terms: https://www.naturalearthdata.com/about/terms-of-use/
+See earth-source.json for the exact local data SHA-256 and upstream URL.
+Globe texture speckles are decorative, not observed city lights or live data.
+Three.js EffectComposer / UnrealBloomPass / support shaders use the same MIT
+license; local import-path adjustments are recorded in vendor/manifest.json.

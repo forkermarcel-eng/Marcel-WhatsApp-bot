@@ -1,36 +1,52 @@
-﻿MARCEL BRAIN 3D EXPERIENCE V1 — LOCAL DESIGN REVIEW
+﻿MARCEL BRAIN — NEURAL REDESIGN / LOCAL OPTICAL REVIEW
 
-Files: index.html retains the existing Brain controls and API handlers.
-experience.css and experience.js implement the presentation and drawer state.
-scene.js is a separate Three.js scene, independent of model/API providers.
-Existing chat, learning, knowledge, Memory, auth and backend modules are reused.
-Only a review-count presentation event was added to the existing memory renderer.
+The main view now uses an animated neural light network: flowing shader pulses,
+cyan/blue/violet filaments, amber highlights, pulsing nodes, drifting particles,
+restrained bloom and a holographic pedestal. No opaque anatomical/STL sculpture
+is displayed. Existing licensed surface geometry is only a shape guide for the
+organic light paths and a faint holographic rim; its asset license remains valid.
+The effects are artistic, not neural telemetry. Actual chat requests increase
+visual intensity through existing busy/error state, without model/API changes.
 
-Interaction: drag horizontally (touch), drag in both axes (mouse), arrow keys,
-Home or the center button. Motion can pause; prefers-reduced-motion starts paused.
-The quiet idle movement is decorative. Retrieval light follows actual chat busy
-state; errors follow the existing chat error state. No neural telemetry is shown.
-Animation stops for hidden tabs/pages. Frame rate and device pixel ratio are capped.
-Mobile uses a smaller mesh; WebGL failure falls back to an inline SVG.
-Only Brain is registered; no News, Trading, Avatar or Media placeholder is exposed.
+The globe is a separate Three.js view. Moscow, Nairobi, Berlin and Medellin have
+static approximate city-center coordinates. City buttons smoothly rotate and
+zoom to their target; markers highlight the selection. Globe markers are also
+clickable. Drag, keyboard, wheel and explicit zoom/reset controls are available.
+The city panel truthfully states that news and weather are not connected.
 
-Third-party assets: locally served Three.js 0.180.0 / r180 (MIT), see vendor/.
-Brain surface by Nevit Dilmen, CC BY-SA 3.0; see assets/ATTRIBUTION.txt,
-CC-BY-SA-3.0.txt and manifest.json. Normalized/cropped geometry and its simplified
-mobile variant retain CC BY-SA 3.0. No endorsement or medical claim is implied.
-Build: node scripts/build-brain-scene-assets.mjs PATH_TO_ORIGINAL_STL
-The builder verifies the published source SHA-1 before converting it.
+Future integration boundary:
+- Listen for document event brain-globe-focus (id/name/country/lat/lon).
+- An authorized server adapter may fetch licensed, sourced regional information.
+- Supply display data through MarcelBrainGlobe.setContents(cityId, items), where
+  each item contains title/source/https URL. Stale city responses and unsafe URLs
+  are rejected; text is not treated as HTML. No adapter/provider is enabled now.
+- No city choice becomes a personal fact, relocation plan or live-state update.
 
-Preview from repository root: node test/brain-experience.preview.mjs
-Open http://127.0.0.1:4591/Brain/ . APIs in this preview are synthetic, in-memory
-fixtures, not production knowledge. Do not expose this preview server publicly.
-Focused browser checks: runBrainExperienceChecks() and
-runBrainSceneFallbackCheck() from test/brain-experience.browser.js, evaluated
-in that local browser page. Fallback check deliberately loses WebGL context;
-reload afterward. No production database or paid API is involved.
+Preserved: existing chat APIs, conversations, sources, TXT export, learning and
+manual imports, personal/doc knowledge, filters, live state, crown review and
+platform navigation. The companion memory/recent-conversation panel reuses
+existing rendered state; no additional private-knowledge/model requests.
+No production DB migration, paid model call, new framework or auth change.
 
-Review viewports: desktop 1440 x 1000; mobile 390 x 844.
-Actual iPhone/Safari hardware performance and final material/camera preferences
-remain part of Marcel's optical acceptance. Reference images 3/4 were not supplied.
-No push, deployment, database migration or production data change is authorized
-by this frontend implementation task.
+Open source and map data:
+Three.js r180 / 0.180.0, MIT; local EffectComposer, UnrealBloomPass and supporting
+passes/shaders. Their imports were adjusted only to the pinned local module.
+See vendor/manifest.json and THREE-LICENSE.txt.
+Neural shape guide: Nevit Dilmen, CC BY-SA 3.0; see assets/ATTRIBUTION.txt.
+Globe coastlines: Natural Earth 1:110m land, Public Domain. See earth-source.json
+and https://www.naturalearthdata.com/about/terms-of-use/ . All map assets are
+served locally. Texture speckles are decorative, not live or population data.
+
+Performance: capped frame rate/pixel ratio, smaller mobile guide, stopped loops
+for hidden/offscreen views, reduced-motion support and independent SVG fallbacks.
+Mobile places the globe below the input and measures composer height so expanded
+options/errors do not overlap it. Genuine iPhone/Safari hardware QA remains open.
+
+Preview: node test/brain-experience.preview.mjs from repository root.
+Open http://127.0.0.1:4591/Brain/ . Preview owner APIs are synthetic and in-memory;
+never expose this fixture server publicly. Focused browser functions are in
+brain-experience.browser.js and brain-neural.browser.js under test/.
+Reference images guide appearance only; fake news, prices, subscriptions,
+"millions of sources", neural telemetry and unsupported tools were not copied.
+
+LOCAL REVIEW ONLY. No push or deployment before Marcel's optical acceptance.

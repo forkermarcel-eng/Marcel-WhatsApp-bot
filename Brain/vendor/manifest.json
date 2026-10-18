@@ -14,6 +14,56 @@
     },
     "THREE-LICENSE.txt": {
       "sha256": "bfe119ea4fd413f5f7ca3fcd63adb0c4a073ed39daa2fe7d3e6b769e21272601"
+    },
+    "postprocessing/EffectComposer.js": {
+      "sha256": "079558b24cc50ae34130deb876af8b9f942761ba1149f4e6aa3e753fbd52e2f0",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/postprocessing/EffectComposer.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "postprocessing/MaskPass.js": {
+      "sha256": "7cd08eee9d5d6f5578beaddbdcbe9c384f6873810af27f22ab7db3ceeb127aa3",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/postprocessing/MaskPass.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "postprocessing/OutputPass.js": {
+      "sha256": "0dfd411b40e3f70e23ebbe4ce68d965c391094f247409465dde91b8909abed73",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/postprocessing/OutputPass.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "postprocessing/Pass.js": {
+      "sha256": "9e981143c1943d3e1202688ed0e1ccd6881af95363307cbaf86f79c52f6284bf",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/postprocessing/Pass.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "postprocessing/RenderPass.js": {
+      "sha256": "f939304277d8bd8db97f70ba9d76d08f00a5b67fa6aa186a1e8e454003419bbd",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/postprocessing/RenderPass.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "postprocessing/ShaderPass.js": {
+      "sha256": "5835009c0398026295266bf765d7b9649c2ede194c8030785a7d1b3fbd2920fa",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/postprocessing/ShaderPass.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "postprocessing/UnrealBloomPass.js": {
+      "sha256": "ed7602014fd01b446bc0f9a157aef34f8c3585e4966310b96106ecf0259b3d1e",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/postprocessing/UnrealBloomPass.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "shaders/CopyShader.js": {
+      "sha256": "a33057d5ac91c43304c186ac0e8816e62bb2ed471d3a00ff3018dfd5c0389718",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/shaders/CopyShader.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "shaders/LuminosityHighPassShader.js": {
+      "sha256": "d112488d1aab88c03fb2b89cbe2695c0bf633f111cf59ba1cc2f9fe8b1a40fba",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/shaders/LuminosityHighPassShader.js",
+      "modification": "'three' imports changed to the locally served pinned module"
+    },
+    "shaders/OutputShader.js": {
+      "sha256": "353479f77a8d7e2629d49ccac9fc2f5dbfdda5442e0adf867b00377a2fcb0cb2",
+      "source": "https://raw.githubusercontent.com/mrdoob/three.js/r180/examples/jsm/shaders/OutputShader.js",
+      "modification": "'three' imports changed to the locally served pinned module"
     }
   }
 }

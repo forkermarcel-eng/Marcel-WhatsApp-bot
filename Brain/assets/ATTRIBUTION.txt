@@ -30,3 +30,11 @@ See earth-source.json for the exact local data SHA-256 and upstream URL.
 Globe texture speckles are decorative, not observed city lights or live data.
 Three.js EffectComposer / UnrealBloomPass / support shaders use the same MIT
 license; local import-path adjustments are recorded in vendor/manifest.json.
+
+World Experience 2.0:
+Night-light composite: NASA Earth Observatory / NOAA NGDC, Suomi NPP VIIRS (2012), not live imagery.
+https://eoimages.gsfc.nasa.gov/images/imagerecords/79000/79765/dnb_land_ocean_ice.2012.3600x1800.jpg
+Country geometry and multilingual country labels: Natural Earth 1:110m, public domain.
+https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
+https://www.naturalearthdata.com/about/terms-of-use/
+News dots represent the labelled geographic relationship, not the origin of a publisher.

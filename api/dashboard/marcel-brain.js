@@ -416,7 +416,7 @@ export default async function handler(
    if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
    railwayPath += "/world";
    const params = new URLSearchParams();
-   for (const key of ["op", "q", "id", "lat", "lon", "zoom", "category", "scope", "name", "country", "page"]) if (typeof req.query?.[key] === "string") params.set(key, req.query[key].slice(0,200));
+   for (const key of ["op", "q", "id", "lat", "lon", "zoom", "category", "scope", "name", "country", "region", "level", "placeId", "language", "page"]) if (typeof req.query?.[key] === "string") params.set(key, req.query[key].slice(0,200));
    if (params.size) railwayPath += "?" + params.toString();
  } else if (resource === "knowledge") {
    if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});

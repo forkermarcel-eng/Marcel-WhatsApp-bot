@@ -10,6 +10,6 @@
  }
  new MutationObserver(recent).observe($('chatList'),{childList:true,subtree:true,attributes:true,attributeFilter:['disabled']});recent();$('neuralAllConversations').onclick=()=>$('experienceHistory').click();
  const mobile=matchMedia('(max-width:720px)'),dock=document.querySelector('.composer-dock'),root=$('brainChat');
- function fitComposer(){if(mobile.matches&&!root.classList.contains('active'))return;root.style.paddingTop=mobile.matches?Math.max(660,dock.offsetTop+dock.offsetHeight+22)+'px':'';}
- new ResizeObserver(fitComposer).observe(dock);mobile.addEventListener('change',fitComposer);document.addEventListener('brain-scene-visible',e=>{if(e.detail.visible)fitComposer();});fitComposer();
+ function fitComposer(){if(mobile.matches&&!root.classList.contains('active'))return;root.style.paddingTop=mobile.matches?(root.dataset.scene==='world'?100:Math.max(720,dock.offsetTop+dock.offsetHeight+22))+'px':'';}
+ new ResizeObserver(fitComposer).observe(dock);mobile.addEventListener('change',fitComposer);document.addEventListener('brain-scene-visible',e=>{if(e.detail.visible)fitComposer();});document.addEventListener('brain-world-view',fitComposer);fitComposer();
 })();

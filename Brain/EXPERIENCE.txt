@@ -1,52 +1,92 @@
-﻿MARCEL BRAIN — NEURAL REDESIGN / LOCAL OPTICAL REVIEW
+﻿MARCEL BRAIN — PREMIUM 3D / LOKALE ABNAHME
+Ausgangspunkt: 5c539aa7. Kein Push, Deployment oder produktiver Datenzugriff.
 
-The main view now uses an animated neural light network: flowing shader pulses,
-cyan/blue/violet filaments, amber highlights, pulsing nodes, drifting particles,
-restrained bloom and a holographic pedestal. No opaque anatomical/STL sculpture
-is displayed. Existing licensed surface geometry is only a shape guide for the
-organic light paths and a faint holographic rim; its asset license remains valid.
-The effects are artistic, not neural telemetry. Actual chat requests increase
-visual intensity through existing busy/error state, without model/API changes.
+UMSETZUNG
+Die bestehende Three.js-/Bloom-Szene rendert ein zusammenhängendes räumliches
+Netz: Desktop 760 Knoten, 1.505 Verbindungen, 230 organische Faserwege;
+Smartphone 340 Knoten, 665 Verbindungen, 105 Faserwege. Ein Drittel der Knoten
+liegt im Inneren. Die lizenzierte Geometrie dient ausschließlich als Konturhilfe;
+kein geschlossenes anatomisches Mesh oder zusätzlicher Rendering-Stack.
 
-The globe is a separate Three.js view. Moscow, Nairobi, Berlin and Medellin have
-static approximate city-center coordinates. City buttons smoothly rotate and
-zoom to their target; markers highlight the selection. Globe markers are also
-clickable. Drag, keyboard, wheel and explicit zoom/reset controls are available.
-The city panel truthfully states that news and weather are not connected.
+Lichtpunkte wandern auf quadratischen Bezier-Verbindungen. Bahnshader und
+Partikel verwenden dieselbe Zeit-/Geschwindigkeits-/Phasengleichung. Knoten
+pulsieren synchron zur Ankunft ihrer ersten drei inzidenten Bahnen. Organische
+Faserwege münden in Netz-Knoten; ihre zusätzlichen Impulse sind dekorativ.
+Die Grafik ist eine symbolische Visualisierung, keine neuronale Messung.
 
-Future integration boundary:
-- Listen for document event brain-globe-focus (id/name/country/lat/lon).
-- An authorized server adapter may fetch licensed, sourced regional information.
-- Supply display data through MarcelBrainGlobe.setContents(cityId, items), where
-  each item contains title/source/https URL. Stale city responses and unsafe URLs
-  are rejected; text is not treated as HTML. No adapter/provider is enabled now.
-- No city choice becomes a personal fact, relocation plan or live-state update.
+AKTIVIERUNG
+Lokale Stichwortregeln werten tatsächlich abgeschickte Texte (Senden/Enter),
+geöffnete Gespräche und die vorhandene Wissensbereich-Auswahl aus.
+Zusätzlich erlauben vier Bereichsschaltflächen und die Wissensschaltfläche
+eine ausdrückliche manuelle Auswahl. Die sichtbare Herkunft nennt die Regel
+oder Auswahl. Keine Modellanfrage, Emotionserkennung oder Speicherung daraus.
+Analyse/Trading: Blau/Cyan; Kreativität/Social: Violett/Blau; romantische Themen:
+Pink/Violett/Gold; Planung: vorderer symbolischer Bereich; Recherche: vernetzt.
+Unbekannte Themen bleiben in der Wissensansicht. Regionen sind keine Aussage
+über menschliche Hemisphären oder biologische Funktionslokalisation.
 
-Preserved: existing chat APIs, conversations, sources, TXT export, learning and
-manual imports, personal/doc knowledge, filters, live state, crown review and
-platform navigation. The companion memory/recent-conversation panel reuses
-existing rendered state; no additional private-knowledge/model requests.
-No production DB migration, paid model call, new framework or auth change.
+WELTANSICHT
+Die vorhandene Szenenregistrierung schaltet Brain/Welt um; derselbe Globus wird
+vergrößert. Stadtauswahl öffnet das zugehörige lesbare Panel. Quaternion-Slerp
+wählt den kurzen Drehweg, zeitabhängige Dämpfung glättet Rotation und Zoom.
+Vier Städte: Berlin, Moskau, Nairobi, Medellín; statische Stadtkoordinaten.
+Beschriftete, sichtbarkeitsgeprüfte Marker, Maus-/Touch-Drehung, Pinch-Zoom,
+Tastatur, Mausrad und explizite Zoom-/Zentrierknöpfe. Auf Smartphones stapeln
+sich große Karte, Stadtpanel und Chat. Der Chat bleibt in beiden Ansichten da.
 
-Open source and map data:
-Three.js r180 / 0.180.0, MIT; local EffectComposer, UnrealBloomPass and supporting
-passes/shaders. Their imports were adjusted only to the pinned local module.
-See vendor/manifest.json and THREE-LICENSE.txt.
-Neural shape guide: Nevit Dilmen, CC BY-SA 3.0; see assets/ATTRIBUTION.txt.
-Globe coastlines: Natural Earth 1:110m land, Public Domain. See earth-source.json
-and https://www.naturalearthdata.com/about/terms-of-use/ . All map assets are
-served locally. Texture speckles are decorative, not live or population data.
+Keine Nachrichten-/Wetteranbindung und keine erfundenen Live-Werte.
+Erweiterung bleibt an MarcelBrainGlobe.setContents(cityId, items):
+- title/source/url (HTTPS), optional kind, publishedAt, imageUrl/imageAlt,
+  videoUrl; Nachrichten (kind=news) benötigen ein gültiges publishedAt.
+- Sichtbare Quelle und Veröffentlichungszeit, Bilder und Video-Quellenlinks.
+- Text wird nicht als HTML interpretiert; unsichere/credentialhaltige URLs und
+  Antworten für nicht gewählte Städte werden verworfen. Bilder ohne Referrer.
+- Event brain-globe-focus enthält Stadt, Koordinaten, initial und
+  liveDataConnected=false. Noch kein externer Datenadapter aktiv.
+- Keine Stadtauswahl wird als persönlicher Fakt oder Live State gespeichert.
 
-Performance: capped frame rate/pixel ratio, smaller mobile guide, stopped loops
-for hidden/offscreen views, reduced-motion support and independent SVG fallbacks.
-Mobile places the globe below the input and measures composer height so expanded
-options/errors do not overlap it. Genuine iPhone/Safari hardware QA remains open.
+BESTAND UND RESSOURCEN
+Bestehende Chat-, Quellen-, Gesprächs-, TXT-, Lern-, Import-, Wissens-,
+Review- und Navigationslogik bleibt maßgeblich. Kein Backend-/Auth-/DB-Umbau;
+Kostenkontrolle unverändert. Enter öffnet nun ebenfalls den Gesprächsbereich.
+Begrenzte Framerate/Pixelratio, kleineres Mobilnetz, Renderpause in verdeckten
+Szenen/Browser-Tabs und außerhalb des Viewports, Reduced Motion, unabhängige
+SVG-Fallbacks bei WebGL-Ausfall. Wiederholte Szenenwechsel erzeugen keine
+zusätzlichen Canvas-Instanzen oder Geometrien. Kein mehrstündiger Hardwaretest;
+echtes iPhone/Safari bleibt für die Abnahme offen.
 
-Preview: node test/brain-experience.preview.mjs from repository root.
-Open http://127.0.0.1:4591/Brain/ . Preview owner APIs are synthetic and in-memory;
-never expose this fixture server publicly. Focused browser functions are in
-brain-experience.browser.js and brain-neural.browser.js under test/.
-Reference images guide appearance only; fake news, prices, subscriptions,
-"millions of sources", neural telemetry and unsupported tools were not copied.
+LIZENZEN
+Three.js r180 / 0.180.0 MIT, lokal eingebundene bestehende Bloom-/Shader-Passes.
+Siehe vendor/manifest.json und THREE-LICENSE.txt.
+Konturhilfe: Nevit Dilmen, CC BY-SA 3.0; assets/ATTRIBUTION.txt gilt weiter.
+Küstenlinien: Natural Earth 1:110m Land, Public Domain; earth-source.json.
+https://www.naturalearthdata.com/about/terms-of-use/
+Die Lichtsprenkel der Karte sind dekorativ, keine Bevölkerungs-/Live-Daten.
 
-LOCAL REVIEW ONLY. No push or deployment before Marcel's optical acceptance.
+LOKALE PRÜFUNG / ARTEFAKTE
+Loopback-Testserver: node test/brain-experience.preview.mjs
+BRAIN_PREVIEW_PORT optional (Standard 4591). Sämtliche Owner-APIs simuliert,
+nur In-Memory-Testdaten; keine echte Anmeldung, DB oder Modellkosten.
+Testfunktionen: brain-experience.browser.js, brain-neural.browser.js,
+brain-premium.browser.js. Separate WebGL-Kontextverlustprüfung.
+Opt-in BRAIN_PREVIEW_RECORDING=true aktiviert ausschließlich im Loopback-
+Testserver /__recording für die feste private Videodatei unter
+.local-knowledge/premium-neural-motion.webm. Nie öffentlich betreiben.
+recordPremiumMotion() aus test/brain-premium-recording.browser.js zeichnet
+das tatsächlich gerenderte WebGL-Canvas via captureStream/MediaRecorder auf.
+
+Abnahmedateien (ignoriert, keine persönlichen Inhalte oder Secrets):
+.local-knowledge/premium-desktop.png
+.local-knowledge/premium-iphone.png
+.local-knowledge/premium-globe-berlin.png
+.local-knowledge/premium-neural-motion.webm
+.local-knowledge/premium-verification.json
+Screenshots verwenden ausschließlich lokale simulierte Testdaten.
+
+Nur lokal vorbereitet. Auf Marcels optische Rückmeldung warten.
+Prüfergebnis: 190 lokale Browser-Assertions (Desktop 89, Smartphone 101),
+zusätzlich Kontextverlust-Fallback, zwölf Szenenwechsel ohne Geometriewachstum,
+Videodekodierung und unterschiedlicher Bildinhalt bei Sekunde 1 und 3.
+Keine Konsolenfehler in den abschließenden Premium-Prüfungen.
+Screenshots: Desktop 1672 x 1000, Smartphone-Viewport 390 x 844.
+Video: VP9/WebM, 1057 x 686, ca. 17 Sekunden, ca. 5,7 MB; fünf Themenmodi.

@@ -408,6 +408,12 @@ export default async function handler(
    railwayPath +=
      "/live-state";
 
+ } else if (resource === "knowledge") {
+   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
+   railwayPath += "/knowledge";
+   const params = new URLSearchParams();
+   for (const key of ["op", "q", "domain", "project"]) if (typeof req.query?.[key] === "string") params.set(key, req.query[key]);
+   if (params.size) railwayPath += "?" + params.toString();
  } else if (
    resource
  ) {

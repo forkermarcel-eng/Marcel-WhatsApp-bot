@@ -1,3 +1,4 @@
+import { registerKnowledgeRoutes } from "./brain-knowledge/routes.js";
 import express from "express";
 import { registerTradingRoutes } from "./trading-core/server/api.js";
 import crypto from "crypto";
@@ -8522,6 +8523,7 @@ registerDeviceBridgeResetRoutes({
 // existing dashboard bearer protects the adapter transport; normal product
 // storage is device-bound by an ordinary foreign key only.
 sharedMediaRuntime?.registerRoutes(app, dashboardApiAuthorized);
+registerKnowledgeRoutes({ app, pool, dashboardApiAuthorized });
 registerTinderMirrorRoutes({
   app,
   pool,

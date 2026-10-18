@@ -23,6 +23,7 @@ export function parseFeed(raw,source,now=Date.now()){
   if(row.find('geo\\:lat').length&&row.find('geo\\:long').length&&Number.isFinite(lat)&&Number.isFinite(lon))location=coordinates(lat,lon);
   else if(point.length===2&&point.every(Number.isFinite))location=coordinates(...point);
   out.push({id:hash(url),title,url,description:text(row.find('description,summary').first().text()).slice(0,220),imageUrl,source:source.name,sourceId:source.id,sourceCountry:source.country,language:source.language,category:source.category,publishedAt:publishedAt.toISOString(),fetchedAt:new Date(now).toISOString(),expiresAt:new Date(Math.min(+publishedAt+TTL,now+TTL)-60000).toISOString(),location,geoQuality:location?'Koordinaten aus dem Feed; Bezug nicht redaktionell geprüft':'Ereignisort unbekannt'});
+  if(source.id==='usgs'&&out.at(-1)?.location){out.at(-1).geoRole='event';out.at(-1).geoQuality='Ereigniskoordinaten aus dem offiziellen USGS-Feed';}
  });return out;
 }
 export function normalizePlace(p){

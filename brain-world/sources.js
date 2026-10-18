@@ -33,4 +33,5 @@ export const sources=[
  ['guardian-food','Guardian Essen','https://www.theguardian.com/food/rss','GB','en','Ernährung'],
  ['guardian-travel','Guardian Reisen','https://www.theguardian.com/travel/rss','GB','en','Reisen'],
  ['guardian-life','Guardian Lifestyle','https://www.theguardian.com/lifeandstyle/rss','GB','en','Lifestyle']
+ ,['usgs','U.S. Geological Survey','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.atom','US','en','Naturereignisse']
 ].map(([id,name,url,country,language,category])=>({id,name,url,country,language,category}));

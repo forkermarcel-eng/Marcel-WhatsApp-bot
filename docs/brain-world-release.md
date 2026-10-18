@@ -94,7 +94,8 @@ Die Welt-Bereinigung greift auf keine dieser Collections zu.
   Brasilien, Tokio, Shanzu, Medellín; Reverse-Geocoding bei Shanzu;
   MET-Vorhersagen und Commons-Stadtbild mit Urheber/Lizenz geprüft.
 - Desktop 1448 × 1086 und mobile Browserbreite 390: kein horizontaler Überlauf.
-- 33 konfigurierte Feeds; im letzten lokalen Abruf 26 mit frischen Meldungen,
+- 34 konfigurierte Feeds einschließlich offizieller USGS-Erdbebenmeldungen
+  mit gelieferten Ereigniskoordinaten; im ersten lokalen Medienabruf 26 mit frischen Meldungen,
   darunter Nation Kenya, The Standard und El Tiempo. Produktionszahlen können
   abweichen und werden erst nach dem Deployment berichtet.
 

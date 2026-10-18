@@ -15,6 +15,10 @@ test('RSS rejects expired/future/unsafe entries and preserves real geographic ev
 test('places are arbitrary, keep geographic level and real timezone',()=>{
  for(const p of [{name:'Geithain',lat:'51.056',lon:'12.697',addresstype:'town',address:{country:'Deutschland',country_code:'de'}},{name:'Shanzu',lat:'-3.971',lon:'39.747',addresstype:'suburb',address:{country:'Kenia',country_code:'ke'}},{name:'Phuket',lat:'7.88',lon:'98.39',address:{country:'Thailand'}}]){const x=normalizePlace(p);assert.equal(x.name,p.name);assert.ok(x.timezone.includes('/'));assert.ok(Number.isFinite(x.lat));}assert.throws(()=>normalizePlace({lat:999,lon:0}));
 });
+test('official USGS Atom keeps event coordinates distinct from arbitrary place mentions',()=>{
+ const raw='<feed><entry><title>M 5.2 - Tonga</title><link rel="alternate" href="https://earthquake.usgs.gov/example"/><updated>2026-10-18T10:00:00Z</updated><georss:point>-21.3 -174.3</georss:point></entry></feed>';
+ const rows=parseFeed(raw,{...source,id:'usgs'},now);assert.equal(rows.length,1);assert.equal(rows[0].geoRole,'event');assert.deepEqual(rows[0].location,{lat:-21.3,lon:-174.3});
+});
 test('weather remains a timestamped forecast, not fabricated observations',()=>{
  const w=normalizeWeather({properties:{meta:{updated_at:'2026-10-18T10:00:00Z'},timeseries:[{time:'2026-10-18T12:00:00Z',data:{instant:{details:{air_temperature:24,relative_humidity:80,wind_speed:2}},next_1_hours:{summary:{symbol_code:'rain_day'},details:{precipitation_amount:1.2}}}}]}},-4,39,now);assert.equal(w.temperature,24);assert.equal(w.symbol,'rain_day');assert.equal(w.timezone,'Africa/Nairobi');assert.equal(w.kind,'Modellvorhersage');assert.throws(()=>normalizeWeather({},0,0,now));
 });

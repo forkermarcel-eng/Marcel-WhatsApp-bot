@@ -38,3 +38,10 @@ test('world HTTP authorization blocks all operations before database access',asy
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
  try{for(const method of ['GET','POST']){const r=await fetch(`http://127.0.0.1:${server.address().port}/dashboard-api/marcel-brain/world`,{method});assert.equal(r.status,401);assert.match(r.headers.get('cache-control'),/no-store/);}}finally{runtime.stop();await new Promise(r=>server.close(r));}
 });
+test('geocoding caches JSON arrays using explicit JSON encoding compatible with node-postgres',async()=>{
+ const {db,pool}=await database();let calls=0,encoded=false;
+ const wrapped={...pool,query(sql,args){if(sql.startsWith('INSERT INTO marcel_world.cache')&&args?.[0]?.startsWith('geo:')){assert.equal(typeof args[1],'string');assert.ok(Array.isArray(JSON.parse(args[1])));encoded=true;}return pool.query(sql,args);}};
+ try{const service=createWorldService({pool:wrapped,fetcher:async()=>{calls++;return new Response(JSON.stringify([{name:'Geithain',lat:'51.054',lon:'12.694',address:{country:'Deutschland'}}]),{headers:{'Content-Type':'application/json'}});}});
+ assert.equal((await service.search('Geithain'))[0].name,'Geithain');assert.equal((await service.search('Geithain'))[0].name,'Geithain');assert.equal(calls,1);assert.ok(encoded);
+ }finally{await db.close();}
+});

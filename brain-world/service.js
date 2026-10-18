@@ -38,7 +38,7 @@ export function normalizeWeather(data,lat,lon,now=Date.now()){
 }
 export function createWorldService({pool,fetcher=fetch,clock=Date.now}){
  const cached=async id=>(await pool.query('SELECT body,expires_at FROM marcel_world.cache WHERE id=$1',[id])).rows[0];
- const saveCache=async(id,body,ms)=>{await pool.query('INSERT INTO marcel_world.cache(id,body,expires_at) VALUES($1,$2,now()+$3*interval \'1 millisecond\') ON CONFLICT(id) DO UPDATE SET body=excluded.body,expires_at=excluded.expires_at',[id,body,ms]);return body;};
+ const saveCache=async(id,body,ms)=>{await pool.query('INSERT INTO marcel_world.cache(id,body,expires_at) VALUES($1,$2,now()+$3*interval \'1 millisecond\') ON CONFLICT(id) DO UPDATE SET body=excluded.body,expires_at=excluded.expires_at',[id,JSON.stringify(body),ms]);return body;};
  async function json(url,options={}){const r=await fetcher(url,{headers:{'User-Agent':ua,Accept:'application/json',...options.headers},signal:AbortSignal.timeout(12000),redirect:'error'});if(!r.ok)throw Error(`Quelle antwortet mit HTTP ${r.status}`);const raw=await r.text();if(raw.length>3000000)throw Error('Antwort zu groß');return {body:JSON.parse(raw),headers:r.headers};}
  async function geo(params){
   const id='geo:'+hash(params.toString()),hit=await cached(id);if(hit&&+new Date(hit.expires_at)>clock())return hit.body;

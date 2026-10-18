@@ -61,4 +61,4 @@ document.addEventListener('brain-world-view',e=>{if(e.detail.world&&!loaded)load
 document.addEventListener('brain-globe-ready',()=>{const place=window.MarcelBrainGlobe.getFocus();if(place&&!selected)loadPlace(place);});
 setInterval(localTime,30000);
 setInterval(()=>{if(!document.hidden&&$('brainChat').dataset.scene==='world'){page=0;loadNews();if(selected)loadPlace(selected);}},10*60000);
-document.querySelectorAll('[data-activation]').forEach(b=>{b.disabled=true;b.tabIndex=-1;});
+document.querySelectorAll('button[data-activation]').forEach(b=>{b.disabled=true;b.tabIndex=-1;});

@@ -6,6 +6,8 @@ import { inflateRawSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { decode } from 'html-entities';
 import { hash, normalize } from './model.js';
+import {load} from 'cheerio';
+import {posix} from 'node:path';
 
 const MAX=32*1024*1024;
 // Central-directory ZIP reader: no extraction to disk, traversal, macros or code
@@ -52,6 +54,16 @@ export function contextualBlocks(blocks) {
   }flush();return output;
 }
 export function extractBytes(bytes, extension, { includeAssistant=false }={}) {
+  if(extension==='.epub'){
+    const archive=zipEntries(bytes),files=new Map(archive.map(e=>[e.name,e]));
+    const xml=path=>{if(!path||path.startsWith('/')||path.split('/').includes('..'))throw Error('Unsafe EPUB resource');const file=files.get(path);if(!file)throw Error('EPUB resource missing');const text=file.read().toString('utf8');if(/<!DOCTYPE[^>]*\[|<!ENTITY/i.test(text))throw Error('EPUB entities are not accepted');return load(text,{xmlMode:true});};
+    const container=xml('META-INF/container.xml'),opf=container('rootfile').first().attr('full-path'),book=xml(opf),base=posix.dirname(opf),manifest=new Map();
+    book('manifest item').each((_,e)=>{const item=book(e);manifest.set(item.attr('id'),{href:item.attr('href'),type:item.attr('media-type')});});
+    const blocks=[];book('spine itemref').each((index,e)=>{const ref=book(e);if(ref.attr('linear')==='no')return;const item=manifest.get(ref.attr('idref'));if(!item||!['application/xhtml+xml','text/html'].includes(item.type))return;
+      const href=decodeURIComponent(item.href.split('#')[0]);if(/^[a-z]+:|^\/|\\/i.test(href))throw Error('External EPUB resource rejected');const path=posix.normalize(posix.join(base,href));
+      const page=xml(path);page('script,style,nav,iframe,object').remove();let section='';page('h1,h2,h3,h4,p,li,blockquote').each((_,node)=>{const value=normalize(page(node).text());if(!value)return;if(/^h[1-4]$/.test(node.name))section=value;blocks.push(...splitLong(value,`epub:${index+1}/${path}/block:${blocks.length+1}`,section));});
+    });if(!blocks.length)throw Error('EPUB contains no readable spine content');return blocks;
+  }
   if(extension==='.docx'||extension===''){
     const archive=zipEntries(bytes),document=archive.find(e=>e.name==='word/document.xml');if(!document)throw Error('Word document.xml missing');
     const relations=archive.find(e=>e.name==='word/_rels/document.xml.rels')?.read().toString('utf8')||'',links=new Map();

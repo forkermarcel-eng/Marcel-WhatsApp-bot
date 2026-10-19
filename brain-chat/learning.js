@@ -11,18 +11,19 @@ export function parseLearningTXT(text){
  if(typeof text!=='string'||Buffer.byteLength(text)>512000||!text.replace(/^\uFEFF/,'').startsWith('MARCEL-BRAIN-CHAT-TXT V1\n')&&!text.replace(/^\uFEFF/,'').startsWith('MARCEL-BRAIN-CHAT-TXT V1\r\n'))throw error('Kein gültiger Brain-Lernexport oder Datei zu groß (maximal 512 KB).');
  text=text.replace(/^\uFEFF/,'').replace(/\r/g,'');
  const conversationId=text.match(/^GESPRAECH-ID: ([\da-f-]{36})$/m)?.[1];if(!conversationId)throw error('Gesprächskennung fehlt.');
- const proposals=[];let section=null,reference=null,type=null,lines=[];
+ const proposals=[];let section=null,reference=null,type=null,lines=[],project='marcel';
  for(const line of text.split('\n')){
   const header=line.match(/^=== ABSCHNITT ([\da-f-]{36}) ===$/);
-  if(header){if(type)throw error('Nicht abgeschlossener Lernblock.');section=header[1];reference=null;continue;}
-  if(line.startsWith('| '))continue; // quoted chat text can never become an import directive
+  if(header){if(type)throw error('Nicht abgeschlossener Lernblock.');section=header[1];reference=null;project='marcel';continue;}
+  if(line.startsWith('| '))continue;
+  if(/^PROJEKT:/.test(line)&&!type){const value=line.slice(8).trim().toLowerCase();if(!['marcel','luxe','barber','trading'].includes(value))throw error('Unknown project');project=value;continue;} // quoted chat text can never become an import directive
   if(/^BEZUG-ID:/.test(line)&&!type){reference=line.slice(9).trim()||null;continue;}
-  if(/^\[(KORREKTUR|LERNREGEL)\]$/.test(line)){
+  if(/^\[(KORREKTUR|LERNREGEL|ENTSCHEIDUNG|ANFORDERUNG|STILREGEL)\]$/.test(line)){
    if(!section||type)throw error('Lernblock außerhalb eines Abschnitts oder verschachtelt.');type=line.slice(1,-1);lines=[];continue;
   }
-  if(/^\[\/(KORREKTUR|LERNREGEL)\]$/.test(line)){
+  if(/^\[\/(KORREKTUR|LERNREGEL|ENTSCHEIDUNG|ANFORDERUNG|STILREGEL)\]$/.test(line)){
    if(!type||line!==`[/${type}]`)throw error('Ungültiger Abschluss eines Lernblocks.');
-   const value=normalize(lines.join('\n'));if(value){if(value.length>5000||secretRisk(value))throw error('Lernvorschlag zu lang oder möglicherweise mit Zugangsdaten.');proposals.push({conversationId,turnId:section,type,text:value,reference});}type=null;continue;
+   const value=normalize(lines.join('\n'));if(value){if(value.length>5000||secretRisk(value))throw error('Lernvorschlag zu lang oder möglicherweise mit Zugangsdaten.');proposals.push({conversationId,turnId:section,type,text:value,reference,project});}type=null;continue;
   }
   if(type)lines.push(line);
  }
@@ -37,7 +38,7 @@ export function createLearningImport({repository,chat}){
  };
  return {preview:prepare,async import({text,previewHash}){
   const parsed=await prepare(text);if(previewHash!==parsed.previewHash)throw error('Datei seit der Vorschau verändert. Bitte erneut prüfen.');
-  const sources=parsed.proposals.map(p=>{const contentHash=hash([p.conversationId,p.turnId,p.type,p.text,p.reference]),source={id:contentHash,path:'brain-learning://'+p.conversationId+'/'+p.turnId+'/'+p.type+'/'+contentHash,title:p.type==='LERNREGEL'?'Manuelle Lernregel':'Manuelle Korrektur',contentHash,project:'marcel',domains:['MARCEL_DNA','PERSONAL_KNOWLEDGE'],knowledgeLayer:'MARCEL_MEMORY',status:'processed',reviewAll:true,authority:'explicit_owner_edited_chat_export',effectiveDate:new Date().toISOString().slice(0,10),blocks:[{text:p.text.length<35?`${p.type==='LERNREGEL'?'Manuelle Lernregel':'Manuelle Korrektur'} aus Gespräch: ${p.text}`:p.text,locator:'conversation:'+p.conversationId+'/turn:'+p.turnId,section:p.type}]};return{source,proposal:p};});
+  const sources=parsed.proposals.map(p=>{const contentHash=hash([p.conversationId,p.turnId,p.type,p.text,p.reference,p.project]),source={id:contentHash,path:'brain-learning://'+p.conversationId+'/'+p.turnId+'/'+p.type+'/'+contentHash,title:'Manueller Vorschlag: '+p.type,contentHash,project:p.project,domains:p.project==='marcel'?['MARCEL_DNA','PERSONAL_KNOWLEDGE']:p.project==='trading'?['TRADING']:['BUSINESS'],kind:({ENTSCHEIDUNG:'decision',ANFORDERUNG:'requirement',STILREGEL:'communication_rule',LERNREGEL:'communication_rule',KORREKTUR:'correction'})[p.type],knowledgeLayer:p.project==='marcel'?'MARCEL_MEMORY':'PROJECT_HISTORY',status:'processed',reviewAll:true,authority:'explicit_owner_edited_chat_export',effectiveDate:new Date().toISOString().slice(0,10),blocks:[{text:p.text.length<35?`${p.type==='LERNREGEL'?'Manuelle Lernregel':'Manuelle Korrektur'} aus Gespräch: ${p.text}`:p.text,locator:'conversation:'+p.conversationId+'/turn:'+p.turnId,section:p.type,subjectKey:p.reference||undefined}]};return{source,proposal:p};});
   if(!sources.length)return{created:0,known:0,pending:0,proposals:0};
   const stats=await createKnowledgeService(repository).ingest(sources.map(s=>s.source));
   await repository.transaction(async tx=>{

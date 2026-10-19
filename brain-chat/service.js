@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {createKnowledgeService} from '../brain-knowledge/service.js';
 import {hash,secretRisk} from '../brain-knowledge/model.js';
+import {structuredChatProposals} from './proposals.js';
 const PREFIX='brain-chat:';
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const validId=id=>typeof id==='string'&&/^[\da-f-]{36}$/i.test(id);
@@ -29,7 +30,9 @@ export function createBrainChat({repository,retrieve,generate,mode='knowledge'})
         if(!turn){turn={id:requestId,user:text.trim(),createdAt:new Date().toISOString(),status:'pending',assistant:'',sources:[]};c.turns.push(turn);}
         else{turn.status='pending';turn.assistant='';delete turn.error;}
         c.activeRequest={id:requestId,until:new Date(Date.now()+120000).toISOString()};c.title=c.turns[0].user.slice(0,65);c.updatedAt=new Date().toISOString();await save(c);
-        if(/\b(?:merk(?:e)? dir|speichere als|ab sofort (?:unsere|die|eine) regel)\b/i.test(text)&&!turn.proposalId){
+        const structured=structuredChatProposals({text,conversationId,requestId,project:project||'marcel'});
+        if(structured.length&&!turn.proposalId){await createKnowledgeService(repository).ingest(structured);turn.proposalIds=structured.map(s=>s.id);turn.proposalId=structured[0].id;await save(c);}
+        if(!structured.length&&/\b(?:merk(?:e)? dir|speichere als|ab sofort (?:unsere|die|eine) regel)\b/i.test(text)&&!turn.proposalId){
           const sourceId=hash([conversationId,requestId,'proposal']);
           const source={id:sourceId,path:'brain-chat://'+conversationId+'/'+requestId,contentHash:hash(text),title:'Wissensvorschlag aus Brain Chat',project:'marcel',domains:['PERSONAL_KNOWLEDGE'],knowledgeLayer:'MARCEL_MEMORY',status:'processed',reviewAll:true,authority:'explicit_owner_chat_proposal',blocks:[{text,locator:'message:'+requestId}]};
           if(text.trim().length<35)source.blocks[0].text='Ausdrücklicher Wissensvorschlag: '+text.trim();

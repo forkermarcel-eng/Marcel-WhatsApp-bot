@@ -28,7 +28,7 @@ export function discoverSources({workflowRoot,repoRoot,documentsRoot,downloadsRo
    const ext=extname(path).toLowerCase();
    if(relative.includes('/LUXE-by-LM/')){
      if(/\/(?:README\.md|docs\/[^/]+\.md|src\/features\/customer-service\/knowledge\.json|docs\/internal\/business-facts\.json|docs\/internal\/owner-requirements-continuation\.txt|docs\/internal\/owner-questionnaire-original\.txt)$/.test(relative))add(path,{project:'luxe',domain:'BUSINESS',authority:'project_document',reviewAll:/owner-questionnaire-original/.test(path)});
-   }else if(['.docx','.pdf','.md','.txt','.json'].includes(ext)||/^WhatsApp Bot Backup/.test(basename(path)))add(path,{historical:/Backup|2026-09-12|stand text/i.test(basename(path))});
+   }else if(['.docx','.epub','.pdf','.md','.txt','.json'].includes(ext)||/^WhatsApp Bot Backup/.test(basename(path)))add(path,{historical:/Backup|2026-09-12|stand text/i.test(basename(path))});
  }
  // Active main documentation is authoritative about source implementation,
  // not automatically a proof of a successful deployment or database migration.

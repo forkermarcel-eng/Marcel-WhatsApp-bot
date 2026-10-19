@@ -53,10 +53,11 @@ export async function refreshMassiveMarkets(repo,env=process.env,fetcher=fetch){
  const latest=new Map();for(const series of await repo.series())if(!latest.has(series.contract)||series.last>latest.get(series.contract).last)latest.set(series.contract,series);
  const contracts=[...latest.values()].sort((a,b)=>b.last.localeCompare(a.last)).slice(0,4),updated=[];
  for(const series of contracts){
-  const url=new URL('/futures/v1/aggs/'+encodeURIComponent(series.contract),'https://api.massive.com');url.search=new URLSearchParams({resolution:'1min',limit:'120',sort:'window_start.asc'});
+  const now=Date.now(),start=now-14*86400000,end=now+60000;
+  const url=new URL('/futures/v1/aggs/'+encodeURIComponent(series.contract),'https://api.massive.com');url.search=new URLSearchParams({resolution:'1min','window_start.gte':String(BigInt(start)*1000000n),'window_start.lt':String(BigInt(end)*1000000n),limit:'120',sort:'window_start.asc'});
   const raw=await boundedFetch(url,{headers:{Authorization:'Bearer '+env.TRADING_MASSIVE_API_KEY}},fetcher,2_000_000),body=JSON.parse(raw);
   if(body.status!=='OK'||!Array.isArray(body.results))throw Error('Massive-Marktformat ungültig.');
-  const now=Date.now(),bars=normalizeMassiveBars(body.results,{contract:series.contract,start:new Date(now-14*86400000).toISOString(),end:new Date(now+60000).toISOString()}).filter(bar=>Date.parse(bar.time)<=now+60000);
+  const bars=normalizeMassiveBars(body.results,{contract:series.contract,start:new Date(start).toISOString(),end:new Date(end).toISOString()}).filter(bar=>Date.parse(bar.time)<=end);
   if(!bars.length)continue;await repo.storeCandles({contract:series.contract,source:'massive-delayed',resolution:60,bars});updated.push({contract:series.contract,bars:bars.length,last:bars.at(-1).time});
  }
  return {configured:true,updated:updated.length,contracts:updated};

@@ -4,12 +4,13 @@ import {hash,secretRisk} from '../brain-knowledge/model.js';
 const PREFIX='brain-chat:';
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const validId=id=>typeof id==='string'&&/^[\da-f-]{36}$/i.test(id);
-const knowledgeAnswer=context=>'Wissensmodus – freie KI-Antwortgenerierung ist deaktiviert. Die folgenden Stellen sind gespeicherte Originalauszüge, keine generierte Antwort.'+(context.sources.length?'\n\n'+context.sources.map((s,i)=>`[${i+1}] ${s.kind==='plan'?'Plan · ':s.kind==='historical'?'Historie · ':''}${s.documents.map(d=>d.title+' · '+d.locator).join('; ')}\n${s.text}`).join('\n\n'):'\n\nKeine passenden freigegebenen Quellen gefunden. Du kannst Dokumentenwissen durchsuchen oder einen neuen Wissensvorschlag zur Prüfung vormerken.');
+const knowledgeAnswer=context=>context.answer??('Wissensmodus – freie KI-Antwortgenerierung ist deaktiviert. Die folgenden Stellen sind gespeicherte Originalauszüge, keine generierte Antwort.'+(context.sources.length?'\n\n'+context.sources.map((s,i)=>`[${i+1}] ${s.kind==='plan'?'Plan · ':s.kind==='historical'?'Historie · ':''}${s.documents.map(d=>d.title+' · '+d.locator).join('; ')}\n${s.text}`).join('\n\n'):'\n\nKeine passenden freigegebenen Quellen gefunden. Du kannst Dokumentenwissen durchsuchen oder einen neuen Wissensvorschlag zur Prüfung vormerken.'));
 export function createBrainChat({repository,retrieve,generate,mode='knowledge'}) {
   const locks=new Set();
   const get=async id=>{if(!validId(id))throw fail('Ungültige Unterhaltung.');const c=await repository.get('meta',PREFIX+id);if(!c)throw fail('Unterhaltung nicht gefunden.',404);return c;};
   const save=c=>repository.transaction(async tx=>{const old=await tx.get('meta',c.id);if((old?.revision||0)!==(c.revision||0))throw fail('Unterhaltung wurde parallel geändert. Bitte neu öffnen.',409);const revision=(c.revision||0)+1;await tx.put('meta',{...c,revision});c.revision=revision;});
   return {
+    async query({text,allowPersonal=false,domain=null,project=null,literal=false}){if(typeof text!=='string'||!text.trim()||text.length>6000||secretRisk(text))throw fail('Ungültige Wissensfrage.');const context=await retrieve({text,allowPersonal:allowPersonal===true,domain,project,literal});return {...context,answer:knowledgeAnswer(context)};},
     async list(){return (await repository.list('meta')).filter(m=>m.id.startsWith(PREFIX)).map(c=>({id:c.conversationId,title:c.title,updatedAt:c.updatedAt})).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));},
     get,
     async create(){const id=randomUUID(),now=new Date().toISOString();const c={id:PREFIX+id,conversationId:id,title:'Neue Unterhaltung',createdAt:now,updatedAt:now,turns:[]};await save(c);return c;},
@@ -38,9 +39,9 @@ export function createBrainChat({repository,retrieve,generate,mode='knowledge'})
         let history=c.turns.filter(t=>t!==turn&&t.status==='complete'&&(!(publicRequest||!allowPersonal)||!t.personalContext)).slice(-12).flatMap(t=>[{role:'user',content:t.user},{role:'assistant',content:t.assistant}]);
         while(JSON.stringify(history).length>24000)history.splice(0,2);
         const context=await retrieve({text,history,domain,project,literal:literal===true,allowPersonal:allowPersonal&&!publicRequest});turn.sources=context.sources;turn.warnings=context.warnings;turn.personalContext=context.sources.some(s=>s.personal);
-        turn.mode=mode;
-        onEvent('context',{sources:turn.sources,warnings:turn.warnings,proposal:!!turn.proposalId,mode});
-        if(mode==='knowledge'){
+        turn.mode=context.answer!==undefined?'knowledge':mode;turn.timings=context.timings;
+        onEvent('context',{sources:turn.sources,warnings:turn.warnings,proposal:!!turn.proposalId,mode:turn.mode,timings:turn.timings});
+        if(mode==='knowledge'||context.answer!==undefined){
           turn.assistant=knowledgeAnswer(context);
           turn.status='complete';delete c.activeRequest;c.updatedAt=new Date().toISOString();await save(c);onEvent('delta',{text:turn.assistant});onEvent('done',{conversation:c});return c;
         }

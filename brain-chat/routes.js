@@ -10,7 +10,7 @@ import {createDocumentImport} from './document-import.js';
 export function createMemoryReaders(pool){
   const required=()=>{if(!pool)throw Error('Memory database unavailable');};
   return {
-    readMemory:async()=>{required();return (await pool.query(`SELECT id,category,memory_key,memory_value,human_verified,allowed_for_bot,sensitivity,valid_until FROM marcel_memory WHERE status='active' AND human_verified=TRUE AND allowed_for_bot=TRUE AND (valid_until IS NULL OR valid_until>NOW()) ORDER BY importance DESC,updated_at DESC LIMIT 100`)).rows;},
+    readMemory:async({keys=[]}={})=>{required();return (await pool.query(`SELECT id,category,memory_key,memory_value,human_verified,allowed_for_bot,sensitivity,valid_until,updated_at FROM marcel_memory WHERE status='active' AND human_verified=TRUE AND allowed_for_bot=TRUE AND (valid_until IS NULL OR valid_until>NOW()) AND (cardinality($1::text[])=0 OR memory_key=ANY($1::text[])) ORDER BY importance DESC,updated_at DESC`,[keys])).rows;},
     readLiveState:async()=>{required();return (await pool.query(`SELECT current_country,current_city,current_timezone,location_status,location_verified_at,updated_at,updated_by FROM marcel_live_state WHERE id=1 LIMIT 1`)).rows[0]||null;}
   };
 }
@@ -46,6 +46,7 @@ export function registerBrainChatRoutes({app,pool,openai,model,authorized,enviro
         return res.json({ok:true,mode,paidApiEnabled:environment.BRAIN_CHAT_PAID_API_ENABLED==='true',conversations:await chat.list()});
       }
       if(req.method!=='POST')return res.status(405).json({ok:false,error:'Methode nicht erlaubt.'});
+      if(req.body?.op==='query')return res.json({ok:true,...await chat.query({...req.body,allowPersonal:req.body.allowPersonal===true})});
       if(req.body?.op==='create')return res.status(201).json({ok:true,conversation:await chat.create()});
       if(req.body?.op==='export'){
         const conversation=await chat.get(req.body.conversationId);

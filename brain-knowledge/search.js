@@ -23,10 +23,13 @@ const concepts = {
 };
 const stop = new Set('der die das den dem des ein eine einer einem und oder aber als ist sind war wird werden was wie meine mein meinen für von mit auf im in zu zum zur ich wir du er sie es the a an and or of for to my our is are how what soll haben wurde bitte'.split(' '));
 const clean = value => normalize(value).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+const matchers=Object.entries(concepts).map(([concept,words])=>[concept,new RegExp(`(?:^|[^a-z0-9])(?:${words.map(w=>clean(w).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|')})(?:$|[^a-z0-9])`)]);
+const vectorCache=new WeakMap();
+function entryVectors(entry){const signature=entry.text+'\n'+(entry.section||'')+'\n'+(entry.topics||[]).join(' '),old=vectorCache.get(entry);if(old?.signature===signature)return old;const result={signature,body:vector(entry.text),expanded:vector(signature)};vectorCache.set(entry,result);return result;}
 export function vector(text) {
   const input=clean(text), weights=new Map();
   for(const token of input.match(/[a-z0-9]+/g)||[]){if(token.length<3||stop.has(token))continue;const stem=token.length>6?token.replace(/(?:ungen|ation|ing|isch|en|er|es|e|s)$/,''):token;weights.set(stem,(weights.get(stem)||0)+1);}
-  for(const [concept,words]of Object.entries(concepts))if(words.some(word=>new RegExp(`(?:^|[^a-z0-9])${clean(word).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:$|[^a-z0-9])`).test(input)))weights.set('@'+concept,3);
+  for(const [concept,matcher]of matchers)if(matcher.test(input))weights.set('@'+concept,3);
   const length=Math.sqrt([...weights.values()].reduce((sum,v)=>sum+v*v,0))||1;
   return Object.fromEntries([...weights].map(([k,v])=>[k,v/length]));
 }
@@ -36,7 +39,7 @@ export function rankEntries(entries, { question, domain=null, project=null, limi
   const anchors=['@usa','@gold','@nasdaq','@dow',...(q['@instagram']&&!q['@rules']?['@instagram']:[]),...(q['@media']?['@media']:[]),...(q['@trading']?['@trading']:[]),...(q['@local']&&q['@architecture']?['@local']:[])].filter(k=>q[k]);
   const eligible=entries.filter(e=>(e.status==='active'||includeHistory&&e.status==='historical')&&!e.reviewRequired&&(!domain||e.domains.includes(domain))&&(!project||e.project===project));
   return eligible.map(entry=>{
-    const body=vector(entry.text),v=vector(entry.text+' '+(entry.section||'')+' '+entry.topics.join(' '));let score=Object.entries(q).reduce((sum,[k,w])=>sum+w*(v[k]||0),0);
+    const cached=entryVectors(entry),body=cached.body,v=cached.expanded;let score=Object.entries(q).reduce((sum,[k,w])=>sum+w*(v[k]||0),0);
     if(q['@workflow']&&v['@workflow'])score+=0.12;
     const topical=['@media','@trading','@social','@instagram','@local','@business'].some(k=>q[k]&&body[k]);
     if(entry.sourceAuthority==='provided_document_unverified'&&topical)score+=0.25;

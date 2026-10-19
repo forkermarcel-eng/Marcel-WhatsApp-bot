@@ -12,6 +12,7 @@ Stand: 19.10.2026. Diese Punkte sind nicht verdeckt; sie sind in der Master-Abna
 | Sprache/Smart Home | BLOCKED | Mikrofone, Home-Assistant-Endpunkt und ausdrückliche Haushalts-/Datenschutzfreigabe fehlen. |
 | Social-Media-Discovery/Publishing | BLOCKED | Keine Account-/API-Berechtigung. Entwürfe bleiben bis zu expliziter Freigabe lokal und unveröffentlicht. |
 | Automatisierte Browser-Performance-Messung | NOT STARTED | Keine dauerhafte, datenschutzgeprüfte RUM-/Synthetic-Monitoring-Infrastruktur konfiguriert. |
+| Zwei Trading-Nachrichtenquellen | PARTIAL | `Treasury Auctions` und `GDELT Discovery` meldeten im Produktionslog einen vorhandenen Cache mit Fehlerstatus. Der Worker hält alte Daten sichtbar statt sie als frisch auszugeben; Anbieterfehler getrennt prüfen, ohne die übrigen Quellen zu stoppen. |
 
 ## Datenbankänderungen
 

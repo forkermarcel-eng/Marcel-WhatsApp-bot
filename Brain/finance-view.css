@@ -33,3 +33,11 @@
 @media(max-width:360px){.experience[data-workspace=finance] .finance-market-grid{grid-template-columns:minmax(0,1fr)}}
 
 @media(min-width:1250px){.experience[data-workspace=finance] .finance-market-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
+.experience[data-workspace=finance] .finance-outlook{grid-area:markets}
+.experience[data-workspace=finance] .finance-upcoming{margin:0;padding:0;list-style:none}
+.experience[data-workspace=finance] .finance-upcoming li{padding:14px;margin:10px 0;border:1px solid #3998c759;border-radius:13px;background:linear-gradient(135deg,#13629b33,#05244366)}
+.experience[data-workspace=finance] .finance-upcoming h3{font-size:15px;line-height:1.45;margin:8px 0;overflow-wrap:anywhere}
+.experience[data-workspace=finance] .finance-upcoming a{color:#e8f6ff;text-decoration:none}
+.experience[data-workspace=finance] .finance-upcoming small{color:#b0d5eb;font-size:11px}
+.experience[data-workspace=finance] .finance-upcoming .finance-impact{font-size:10px}

@@ -1,5 +1,6 @@
 import {renderWeatherView} from './weather-view.js';
 const weatherStyles=document.createElement('link');weatherStyles.rel='stylesheet';weatherStyles.href=new URL('./weather-view.css',import.meta.url).href;document.head.append(weatherStyles);
+const weatherVisibility=()=>document.documentElement.classList.toggle('weather-tab-hidden',document.hidden);document.addEventListener('visibilitychange',weatherVisibility);weatherVisibility();
 // Separate views sharing the authenticated world service and selected globe location.
 export function createWorldWorkspaces({root,api,esc,safe,getPlace}){
  const section=document.createElement('section');section.className='world-workspace';section.hidden=true;section.setAttribute('aria-label','Eigenständige Ansicht');root.append(section);
@@ -34,7 +35,7 @@ export function createWorldWorkspaces({root,api,esc,safe,getPlace}){
   if(!place){data.innerHTML='<p class="workspace-status">Suche einen Ort oder verwende die vorhandene Globusauswahl.</p>';return;}
   data.innerHTML='<p class="workspace-status">Vorhersage wird geladen …</p>';
   try{const {weather:w}=await api('weather',{lat:place.lat,lon:place.lon});if(version!==generation)return;
-   const view=renderWeatherView({weather:w,place,esc});section.dataset.weather=view.kind;section.dataset.night=String(view.night);data.innerHTML=view.html;
+   const view=renderWeatherView({weather:w,place,esc});section.dataset.weather=view.kind;section.dataset.night=String(view.night);section.dataset.light=view.phase;data.innerHTML=view.html;
   }catch(error){if(version===generation){data.textContent=error.message;data.classList.add('weather-load-error');}}
  }
  function open(view){active=view;generation++;root.dataset.workspace=view;document.getElementById('worldHome').classList.toggle('selected',view==='world');section.hidden=view==='world';document.querySelectorAll('[data-world-nav]').forEach(b=>{b.classList.toggle('active',b.dataset.worldNav===view);b.setAttribute('aria-current',b.dataset.worldNav===view?'page':'false');});if(view==='news')news();if(view==='finance')news(true);if(view==='weather')weather();}

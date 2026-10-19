@@ -24,7 +24,8 @@ try{
     const sources=[];
     for(const spec of specs)sources.push(spec.path.endsWith('.jsonl')?await readChatSource(spec):readSource(spec));
     const archive=get('archive');if(archive&&existsSync(archive))sources.push(...readDocumentArchive(archive));
-    const indexPath=join(repoRoot,'index.js'),index=readFileSync(indexPath,'utf8');
+    const policyPath=join(repoRoot,'services','communication-policies.js');
+    const indexPath=existsSync(policyPath)?policyPath:join(repoRoot,'index.js'),index=readFileSync(indexPath,'utf8');
     const persona=index.match(/const MARCEL_PERSONA_V1_7_2 = `([\s\S]*?)`;/)?.[1];
     if(persona)sources.push({id:hash([indexPath,hash(persona)]),contentHash:hash(persona),path:indexPath+'#MARCEL_PERSONA_V1_7_2',title:'Bestehende Marcel Persona V1.7.2',project:'marcel',domain:'MARCEL_DNA',authority:'existing_persona_code',kind:'communication_rule',status:'processed',blocks:textBlocks(persona)});
     for(const source of sources){source.blocks=contextualBlocks(source.blocks||[]);source.extractorVersion=2;}

@@ -1,0 +1,15 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {resolve,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {discoverSources} from '../brain-knowledge/discover.js';
+import {readSource,readChatSource,contextualBlocks} from '../brain-knowledge/extract.js';
+import {hash,candidateFromBlock} from '../brain-knowledge/model.js';
+const args=process.argv.slice(2),option=name=>{const i=args.indexOf(name);return i<0?undefined:args[i+1];};
+const repoRoot=resolve(dirname(fileURLToPath(import.meta.url)),'..'),workflowRoot=option('--workflow');
+if(!workflowRoot)throw Error('Explicit --workflow path required. Read-only audit; no database connection.');
+const sources=[];for(const spec of discoverSources({repoRoot,workflowRoot:resolve(workflowRoot),documentsRoot:option('--documents')||'',downloadsRoot:option('--downloads')||'',chatRoot:option('--chats')||''}))sources.push(spec.path.endsWith('.jsonl')?await readChatSource(spec):readSource(spec));
+const candidates=new Set(),documents=sources.map(source=>{const blocks=contextualBlocks(source.blocks||[]);let count=0,duplicates=0;for(const block of blocks){const candidate=candidateFromBlock({...source,reviewAll:true},block);if(!candidate)continue;count++;if(candidates.has(candidate.id))duplicates++;candidates.add(candidate.id);}return {title:source.title,project:source.project,status:source.status,reason:source.reason,contentHash:source.contentHash,blocks:blocks.length,candidates:count,duplicates};});
+const index=readFileSync(resolve(repoRoot,'index.js'),'utf8'),policies=readFileSync(resolve(repoRoot,'services/communication-policies.js'),'utf8');
+const report={generatedAt:new Date().toISOString(),readOnly:true,productionCompared:false,productionReason:'Railway access suspended by owner; no completeness claim against production register.',index:{bytes:Buffer.byteLength(index),sha256:hash(index),lines:index.split('\n').length,policyBytes:Buffer.byteLength(policies),policySha256:hash(policies),policyNames:[...policies.matchAll(/export const (\w+) =/g)].map(m=>m[1]),remainingMemorySeed: index.includes('seedMarcelMemory'),remainingEmbeddedPolicyIdentifiers:[...new Set([...index.matchAll(/(?:const|function) (\w*(?:PROMPT|PERSONA|RULES|MEMORY|DNA)\w*)/g)].map(m=>m[1]))]},documents,uniqueCandidateIds:candidates.size,counts:Object.fromEntries(['processed','missing','excluded','unreadable'].map(status=>[status,documents.filter(d=>d.status===status).length]))};
+const output=option('--out');if(output)writeFileSync(resolve(output),JSON.stringify(report,null,2),{flag:'wx',mode:0o600});
+console.log(JSON.stringify({readOnly:true,productionCompared:false,counts:report.counts,uniqueCandidateIds:report.uniqueCandidateIds,index:report.index,reportWritten:!!output},null,2));

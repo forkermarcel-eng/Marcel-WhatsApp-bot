@@ -31,7 +31,7 @@ Stand: 19.10.2026. Quellen dieses Registers sind Master Night Build (1/4), Forts
 | PD-1 Einheitliche Premium-Designsprache/desktop und mobil | PARTIAL | Liquid-Glass- und responsive Arbeitsflächen implementiert und lokal gerendert; authentifizierte Produktionsansicht noch nicht visuell abgenommen. |
 | PD-2 Magazin-News mit Bildern/Karussells/Interaktion | PASS | News-Workspace und Quell-/Cache-Layer liefern bebilderte, navigierbare Kacheln; Feed- und Cache-Tests bestanden. |
 | PD-3 Echte Wettervorhersage | PASS | Provider-Adapter statt Fixture-Daten im produktiven Pfad; lokale UI-Prüfung der Ortswechsel bestanden. |
-| PD-4 Live-Finanzdaten: Anbieter prüfen, Aktualisierung reparieren | PASS | Massive-Anbindung untersucht und integriert: opt-in, maximal vier vorhandene Kontrakte, zehnminütiger Takt, keine Symbolerfindung, verzögerte Kennzeichnung. Der bestehende News-Worker protokollierte erfolgreiche 200/304-Abrufe. |
+| PD-4 Live-Finanzdaten: Anbieter prüfen, Aktualisierung reparieren | PARTIAL | Massive-Anbindung untersucht und integriert: opt-in, maximal vier vorhandene Kontrakte, zehnminütiger Takt, keine Symbolerfindung, verzögerte Kennzeichnung. Der bestehende News-Worker protokollierte erfolgreiche 200/304-Abrufe. Das vorhandene Entitlement liefert derzeit nur deutlich verzögerte Kerzen; es wird deshalb niemals als Livefeed dargestellt. |
 | PD-5 Veröffentlichung und veröffentlichte Website prüfen | PARTIAL | Deployment-Commit wird erstellt/über die bestehende Pipeline veröffentlicht. Externe Website kann ohne angemeldete Sitzung nur auf `/login` geprüft werden; siehe offene Punkte. |
 
 ## Massive: konkrete Integration

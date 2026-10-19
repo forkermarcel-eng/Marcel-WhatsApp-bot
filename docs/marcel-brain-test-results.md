@@ -8,6 +8,7 @@ Stand: 19.10.2026. Alle hier genannten Befehle wurden im Worktree `trading-curre
 | Trading Provider und Massive | PASS | `node --test trading-core/tests/providers.test.js trading-core/tests/current-integration.test.js`: 14/14. Der neue Test prüft Opt-in, keine Abrufe ohne Freigabe, Vier-Kontrakt-Grenze, Bearer-Header und Speicherung nur als `massive-delayed`. |
 | Kontext-Nachrichten | PASS | Railway-Logs: Contextworker gestartet im 60-s-Takt, erfolgreiche HTTP-200/304-Abrufe, bestehende Backoff-Fehler bleiben sichtbar und werden nicht als Erfolg ausgegeben. |
 | Massive-Zugang | PASS | Read-only Probe gegen den bereits konfigurierten Anbieter: HTTP 200, gültige Ergebnisliste; Schlüssel nicht ausgegeben. |
+| Massive-Ende-zu-Ende-Synchronisierung | PASS | Nach Korrektur der UTC-Minuten-Grenzen: 4/4 vorhandene Kontrakte, je 120 Kerzen, als `massive-delayed` gespeichert. Die zurückgelieferten Zeitstempel lagen am 05.10.2026 und werden deshalb korrekt als stale/verzögert behandelt. |
 | Brain/World Regression | PASS | Zuvor ausgeführt: `npm run test:night-build` 13/13 und `npm run test:brain-world` 13/13. |
 | Workspace/Navigations-UI | PASS | Zuvor ausgeführt: `npm run test:web-ui` 7/7; lokaler Desktop- und Mobile-Snapshot ohne Scroll-/Nav-Regression. |
 | Gesamte lokale Testmatrix | PASS | Alle von `npm test` referenzierten Suiten wurden in ihrer jeweiligen npm-Teilgruppe ausgeführt. Die besonders lange Shared-Media-Suite endete mit Exit 0, 66 bestanden, 0 fehlgeschlagen. |

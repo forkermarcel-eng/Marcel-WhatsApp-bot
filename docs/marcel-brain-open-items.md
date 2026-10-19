@@ -5,7 +5,7 @@ Stand: 19.10.2026. Diese Punkte sind nicht verdeckt; sie sind in der Master-Abna
 | Bereich | Status | Konkreter Blocker / nächster Schritt |
 | --- | --- | --- |
 | Visuelle Produktionsabnahme | UNVERIFIED | Eine authentifizierte Browser-Sitzung für die veröffentlichte Marcel-Brain-Domain fehlt. Nach Login: Brain, Weltmarker/Zoom, News, Wetter, Finanzen sowie Mobilansicht gegen die Referenz prüfen. |
-| Massive als Echtzeitfeed | BLOCKED | Der verwendete Tarif/Entitlement liefert keine zugesicherte Echtzeit. Die Anwendung speichert/zeigt deshalb ausschließlich verzögerte Daten. Für Echtzeit wäre eine ausdrückliche Tarif- und Kostenfreigabe nötig. |
+| Massive als Echtzeitfeed | BLOCKED | Der verwendete Tarif/Entitlement lieferte beim E2E-Abruf Kerzen vom 05.10.2026 und keine zugesicherte Echtzeit. Die Anwendung speichert/zeigt sie ausschließlich als verzögert/stale. Für Echtzeit wäre eine ausdrückliche Tarif- und Kostenfreigabe nötig. |
 | Wetterradar/Unwetter | NOT STARTED | Es gibt keine kostenfrei freigegebene Radar-/Warnquelle im Bestand. Vor Ergänzung Anbieter, Lizenz und Rate-Limit prüfen. |
 | Lokaler KI-Motor | BLOCKED | Kein lokaler Ollama/Qwen/llama.cpp-Server, Modellgewicht oder Hardwareziel konfiguriert. Der Adapter akzeptiert nur Loopback-Verbindungen. |
 | iPhone-App | BLOCKED | Apple Developer Signing, Gerät und private Pairing-Freigabe fehlen. |

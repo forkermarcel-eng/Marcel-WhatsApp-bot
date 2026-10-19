@@ -59,6 +59,7 @@ body.world-active .experience[data-scene=world] .globe-zoom{width:48px!important
 @keyframes city-atmosphere-rain{to{transform:translate(-20px,340px)}}
 @keyframes city-atmosphere-flash{0%,93%,96%,100%{opacity:.2}94%,95%{opacity:.8}}
 @media(max-width:1050px){.world-active .world-city-card{height:350px}.world-active .world-city-card .city-main{border-radius:17px 17px 0 0;grid-template-rows:128px 34px}.world-active .world-city-card .city-more{padding-top:10px}.world-active .world-city-card .place-summary-heading{padding-right:130px}.world-active .world-city-card .more-information{position:static;align-self:flex-start;margin-top:0}.world-active .world-city-card #placeOverview{min-height:45px}}
+@media(max-width:1050px){.world-active .world-city-card{grid-template-rows:190px minmax(0,1fr)}.world-active .world-city-card .city-main{box-sizing:border-box}}
 @media(max-width:800px){.world-active .world-city-card{height:350px}.world-active .world-city-card .city-more{min-height:0}.world-active .world-city-card .place-summary-heading{padding-right:0}}
 @media(prefers-reduced-motion:reduce){.world-active .world-city-card .city-weather-atmosphere *{animation:none!important}}
 .world-motion-off .world-city-card .city-weather-atmosphere *{animation:none!important}

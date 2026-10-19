@@ -2,7 +2,6 @@ import {PgRepository} from '../trading-core/server/repository.js';
 import {dedupeEvents} from '../trading-core/server/official-context.js';
 import {fetchNews} from '../trading-core/server/news-sources.js';
 import {parseFeed} from './service.js';
-import {readWorldMarkets} from './markets.js';
 import {DateTime} from 'luxon';
 
 // Separate presentation channel. These sources never enter general world news.
@@ -12,6 +11,11 @@ export const FINANCE_FEEDS=[
  {id:'fn-economy',name:'FinanzNachrichten.de · Wirtschaft',url:'https://www.finanznachrichten.de/rss-nachrichten-wirtschaft-konjunktur',country:'DE',language:'de',category:'Wirtschaft'},
  {id:'fn-markets',name:'FinanzNachrichten.de · Märkte',url:'https://www.finanznachrichten.de/rss-marktberichte',country:'DE',language:'de',category:'Finanzen'}
 ];
+// Exact dashboard instruments. Never substitute Trading contracts or ETFs.
+export const FINANCE_MARKETS=[
+ ['dax','DAX','Deutschland'],['sp500','S&P 500','USA'],['nasdaq100','Nasdaq 100','USA Technologie'],['dow','Dow Jones','USA'],['gold','Goldpreis','Edelmetalle'],['bitcoin','Bitcoin / USD','Kryptowährungen'],['eurusd','EUR / USD','Devisen'],['brent','Brent-Öl','Energie']
+].map(([id,contract,region])=>({id,contract,region}));
+export function unavailableFinanceMarkets(){return FINANCE_MARKETS.map(m=>({...m,status:'unavailable',value:null,change:null,changePercent:null,at:null,chart:[],source:null,reason:'Keine freigegebene Kursanbindung für dieses Instrument. Neue Datenversorgung zurückgestellt.'}));}
 const KEY='finance-headlines:v1',TTL=72*3600000;
 export function parseEurostatEvents(rows,at){
  if(!Array.isArray(rows))throw Error('Ungültiger Eurostat-Kalender');
@@ -52,12 +56,12 @@ export function createFinanceService({pool,repository=new PgRepository(pool),fet
  })().finally(()=>running=null);return running;}
  async function read(){
   const now=clock(),warnings=[];
-  const settled=await Promise.allSettled([readWorldMarkets(pool,{repository,now}),repository.list('events',10000),repository.get('settings','providerSync'),repository.list('observations',100),cache()]);
-  const value=(i,fallback)=>{if(settled[i].status==='fulfilled')return settled[i].value;warnings.push(['Marktdaten','Wirtschaftskalender','Quellenstatus','Offizielle Indikatoren','Finanznachrichten'][i]+' derzeit nicht erreichbar.');return fallback;};
-  const market=value(0,{items:[]}),events=value(1,[]),sync=value(2,null),observations=value(3,[]),state=value(4,{sources:{}});
-  const news=[...new Map(Object.values(state.sources||{}).flatMap(s=>(s.items||[]).map(n=>({...n,cached:!!s.error,checkedAt:s.checkedAt}))).filter(n=>Date.parse(n.publishedAt)>now-TTL&&Date.parse(n.publishedAt)<=now+300000).map(n=>[n.url,n])).values()].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt));
-  const indicators=observations.filter(o=>['DGS2','DGS10','DFII10','DTWEXBGS'].includes(o.id)&&Number.isFinite(o.value)).map(o=>({contract:o.label,source:o.source,value:o.value,unit:o.unit,datePrecision:o.date_precision,at:o.at,change:o.change,basis:'Änderung zum vorherigen offiziellen Wert',stale:now-Date.parse(o.at)>4*86400000,delayed:true,chart:(o.points||[]).map(p=>({time:p.date,value:p.value}))}));
-  return {at:new Date(now).toISOString(),markets:[...indicators,...market.items],events:selectFinanceEvents([...events,...(state.calendar?.events||[])],sync,now),calendarStatus:sync?.calendarStatus||'UNKNOWN',calendarUpdatedAt:sync?.lastSyncAt||state.calendar?.checkedAt||null,news:news.slice(0,32),important:importantFinanceNews(news),sourceStatus:[...FINANCE_FEEDS.map(s=>({name:s.name,url:s.url,checkedAt:state.sources?.[s.id]?.checkedAt||null,error:state.sources?.[s.id]?.error||null})),{name:'Eurostat',checkedAt:state.calendar?.checkedAt||null,error:state.calendar?.error||null}],warnings};
+  const settled=await Promise.allSettled([repository.list('events',10000),repository.get('settings','providerSync'),cache()]);
+  const value=(i,fallback)=>{if(settled[i].status==='fulfilled')return settled[i].value;warnings.push(['Wirtschaftskalender','Quellenstatus','Finanznachrichten'][i]+' derzeit nicht erreichbar.');return fallback;};
+  const events=value(0,[]),sync=value(1,null),state=value(2,{sources:{}});
+  const seenTitles=new Set();
+  const news=[...new Map(Object.values(state.sources||{}).flatMap(s=>(s.items||[]).map(n=>({...n,cached:!!s.error,checkedAt:s.checkedAt}))).filter(n=>Date.parse(n.publishedAt)>now-TTL&&Date.parse(n.publishedAt)<=now+300000).map(n=>[n.url,n])).values()].sort((a,b)=>b.publishedAt.localeCompare(a.publishedAt)).filter(n=>{const title=n.title.toLocaleLowerCase('de-DE').replace(/[^\p{L}\p{N}]+/gu,' ').trim();if(seenTitles.has(title))return false;seenTitles.add(title);return true;});
+  return {at:new Date(now).toISOString(),markets:unavailableFinanceMarkets(),marketStatus:{configured:false,targetRefreshMinutes:30,actualRefreshMinutes:null,reasonCode:'ADAPTER_PENDING_APPROVAL'},events:selectFinanceEvents([...events,...(state.calendar?.events||[])],sync,now),calendarStatus:sync?.calendarStatus||'UNKNOWN',calendarUpdatedAt:sync?.lastSyncAt||state.calendar?.checkedAt||null,news:news.slice(0,32),important:importantFinanceNews(news),sourceStatus:[...FINANCE_FEEDS.map(s=>({name:s.name,url:s.url,checkedAt:state.sources?.[s.id]?.checkedAt||null,error:state.sources?.[s.id]?.error||null})),{name:'Eurostat',checkedAt:state.calendar?.checkedAt||null,error:state.calendar?.error||null}],warnings};
  }
  return {read,syncNews};
 }

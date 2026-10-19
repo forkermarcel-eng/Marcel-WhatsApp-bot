@@ -1,4 +1,5 @@
 import {createWorldService} from './service.js';
+import {readWorldMarkets} from './markets.js';
 export function registerWorldRoutes({app,pool,authorized}){
  const service=createWorldService({pool});let ready=false,running=false;
  async function tick(){if(running)return;running=true;try{await pool.query('SELECT 1 FROM marcel_world.news LIMIT 0');ready=true;await service.sync();}catch(e){console.error('Brain Welt: Hintergrundaktualisierung nicht verfügbar.',e.code||'provider_error');}finally{running=false;}}
@@ -19,6 +20,8 @@ export function registerWorldRoutes({app,pool,authorized}){
    if(op==='place')return res.json({ok:true,place:await service.placeInfo(q.id)});
    if(op==='news')return res.json({ok:true,...await service.news(q)});
    if(op==='favorites')return res.json({ok:true,items:await service.favorites()});
+   if(op==='markets')return res.json({ok:true,...await readWorldMarkets(pool)});
+   if(op==='saved')return res.json({ok:true,items:(await pool.query("SELECT body FROM marcel_knowledge.entries WHERE id LIKE 'news:%' AND body->>'bookmarkedBy'='owner' ORDER BY body->>'createdAt' DESC LIMIT 300")).rows.map(r=>r.body)});
    return res.status(400).json({ok:false,error:'Unbekannte Weltoperation.'});
   }catch(e){return res.status(e.status||503).json({ok:false,error:e.status?e.message:'Welt-Datenquelle ist momentan nicht erreichbar.'});}
  });return {service,tick,stop:()=>{clearTimeout(initial);clearInterval(timer);clearInterval(cleanupTimer);}};

@@ -1,5 +1,6 @@
 import {hash,secretRisk} from '../brain-knowledge/model.js';
 const kinds={ENTSCHEIDUNG:'decision',ANFORDERUNG:'requirement',STILREGEL:'communication_rule',LERNREGEL:'communication_rule',WORKFLOW:'workflow',AUFGABE:'task',PRIORITAET:'priority',HISTORIE:'historical',FAKT:'owner_statement',KORREKTUR:'correction'};
+export const PROPOSAL_TYPES=Object.freeze(Object.keys(kinds));
 // Only explicitly structured messages, never markers buried in quotes or ordinary chat.
 export function structuredChatProposals({text,conversationId,requestId,project='marcel'}){
  if(!Object.hasOwn(kinds,text.trim().match(/^\[([A-Z]+)\]/)?.[1]||''))return [];

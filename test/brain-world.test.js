@@ -35,6 +35,12 @@ test('German default, explicit originals, marker selection and persistent favori
  const p={id:'munich',name:'München',lat:48.14,lon:11.58,countryCode:'DE'};await api.favorites(p);await api.favorites(p);assert.equal((await createWorldService({pool}).favorites()).length,1);assert.equal((await api.favorites(p,true)).length,0);assert.equal((await db.query('SELECT count(*) FROM marcel_knowledge.entries')).rows[0].count,0);assert.equal((await db.query('SELECT * FROM marcel_memory')).rows[0].human_verified,true);
  }finally{await db.close();}
 });
+test('a 47-article cluster retains all selected IDs across pagination and explicit filters',async()=>{
+ const {db,pool}=await database();try{const ids=[];for(let i=0;i<47;i++){const id=hash('synthetic-cluster-'+i);ids.push(id);await db.query("INSERT INTO marcel_world.news VALUES($1,$2,now(),now(),now()+interval '1 hour')",[id,{id,title:'Synthetic cluster article '+i,sourceId:'fixture',source:'Testquelle',language:'de',category:'Wirtschaft',publishedAt:new Date(Date.now()-i*1000).toISOString()}]);}
+ const service=createWorldService({pool}),first=await service.news({ids,scope:'marker'}),second=await service.news({ids,scope:'marker',page:1});assert.equal(first.total,47);assert.equal(new Set([...first.items,...second.items].map(item=>item.id)).size,47);
+ assert.equal((await service.news({ids,sourceId:'other'})).total,0);assert.equal((await service.news({ids,q:'cluster article 46',sourceId:'fixture'})).total,1);assert.equal((await db.query('SELECT count(*) FROM marcel_knowledge.entries')).rows[0].count,0);
+ }finally{await db.close();}
+});
 test('RSS rejects expired/future/unsafe entries and preserves real geographic evidence',()=>{
  const raw=`<rss><channel><item><title><![CDATA[<b>Mombasa</b>]]></title><link>https://example.org/a</link><pubDate>Sun, 18 Oct 2026 10:00:00 GMT</pubDate><georss:point>-4.04 39.66</georss:point><media:thumbnail url="https://example.org/a.jpg"/></item><item><title>old</title><link>https://example.org/old</link><pubDate>Sun, 11 Oct 2026 10:00:00 GMT</pubDate></item><item><title>unsafe</title><link>javascript:alert(1)</link><pubDate>Sun, 18 Oct 2026 10:00:00 GMT</pubDate></item></channel></rss>`;
  const rows=parseFeed(raw,source,now);assert.equal(rows.length,1);assert.equal(rows[0].title,'Mombasa');assert.equal(rows[0].sourceCountry,'KE');assert.deepEqual(rows[0].location,{lat:-4.04,lon:39.66});assert.ok(Date.parse(rows[0].expiresAt)<=now+TTL);

@@ -41,7 +41,10 @@ export function normalizeWeather(data,lat,lon,now=Date.now()){
  const timezone=tzlookup(lat,lon),day=t=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(t));
  const current=series.find(x=>Date.parse(x.time)>=now-3600000)||series[0],d=current.data.instant.details;
  const temps=series.filter(x=>day(x.time)===day(now)).map(x=>x.data.instant.details.air_temperature).filter(Number.isFinite);
- return {temperature:d.air_temperature,humidity:d.relative_humidity,wind:d.wind_speed,windDirection:d.wind_from_direction,symbol:current.data.next_1_hours?.summary?.symbol_code||current.data.next_6_hours?.summary?.symbol_code||'cloudy',precipitation:current.data.next_1_hours?.details?.precipitation_amount??null,min:temps.length?Math.min(...temps):null,max:temps.length?Math.max(...temps):null,validAt:current.time,updatedAt:data.properties.meta.updated_at,fetchedAt:new Date(now).toISOString(),timezone,source:'MET Norway',license:'CC BY 4.0',kind:'Modellvorhersage',stale:false};
+ const hourly=series.filter(x=>Date.parse(x.time)>=now-3600000).slice(0,48).map(x=>({time:x.time,temperature:x.data.instant.details.air_temperature,humidity:x.data.instant.details.relative_humidity,wind:x.data.instant.details.wind_speed,precipitation:x.data.next_1_hours?.details?.precipitation_amount??null,symbol:x.data.next_1_hours?.summary?.symbol_code||x.data.next_6_hours?.summary?.symbol_code||null}));
+ const days=new Map();for(const point of series){if(Date.parse(point.time)<now-3600000)continue;const key=day(point.time),values=days.get(key)||[];values.push(point);days.set(key,values);}
+ const daily=[...days].slice(0,8).map(([date,points])=>{const values=points.map(x=>x.data.instant.details.air_temperature).filter(Number.isFinite);return {date,min:values.length?Math.min(...values):null,max:values.length?Math.max(...values):null,samples:points.length,partial:date===day(now)||points.length<4};});
+ return {temperature:d.air_temperature,humidity:d.relative_humidity,wind:d.wind_speed,windDirection:d.wind_from_direction,symbol:current.data.next_1_hours?.summary?.symbol_code||current.data.next_6_hours?.summary?.symbol_code||'cloudy',precipitation:current.data.next_1_hours?.details?.precipitation_amount??null,min:temps.length?Math.min(...temps):null,max:temps.length?Math.max(...temps):null,validAt:current.time,updatedAt:data.properties.meta.updated_at,fetchedAt:new Date(now).toISOString(),timezone,source:'MET Norway',license:'CC BY 4.0',kind:'Modellvorhersage',stale:false,hourly,daily,warningsAvailable:false};
 }
 export function createWorldService({pool,fetcher=fetch,clock=Date.now}){
  const cached=async id=>(await pool.query('SELECT body,expires_at FROM marcel_world.cache WHERE id=$1',[id])).rows[0];
@@ -101,7 +104,7 @@ export function createWorldService({pool,fetcher=fetch,clock=Date.now}){
   }finally{if(locked)await client.query('SELECT pg_advisory_unlock(1810202606)');client.release();}
  }
  async function knownPlaces(){return (await pool.query("SELECT body FROM marcel_world.cache WHERE id LIKE 'geo:%' AND expires_at>now() LIMIT 500")).rows.flatMap(r=>Array.isArray(r.body)?r.body:[]);}
- async function news({category,scope='auto',name,country,region,level,lat,lon,placeId,language='de',ids,page=0}={}){
+ async function news({category,scope='auto',name,country,region,level,lat,lon,placeId,language='de',ids,page=0,q='',sourceId=''}={}){
   page=Math.min(300,Math.max(0,Math.floor(Number(page)||0)));
   const [raw,places,statuses]=await Promise.all([
    pool.query('SELECT body FROM marcel_world.news WHERE expires_at>now() ORDER BY published_at DESC LIMIT 10000').then(r=>r.rows.map(x=>x.body)),
@@ -112,8 +115,10 @@ export function createWorldService({pool,fetcher=fetch,clock=Date.now}){
   const rows=raw.map(item=>{const p=presentItem(item),source=sources.find(s=>s.id===p.sourceId);return {...p,coverage:p.coverage||source?.coverage||null,bookmarkPolicy:p.bookmarkPolicy||source?.bookmarkPolicy||'reference',geoRefs:enrichLocations(p,index)};});
   const markerRows=rows.filter(x=>language==='originals'?x.language!=='de'&&x.kind!=='earthquake':x.language==='de');
   const markerGroups=new Map();
-  for(const item of markerRows)for(const ref of item.geoRefs){const key=(item.kind==='earthquake'?'event:':'news:')+ref.id;let m=markerGroups.get(key);if(!m){m={...ref,id:key,kind:item.kind==='earthquake'?'earthquake':'news',ids:[],count:0,title:ref.level==='point'?(item.eventPlace||item.title):ref.name};markerGroups.set(key,m);}m.ids.push(item.id);m.count++;}
+  for(const item of markerRows)for(const ref of item.geoRefs){const key=(item.kind==='earthquake'?'event:':'news:')+ref.id;let m=markerGroups.get(key);if(!m){m={...ref,id:key,kind:item.kind==='earthquake'?'earthquake':'news',ids:[],count:0,title:ref.level==='point'?(item.eventPlace||item.title):ref.name,imageUrl:safeURL(item.imageUrl)};markerGroups.set(key,m);}m.ids.push(item.id);m.count++;}
   let list=markerRows;if(category&&category!=='Alle')list=list.filter(x=>x.category===category);
+  if(sourceId)list=list.filter(x=>x.sourceId===String(sourceId));
+  const search=fold(String(q).slice(0,200));if(search)list=list.filter(x=>fold(x.title+' '+(x.description||'')).includes(search));
   const wanted=Array.isArray(ids)?new Set(ids.filter(x=>/^[a-f0-9]{64}$/.test(x)).slice(0,500)):null;
   if(wanted?.size)list=list.filter(x=>wanted.has(x.id));
   list=list.map(x=>({...x,relation:relation(x,place)}));

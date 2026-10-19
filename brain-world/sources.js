@@ -22,17 +22,17 @@ export const sources=[
  ['abc','ABC Australia','https://www.abc.net.au/news/feed/51120/rss.xml','AU','en','Welt'],
  ['rnz','Radio New Zealand','https://www.rnz.co.nz/rss/national.xml','NZ','en','Welt'],
  ['elpais','El País América','https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/america/portada','ES','es','Welt'],
- ['elcolombiano','El Colombiano','https://www.elcolombiano.com/rss/portada.xml','CO','es','Welt'],
+ ['elcolombiano','El Colombiano','https://www.elcolombiano.com/rss/inicio.xml','CO','es','Welt'],
  ['eltiempo','El Tiempo','https://www.eltiempo.com/rss/mundo.xml','CO','es','Welt'],
  ['moscowtimes','The Moscow Times','https://www.themoscowtimes.com/rss/news','NL','en','Welt'],
  ['bbc-health','BBC Gesundheit','https://feeds.bbci.co.uk/news/health/rss.xml','GB','en','Gesundheit'],
  ['bbc-science','BBC Wissenschaft','https://feeds.bbci.co.uk/news/science_and_environment/rss.xml','GB','en','Wissenschaft'],
  ['bbc-business','BBC Wirtschaft','https://feeds.bbci.co.uk/news/business/rss.xml','GB','en','Wirtschaft'],
  ['bbc-sport','BBC Sport','https://feeds.bbci.co.uk/sport/rss.xml','GB','en','Sport'],
- ['guardian-culture','Guardian Kultur','https://www.theguardian.com/culture/rss','GB','en','Kultur'],
+ ['guardian-culture','Guardian Kultur','https://www.theguardian.com/uk/culture/rss','GB','en','Kultur'],
  ['guardian-food','Guardian Essen','https://www.theguardian.com/food/rss','GB','en','Ernährung'],
- ['guardian-travel','Guardian Reisen','https://www.theguardian.com/travel/rss','GB','en','Reisen'],
- ['guardian-life','Guardian Lifestyle','https://www.theguardian.com/lifeandstyle/rss','GB','en','Lifestyle']
+ ['guardian-travel','Guardian Reisen','https://www.theguardian.com/uk/travel/rss','GB','en','Reisen'],
+ ['guardian-life','Guardian Lifestyle','https://www.theguardian.com/uk/lifeandstyle/rss','GB','en','Lifestyle']
  ,['usgs','U.S. Geological Survey','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.atom','US','en','Naturereignisse']
 ].map(([id,name,url,country,language,category])=>({id,name,url,country,language,category}));
 // Endpoints below were checked against the publisher and parsed before activation.

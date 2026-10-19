@@ -1,0 +1,22 @@
+// Synthetic fixtures only. Never imports index.js, reads credentials or connects to Railway.
+import express from 'express';
+import {resolve,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {normalizeWeather} from '../brain-world/service.js';
+import {openLocalKnowledge} from '../brain-knowledge/repository.js';
+import {registerBrainChatRoutes} from '../brain-chat/routes.js';
+const app=express(),root=resolve(dirname(fileURLToPath(import.meta.url)),'..');app.use(express.json());
+const repository=await openLocalKnowledge(':memory:');
+app.use('/api/dashboard/marcel-brain',(req,res,next)=>{if(req.query.resource!=='chat')return next();req.url='/dashboard-api/marcel-brain/chat'+new URL(req.originalUrl,'http://localhost').search;app.handle(req,res,next);});
+registerBrainChatRoutes({app,repository,authorized:()=>true,environment:{BRAIN_CHAT_ENABLED:'true'},readers:{readMemory:async()=>[{id:'fixture-height',memory_key:'height',memory_value:{centimeters:171},human_verified:true,allowed_for_bot:true}],readLiveState:async()=>null}});
+app.get('/__fixture',async(_req,res)=>res.json({synthetic:true,entries:(await repository.list('entries')).map(e=>({project:e.project,status:e.status,kind:e.kind,reviewRequired:e.reviewRequired}))}));
+const place={id:'fixture-munich',name:'München · TESTDATEN',lat:48.14,lon:11.58,countryCode:'DE',country:'Deutschland',timezone:'Europe/Berlin',level:'city'};
+const series=Array.from({length:72},(_,i)=>({time:new Date(Date.now()+i*3600000).toISOString(),data:{instant:{details:{air_temperature:12+Math.sin(i/6)*5,wind_speed:3,relative_humidity:64}},next_1_hours:{summary:{symbol_code:'partlycloudy_day'},details:{precipitation_amount:0}}}}));
+const article={id:'a'.repeat(64),title:'Synthetische Testmeldung für die lokale Ansicht',description:'Diese Meldung ist ein Testdatensatz und stammt aus keiner Nachrichtenquelle.',source:'Lokale Testquelle',sourceId:'fixture',publishedAt:new Date().toISOString(),category:'Wirtschaft',url:'https://example.org/',language:'de'};
+app.all('/api/dashboard/marcel-brain',(req,res)=>{res.setHeader('Cache-Control','no-store');const q={...req.query,...req.body};if(q.resource==='chat')return res.json({ok:true,mode:'knowledge',conversations:[]});if(q.resource!=='world')return res.json({ok:true,items:[],documents:[],entries:[],counts:{},domains:[],pending:[]});
+ if(q.op==='search'||q.op==='reverse')return res.json({ok:true,places:[place]});if(q.op==='weather')return res.json({ok:true,weather:normalizeWeather({properties:{meta:{updated_at:new Date().toISOString()},timeseries:series}},place.lat,place.lon)});
+ if(q.op==='favorites')return res.json({ok:true,items:[place]});if(q.op==='place')return res.json({ok:true,place:null});if(q.op==='markets')return res.json({ok:true,items:[{contract:'TEST-FUTURE',value:100,source:'Synthetische Testkerzen',at:new Date().toISOString(),basis:'TESTDATEN',delayed:true}],notice:'Nur synthetische lokale Testdaten; keine Marktpreise.'});if(q.op==='saved')return res.json({ok:true,items:[]});if(q.op==='bookmark')return res.json({ok:true,entry:{id:article.id}});
+ const items=q.q&&!article.title.includes(q.q)?[]:[article];return res.json({ok:true,items,total:items.length,page:0,perPage:30,markers:[{id:'fixture-marker',name:place.name,title:place.name,lat:place.lat,lon:place.lon,ids:[article.id],count:1,kind:'news',role:'mentioned'}],groups:{},sources:[{id:'fixture',name:'Lokale Testquelle',language:'de',category:'Wirtschaft'}],activeSources:1,germanSources:1,configuredSources:1});});
+app.use('/Brain',express.static(resolve(root,'Brain')));app.get('/presentation.js',(_req,res)=>res.sendFile('presentation.js',{root}));
+const server=app.listen(3099,'127.0.0.1',()=>console.log('Synthetic local preview: http://127.0.0.1:3099/Brain/'));
+const close=()=>server.close(()=>{repository.close();process.exit(0);});process.once('SIGINT',close);process.once('SIGTERM',close);

@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {createKnowledgeService} from '../brain-knowledge/service.js';
 import {hash,secretRisk} from '../brain-knowledge/model.js';
-import {structuredChatProposals} from './proposals.js';
+import {structuredChatProposals,PROPOSAL_TYPES} from './proposals.js';
 const PREFIX='brain-chat:';
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const validId=id=>typeof id==='string'&&/^[\da-f-]{36}$/i.test(id);
@@ -15,22 +15,24 @@ export function createBrainChat({repository,retrieve,generate,mode='knowledge'})
     async list(){return (await repository.list('meta')).filter(m=>m.id.startsWith(PREFIX)).map(c=>({id:c.conversationId,title:c.title,updatedAt:c.updatedAt})).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));},
     get,
     async create(){const id=randomUUID(),now=new Date().toISOString();const c={id:PREFIX+id,conversationId:id,title:'Neue Unterhaltung',createdAt:now,updatedAt:now,turns:[]};await save(c);return c;},
-    async send({conversationId,text,requestId,allowPersonal=false,domain=null,project=null,literal=false,signal,onEvent=()=>{}}){
+    async send({conversationId,text,requestId,allowPersonal=false,domain=null,project=null,proposalType=null,literal=false,signal,onEvent=()=>{}}){
       if(typeof text!=='string'||!text.trim()||text.length>6000)throw fail('Bitte eine Nachricht mit 1 bis 6.000 Zeichen eingeben.');
       if(secretRisk(text))throw fail('Die Nachricht enthält möglicherweise Zugangsdaten. Bitte diese vor dem Senden entfernen.');
       if(!validId(requestId))throw fail('Ungültige Nachrichtenkennung.');
+      if(proposalType&&!PROPOSAL_TYPES.includes(proposalType))throw fail('Unbekannte Art des Wissensvorschlags.');
       if(locks.has(conversationId))throw fail('In dieser Unterhaltung läuft bereits eine Antwort.',409);
       locks.add(conversationId);let c,turn;
       try{
         c=await get(conversationId);turn=c.turns.find(t=>t.id===requestId);
         if(turn&&turn.user!==text.trim())throw fail('Diese Nachrichtenkennung wurde bereits verwendet.',409);
+        if(turn&&((turn.project||null)!==(project||null)||(turn.proposalType||null)!==(proposalType||null)))throw fail('Der Vorschlagstyp oder das Projekt dieser Nachricht wurde geändert.',409);
         if(turn?.status==='complete'){onEvent('done',{conversation:c,cached:true});return c;}
         if(c.activeRequest&&Date.parse(c.activeRequest.until)>Date.now())throw fail('In dieser Unterhaltung läuft bereits eine Antwort. Bitte kurz warten.',409);
         if(c.turns.length>=200&&!turn)throw fail('Bitte eine neue Unterhaltung beginnen; dieser Verlauf ist voll.');
-        if(!turn){turn={id:requestId,user:text.trim(),createdAt:new Date().toISOString(),status:'pending',assistant:'',sources:[]};c.turns.push(turn);}
+        if(!turn){turn={id:requestId,user:text.trim(),project,proposalType,createdAt:new Date().toISOString(),status:'pending',assistant:'',sources:[]};c.turns.push(turn);}
         else{turn.status='pending';turn.assistant='';delete turn.error;}
         c.activeRequest={id:requestId,until:new Date(Date.now()+120000).toISOString()};c.title=c.turns[0].user.slice(0,65);c.updatedAt=new Date().toISOString();await save(c);
-        const structured=structuredChatProposals({text,conversationId,requestId,project:project||'marcel'});
+        const structured=structuredChatProposals({text:proposalType?`[${proposalType}]\n${text}\n[/${proposalType}]`:text,conversationId,requestId,project:project||'marcel'});
         if(structured.length&&!turn.proposalId){await createKnowledgeService(repository).ingest(structured);turn.proposalIds=structured.map(s=>s.id);turn.proposalId=structured[0].id;await save(c);}
         if(!structured.length&&/\b(?:merk(?:e)? dir|speichere als|ab sofort (?:unsere|die|eine) regel)\b/i.test(text)&&!turn.proposalId){
           const sourceId=hash([conversationId,requestId,'proposal']);

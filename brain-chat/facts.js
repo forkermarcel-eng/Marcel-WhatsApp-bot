@@ -12,7 +12,7 @@ function format(memory,field){let value=memory.memory_value;if(typeof value==='s
  if(value&&typeof value==='object'&&!Array.isArray(value)){const key=field.properties.find(k=>value[k]!=null);value=key?value[key]:value.value??null;}
  if(field.unit){if(typeof value==='string'&&/^\d+(?:[.,]\d+)?(?:\s*(?:cm|kg))?$/.test(value))value=Number(value.replace(',','.').replace(/\s*(cm|kg)$/,''));if(typeof value!=='number'||!Number.isFinite(value)||value<=0)return null;return new Intl.NumberFormat('de-DE',{maximumFractionDigits:2}).format(value)+' '+field.unit+'.';}
  if(Array.isArray(value)&&value.length<=15&&value.every(v=>typeof v==='string'&&v.length<80))value=value.join(', ');
- return typeof value==='string'&&value.length<250&&!secretRisk(value)?value.replace(/[.!?]+$/,'')+'.':null;
+ return typeof value==='string'&&value.trim().length>0&&value.length<250&&!secretRisk(value)?value.replace(/[.!?]+$/,'')+'.':null;
 }
 export function answerFact(memories,field,now=Date.now()){
  const rows=memories.filter(m=>m.human_verified===true&&m.allowed_for_bot===true&&(!m.status||m.status==='active')&&!/intimate|third.party/.test(m.sensitivity||'')&&(!m.valid_until||Date.parse(m.valid_until)>now)&&field.keys.includes(m.memory_key));

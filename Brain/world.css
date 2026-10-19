@@ -31,3 +31,34 @@ body.world-active .world-city-card,body.world-active .world-info{isolation:isola
 /* The flex column previously occupied the full upper globe width and swallowed
    pointer events outside its visible controls. Only its four buttons are hit targets. */
 body.world-active .experience[data-scene=world] .globe-zoom{width:48px!important;align-items:flex-start!important;pointer-events:none!important}body.world-active .experience[data-scene=world] .globe-zoom button{pointer-events:auto!important}
+
+/* Bottom place card only: weather behind the original image and information. */
+.world-active .world-city-card .city-main{position:relative;isolation:isolate;overflow:hidden;border-radius:17px 0 0 17px}
+.world-active .world-city-card .city-main>*:not(.city-weather-atmosphere){position:relative;z-index:1}
+.world-active .world-city-card .city-weather-atmosphere{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden;background:radial-gradient(ellipse at 70% 20%,#7cc7ff24,transparent 70%)}
+.world-active .world-city-card [data-weather=sun] .city-weather-atmosphere{background:radial-gradient(ellipse at 75% 10%,#ffe19466,transparent 65%)}
+.world-active .world-city-card [data-night=true] .city-weather-atmosphere{filter:brightness(.65)}
+.world-active .world-city-card .city-weather-atmosphere b{position:absolute;inset:-40%;background:radial-gradient(ellipse at 40% 40%,#dff4ff44,transparent 35%),radial-gradient(ellipse at 75% 65%,#d8eaff33,transparent 40%);filter:blur(12px);animation:city-atmosphere-drift 16s ease-in-out infinite alternate}
+.world-active .world-city-card [data-weather=fog] .city-weather-atmosphere b{background:repeating-linear-gradient(5deg,transparent,#e4f7ff55 20%,transparent 40%);filter:blur(16px)}
+.world-active .world-city-card [data-weather=thunder] .city-weather-atmosphere{background:#111d454d}
+.world-active .world-city-card [data-weather=thunder] .city-weather-atmosphere b{animation:city-atmosphere-flash 12s steps(1) infinite}
+.world-active .world-city-card .city-weather-atmosphere i{display:none;position:absolute;left:calc(var(--drop)*6.8%);top:-15%;width:1px;height:20px;background:linear-gradient(transparent,#a9e8ffb3);animation:city-atmosphere-rain 1.6s linear infinite;animation-delay:calc(var(--drop)*-.27s)}
+.world-active .world-city-card :is([data-weather=rain],[data-weather=thunder]) .city-weather-atmosphere i{display:block}
+.world-active .world-city-card [data-weather=snow] .city-weather-atmosphere{background:linear-gradient(125deg,#e3f7ff33,#85b8d322)}
+.world-active .world-city-card [data-weather=snow] .city-weather-atmosphere i{display:block;width:4px;height:4px;border-radius:50%;background:#fff;animation-duration:7s}
+.world-active .world-city-card #placeWeather>.weather-animation{display:none}
+.world-active .world-city-card .city-more{overflow:hidden;background:linear-gradient(140deg,#d5f4ff0d,#0a223633);gap:8px}
+.world-active .world-city-card .place-summary-heading{margin:0;font-size:13px;color:#e9f9ff;font-weight:650;letter-spacing:.02em}
+.world-active .world-city-card #placeOverview{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;line-height:1.55;min-height:0}
+.world-active .world-city-card #placeOverview .place-summary-text{display:block;-webkit-line-clamp:unset;overflow:visible;font-size:12px;margin:0 0 10px;color:#d8eaf5}
+.world-active .world-city-card .place-summary-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px;margin:0 0 6px}
+.world-active .world-city-card .place-summary-facts>div{min-width:0;border-top:1px solid #bfeaff26;padding-top:5px}
+.world-active .world-city-card .place-summary-facts dt{font-size:9px;color:#99cce2}
+.world-active .world-city-card .place-summary-facts dd{font-size:11px;margin:2px 0 0;overflow-wrap:anywhere;color:#ecf8ff}
+@keyframes city-atmosphere-drift{to{transform:translate(12%,5%)}}
+@keyframes city-atmosphere-rain{to{transform:translate(-20px,340px)}}
+@keyframes city-atmosphere-flash{0%,93%,96%,100%{opacity:.2}94%,95%{opacity:.8}}
+@media(max-width:1050px){.world-active .world-city-card{height:350px}.world-active .world-city-card .city-main{border-radius:17px 17px 0 0;grid-template-rows:128px 34px}.world-active .world-city-card .city-more{padding-top:10px}.world-active .world-city-card .place-summary-heading{padding-right:130px}.world-active .world-city-card .more-information{position:static;align-self:flex-start;margin-top:0}.world-active .world-city-card #placeOverview{min-height:45px}}
+@media(max-width:800px){.world-active .world-city-card{height:350px}.world-active .world-city-card .city-more{min-height:0}.world-active .world-city-card .place-summary-heading{padding-right:0}}
+@media(prefers-reduced-motion:reduce){.world-active .world-city-card .city-weather-atmosphere *{animation:none!important}}
+.world-motion-off .world-city-card .city-weather-atmosphere *{animation:none!important}

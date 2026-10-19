@@ -1,10 +1,11 @@
 import {renderWeatherView} from './weather-view.js';
+import {mountFinance} from './finance-view.js';
 const weatherStyles=document.createElement('link');weatherStyles.rel='stylesheet';weatherStyles.href=new URL('./weather-view.css',import.meta.url).href;document.head.append(weatherStyles);
 const weatherVisibility=()=>document.documentElement.classList.toggle('weather-tab-hidden',document.hidden);document.addEventListener('visibilitychange',weatherVisibility);weatherVisibility();
 // Separate views sharing the authenticated world service and selected globe location.
 export function createWorldWorkspaces({root,api,esc,safe,getPlace}){
  const section=document.createElement('section');section.className='world-workspace';section.hidden=true;section.setAttribute('aria-label','Eigenständige Ansicht');root.append(section);
- let active='world',generation=0,weatherPlace=null;
+ let active='world',generation=0,weatherPlace=null,closeFinance=()=>{};
  const date=value=>value?new Date(value).toLocaleString('de-DE'):'Nicht verfügbar';
  const chart=item=>{const values=(item.chart||[]).map(p=>p.value).filter(Number.isFinite);if(values.length<2)return '';const min=Math.min(...values),max=Math.max(...values),points=values.map((value,i)=>`${(i/(values.length-1)*280).toFixed(1)},${(72-(value-min)/(max-min||1)*64).toFixed(1)}`).join(' ');return `<svg class="market-chart" viewBox="0 0 280 80" role="img" aria-label="Verlauf der letzten ${values.length} gespeicherten Schlusskurse"><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;};
  const cards=items=>items.map((item,index)=>`<article class="workspace-card workspace-story ${index===0?'workspace-story-featured':index<5?'workspace-story-lead':'workspace-story-compact'}">${safe(item.imageUrl)?`<img class="workspace-thumbnail" src="${esc(safe(item.imageUrl))}" alt="" loading="lazy" referrerpolicy="no-referrer">`:""}<small>${esc(item.source)} · ${esc(date(item.publishedAt))}</small><h3><a href="${esc(safe(item.url))}" target="_blank" rel="noopener">${esc(item.title)}</a></h3><p>${esc(item.description||'')}</p>${item.id&&!item.bookmarkedBy?`<button data-save="${esc(item.id)}">Speichern</button>`:''}</article>`).join('')||'<p>Keine passenden Meldungen verfügbar.</p>';
@@ -38,7 +39,7 @@ export function createWorldWorkspaces({root,api,esc,safe,getPlace}){
    const view=renderWeatherView({weather:w,place,esc});section.dataset.weather=view.kind;section.dataset.night=String(view.night);section.dataset.light=view.phase;data.innerHTML=view.html;
   }catch(error){if(version===generation){data.textContent=error.message;data.classList.add('weather-load-error');}}
  }
- function open(view){active=view;generation++;root.dataset.workspace=view;document.getElementById('worldHome').classList.toggle('selected',view==='world');section.hidden=view==='world';document.querySelectorAll('[data-world-nav]').forEach(b=>{b.classList.toggle('active',b.dataset.worldNav===view);b.setAttribute('aria-current',b.dataset.worldNav===view?'page':'false');});if(view==='news')news();if(view==='finance')news(true);if(view==='weather')weather();}
+ function open(view){closeFinance();active=view;generation++;root.dataset.workspace=view;document.getElementById('worldHome').classList.toggle('selected',view==='world');section.hidden=view==='world';document.querySelectorAll('[data-world-nav]').forEach(b=>{b.classList.toggle('active',b.dataset.worldNav===view);b.setAttribute('aria-current',b.dataset.worldNav===view?'page':'false');});if(view==='news')news();if(view==='finance')closeFinance=mountFinance({section,api,esc,safe});if(view==='weather')weather();}
  document.addEventListener('brain-globe-focus',()=>{if(active==='weather')weather();});document.addEventListener('brain-world-view',e=>{if(!e.detail.world)open('world');});
  return {open};
 }

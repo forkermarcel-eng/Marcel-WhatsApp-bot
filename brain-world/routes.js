@@ -1,8 +1,9 @@
 import {createWorldService} from './service.js';
 import {readWorldMarkets} from './markets.js';
+import {createFinanceService} from './finance.js';
 export function registerWorldRoutes({app,pool,authorized}){
- const service=createWorldService({pool});let ready=false,running=false;
- async function tick(){if(running)return;running=true;try{await pool.query('SELECT 1 FROM marcel_world.news LIMIT 0');ready=true;await service.sync();}catch(e){console.error('Brain Welt: Hintergrundaktualisierung nicht verfügbar.',e.code||'provider_error');}finally{running=false;}}
+ const service=createWorldService({pool}),finance=createFinanceService({pool});let ready=false,running=false;
+ async function tick(){if(running)return;running=true;try{await pool.query('SELECT 1 FROM marcel_world.news LIMIT 0');ready=true;const results=await Promise.allSettled([service.sync(),finance.syncNews()]);results.forEach((r,i)=>{if(r.status==='rejected')console.error(i?'Brain Finanzen: Aktualisierung nicht verfügbar.':'Brain Welt: Hintergrundaktualisierung nicht verfügbar.',r.reason?.code||'provider_error');});}catch(e){console.error('Brain Welt: Hintergrundaktualisierung nicht verfügbar.',e.code||'provider_error');}finally{running=false;}}
  const timer=setInterval(tick,5*60000);timer.unref();const initial=setTimeout(tick,10000);initial.unref();
  const cleanupTimer=setInterval(()=>service.cleanup().catch(e=>console.error('Brain Welt: Bereinigung fehlgeschlagen.',e.code||'database_error')),60000);cleanupTimer.unref();
  app.all('/dashboard-api/marcel-brain/world',async(req,res)=>{
@@ -21,6 +22,7 @@ export function registerWorldRoutes({app,pool,authorized}){
    if(op==='news')return res.json({ok:true,...await service.news(q)});
    if(op==='favorites')return res.json({ok:true,items:await service.favorites()});
    if(op==='markets')return res.json({ok:true,...await readWorldMarkets(pool)});
+   if(op==='finance')return res.json({ok:true,...await finance.read()});
    if(op==='saved')return res.json({ok:true,items:(await pool.query("SELECT body FROM marcel_knowledge.entries WHERE id LIKE 'news:%' AND body->>'bookmarkedBy'='owner' ORDER BY body->>'createdAt' DESC LIMIT 300")).rows.map(r=>r.body)});
    return res.status(400).json({ok:false,error:'Unbekannte Weltoperation.'});
   }catch(e){return res.status(e.status||503).json({ok:false,error:e.status?e.message:'Welt-Datenquelle ist momentan nicht erreichbar.'});}

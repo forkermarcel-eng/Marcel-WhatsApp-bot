@@ -46,7 +46,7 @@ export function parseFinanceHeadlines(raw,source,now){
 }
 // Bounded conditional public reads; no credentials or Trading modules involved.
 export async function fetchFinanceSource(url,previous={},fetcher=fetch){
- const headers={'User-Agent':'MarcelBrain/1.0 (+https://marcelmarlow.com)'};if(previous.etag)headers['If-None-Match']=previous.etag;if(previous.lastModified)headers['If-Modified-Since']=previous.lastModified;
+ const headers={};if(previous.etag)headers['If-None-Match']=previous.etag;if(previous.lastModified)headers['If-Modified-Since']=previous.lastModified;
  const r=await fetcher(url,{headers,redirect:'error',signal:AbortSignal.timeout(12000)});
  if(r.status===304)return {notModified:true,httpStatus:304,etag:r.headers.get('etag')||previous.etag,lastModified:r.headers.get('last-modified')||previous.lastModified};
  if(!r.ok){const e=Error('Öffentliche Finanzquelle nicht erreichbar');e.httpStatus=r.status;const retry=r.headers.get('retry-after');e.retryMs=/^\d+$/.test(retry||'')?Number(retry)*1000:Math.max(0,Date.parse(retry)-Date.now())||0;throw e;}

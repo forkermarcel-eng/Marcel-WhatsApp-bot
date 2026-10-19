@@ -28,6 +28,8 @@ async function bootstrap(src,enabled) {
   const bindings={express:{default:express},crypto:{default:{}},openai:{default:class {}},
     '@whiskeysockets/baileys':{default:forbidden,DisconnectReason:{},fetchLatestBaileysVersion:forbidden,useMultiFileAuthState:forbidden},
     pino:{default:()=>({})},pg:{default:{Pool}},'pg-boss':{PgBoss:class {constructor(){forbidden();}}},
+    './services/communication-policies.js':{MARCEL_PERSONA_V1_7_2:'fixture',WOMAN_MEMORY_SEMANTIC_CORE:'fixture',WOMAN_MEMORY_LIVE_OUTPUT_RULES:'fixture',WOMAN_MEMORY_HISTORICAL_RULES:'fixture'},
+    './brain-world/routes.js':{registerWorldRoutes:()=>{}},'./brain-knowledge/routes.js':{registerKnowledgeRoutes:()=>{}},'./brain-chat/routes.js':{registerBrainChatRoutes:()=>{}},
     './device-bridge/protocol-v1.js':{DEVICE_BRIDGE_PROTOCOL:{maximumRequestBytes:65536}},
     './device-bridge/reset-initialization.js':{initializeResetDeviceBridgeDatabase:async()=>{}},
     './device-bridge/enrollment.js':{createAdminEnrollmentCodeHandler:()=>noop,createDeviceEnrollmentHandler:()=>noop},

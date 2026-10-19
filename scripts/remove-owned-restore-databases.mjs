@@ -5,6 +5,11 @@ const ownedRestoreDatabases = [
   'marcel_world2_restore_20261018',
   'marcel_production_verify_20261019',
 ];
+const requested = process.env.PG_OWNED_RESTORE_DATABASE;
+if (requested) {
+  if (!/^marcel_[a-z0-9_]+$/.test(requested)) throw new Error('Ungültiger Name für eine eigene Restore-Testdatenbank.');
+  ownedRestoreDatabases.push(requested);
+}
 const source = process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL;
 const port = process.env.PG_AUDIT_TUNNEL_PORT;
 if (!source || !port) throw new Error('DATABASE_URL und PG_AUDIT_TUNNEL_PORT sind erforderlich.');

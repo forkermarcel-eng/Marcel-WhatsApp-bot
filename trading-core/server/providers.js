@@ -45,6 +45,22 @@ export async function syncContext(repo,env=process.env,fetcher=fetch){
  const task=syncSources(repo,env,{read:url=>boundedFetch(url,{},fetcher),readNews:(url,prev)=>fetchNews(url,prev,fetcher),parseRSS,feeds:[...NEWS_FEEDS,...EXTRA_NEWS]});
  pendingSyncs.set(repo,task);try{return await task;}finally{pendingSyncs.delete(repo);}
 }
+// Uses the already configured Massive entitlement only for contracts already
+// present in the Trading store. It never invents symbols, rolls contracts, or
+// labels delayed data as live. The worker applies its own 10-minute cadence.
+export async function refreshMassiveMarkets(repo,env=process.env,fetcher=fetch){
+ if(env.TRADING_MASSIVE_ENABLED!=='true'||!env.TRADING_MASSIVE_API_KEY)return {configured:false,updated:0,contracts:[]};
+ const latest=new Map();for(const series of await repo.series())if(!latest.has(series.contract)||series.last>latest.get(series.contract).last)latest.set(series.contract,series);
+ const contracts=[...latest.values()].sort((a,b)=>b.last.localeCompare(a.last)).slice(0,4),updated=[];
+ for(const series of contracts){
+  const url=new URL('/futures/v1/aggs/'+encodeURIComponent(series.contract),'https://api.massive.com');url.search=new URLSearchParams({resolution:'1min',limit:'120',sort:'window_start.asc'});
+  const raw=await boundedFetch(url,{headers:{Authorization:'Bearer '+env.TRADING_MASSIVE_API_KEY}},fetcher,2_000_000),body=JSON.parse(raw);
+  if(body.status!=='OK'||!Array.isArray(body.results))throw Error('Massive-Marktformat ungültig.');
+  const now=Date.now(),bars=normalizeMassiveBars(body.results,{contract:series.contract,start:new Date(now-14*86400000).toISOString(),end:new Date(now+60000).toISOString()}).filter(bar=>Date.parse(bar.time)<=now+60000);
+  if(!bars.length)continue;await repo.storeCandles({contract:series.contract,source:'massive-delayed',resolution:60,bars});updated.push({contract:series.contract,bars:bars.length,last:bars.at(-1).time});
+ }
+ return {configured:true,updated:updated.length,contracts:updated};
+}
 export function parseDatabentoJSON(raw){const records=raw.trim().startsWith('[')?JSON.parse(raw):raw.trim().split('\n').filter(Boolean).map(x=>JSON.parse(x));return records.map(x=>{let time=x.ts_event??x.hd?.ts_event;if(typeof time==='number'||/^\d+$/.test(String(time)))time=new Date(Number(BigInt(String(time))/1000000n)).toISOString();return validateCandle({...x,time});});}
 export async function historyFromDatabento(body,env=process.env,fetcher=fetch){invariant(env.TRADING_DATABENTO_ENABLED==='true'&&env.TRADING_DATABENTO_KEY,'Databento nicht konfiguriert/freigegeben.');const root=text(body.instrument,8),contract=text(body.contract,24);invariant(INSTRUMENTS[root]&&contractValid(root,contract),'Exakter Kontrakt fehlt.');const start=iso(body.from),end=iso(body.to);invariant(Date.parse(end)>Date.parse(start)&&Date.parse(end)-Date.parse(start)<=7*86400000,'Ein Abruf umfasst maximal sieben Tage.');invariant(Date.parse(end)<=Date.now(),'Historischer Endzeitpunkt darf nicht in der Zukunft liegen.');
  const args={dataset:'GLBX.MDP3',symbols:contract,stype_in:'raw_symbol',schema:'ohlcv-1m',start,end};const headers={Authorization:'Basic '+Buffer.from(env.TRADING_DATABENTO_KEY+':').toString('base64')};

@@ -1,0 +1,5 @@
+﻿import {fail,dhlResult} from './model.js';
+export function createDHL({approved=false,key,fetcher=fetch}={}){return {
+ configured:approved===true&&!!key,
+ async track(number){if(!approved||!key)throw fail('DHL-Registrierung, API-Schlüssel und ausdrückliche Tracking-Freigabe fehlen.',503);const url=new URL('https://api-eu.dhl.com/track/shipments');url.search=new URLSearchParams({trackingNumber:number,language:'de'});let r;try{r=await fetcher(url,{headers:{'DHL-API-Key':key,Accept:'application/json'},redirect:'error',signal:AbortSignal.timeout(12000)});}catch{throw fail('DHL derzeit nicht erreichbar.',503);}if(!r.ok){const error=fail(r.status===429?'DHL-Abfragelimit erreicht.':'DHL-Zugang oder Sendung derzeit nicht verfügbar.',503);const retry=r.headers.get('retry-after');error.retryMs=/^\d+$/.test(retry||'')?Math.min(86400000,Number(retry)*1000):0;throw error;}const raw=await r.text();if(Buffer.byteLength(raw)>1000000)throw fail('DHL-Antwort überschreitet das Größenlimit.',502);return dhlResult(JSON.parse(raw),number);}
+ };}

@@ -418,6 +418,10 @@ export default async function handler(
    const params = new URLSearchParams();
    for (const key of ["op", "q", "id", "lat", "lon", "zoom", "category", "scope", "name", "country", "region", "level", "placeId", "language", "sourceId", "page"]) if (typeof req.query?.[key] === "string") params.set(key, req.query[key].slice(0,200));
    if (params.size) railwayPath += "?" + params.toString();
+ } else if (resource === "organisation") {
+   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
+   railwayPath += "/organisation";
+   if (typeof req.query?.op === "string") railwayPath += "?op=" + encodeURIComponent(req.query.op.slice(0,30));
  } else if (resource === "knowledge") {
    if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
    railwayPath += "/knowledge";

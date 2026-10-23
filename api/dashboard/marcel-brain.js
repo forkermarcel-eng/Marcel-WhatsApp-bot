@@ -1,3 +1,4 @@
+import {analysisIdentity,mintAnalysisAssertion} from '../../market-analysis/auth.js';
 import crypto from "crypto";
  
  
@@ -418,6 +419,20 @@ export default async function handler(
    const params = new URLSearchParams();
    for (const key of ["op", "q", "id", "lat", "lon", "zoom", "category", "scope", "name", "country", "region", "level", "placeId", "language", "sourceId", "page"]) if (typeof req.query?.[key] === "string") params.set(key, req.query[key].slice(0,200));
    if (params.size) railwayPath += "?" + params.toString();
+ } else if (resource === "market-analysis") {
+   const identity=analysisIdentity(req,{password:process.env.DASHBOARD_PASSWORD});
+   if(!identity)return res.status(401).json({ok:false,code:"ANALYSIS_SESSION_REQUIRED",error:"Bitte erneut anmelden."});
+   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
+   res.setHeader("Cache-Control", "no-store, private");
+   if (req.method === "POST") {
+     const origin = req.headers.origin;
+     let validOrigin=false; try { const parsed=new URL(origin); validOrigin=/^https?:$/.test(parsed.protocol) && parsed.host===req.headers.host; } catch {}
+     if (!validOrigin) return res.status(403).json({ok:false,error:"Ung?ltiger Anfrageursprung."});
+   }
+   railwayPath += "/market-analysis";
+   const params = new URLSearchParams();
+   for (const key of ["op", "q", "group", "sourceId", "instrumentId", "id", "before", "from", "to", "intervalMs"]) if (typeof req.query?.[key] === "string") params.set(key, req.query[key].slice(0,700));
+   if (params.size) railwayPath += "?" + params.toString();
  } else if (resource === "organisation") {
    if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ok:false,error:"Methode nicht erlaubt."});
    railwayPath += "/organisation";
@@ -491,6 +506,7 @@ export default async function handler(
  
            Accept:
              "application/json",
+           ...(resource === "market-analysis" ? {"X-Marcel-Analysis-Session":mintAnalysisAssertion(analysisIdentity(req,{password:process.env.DASHBOARD_PASSWORD}),dashboardApiSecret)} : {}),
  
            ...(hasBody
              ? {
@@ -679,7 +695,7 @@ export default async function handler(
  
    res.setHeader(
      "Cache-Control",
-     "no-store, max-age=0"
+     resource === "market-analysis" ? "no-store, private" : "no-store, max-age=0"
    );
  
  

@@ -1,3 +1,4 @@
+import {mintAnalysisSession,analysisCookie} from '../market-analysis/auth.js';
 import crypto from "crypto";
 
 export default function handler(req, res) {
@@ -28,15 +29,6 @@ export default function handler(req, res) {
   const usernameMatches = username === correctUsername;
   const passwordMatches = password === correctPassword;
 
-  console.log("Dashboard Login Test:", {
-    usernameMatches,
-    passwordMatches,
-    receivedUsernameLength: String(username || "").length,
-    storedUsernameLength: String(correctUsername || "").length,
-    receivedPasswordLength: String(password || "").length,
-    storedPasswordLength: String(correctPassword || "").length
-  });
-
   if (!usernameMatches || !passwordMatches) {
     return res.status(401).json({
       ok: false,
@@ -55,7 +47,7 @@ export default function handler(req, res) {
 
   res.setHeader(
     "Set-Cookie",
-    `marcel_dashboard_session=${session}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`
+    [`marcel_dashboard_session=${session}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`, `${analysisCookie}=${mintAnalysisSession({username:correctUsername,dashboardSession:session,password:correctPassword})}; Path=/api/dashboard; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`]
   );
 
   return res.status(200).json({

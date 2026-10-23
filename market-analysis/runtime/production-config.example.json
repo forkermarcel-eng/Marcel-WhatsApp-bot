@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "mode": "production",
+  "pythonPath": null,
+  "memoryMb": 256,
+  "timeoutMs": 10000,
+  "calendars": [],
+  "specifications": [],
+  "authorizations": []
+}

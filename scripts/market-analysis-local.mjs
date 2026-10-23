@@ -1,0 +1,21 @@
+// Local-only, explicit fixture harness. Existing production entry point is not started.
+import express from 'express';
+import crypto from 'node:crypto';
+import {phase7Fixture} from '../test/market-analysis-phase7-fixture.js';
+import proxy from '../api/dashboard/marcel-brain.js';
+import {registerMarketAnalysisRoutes} from '../market-analysis/routes.js';
+if(!process.argv.includes('--offline-fixture'))throw Error('Nur mit --offline-fixture starten. Keine Produktionsdaten verwenden.');
+const pythonIndex=process.argv.indexOf('--python');const pythonPath=pythonIndex>=0?process.argv[pythonIndex+1]:undefined;
+const f=await phase7Fixture({pythonPath});const app=express();app.use(express.json({limit:'64kb'}));
+process.env.DASHBOARD_PASSWORD='LOCAL-OFFLINE-FIXTURE-NOT-PRODUCTION';process.env.DASHBOARD_API_SECRET='LOCAL-OFFLINE-FIXTURE-BEARER';
+registerMarketAnalysisRoutes({app,runtime:f.runtime,authorized:req=>req.headers.authorization==='Bearer '+process.env.DASHBOARD_API_SECRET,clock:()=>Date.now()});
+app.all('/dashboard-api/marcel-brain/world',(req,res)=>res.json({ok:true,items:[],sources:[],total:0,perPage:18,mode:'offline-fixture'}));
+app.all('/dashboard-api/marcel-brain/chat',(req,res)=>res.json({ok:true,conversations:[],items:[],mode:'offline-fixture'}));
+app.get('/dashboard-api/marcel-brain',(req,res)=>res.json({ok:true,items:[],stats:{},mode:'offline-fixture'}));
+app.all('/api/dashboard/marcel-brain',proxy);
+app.get('/__fixture-login',(req,res)=>{const token='LOCAL-OFFLINE-FIXTURE';const signature=crypto.createHmac('sha256',process.env.DASHBOARD_PASSWORD).update(token).digest('hex');res.cookie('marcel_dashboard_session',token+'.'+signature,{httpOnly:true,sameSite:'strict'});res.redirect('/Brain/#market-analysis');});
+app.get('/presentation.js',(req,res)=>res.sendFile('presentation.js',{root:process.cwd()}));
+app.use('/Brain',express.static('Brain'));
+app.post('/__fixture/advance',(req,res)=>{f.advance();res.json({ok:true});});
+const server=app.listen(0,'127.0.0.1',()=>{process.env.RAILWAY_BACKEND_URL='http://127.0.0.1:'+server.address().port;console.log('OFFLINE-FIXTURES ONLY; in-memory DB; no production data.');console.log('PHASE7_LOCAL_URL='+process.env.RAILWAY_BACKEND_URL+'/__fixture-login');});
+process.on('SIGINT',()=>server.close(async()=>{await f.close();process.exit(0);}));

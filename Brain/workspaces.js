@@ -1,3 +1,4 @@
+import {mountMarketAnalysis} from './market-analysis.js';
 import {renderWeatherView} from './weather-view.js';
 import {mountFinance} from './finance-view.js';
 const weatherStyles=document.createElement('link');weatherStyles.rel='stylesheet';weatherStyles.href=new URL('./weather-view.css',import.meta.url).href;document.head.append(weatherStyles);
@@ -5,6 +6,7 @@ const weatherVisibility=()=>document.documentElement.classList.toggle('weather-t
 // Separate views sharing the authenticated world service and selected globe location.
 export function createWorldWorkspaces({root,api,esc,safe,getPlace}){
  const section=document.createElement('section');section.className='world-workspace';section.hidden=true;section.setAttribute('aria-label','Eigenständige Ansicht');root.append(section);
+ let closeAnalysis=()=>{};
  let active='world',generation=0,weatherPlace=null,closeFinance=()=>{};
  const date=value=>value?new Date(value).toLocaleString('de-DE'):'Nicht verfügbar';
  const chart=item=>{const values=(item.chart||[]).map(p=>p.value).filter(Number.isFinite);if(values.length<2)return '';const min=Math.min(...values),max=Math.max(...values),points=values.map((value,i)=>`${(i/(values.length-1)*280).toFixed(1)},${(72-(value-min)/(max-min||1)*64).toFixed(1)}`).join(' ');return `<svg class="market-chart" viewBox="0 0 280 80" role="img" aria-label="Verlauf der letzten ${values.length} gespeicherten Schlusskurse"><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;};
@@ -39,7 +41,8 @@ export function createWorldWorkspaces({root,api,esc,safe,getPlace}){
    const view=renderWeatherView({weather:w,place,esc});section.dataset.weather=view.kind;section.dataset.night=String(view.night);section.dataset.light=view.phase;data.innerHTML=view.html;
   }catch(error){if(version===generation){data.textContent=error.message;data.classList.add('weather-load-error');}}
  }
- function open(view){closeFinance();active=view;generation++;root.dataset.workspace=view;document.getElementById('worldHome').classList.toggle('selected',view==='world');section.hidden=view==='world';document.querySelectorAll('[data-world-nav]').forEach(b=>{b.classList.toggle('active',b.dataset.worldNav===view);b.setAttribute('aria-current',b.dataset.worldNav===view?'page':'false');});if(view==='news')news();if(view==='finance')closeFinance=mountFinance({section,api,esc,safe});if(view==='weather')weather();}
+ function open(view){if(view==='market-analysis'&&location.hash!=='#market-analysis')history.pushState({marcelWorkspace:view},'',location.pathname+location.search+'#market-analysis');else if(view!=='market-analysis'&&location.hash==='#market-analysis')history.pushState({marcelWorkspace:view},'',location.pathname+location.search);if(view==='market-analysis'&&!history.state?.marcelWorkspace)history.replaceState({marcelWorkspace:view},'',location.href);closeAnalysis();closeAnalysis=()=>{};closeFinance();active=view;generation++;root.dataset.workspace=view;document.getElementById('worldHome').classList.toggle('selected',view==='world');section.hidden=view==='world';document.querySelectorAll('[data-world-nav]').forEach(b=>{b.classList.toggle('active',b.dataset.worldNav===view);b.setAttribute('aria-current',b.dataset.worldNav===view?'page':'false');});if(view==='market-analysis')closeAnalysis=mountMarketAnalysis({section});if(view==='news')news();if(view==='finance')closeFinance=mountFinance({section,api,esc,safe});if(view==='weather')weather();}
  document.addEventListener('brain-globe-focus',()=>{if(active==='weather')weather();});document.addEventListener('brain-world-view',e=>{if(!e.detail.world)open('world');});
+ const analysisLink=()=>{if(location.hash==='#market-analysis'){window.MarcelBrainScenes?.open('world');open('market-analysis');}};window.addEventListener('hashchange',analysisLink);window.addEventListener('popstate',()=>{if(location.hash==='#market-analysis')analysisLink();else if(active==='market-analysis')open(['world','news','weather','finance'].includes(history.state?.marcelWorkspace)?history.state.marcelWorkspace:'world');});if(location.hash==='#market-analysis')setTimeout(analysisLink,0);
  return {open};
 }

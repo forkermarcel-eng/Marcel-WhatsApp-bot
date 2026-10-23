@@ -1,4 +1,5 @@
 import { registerOrganisationRoutes } from "./brain-organisation/routes.js";
+import {registerDeployedMarketAnalysisRoutes} from "./market-analysis/deployed-routes.js";
 import { MARCEL_PERSONA_V1_7_2, WOMAN_MEMORY_SEMANTIC_CORE, WOMAN_MEMORY_LIVE_OUTPUT_RULES, WOMAN_MEMORY_HISTORICAL_RULES } from "./services/communication-policies.js";
 import { registerWorldRoutes } from "./brain-world/routes.js";
 import { registerKnowledgeRoutes } from "./brain-knowledge/routes.js";
@@ -7981,6 +7982,7 @@ registerKnowledgeRoutes({ app, pool, dashboardApiAuthorized });
 registerBrainChatRoutes({app,pool,openai,model:MODEL,authorized:dashboardApiAuthorized});
 registerWorldRoutes({app,pool,authorized:dashboardApiAuthorized});
 registerOrganisationRoutes({app,pool,authorized:dashboardApiAuthorized});
+await registerDeployedMarketAnalysisRoutes({app,pool,authorized:dashboardApiAuthorized});
 registerTinderMirrorRoutes({
   app,
   pool,

@@ -57,14 +57,14 @@ export function createPromptsLibrary({fetcher=fetch,clock=Date.now}={}){
    const listed=await rpc('tools/list',null,signal);const tools=new Map((listed.tools||[]).map(t=>[t.name,t]));for(const name of allowed){const schema=tools.get(name)?.inputSchema;if(schema?.type!=='object'||!(name.startsWith('search_')?schema.properties?.query?.type==='string':schema.properties?.id?.type==='string'))throw failure('Benötigte MCP-Werkzeuge oder Parameter sind nicht verfügbar.');}return true;
   })().catch(e=>{initialized=null;session=null;throw e;});return initialized;
  }
- return {async call(tool,input={}){
+ return {async call(tool,input={},options={}){
   const args=argumentsFor(tool,input),now=clock();
   if(now-windowAt>=60000){windowAt=now;requests=0;}if(++requests>30)throw failure('Anfragelimit erreicht. Bitte eine Minute warten.',429);
   const key=JSON.stringify([tool,args]),hit=cache.get(key);if(hit&&hit.until>now)return hit.value;
   if(now<retryAt)throw failure('Externe Bibliothek vorübergehend pausiert. Bitte später erneut versuchen.',503);
   if(active>=2)throw failure('Es laufen bereits zwei Bibliotheksanfragen.',429);active++;
   try{
-   const signal=AbortSignal.timeout(15000);await connect(signal);
+   const signal=options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000);await connect(signal);
    const result=await rpc('tools/call',{name:tool,arguments:args},signal);if(result.isError)throw failure('Die öffentliche Bibliothek konnte diesen Eintrag nicht liefern.');
    const content=result.content?.find(c=>c.type==='text')?.text;const data=result.structuredContent||JSON.parse(content||'null');if(!data||data.error)throw failure('Die öffentliche Bibliothek hat keine verwendbaren Daten geliefert.');
    const kind=tool.includes('skill')?'skill':'prompt';let value;
@@ -74,7 +74,8 @@ export function createPromptsLibrary({fetcher=fetch,clock=Date.now}={}){
   }catch(e){if(++failures>=3)retryAt=clock()+30000;if(e.status)throw e;throw failure('Öffentliche Bibliothek nicht erreichbar oder Antwort ungültig. Bitte später erneut versuchen.',503);}finally{active--;}
  }};
 }
-export function registerPromptsLibraryRoutes({app,authorized,library=createPromptsLibrary()}){
+export const sharedPromptsLibrary=createPromptsLibrary();
+export function registerPromptsLibraryRoutes({app,authorized,library=sharedPromptsLibrary}){
  app.all('/dashboard-api/marcel-brain/prompt-library',async(req,res)=>{
   res.setHeader('Cache-Control','no-store, private');res.setHeader('X-Content-Type-Options','nosniff');
   if(!authorized(req))return res.status(401).json({ok:false,error:'Nicht autorisiert.'});

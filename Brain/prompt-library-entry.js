@@ -1,0 +1,4 @@
+// Add an ordinary protected Brain page; existing workspace routing stays intact.
+function entry(){const link=document.createElement('a');link.href='/Brain/prompt-library';link.dataset.promptLibrary='true';link.textContent='Prompts & Skills';link.style.cssText='display:flex;align-items:center;justify-content:center;padding:12px 10px;color:inherit;text-decoration:none;font-size:12px;text-align:center;border:1px solid #3476a0;border-radius:10px;flex-shrink:0';return link;}
+function addEntry(){const tabs=document.querySelector('.tabs');if(tabs&&!tabs.querySelector('[data-prompt-library]'))tabs.append(entry());const nav=document.querySelector('.world-nav');if(!nav)return false;if(!nav.querySelector('[data-prompt-library]'))nav.append(entry());return true;}
+if(!addEntry()){const observer=new MutationObserver(()=>{if(addEntry())observer.disconnect();});observer.observe(document.body,{childList:true,subtree:true});setTimeout(()=>observer.disconnect(),15000);}

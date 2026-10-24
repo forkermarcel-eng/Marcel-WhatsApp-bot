@@ -1,0 +1,42 @@
+[
+  {
+    "repo": "marmbiz/humanizer-de",
+    "commit": "924831533ffd86716845a74c10b476f1d7d92ab7"
+  },
+  {
+    "repo": "fabricioctelles/skills",
+    "commit": "cb603b0aa5d76a2c3220324014dd07b282ab6878"
+  },
+  {
+    "repo": "btford/write-good",
+    "commit": "6940b034c6f5a7e101c01a24d651a778fc3fe435"
+  },
+  {
+    "repo": "KyaniteLabs/DialectOS",
+    "commit": "fb1f2997de70a2ad2e0d3b15a3e2ffa81d997364"
+  },
+  {
+    "repo": "ViniciusStanula/Zero-Lero",
+    "commit": "790d5bb8abbed856be51064237c0fde47ab69ca9"
+  },
+  {
+    "repo": "mackswendhell/humanizer-pt-br",
+    "commit": "ada3599ae2732725585f1d93770eeae98c922ff0"
+  },
+  {
+    "repo": "langchain-ai/langmem",
+    "commit": "48e3c11f5bb527282c7d5339c6a87a0b35abccfc"
+  },
+  {
+    "repo": "talhapythoneer/anti-sycophancy-prompt",
+    "commit": "d940a2c7ed210c6edc9300e64ff3798d49a41b4a"
+  },
+  {
+    "repo": "dripips/plain-prose",
+    "commit": "046e2bf65a5da3b299fe3cd51f306276af30e66d"
+  },
+  {
+    "repo": "promptfoo/promptfoo",
+    "commit": "c0b88a324175c60019cc80de1b2e32b4c849d4c3"
+  }
+]

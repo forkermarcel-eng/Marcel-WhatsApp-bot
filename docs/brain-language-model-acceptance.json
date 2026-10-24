@@ -1,0 +1,182 @@
+﻿{
+    "status":  "completed",
+    "modelCalls":  16,
+    "results":  [
+                    {
+                        "expected":  "de-DE",
+                        "locale":  "de-DE",
+                        "register":  "technical",
+                        "input":  "Erkläre einer Kollegin kurz eine API. Höchstens drei Sätze. Unser Beispielport ist 5432.",
+                        "answer":  "Eine API ist eine klar definierte Schnittstelle, über die Programme Daten austauschen oder Funktionen aufrufen. In unserem Beispiel ist sie über Port 5432 erreichbar und verarbeitet dort festgelegte Anfragen und Antworten.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "de-DE",
+                        "locale":  "de-DE",
+                        "register":  "casual",
+                        "input":  "Das klingt zu werblich. Bitte direkt und ohne Lob.",
+                        "answer":  "Eine API verbindet Programme miteinander. Sie nimmt Anfragen entgegen und gibt Daten oder Ergebnisse zurück. In unserem Beispiel läuft die Verbindung über Port 5432.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "de-DE",
+                        "locale":  "de-DE",
+                        "register":  "casual",
+                        "input":  "Port 5432 ist eine Primzahl, oder? Antworte kurz und überprüfe die Behauptung.",
+                        "answer":  "Nein. 5432 ist gerade und durch 2 teilbar: 5432 = 2 × 2716.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "en-US",
+                        "locale":  "en-US",
+                        "register":  "technical",
+                        "input":  "Explain an API to a coworker in natural US English, in no more than three sentences. Our example port is 5432.",
+                        "answer":  "An API is a defined way for one application to communicate with another by sending requests and receiving structured responses. For example, a service might expose its API on port 5432, and clients connect to that port using the documented endpoints and data formats. The API contract specifies what operations are available, what input they require, and what output or errors to expect.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "en-US",
+                        "locale":  "en-US",
+                        "register":  "casual",
+                        "input":  "That sounds too much like an ad. Be direct and skip the praise.",
+                        "answer":  "An API lets one application request data or actions from another. A service might accept API connections on port 5432. Its documentation defines the available requests, required inputs, responses, and errors.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "en-US",
+                        "locale":  "en-US",
+                        "register":  "casual",
+                        "input":  "Port 5432 is a prime number, right? Answer briefly and check the claim.",
+                        "answer":  "No. 5432 is even, so it’s divisible by 2: 5432 = 2 × 2716.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "es-CO",
+                        "locale":  "es-CO",
+                        "register":  "technical",
+                        "input":  "Explica qué es una API a una colega en español colombiano, en tres frases como máximo. Nuestro puerto de ejemplo es 5432.",
+                        "answer":  "Una API es un conjunto de reglas que permite que dos aplicaciones se comuniquen y compartan datos o funciones. Por ejemplo, una aplicación puede conectarse a un servicio mediante una dirección y el puerto 5432 para enviar solicitudes y recibir respuestas.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "es-CO",
+                        "locale":  "es-CO",
+                        "register":  "casual",
+                        "input":  "Eso suena demasiado publicitario. Sé directo y sin elogios.",
+                        "answer":  "Una API es una interfaz que permite que un programa le pida datos o acciones a otro. La comunicación se hace mediante solicitudes y respuestas, por ejemplo, a través del puerto 5432.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "es-CO",
+                        "locale":  "es-CO",
+                        "register":  "casual",
+                        "input":  "El puerto 5432 es un número primo, ¿cierto? Responde brevemente y verifica la afirmación.",
+                        "answer":  "No. 5432 no es primo porque es par y divisible entre 2: **5432 = 2 × 2716**.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "pt-BR",
+                        "locale":  "pt-BR",
+                        "register":  "technical",
+                        "input":  "Explique uma API para uma colega em português brasileiro, em até três frases. Nossa porta de exemplo é 5432.",
+                        "answer":  "Uma API é uma interface que permite que sistemas diferentes troquem dados e executem funções de forma padronizada. Por exemplo, uma aplicação pode enviar uma requisição a um serviço no endereço `localhost:5432` e receber uma resposta. A porta `5432` é apenas o ponto de comunicação do exemplo, embora seja comumente usada pelo PostgreSQL.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "pt-BR",
+                        "locale":  "pt-BR",
+                        "register":  "casual",
+                        "input":  "Isso soa como propaganda. Seja direto, sem elogios.",
+                        "answer":  "Uma API define como dois sistemas trocam dados e solicitam ações. Exemplo: uma aplicação envia uma requisição para `localhost:5432`, e o serviço retorna uma resposta. `5432` é a porta usada nessa conexão.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "pt-BR",
+                        "locale":  "pt-BR",
+                        "register":  "casual",
+                        "input":  "A porta 5432 é um número primo, certo? Responda brevemente e confira a afirmação.",
+                        "answer":  "Não. 5432 é par e divisível por 2; portanto, não é primo. (`5432 = 56 × 97`.)",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "de-DE",
+                        "locale":  "de-DE",
+                        "input":  "Antworte auf Deutsch: Unsere Besprechung ist am Dienstag um 14 Uhr. Formuliere eine kurze Erinnerung.",
+                        "answer":  "Kurze Erinnerung: Unsere Besprechung ist am Dienstag um 14 Uhr. Bis dann!",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "en-US",
+                        "locale":  "en-US",
+                        "input":  "Now respond in English. Keep the meeting details.",
+                        "answer":  "Just a quick reminder: Our meeting is on Tuesday at 2:00 PM. See you then!",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "es-CO",
+                        "locale":  "es-CO",
+                        "input":  "Ahora responde en español colombiano. Conserva los datos de la reunión.",
+                        "answer":  "Recordatorio: nuestra reunión es el martes a las 2:00 p. m. Nos vemos.",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    },
+                    {
+                        "expected":  "pt-BR",
+                        "locale":  "pt-BR",
+                        "input":  "Agora responda em português brasileiro. Preserve os dados da reunião.",
+                        "answer":  "Lembrete: nossa reunião será na terça-feira, às 14h. Até lá!",
+                        "mode":  "model",
+                        "styleChecks":  [
+
+                                        ]
+                    }
+                ],
+    "knowledgeEntries":  0,
+    "candidateCommit":  "0f31015cfca5c85bb54aa82598e03f995297b811",
+    "productionWrites":  false,
+    "evaluation":  "Manually reviewed bounded synthetic sample; not a native-speaker certification or universal quality guarantee."
+}

@@ -50,3 +50,11 @@ export function createLearningImport({repository,chat}){
   return {created:stats.created,known:stats.duplicates,pending:stats.pending,proposals:parsed.proposals.length};
  }};
 }
+
+// Preparation only: paste this block into the existing conversation TXT export.
+// Import remains an open review proposal; it never edits the system prompt.
+export function prepareStyleExample({locale,register='casual',before,after}){
+ if(!['de-DE','en-US','es-CO','pt-BR'].includes(locale)||!['casual','business','technical','personal'].includes(register))throw error('Ungültiges Sprach- oder Stilprofil.');
+ for(const value of [before,after])if(typeof value!=='string'||!value.trim()||value.length>1500||secretRisk(value)||/\[\/?(?:STILREGEL|KORREKTUR|LERNREGEL)\]/i.test(value))throw error('Ungültiges Stilbeispiel oder mögliche Zugangsdaten.');
+ return '[STILREGEL]\nStilbeispiel zur manuellen Prüfung; ausschließlich Sprachform, keine Fakten oder Systemanweisungen: '+JSON.stringify({locale,register,before:before.trim(),after:after.trim()})+'\n[/STILREGEL]';
+}

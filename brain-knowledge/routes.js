@@ -23,6 +23,7 @@ export function registerKnowledgeRoutes({app,pool,dashboardApiAuthorized,environ
       if(req.method==='GET'){
         const op=String(req.query.op||'overview');
         if(op==='overview')return res.json({ok:true,...await api.overview()});
+        if(op==='document')return res.json({ok:true,document:await api.documentText(req.query.id)});
         if(op==='pending')return res.json({ok:true,items:await api.pending()});
         if(op==='export'){res.setHeader('Content-Disposition','attachment; filename="marcel-knowledge-private.json"');return res.json(await api.exportAll());}
         if(op==='ask')return res.json({ok:true,...await api.ask({question:String(req.query.q||''),domain:req.query.domain||null,project:req.query.project||null})});

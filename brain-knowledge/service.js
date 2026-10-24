@@ -71,6 +71,12 @@ export function createKnowledgeService(repository) {
       const missingSources=documents.filter(d=>['missing','unreadable'].includes(d.status)).map(d=>d.title);
       return {answer:results.length?results.map((r,i)=>`[${i+1}] ${r.kind==='plan'?'Geplant: ':r.kind==='opinion'?'Meinung: ':r.kind==='historical'?'Historisch: ':'Dokumentiert: '}${r.text}`).join('\n\n'):'In den freigegebenen lokalen Quellen ist dazu keine ausreichend passende Information vorhanden.',results,missingSources,searchMethod:SEARCH_METHOD,externalAI:false,notice:'Quellenbasierte Auszüge; dokumentierte Aussagen sind kein Nachweis des heutigen Livezustands. Ungeprüfte persönliche Angaben und ungeprüfte Trading-Parameter sind ausgeschlossen.'};
     },
+    async documentText(id){
+      const document=typeof id==='string'&&await repository.get('documents',id);
+      if(!document)throw error('Dokument nicht gefunden.',404);
+      const fragments=(await repository.list('evidence')).filter(e=>e.documentId===id).slice(0,100);
+      return {id:document.id,title:document.title,status:document.status,fragments:fragments.map(e=>({locator:e.locator,text:String(e.quote||'').slice(0,6000)})),notice:'Importierte Textauszüge; keine Originaldatei. Das Original und das Wissensarchiv bleiben unverändert.'};
+    },
     async pending(){return (await repository.list('entries')).filter(e=>e.reviewRequired&&e.status!=='rejected'&&e.historyReason!=='superseded_extraction');},
     async review({id,action,text,expectedVersion,resolveConflict=false,allowPersonal=false}) {
       if(!['confirm','reject','correct'].includes(action))throw error('Unknown review action');

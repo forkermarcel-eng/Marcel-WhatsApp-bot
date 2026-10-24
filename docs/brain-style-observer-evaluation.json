@@ -1,0 +1,110 @@
+{
+  "historicalSyntheticModelReplies": 16,
+  "flaggedReplies": 0,
+  "results": [
+    {
+      "locale": "de-DE",
+      "input": "Erkläre einer Kollegin kurz eine API. Höchstens drei Sätze. Unser Beispielport ist 5432.",
+      "findings": []
+    },
+    {
+      "locale": "de-DE",
+      "input": "Das klingt zu werblich. Bitte direkt und ohne Lob.",
+      "findings": []
+    },
+    {
+      "locale": "de-DE",
+      "input": "Port 5432 ist eine Primzahl, oder? Antworte kurz und überprüfe die Behauptung.",
+      "findings": []
+    },
+    {
+      "locale": "en-US",
+      "input": "Explain an API to a coworker in natural US English, in no more than three sentences. Our example port is 5432.",
+      "findings": []
+    },
+    {
+      "locale": "en-US",
+      "input": "That sounds too much like an ad. Be direct and skip the praise.",
+      "findings": []
+    },
+    {
+      "locale": "en-US",
+      "input": "Port 5432 is a prime number, right? Answer briefly and check the claim.",
+      "findings": []
+    },
+    {
+      "locale": "es-CO",
+      "input": "Explica qué es una API a una colega en español colombiano, en tres frases como máximo. Nuestro puerto de ejemplo es 5432.",
+      "findings": []
+    },
+    {
+      "locale": "es-CO",
+      "input": "Eso suena demasiado publicitario. Sé directo y sin elogios.",
+      "findings": []
+    },
+    {
+      "locale": "es-CO",
+      "input": "El puerto 5432 es un número primo, ¿cierto? Responde brevemente y verifica la afirmación.",
+      "findings": []
+    },
+    {
+      "locale": "pt-BR",
+      "input": "Explique uma API para uma colega em português brasileiro, em até três frases. Nossa porta de exemplo é 5432.",
+      "findings": []
+    },
+    {
+      "locale": "pt-BR",
+      "input": "Isso soa como propaganda. Seja direto, sem elogios.",
+      "findings": []
+    },
+    {
+      "locale": "pt-BR",
+      "input": "A porta 5432 é um número primo, certo? Responda brevemente e confira a afirmação.",
+      "findings": []
+    },
+    {
+      "locale": "de-DE",
+      "input": "Antworte auf Deutsch: Unsere Besprechung ist am Dienstag um 14 Uhr. Formuliere eine kurze Erinnerung.",
+      "findings": []
+    },
+    {
+      "locale": "en-US",
+      "input": "Now respond in English. Keep the meeting details.",
+      "findings": []
+    },
+    {
+      "locale": "es-CO",
+      "input": "Ahora responde en español colombiano. Conserva los datos de la reunión.",
+      "findings": []
+    },
+    {
+      "locale": "pt-BR",
+      "input": "Agora responda em português brasileiro. Preserve os dados da reunião.",
+      "findings": []
+    }
+  ],
+  "knownFalsePositive": {
+    "text": "Great question! The setting depends on your audience.",
+    "findings": [
+      {
+        "rule": "stock_praise_or_agreement",
+        "severity": "info",
+        "start": 0,
+        "end": 14,
+        "reason": "Formelhafte Gesprächsphrase; situationsgerechte Verwendung ist erlaubt.",
+        "source": "curated open-source rules"
+      }
+    ],
+    "review": "A sincere isolated compliment can be natural. Advisory info only; no rewriting."
+  },
+  "knownMiss": {
+    "text": "Das Problem ist erledigt. Die Sache ist jetzt abgeschlossen.",
+    "findings": [],
+    "review": "Semantic paraphrase repetition is not detected by literal comparison."
+  },
+  "boundedProbe": {
+    "characters": 59200,
+    "findings": 24,
+    "milliseconds": 18
+  }
+}

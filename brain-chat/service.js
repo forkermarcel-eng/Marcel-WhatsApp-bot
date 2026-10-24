@@ -4,10 +4,20 @@ import {hash,secretRisk} from '../brain-knowledge/model.js';
 import {structuredChatProposals,PROPOSAL_TYPES} from './proposals.js';
 import {createBrainLibrary,libraryAnswer,LIBRARY_POLICY} from './library.js';
 import {languagePolicy,KNOWLEDGE_LABELS} from './language.js';
-import {styleDiagnostics} from './style-quality.js';
+import {observeStyle} from './style-quality.js';
 const PREFIX='brain-chat:';
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 const validId=id=>typeof id==='string'&&/^[\da-f-]{36}$/i.test(id);
+function recordStyle(turn,language,previous,text,literal){
+  try{
+    turn.styleObservation=observeStyle(turn.assistant,language.locale,{previous,userText:text,register:language.register,literal,origin:turn.mode==='knowledge'?'knowledge':'model'});
+    turn.styleChecks=[...new Set(turn.styleObservation.findings.map(f=>f.rule))];
+  }catch{
+    // Diagnostics must never break an otherwise successful answer.
+    turn.styleObservation={version:1,mode:'observe',locale:language.locale,status:'unavailable',findings:[],summary:{info:0,warning:0}};
+    turn.styleChecks=[];
+  }
+}
 const knowledgeAnswer=(context,locale='de-DE')=>context.answer??(KNOWLEDGE_LABELS[locale][0]+(context.sources.length?'\n\n'+context.sources.map((s,i)=>`[${i+1}] ${s.kind==='plan'?'Plan · ':s.kind==='historical'?'Historie · ':''}${s.documents.map(d=>d.title+' · '+d.locator).join('; ')}\n${s.text}`).join('\n\n'):'\n\n'+KNOWLEDGE_LABELS[locale][1]));
 export function createBrainChat({repository,retrieve,generate,mode='knowledge',supplement=createBrainLibrary()}) {
   const locks=new Set();
@@ -57,6 +67,7 @@ export function createBrainChat({repository,retrieve,generate,mode='knowledge',s
         onEvent('context',{sources:turn.sources,warnings:turn.warnings,proposal:!!turn.proposalId,mode:turn.mode,timings:turn.timings});
         if(mode==='knowledge'||context.answer!==undefined){
           turn.assistant=reference?libraryAnswer(reference):knowledgeAnswer(context,language.locale);
+          recordStyle(turn,language,c.turns.filter(t=>t!==turn),text,literal===true);
           turn.status='complete';delete c.activeRequest;c.updatedAt=new Date().toISOString();await save(c);onEvent('delta',{text:turn.assistant});onEvent('done',{conversation:c});return c;
         }
         const instructions=language.instructions+'\n'+`Du bist Marcel Brain, Marcels persönlicher Assistent. Sprich natürlich und direkt. Keine überflüssigen Bestätigungen, Fragewiederholungen, Einleitungen, Abschlusszusammenfassungen, ständigen Anreden, recycelten Floskeln oder unnötigen Listen. Kein Psychologen-, Coach- oder Kundendienstton. Kein zwanghaftes Zustimmen; begründet widersprechen. Länge und Humor der Situation anpassen. Bei Trading unabhängig und sachlich. Sprache und Register bestimmt das zentrale Sprachprofil; ausdrückliche Sprachwünsche für einzelne Textteile bleiben erhalten. Antworte als Assistent an Marcel. Nur bei ausdrücklichem Schreibauftrag formulierst du in seinem Namen.
@@ -71,7 +82,7 @@ HINWEISE_JSON: ${JSON.stringify(context.warnings)}`+((reference||c.turns.some(t=
           turn.assistant+=delta;if(turn.assistant.length>60000)throw fail('Die Antwort überschreitet die zulässige Länge.');onEvent('delta',{text:delta});
         }}catch(e){if(mode!=='local'||signal?.aborted)throw e;turn.mode='knowledge';turn.assistant=KNOWLEDGE_LABELS[language.locale][2]+'\n\n'+(reference?libraryAnswer(reference):knowledgeAnswer(context,language.locale));onEvent('context',{sources:turn.sources,warnings:turn.warnings,mode:'knowledge'});onEvent('delta',{text:turn.assistant});}
         if(!turn.assistant.trim())throw fail('Die KI hat keine Antwort geliefert.',502);
-        turn.styleChecks=styleDiagnostics(turn.assistant,language.locale,c.turns.filter(t=>t!==turn));
+        recordStyle(turn,language,c.turns.filter(t=>t!==turn),text,literal===true);
         turn.status='complete';delete c.activeRequest;c.updatedAt=new Date().toISOString();await save(c);onEvent('done',{conversation:c});return c;
       }catch(e){if(c&&turn&&c.activeRequest?.id===requestId&&e.status!==409){turn.status='error';delete c.activeRequest;turn.error=e.status?e.message:'Die KI-Verbindung ist fehlgeschlagen. Bitte Konfiguration und Verbindung prüfen.';c.updatedAt=new Date().toISOString();await save(c);}throw e;}
       finally{locks.delete(conversationId);}

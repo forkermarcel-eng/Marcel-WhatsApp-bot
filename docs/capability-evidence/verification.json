@@ -1,0 +1,706 @@
+{
+  "date": "2026-10-26",
+  "baseCommit": "15d5645b844435a7ce24e6ef4080bb26e8b359d4",
+  "deployment": false,
+  "modelCalls": 0,
+  "migrations": 0,
+  "counts": {
+    "repositories": 28,
+    "entries": 4253,
+    "skills": 410,
+    "references": 3564,
+    "toolAdapters": 19
+  },
+  "tests": {
+    "passed": 80,
+    "failed": 0,
+    "skipped": 0,
+    "suites": [
+      "brain-capabilities",
+      "brain-chat",
+      "brain-language",
+      "brain-style-observer",
+      "brain-library-agent",
+      "brain-learning",
+      "organisation",
+      "market-analysis-auth",
+      "prompts-library"
+    ]
+  },
+  "browser": {
+    "localAuthenticatedLibrary": true,
+    "desktop": {
+      "width": 1536,
+      "height": 900
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "horizontalOverflow": false
+    },
+    "checks": [
+      "catalog search and detail",
+      "pinned SwiftUI reference text loaded: 6073 characters",
+      "workflow create/start/manual review/cancel",
+      "custom Web demo light toggle"
+    ],
+    "scope": "Synthetic local user/data only; screenshots predate final additive metadata controls"
+  },
+  "routing": [
+    {
+      "task": "Entwirf eine native Android App mit Kotlin",
+      "plan": {
+        "version": 1,
+        "coordinator": "Planner / Orchestrator",
+        "category": "android",
+        "role": "Native Android Developer",
+        "modelPolicy": "existing-central-model-only; no new model calls",
+        "execution": "plan_only",
+        "skills": [
+          {
+            "id": "skill-6c98eb8ff5b3aee4ac",
+            "name": "android-for-cars-parked-apps",
+            "status": "review_required",
+            "source": "https://github.com/android/skills/blob/4ebabf2b0fd6c04b7150023c8b612f80592a6226/cars/android-for-cars-parked-apps/SKILL.md"
+          },
+          {
+            "id": "skill-8d0f2a7ad41e3e1107",
+            "name": "appfunctions",
+            "status": "review_required",
+            "source": "https://github.com/android/skills/blob/4ebabf2b0fd6c04b7150023c8b612f80592a6226/device-ai/appfunctions/SKILL.md"
+          },
+          {
+            "id": "skill-936e1e25c48f1cf4ea",
+            "name": "applying-testing-strategies",
+            "status": "review_required",
+            "source": "https://github.com/skydoves/android-testing-skills/blob/8665ed59643c90eb1056a256a6ddec161aa1cfa1/fundamentals/strategies/applying-testing-strategies/SKILL.md"
+          }
+        ],
+        "referenceCard": "topic-android-c78f6c97923e81a2f0",
+        "reason": "Lokale Aufgaben-/Technologiezuordnung; vorhandene Funktionen und Fachquellen zuerst.",
+        "tasks": [
+          {
+            "id": "task-0",
+            "role": "Software Architect",
+            "status": "pending",
+            "dependsOn": [],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Anforderungen, vorhandenen Stack und konkrete Abnahmekriterien erfassen."
+          },
+          {
+            "id": "task-1",
+            "role": "Native Android Developer",
+            "status": "pending",
+            "dependsOn": [
+              "task-0"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": true,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-2",
+            "role": "Security Reviewer",
+            "status": "pending",
+            "dependsOn": [
+              "task-1"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-3",
+            "role": "QA/Browser/Device Tester",
+            "status": "pending",
+            "dependsOn": [
+              "task-2"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-4",
+            "role": "Documentation/Research Specialist",
+            "status": "pending",
+            "dependsOn": [
+              "task-3"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          }
+        ],
+        "gates": [
+          "Ungeprüfte Inhalte bleiben Quarantäne/Vorschau.",
+          "Installation, Kontozugriff, kostenpflichtige Aktion und Veröffentlichung benötigen separate Freigabe."
+        ],
+        "tools": [
+          "adb (local authorization)",
+          "gradle-build (SDK/project review required)"
+        ]
+      }
+    },
+    {
+      "task": "Entwirf eine SwiftUI Anwendung für iOS",
+      "plan": {
+        "version": 1,
+        "coordinator": "Planner / Orchestrator",
+        "category": "apple",
+        "role": "Apple Developer",
+        "modelPolicy": "existing-central-model-only; no new model calls",
+        "execution": "plan_only",
+        "skills": [
+          {
+            "id": "skill-8ae92181b290265731",
+            "name": "swiftui-expert-skill",
+            "status": "knowledge_available",
+            "source": "https://github.com/AvdLee/SwiftUI-Agent-Skill/blob/204dba7c67256a8b707ee3fbc5759a824191974f/skills/swiftui-expert-skill/SKILL.md"
+          },
+          {
+            "id": "skill-0d89de27204b42e5fe",
+            "name": "update-swiftui-apis",
+            "status": "review_required",
+            "source": "https://github.com/AvdLee/SwiftUI-Agent-Skill/blob/204dba7c67256a8b707ee3fbc5759a824191974f/.agents/skills/update-swiftui-apis/SKILL.md"
+          }
+        ],
+        "referenceCard": "topic-apple-ae8ed2743925477eaf",
+        "reason": "Lokale Aufgaben-/Technologiezuordnung; vorhandene Funktionen und Fachquellen zuerst.",
+        "tasks": [
+          {
+            "id": "task-0",
+            "role": "Software Architect",
+            "status": "pending",
+            "dependsOn": [],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Anforderungen, vorhandenen Stack und konkrete Abnahmekriterien erfassen."
+          },
+          {
+            "id": "task-1",
+            "role": "Apple Developer",
+            "status": "pending",
+            "dependsOn": [
+              "task-0"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": true,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-2",
+            "role": "Security Reviewer",
+            "status": "pending",
+            "dependsOn": [
+              "task-1"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-3",
+            "role": "QA/Browser/Device Tester",
+            "status": "pending",
+            "dependsOn": [
+              "task-2"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-4",
+            "role": "Documentation/Research Specialist",
+            "status": "pending",
+            "dependsOn": [
+              "task-3"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          }
+        ],
+        "gates": [
+          "Ungeprüfte Inhalte bleiben Quarantäne/Vorschau.",
+          "Installation, Kontozugriff, kostenpflichtige Aktion und Veröffentlichung benötigen separate Freigabe."
+        ],
+        "tools": [
+          "xcodebuild (macOS only; prepared)"
+        ]
+      }
+    },
+    {
+      "task": "Erstelle eine individuelle responsive Website",
+      "plan": {
+        "version": 1,
+        "coordinator": "Planner / Orchestrator",
+        "category": "web",
+        "role": "Web/Frontend/Backend Developer",
+        "modelPolicy": "existing-central-model-only; no new model calls",
+        "execution": "plan_only",
+        "skills": [
+          {
+            "id": "skill-8d9661c70afc0f9c5e",
+            "name": "accessibility",
+            "status": "knowledge_available",
+            "source": "https://github.com/addyosmani/web-quality-skills/blob/afa8da942115f2961fdbfa80807ea0b232ff6c00/skills/accessibility/SKILL.md"
+          },
+          {
+            "id": "skill-3b20da7a9d4136e344",
+            "name": "adev-writing-guide",
+            "status": "review_required",
+            "source": "https://github.com/angular/angular/blob/6d32550fbbae49851a680b3dc1281d8b899352e7/.agent/skills/adev-writing-guide/SKILL.md"
+          },
+          {
+            "id": "skill-aacb0f4173e4ffd251",
+            "name": "analyze-github-action-logs",
+            "status": "review_required",
+            "source": "https://github.com/withastro/astro/blob/c3185b764e14f50664b0e63ec665804fdecf685e/.agents/skills/analyze-github-action-logs/SKILL.md"
+          }
+        ],
+        "referenceCard": "topic-web-07239dbd2a1a1dd793",
+        "reason": "Lokale Aufgaben-/Technologiezuordnung; vorhandene Funktionen und Fachquellen zuerst.",
+        "tasks": [
+          {
+            "id": "task-0",
+            "role": "Software Architect",
+            "status": "pending",
+            "dependsOn": [],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Anforderungen, vorhandenen Stack und konkrete Abnahmekriterien erfassen."
+          },
+          {
+            "id": "task-1",
+            "role": "Web/Frontend/Backend Developer",
+            "status": "pending",
+            "dependsOn": [
+              "task-0"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": true,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-2",
+            "role": "Security Reviewer",
+            "status": "pending",
+            "dependsOn": [
+              "task-1"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-3",
+            "role": "QA/Browser/Device Tester",
+            "status": "pending",
+            "dependsOn": [
+              "task-2"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-4",
+            "role": "Documentation/Research Specialist",
+            "status": "pending",
+            "dependsOn": [
+              "task-3"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          }
+        ],
+        "gates": [
+          "Ungeprüfte Inhalte bleiben Quarantäne/Vorschau.",
+          "Installation, Kontozugriff, kostenpflichtige Aktion und Veröffentlichung benötigen separate Freigabe."
+        ],
+        "tools": [
+          "node-check",
+          "browser-MCP (connection required)"
+        ]
+      }
+    },
+    {
+      "task": "Erstelle eine Expo App mit React Native",
+      "plan": {
+        "version": 1,
+        "coordinator": "Planner / Orchestrator",
+        "category": "cross",
+        "role": "Cross-Platform Developer",
+        "modelPolicy": "existing-central-model-only; no new model calls",
+        "execution": "plan_only",
+        "skills": [
+          {
+            "id": "skill-81be9b9823d7787e0c",
+            "name": "eas-app-stores",
+            "status": "review_required",
+            "source": "https://github.com/expo/skills/blob/d5caf7fdf8b4854351f05841a7e315ac87ad7d24/plugins/expo/skills/eas-app-stores/SKILL.md"
+          },
+          {
+            "id": "skill-445fbbcfe138a1d039",
+            "name": "expo-app-clip",
+            "status": "review_required",
+            "source": "https://github.com/expo/skills/blob/d5caf7fdf8b4854351f05841a7e315ac87ad7d24/plugins/expo/skills/expo-app-clip/SKILL.md"
+          },
+          {
+            "id": "skill-27749c7fd4d8593504",
+            "name": "expo-native-ui",
+            "status": "review_required",
+            "source": "https://github.com/expo/skills/blob/d5caf7fdf8b4854351f05841a7e315ac87ad7d24/plugins/expo/skills/expo-native-ui/SKILL.md"
+          }
+        ],
+        "referenceCard": "topic-cross-1cd07be18aed5105b1",
+        "reason": "Lokale Aufgaben-/Technologiezuordnung; vorhandene Funktionen und Fachquellen zuerst.",
+        "tasks": [
+          {
+            "id": "task-0",
+            "role": "Software Architect",
+            "status": "pending",
+            "dependsOn": [],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Anforderungen, vorhandenen Stack und konkrete Abnahmekriterien erfassen."
+          },
+          {
+            "id": "task-1",
+            "role": "Cross-Platform Developer",
+            "status": "pending",
+            "dependsOn": [
+              "task-0"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": true,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-2",
+            "role": "Security Reviewer",
+            "status": "pending",
+            "dependsOn": [
+              "task-1"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-3",
+            "role": "QA/Browser/Device Tester",
+            "status": "pending",
+            "dependsOn": [
+              "task-2"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-4",
+            "role": "Documentation/Research Specialist",
+            "status": "pending",
+            "dependsOn": [
+              "task-3"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          }
+        ],
+        "gates": [
+          "Ungeprüfte Inhalte bleiben Quarantäne/Vorschau.",
+          "Installation, Kontozugriff, kostenpflichtige Aktion und Veröffentlichung benötigen separate Freigabe."
+        ],
+        "tools": [
+          "node-check",
+          "browser-MCP (connection required)"
+        ]
+      }
+    },
+    {
+      "task": "Erstelle eine Flutter Anwendung",
+      "plan": {
+        "version": 1,
+        "coordinator": "Planner / Orchestrator",
+        "category": "cross",
+        "role": "Cross-Platform Developer",
+        "modelPolicy": "existing-central-model-only; no new model calls",
+        "execution": "plan_only",
+        "skills": [
+          {
+            "id": "skill-6b2cefaf21af4ea2e0",
+            "name": "flutter-add-integration-test",
+            "status": "review_required",
+            "source": "https://github.com/flutter/agent-plugins/blob/f813a46b18456a20f37eb5784c091b7d945c3b4b/skills/flutter-add-integration-test/SKILL.md"
+          },
+          {
+            "id": "skill-ee82e367daef1fb5ef",
+            "name": "flutter-add-widget-preview",
+            "status": "review_required",
+            "source": "https://github.com/flutter/agent-plugins/blob/f813a46b18456a20f37eb5784c091b7d945c3b4b/skills/flutter-add-widget-preview/SKILL.md"
+          },
+          {
+            "id": "skill-b7816fa9e47deadbc5",
+            "name": "flutter-add-widget-test",
+            "status": "review_required",
+            "source": "https://github.com/flutter/agent-plugins/blob/f813a46b18456a20f37eb5784c091b7d945c3b4b/skills/flutter-add-widget-test/SKILL.md"
+          }
+        ],
+        "referenceCard": "topic-cross-1cd07be18aed5105b1",
+        "reason": "Lokale Aufgaben-/Technologiezuordnung; vorhandene Funktionen und Fachquellen zuerst.",
+        "tasks": [
+          {
+            "id": "task-0",
+            "role": "Software Architect",
+            "status": "pending",
+            "dependsOn": [],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Anforderungen, vorhandenen Stack und konkrete Abnahmekriterien erfassen."
+          },
+          {
+            "id": "task-1",
+            "role": "Cross-Platform Developer",
+            "status": "pending",
+            "dependsOn": [
+              "task-0"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": true,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-2",
+            "role": "Security Reviewer",
+            "status": "pending",
+            "dependsOn": [
+              "task-1"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-3",
+            "role": "QA/Browser/Device Tester",
+            "status": "pending",
+            "dependsOn": [
+              "task-2"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-4",
+            "role": "Documentation/Research Specialist",
+            "status": "pending",
+            "dependsOn": [
+              "task-3"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          }
+        ],
+        "gates": [
+          "Ungeprüfte Inhalte bleiben Quarantäne/Vorschau.",
+          "Installation, Kontozugriff, kostenpflichtige Aktion und Veröffentlichung benötigen separate Freigabe."
+        ],
+        "tools": [
+          "node-check",
+          "browser-MCP (connection required)"
+        ]
+      }
+    },
+    {
+      "task": "Exportiere ein Video mit FFmpeg",
+      "plan": {
+        "version": 1,
+        "coordinator": "Planner / Orchestrator",
+        "category": "media",
+        "role": "Image/Video/Audio Specialist",
+        "modelPolicy": "existing-central-model-only; no new model calls",
+        "execution": "plan_only",
+        "skills": [],
+        "referenceCard": "topic-media-a16a695ef6f7b73910",
+        "reason": "Lokale Aufgaben-/Technologiezuordnung; vorhandene Funktionen und Fachquellen zuerst.",
+        "tasks": [
+          {
+            "id": "task-0",
+            "role": "Software Architect",
+            "status": "pending",
+            "dependsOn": [],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Anforderungen, vorhandenen Stack und konkrete Abnahmekriterien erfassen."
+          },
+          {
+            "id": "task-1",
+            "role": "Image/Video/Audio Specialist",
+            "status": "pending",
+            "dependsOn": [
+              "task-0"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": true,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-2",
+            "role": "Security Reviewer",
+            "status": "pending",
+            "dependsOn": [
+              "task-1"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-3",
+            "role": "QA/Browser/Device Tester",
+            "status": "pending",
+            "dependsOn": [
+              "task-2"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          },
+          {
+            "id": "task-4",
+            "role": "Documentation/Research Specialist",
+            "status": "pending",
+            "dependsOn": [
+              "task-3"
+            ],
+            "attempts": 0,
+            "maxAttempts": 2,
+            "artifacts": [],
+            "approvalRequired": false,
+            "decision": "Vorgängerergebnis prüfen; Quellen und Toolvoraussetzungen getrennt behandeln."
+          }
+        ],
+        "gates": [
+          "Ungeprüfte Inhalte bleiben Quarantäne/Vorschau.",
+          "Installation, Kontozugriff, kostenpflichtige Aktion und Veröffentlichung benötigen separate Freigabe."
+        ],
+        "tools": [
+          "ffmpeg-preview (local approved scope)"
+        ]
+      }
+    }
+  ],
+  "ffmpeg": {
+    "version": "n7.0.1-playwright-build-1013",
+    "videoBytes": 19474,
+    "codec": "VP9/WebM",
+    "durationSeconds": 1,
+    "exportExitCode": 0,
+    "decodeExitCode": 0,
+    "limits": "Reduced installed build; lavfi/MPEG4 test unsupported"
+  },
+  "adb": {
+    "version": "37.0.1-15733141 / 1.0.41",
+    "versionExitCode": 0,
+    "deviceAccess": false
+  },
+  "localBrowser": {
+    "tool": "browser-local-inspect",
+    "status": "executed",
+    "exitCode": 0,
+    "domTitlePresent": true,
+    "isolatedProfile": true,
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "scope": "loopback synthetic project only"
+  },
+  "artifactWriter": {
+    "tool": "write-reviewed-artifact",
+    "status": "executed",
+    "exitCode": 0,
+    "path": "bespoke/design-notes.md",
+    "contentHash": "fee051682d74b832f9acd912c53daf47bf78b675af20841ed46c76d672456f27",
+    "automaticExecution": false
+  },
+  "nativeBuilds": {
+    "android": "Source prepared; Gradle unavailable, no SDK/emulator build",
+    "apple": "Source prepared; macOS/Xcode not available on Windows",
+    "expo": "Source screen prepared; no dependency install/EAS build",
+    "flutter": "Source prepared; SDK/build not verified"
+  },
+  "boundaries": [
+    "No production writes/deployment",
+    "No automatic external code execution",
+    "No additional models",
+    "No private external text submission"
+  ]
+}

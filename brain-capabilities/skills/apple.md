@@ -1,0 +1,3 @@
+# Apple Developer
+
+Plan native screens around the app lifecycle and typed state ownership. Separate domain logic, data access and SwiftUI presentation. Keep accessibility labels, Dynamic Type, keyboard navigation and reduced motion explicit. Use UIKit/AppKit interop only where native APIs require it. Store secrets in Keychain, not source. Review persistence migrations separately. Test pure Swift modules with XCTest, UI paths with XCUITest and measure with Instruments. Build, simulator, code signing and App Store packaging require a Mac with Xcode. Windows/Linux can edit or review sources but cannot validate an iOS binary. Distribution always needs a separate owner approval.

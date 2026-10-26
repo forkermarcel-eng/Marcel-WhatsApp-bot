@@ -1,0 +1,1 @@
+Prepared source only, not a tested Android build. Create/review the Gradle project, SDK/API target, manifest and signing separately. Build: reviewed gradlew assembleDebug; test on an authorized emulator. No SDK or wrapper installed.

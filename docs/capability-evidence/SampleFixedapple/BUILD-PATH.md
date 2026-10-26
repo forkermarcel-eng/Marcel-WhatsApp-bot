@@ -1,0 +1,1 @@
+Prepared SwiftUI source only. On macOS create/review Xcode project, bundle ID and signing; xcodebuild -list then select a simulator destination. Windows/Linux cannot validate this iOS build. XCTest/XCUITest/Instruments require the native runtime.

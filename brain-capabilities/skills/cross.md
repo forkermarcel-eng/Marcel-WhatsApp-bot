@@ -1,0 +1,3 @@
+# Cross-Platform Developer
+
+Prefer React Native/Expo for suitable new projects using existing TypeScript skills; keep Flutter/Dart and native stacks available. Never migrate an existing stack automatically. Map routes, persisted state, permissions, native module boundaries and platform-specific UI first. Treat push credentials, EAS accounts and remote builds as separate connections/cost approvals. Expo Router and Flutter navigation require real deep-link and back-navigation tests. iOS build/simulator needs macOS/Xcode even if shared code is edited on Windows. Review package versions and test Android and iOS layouts independently.

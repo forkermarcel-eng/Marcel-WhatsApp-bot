@@ -1,0 +1,2 @@
+# Reviewed-reference SHA-256 values require stable bytes on Windows and Linux.
+*.md text eol=lf

@@ -433,6 +433,9 @@ export default async function handler(
    const params = new URLSearchParams();
    for (const key of ["op", "q", "group", "sourceId", "instrumentId", "id", "before", "from", "to", "intervalMs"]) if (typeof req.query?.[key] === "string") params.set(key, req.query[key].slice(0,700));
    if (params.size) railwayPath += "?" + params.toString();
+ } else if (resource === "capabilities") {
+   if (req.method !== "POST") return res.status(405).json({ok:false,error:"Explizite Capability-Anfrage erforderlich."});
+   railwayPath += "/capabilities";
  } else if (resource === "prompt-library") {
    if (req.method !== "POST") return res.status(405).json({ok:false,error:"Nur explizite Bibliotheksanfragen sind erlaubt."});
    railwayPath += "/prompt-library";

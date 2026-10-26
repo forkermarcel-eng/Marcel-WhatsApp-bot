@@ -1,0 +1,190 @@
+{
+  "write-reviewed-artifact": {
+    "binary": null,
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "write-approved-project-source",
+    "approval": "exact operation fingerprint including path and full content; never overwrite"
+  },
+  "node-check": {
+    "binary": "current Node.js executable",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "read-project",
+    "approval": "explicit local invocation"
+  },
+  "git-status": {
+    "binary": "git",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "read-project",
+    "approval": "explicit local invocation"
+  },
+  "ffmpeg-version": {
+    "binary": "ffmpeg",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "read-runtime",
+    "approval": "explicit local invocation"
+  },
+  "ffmpeg-preview": {
+    "binary": "ffmpeg",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "write-isolated-artifact",
+    "approval": "exact operation fingerprint"
+  },
+  "ffmpeg-image-preview": {
+    "binary": "ffmpeg",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "write-isolated-artifact",
+    "approval": "exact operation fingerprint"
+  },
+  "adb-version": {
+    "binary": "adb",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "read-runtime",
+    "approval": "explicit local invocation"
+  },
+  "xcodebuild-version": {
+    "binary": "xcodebuild",
+    "os": [
+      "darwin"
+    ],
+    "effect": "read-runtime",
+    "approval": "macOS local invocation"
+  },
+  "gradle-version": {
+    "binary": "gradle",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "read-runtime",
+    "approval": "explicit local invocation"
+  },
+  "flutter-version": {
+    "binary": "flutter",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "may-start-sdk-or-update",
+    "approval": "prepared only"
+  },
+  "comfyui": {
+    "binary": null,
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "local-image-workflow",
+    "approval": "prepared; licensed model weights and GPU/runtime review required"
+  },
+  "imagemagick": {
+    "binary": "magick",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "image-processing",
+    "approval": "prepared; reviewed binary and input/output scope required"
+  },
+  "gimp": {
+    "binary": null,
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "image-editing",
+    "approval": "prepared; local app and automation permission required"
+  },
+  "blender": {
+    "binary": "blender",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "3d-animation-render",
+    "approval": "prepared; project/scripts and CPU/GPU budget review required"
+  },
+  "transcription": {
+    "binary": null,
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "audio-transcription",
+    "approval": "prepared; engine/model weights/license not configured"
+  },
+  "ffmpeg-timeline": {
+    "binary": "ffmpeg",
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "video-audio-subtitle-scene-export",
+    "approval": "prepared; complete build with required filters/codecs and a reviewed timeline required"
+  },
+  "browser-local-inspect": {
+    "binary": null,
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "isolated-local-browser-render",
+    "approval": "exact operation fingerprint; reviewed browser binary and loopback project URL only"
+  },
+  "browser-mcp": {
+    "binary": null,
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "browser-control",
+    "approval": "prepared; connect existing authorized MCP"
+  },
+  "desktop-adapter": {
+    "binary": null,
+    "os": [
+      "win32",
+      "linux",
+      "darwin"
+    ],
+    "effect": "desktop-control",
+    "approval": "prepared; reviewed native bridge required"
+  }
+}

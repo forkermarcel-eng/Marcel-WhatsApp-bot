@@ -1,0 +1,196 @@
+[
+  {
+    "id": "cursortouch-android-mcp",
+    "source": "https://github.com/CursorTouch/Android-MCP",
+    "commit": "35759d88561946b962275ed193fd1c6e322ab4a9",
+    "license": "MIT",
+    "status": "connection_missing",
+    "transport": "source-specific local CLI/MCP; not started",
+    "allowedOperations": "read/inspect only until separately authorized",
+    "runtime": {},
+    "permission": "Reviewed installation and device/browser/session scope required",
+    "requirements": [
+      "Python >=3.13",
+      "Dependencies in inspected pyproject.toml; no installation"
+    ],
+    "python": {
+      "requires": ">=3.13",
+      "dependencies": [
+        "click>=8.2.1",
+        "fastmcp>=4.1.3",
+        "pillow>=11.2.1"
+      ]
+    }
+  },
+  {
+    "id": "mobile-next-mobile-mcp",
+    "source": "https://github.com/mobile-next/mobile-mcp",
+    "commit": "294f403f2fe94ae86fc086181ebc1c1ec5b5c990",
+    "license": "Apache-2.0",
+    "status": "connection_missing",
+    "transport": "source-specific local CLI/MCP; not started",
+    "allowedOperations": "read/inspect only until separately authorized",
+    "runtime": {
+      "engine": {
+        "node": ">=20"
+      },
+      "bin": {
+        "mcp-server-mobile": "lib/index.js"
+      },
+      "runtime": [
+        "@modelcontextprotocol/express",
+        "@modelcontextprotocol/node",
+        "@modelcontextprotocol/server",
+        "ajv",
+        "commander",
+        "express",
+        "fast-xml-parser",
+        "mobilewright",
+        "qs",
+        "zod",
+        "zod-to-json-schema"
+      ]
+    },
+    "permission": "Reviewed installation and device/browser/session scope required",
+    "requirements": [
+      "Node.js >=20",
+      "Dependencies in inspected package.json; no upstream installation"
+    ]
+  },
+  {
+    "id": "callstack-agent-device",
+    "source": "https://github.com/callstack/agent-device",
+    "commit": "5b61e8a9ad3d16d34c4462ca6749937571b54c88",
+    "license": "MIT",
+    "status": "connection_missing",
+    "transport": "source-specific local CLI/MCP; not started",
+    "allowedOperations": "read/inspect only until separately authorized",
+    "runtime": {
+      "engine": {
+        "node": ">=22.12"
+      },
+      "bin": {
+        "agent-device": "bin/agent-device.mjs"
+      },
+      "runtime": []
+    },
+    "permission": "Reviewed installation and device/browser/session scope required",
+    "requirements": [
+      "Node.js >=22.12",
+      "Dependencies in inspected package.json; no upstream installation"
+    ]
+  },
+  {
+    "id": "figma-mcp-server-guide",
+    "source": "https://github.com/figma/mcp-server-guide",
+    "commit": "056adaf7564d3dc5fa2e1c7828bbec925d5fa6bb",
+    "license": "unverified",
+    "status": "guide_only",
+    "transport": "Documentation; no server implementation installed",
+    "allowedOperations": "read/inspect only until separately authorized",
+    "runtime": {},
+    "permission": "Reviewed installation and device/browser/session scope required",
+    "requirements": [
+      "Documentation guide, not an executable MCP server",
+      "Figma authorization, actual server and API terms separately required"
+    ]
+  },
+  {
+    "id": "microsoft-playwright-mcp",
+    "source": "https://github.com/microsoft/playwright-mcp",
+    "commit": "0c4107acbecb75472b23c05c0e42471a0011874f",
+    "license": "Apache-2.0",
+    "status": "connection_missing",
+    "transport": "source-specific local CLI/MCP; not started",
+    "allowedOperations": "read/inspect only until separately authorized",
+    "runtime": {
+      "engine": {
+        "node": ">=18"
+      },
+      "bin": {
+        "playwright-mcp": "cli.js"
+      },
+      "runtime": [
+        "playwright",
+        "playwright-core"
+      ]
+    },
+    "permission": "Reviewed installation and device/browser/session scope required",
+    "requirements": [
+      "Node.js >=18",
+      "Dependencies in inspected package.json; no upstream installation"
+    ]
+  },
+  {
+    "id": "chromedevtools-chrome-devtools-mcp",
+    "source": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+    "commit": "2a54e28eebb8537dc60af667dbe98e58df9a49e5",
+    "license": "Apache-2.0",
+    "status": "connection_missing",
+    "transport": "source-specific local CLI/MCP; not started",
+    "allowedOperations": "read/inspect only until separately authorized",
+    "runtime": {
+      "engine": {
+        "node": "^20.19.0 || ^22.12.0 || >=23"
+      },
+      "bin": {
+        "chrome-devtools-mcp": "./build/src/bin/chrome-devtools-mcp.js",
+        "chrome-devtools": "./build/src/bin/chrome-devtools.js"
+      },
+      "runtime": []
+    },
+    "permission": "Reviewed installation and device/browser/session scope required",
+    "requirements": [
+      "Node.js ^20.19.0 || ^22.12.0 || >=23",
+      "Dependencies in inspected package.json; no upstream installation"
+    ]
+  },
+  {
+    "id": "googlechrome-lighthouse",
+    "source": "https://github.com/googlechrome/lighthouse",
+    "commit": "1a4ffa418258919adbbf6ccca548c02e0092bafd",
+    "license": "Apache-2.0",
+    "status": "connection_missing",
+    "transport": "source-specific local CLI/MCP; not started",
+    "allowedOperations": "read/inspect only until separately authorized",
+    "runtime": {
+      "engine": {
+        "node": ">=22.19"
+      },
+      "bin": {
+        "lighthouse": "cli/index.js",
+        "chrome-debug": "core/scripts/manual-chrome-launcher.js",
+        "smokehouse": "cli/test/smokehouse/frontends/smokehouse-bin.js"
+      },
+      "runtime": [
+        "@paulirish/trace_engine",
+        "@sentry/node",
+        "ajv-formats",
+        "axe-core",
+        "chrome-launcher",
+        "configstore",
+        "csp_evaluator",
+        "devtools-protocol",
+        "enquirer",
+        "http-link-header",
+        "intl-messageformat",
+        "js-library-detector",
+        "lighthouse-logger",
+        "lighthouse-stack-packs",
+        "open",
+        "puppeteer-core",
+        "robots-parser",
+        "speedline-core",
+        "third-party-web",
+        "tldts-icann",
+        "yargs",
+        "yargs-parser"
+      ]
+    },
+    "permission": "Reviewed installation and device/browser/session scope required",
+    "requirements": [
+      "Node.js >=22.19",
+      "Dependencies in inspected package.json; no upstream installation"
+    ]
+  }
+]

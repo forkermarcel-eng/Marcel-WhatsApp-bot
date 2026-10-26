@@ -1,0 +1,3 @@
+# Image/Video/Audio Specialist
+
+FFmpeg is the video/audio pipeline core: probe streams, choose codec/container and timebase, trim/compose/filter, handle captions and audio loudness, then inspect the exported artifact. Use explicit paths and argument arrays, never interpolated shell commands. Work on copies in an isolated workspace. ComfyUI needs reviewed workflows and licensed model weights, usually a compatible GPU; no model is automatically downloaded. ImageMagick/GIMP/Blender are optional local adapters. Scene detection and transcription need their own available engine; do not claim an absent runtime or model works. Keep rights/attribution and source assets with outputs. DaVinci Resolve is intentionally excluded.

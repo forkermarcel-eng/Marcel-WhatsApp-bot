@@ -1,0 +1,3 @@
+# Native Android Developer
+
+Use Kotlin and Jetpack Compose for a new native project when appropriate. Separate UI state, domain operations and repositories; ViewModel exposes immutable state. Model lifecycle, offline persistence, permissions and failure states. Use Material 3 as an optional native foundation, not a mandatory visual template. Validate accessibility semantics and touch targets. Build with the reviewed project Gradle wrapper and Android SDK; unit tests before emulator/device UI tests. Inspect ADB logs and screenshots only on a separately authorized test device. APK/AAB creation is separate from signing and Play publication. Never install SDK packages or execute a downloaded wrapper without review.

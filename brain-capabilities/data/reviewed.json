@@ -1,0 +1,116 @@
+[
+  {
+    "id": "tzzs-apple-design-skill-root",
+    "category": "apple",
+    "title": "tzzs/apple-design-skill / SKILL.md",
+    "source": "https://github.com/tzzs/apple-design-skill/blob/0387580473df697d1de037987f7ca94c9564cf72/SKILL.md",
+    "version": "0387580473df697d1de037987f7ca94c9564cf72",
+    "license": "MIT",
+    "filename": "tzzs-apple-design-skill-root.md",
+    "contentHash": "849ee2f5320bbc9362cb1960631f5697baf309510824ed97d54724144237c304",
+    "status": "reviewed-reference-data",
+    "reviewScope": "Markdown instruction/reference data only; no executable scripts or dependency installation",
+    "security": {
+      "trusted": false,
+      "executable": false,
+      "findings": [],
+      "status": "review_required",
+      "notice": "Automatische Hinweise ersetzen keine Inhalts-, Lizenz- oder Codeprüfung."
+    },
+    "checkedAt": "2026-10-26"
+  },
+  {
+    "id": "avdlee-swiftui-agent-skill-swiftui-expert-skill",
+    "category": "apple",
+    "title": "AvdLee/SwiftUI-Agent-Skill / skills/swiftui-expert-skill/SKILL.md",
+    "source": "https://github.com/AvdLee/SwiftUI-Agent-Skill/blob/204dba7c67256a8b707ee3fbc5759a824191974f/skills/swiftui-expert-skill/SKILL.md",
+    "version": "204dba7c67256a8b707ee3fbc5759a824191974f",
+    "license": "MIT",
+    "filename": "avdlee-swiftui-agent-skill-swiftui-expert-skill.md",
+    "contentHash": "3b794f9cb46efb016eafcad2fcedce7127c74d60c50a949619e0bcd2bc38351f",
+    "status": "reviewed-reference-data",
+    "reviewScope": "Markdown instruction/reference data only; no executable scripts or dependency installation",
+    "security": {
+      "trusted": false,
+      "executable": false,
+      "findings": [],
+      "status": "review_required",
+      "notice": "Automatische Hinweise ersetzen keine Inhalts-, Lizenz- oder Codeprüfung."
+    },
+    "checkedAt": "2026-10-26"
+  },
+  {
+    "id": "guillemroca-agent-skills-android-android-architecture",
+    "category": "android",
+    "title": "GuillemRoca/agent-skills-android / skills/android-architecture/SKILL.md",
+    "source": "https://github.com/GuillemRoca/agent-skills-android/blob/68fd141eec5ad2029ae8393e510dbe46dea48c36/skills/android-architecture/SKILL.md",
+    "version": "68fd141eec5ad2029ae8393e510dbe46dea48c36",
+    "license": "MIT",
+    "filename": "guillemroca-agent-skills-android-android-architecture.md",
+    "contentHash": "b7bfa346b8dcada48389ff14a21a02301030997f4e2ffd46fa0bcf5363d60f7d",
+    "status": "reviewed-reference-data",
+    "reviewScope": "Markdown instruction/reference data only; no executable scripts or dependency installation",
+    "security": {
+      "trusted": false,
+      "executable": false,
+      "findings": [],
+      "status": "review_required",
+      "notice": "Automatische Hinweise ersetzen keine Inhalts-, Lizenz- oder Codeprüfung."
+    },
+    "checkedAt": "2026-10-26"
+  },
+  {
+    "id": "expo-skills-expo-native-ui",
+    "category": "cross",
+    "title": "expo/skills / plugins/expo/skills/expo-native-ui/SKILL.md",
+    "source": "https://github.com/expo/skills/blob/d5caf7fdf8b4854351f05841a7e315ac87ad7d24/plugins/expo/skills/expo-native-ui/SKILL.md",
+    "version": "d5caf7fdf8b4854351f05841a7e315ac87ad7d24",
+    "license": "MIT",
+    "filename": "expo-skills-expo-native-ui.md",
+    "contentHash": "b767395c5043a3cbefaa992a7909921393aa34159c2e3b4bc9456851262e6d70",
+    "status": "quarantine",
+    "reviewScope": "Markdown instruction/reference data only; no executable scripts or dependency installation",
+    "security": {
+      "trusted": false,
+      "executable": false,
+      "findings": [
+        {
+          "rule": "secret_access",
+          "severity": "high"
+        },
+        {
+          "rule": "install_or_privilege",
+          "severity": "review"
+        }
+      ],
+      "status": "quarantine",
+      "notice": "Automatische Hinweise ersetzen keine Inhalts-, Lizenz- oder Codeprüfung."
+    },
+    "checkedAt": "2026-10-26"
+  },
+  {
+    "id": "addyosmani-web-quality-skills-accessibility",
+    "category": "web",
+    "title": "addyosmani/web-quality-skills / skills/accessibility/SKILL.md",
+    "source": "https://github.com/addyosmani/web-quality-skills/blob/afa8da942115f2961fdbfa80807ea0b232ff6c00/skills/accessibility/SKILL.md",
+    "version": "afa8da942115f2961fdbfa80807ea0b232ff6c00",
+    "license": "MIT",
+    "filename": "addyosmani-web-quality-skills-accessibility.md",
+    "contentHash": "267fb2a0707d6142f2871f22688203a42ba21291a2aa200fb740936e41362b5d",
+    "status": "reviewed-reference-data",
+    "reviewScope": "Markdown instruction/reference data only; no executable scripts or dependency installation",
+    "security": {
+      "trusted": false,
+      "executable": false,
+      "findings": [
+        {
+          "rule": "install_or_privilege",
+          "severity": "review"
+        }
+      ],
+      "status": "review_required",
+      "notice": "Automatische Hinweise ersetzen keine Inhalts-, Lizenz- oder Codeprüfung."
+    },
+    "checkedAt": "2026-10-26"
+  }
+]
